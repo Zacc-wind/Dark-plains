@@ -1,65 +1,119 @@
-import Image from "next/image";
+'use client';
 
-export default function Home() {
+import { useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { register, login } from '@/lib/auth';
+import { emitFxEvent } from '@/lib/fxEvents';
+import ThreeFxOverlay from '@/components/ThreeFxOverlay';
+
+export default function AuthPage() {
+  const [isLogin, setIsLogin] = useState(true);
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+  const router = useRouter();
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setSuccess('');
+
+    if (isLogin) {
+      const result = login(username, password);
+      if (result.success) {
+        emitFxEvent({ type: 'spell', tone: 'violet', intensity: 0.7 });
+        router.push('/game');
+      } else {
+        setError(result.error || 'Login failed');
+        emitFxEvent({ type: 'status', tone: 'red', intensity: 0.42 });
+      }
+    } else {
+      const result = register(username, password);
+      if (result.success) {
+        emitFxEvent({ type: 'recruit', tone: 'green', intensity: 0.72 });
+        setError('');
+        setIsLogin(true);
+        setPassword('');
+        setSuccess('Account created. Please log in.');
+      } else {
+        setError(result.error || 'Registration failed');
+        emitFxEvent({ type: 'status', tone: 'red', intensity: 0.42 });
+      }
+    }
+  };
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
+    <div className="fantasy-ui flex min-h-screen items-center justify-center bg-[#05080a] p-4">
+      <ThreeFxOverlay />
+      <div className="command-panel vine-frame relative z-[100] w-full max-w-md rounded border p-8">
+        <h1 className="fantasy-heading mb-2 text-center text-4xl">Pirate Game</h1>
+        <p className="arcane-label mb-8 text-center">
+          {isLogin ? 'Login to continue' : 'Create your account'}
+        </p>
+
+        <form onSubmit={handleSubmit} className="space-y-6">
+          <div>
+            <label className="arcane-label mb-2 block">Username</label>
+            <input
+              type="text"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              className="ui-card w-full rounded-lg border px-4 py-3 font-semibold text-[var(--ui-text)] outline-none transition-all focus:border-[var(--ui-border-strong)]"
+              style={{ imageRendering: 'pixelated' }}
+              placeholder="Enter username"
+              required
             />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+          </div>
+
+          <div>
+            <label className="arcane-label mb-2 block">Password</label>
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="ui-card w-full rounded-lg border px-4 py-3 font-semibold text-[var(--ui-text)] outline-none transition-all focus:border-[var(--ui-border-strong)]"
+              style={{ imageRendering: 'pixelated' }}
+              placeholder="Enter password"
+              required
+            />
+          </div>
+
+          {error && (
+            <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 font-semibold text-red-300">
+              {error}
+            </div>
+          )}
+
+          {success && (
+            <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 font-semibold text-emerald-200">
+              {success}
+            </div>
+          )}
+
+          <button
+            type="submit"
+            className="ui-button-primary w-full rounded-lg px-6 py-4 font-semibold transition-all"
           >
-            Documentation
-          </a>
+            {isLogin ? 'Login' : 'Register'}
+          </button>
+        </form>
+
+        <div className="mt-6 text-center">
+          <button
+            onClick={() => {
+              emitFxEvent({ type: 'interface', tone: 'bone', intensity: 0.36 });
+              setIsLogin(!isLogin);
+              setError('');
+              setSuccess('');
+              setPassword('');
+            }}
+            className="font-bold text-[var(--ui-accent)] underline hover:text-white"
+          >
+            {isLogin ? "Don't have an account? Register" : 'Already have an account? Login'}
+          </button>
         </div>
-      </main>
+      </div>
     </div>
   );
 }
