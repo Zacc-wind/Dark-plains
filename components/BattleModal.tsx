@@ -24,6 +24,7 @@ import {
   getAttackDamage,
   getBattleMana,
   getHealAmount,
+  getPlayerModelAsset,
   getTerrainAt,
   getTerrainMoveCost,
   getTurnTimeRemaining,
@@ -63,6 +64,7 @@ import {
 import { emitCompletionNotice, type CompletionRewardLine } from '@/lib/completionEvents';
 import { emitFxEvent, type FxEventType } from '@/lib/fxEvents';
 import { readGameJson, writeGameJson } from '@/lib/gameStore';
+import { getStaticPOIs, POIType } from '@/lib/mapData';
 import CombatThreeFxLayer from './CombatThreeFxLayer';
 
 interface BattleModalProps {
@@ -101,6 +103,8 @@ type BattlePieceAnimation =
   | 'heal'
   | 'buff'
   | 'debuff'
+  | 'guard'
+  | 'mana'
   | 'morale'
   | 'commander-spell'
   | 'spell-hit'
@@ -135,15 +139,16 @@ interface BattleResultReportData {
   status: 'victory' | 'defeat' | 'recruited';
   reward?: VictoryRewardReport;
   healthLost?: number;
+  respawnTown?: string;
   recruitedMinions?: string[];
   casualtyReport?: MinionCasualtyReport;
   completedAt: number;
 }
 
 const BATTLE_SPEEDS: Record<BattleSpeed, BattleSpeedConfig> = {
-  normal: { label: 'Normal', playerDelayMs: 1350, enemyDelayMs: 2400 },
-  fast: { label: 'Fast', playerDelayMs: 620, enemyDelayMs: 1150 },
-  instant: { label: 'Instant', playerDelayMs: 0, enemyDelayMs: 140 },
+  normal: { label: 'Normal', playerDelayMs: 950, enemyDelayMs: 1550 },
+  fast: { label: 'Fast', playerDelayMs: 760, enemyDelayMs: 1050 },
+  instant: { label: 'Instant', playerDelayMs: 420, enemyDelayMs: 620 },
 };
 
 const BATTLE_SPEED_ORDER: BattleSpeed[] = ['normal', 'fast', 'instant'];
@@ -181,9 +186,13 @@ export default function BattleModal({
   const [confirmMoveEnabled, setConfirmMoveEnabled] = useState(() => readGameJson(CONFIRM_MOVE_SETTING_KEY, false));
   const enemyTimer = useRef<number | null>(null);
   const playerActionTimer = useRef<number | null>(null);
+  const autoCloseTimer = useRef<number | null>(null);
   const rewardClaimed = useRef(false);
   const battleEndNotified = useRef(false);
   const speedConfig = BATTLE_SPEEDS[battleSpeed];
+  const isBossBattle = enemy.personality === 'boss' || Boolean(enemy.bossId);
+  const [visibleBossIntroEnemyId, setVisibleBossIntroEnemyId] = useState<string | null>(null);
+  const bossIntroVisible = visibleBossIntroEnemyId === enemy.id;
   const activeSpellIds = availableSpellIds || getCurrentUser()?.equippedSpellIds || DEFAULT_EQUIPPED_SPELL_IDS;
   const availableSpells = BATTLE_SPELLS.filter(spell => activeSpellIds.includes(spell.id)).slice(0, 4);
 
@@ -195,7 +204,20 @@ export default function BattleModal({
   useEffect(() => () => {
     if (enemyTimer.current) window.clearTimeout(enemyTimer.current);
     if (playerActionTimer.current) window.clearTimeout(playerActionTimer.current);
+    if (autoCloseTimer.current) window.clearTimeout(autoCloseTimer.current);
   }, []);
+
+  useEffect(() => {
+    if (!isBossBattle) return undefined;
+
+    const showTimer = window.setTimeout(() => setVisibleBossIntroEnemyId(enemy.id), 2000);
+    const hideTimer = window.setTimeout(() => setVisibleBossIntroEnemyId(null), 6000);
+
+    return () => {
+      window.clearTimeout(showTimer);
+      window.clearTimeout(hideTimer);
+    };
+  }, [enemy.id, isBossBattle]);
 
   useEffect(() => {
     if (!battle || battle.status !== 'active') return;
@@ -261,23 +283,32 @@ export default function BattleModal({
       }
       rewardClaimed.current = true;
     } else if (battle.status === 'defeat') {
-      const casualtyReport = persistentResults ? applyBattleCasualties(battle) : undefined;
-      const healthLost = persistentResults ? applyDefeatPenalty(battle.enemy) : 0;
-      window.setTimeout(() => {
-        setResultReport({
-          status: 'defeat',
-          healthLost,
-          casualtyReport,
-          completedAt: Date.now(),
-        });
-      }, 0);
+      const casualtyReport = persistentResults ? applyBattleCasualties(battle, { deleteImmediately: true }) : undefined;
+      const defeatPenalty = persistentResults ? applyDefeatPenalty(battle.enemy) : { healthLost: 0 };
+      const defeatReport: BattleResultReportData = {
+        status: 'defeat',
+        healthLost: defeatPenalty.healthLost,
+        respawnTown: defeatPenalty.respawnTown,
+        casualtyReport,
+        completedAt: Date.now(),
+      };
+
+      if (persistentResults) {
+        emitBattleCompletionNotice(battle, defeatReport);
+        autoCloseTimer.current = window.setTimeout(onClose, 650);
+      } else {
+        window.setTimeout(() => {
+          setResultReport(defeatReport);
+        }, 0);
+      }
+
       if (!battleEndNotified.current) {
-        onBattleEnd?.({ status: 'defeat', battle, healthLost });
+        onBattleEnd?.({ status: 'defeat', battle, healthLost: defeatPenalty.healthLost });
         battleEndNotified.current = true;
       }
       rewardClaimed.current = true;
     }
-  }, [battle, onBattleEnd, persistentResults]);
+  }, [battle, onBattleEnd, onClose, persistentResults]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -628,10 +659,26 @@ export default function BattleModal({
     movementLocked: canUndoMove,
   });
   const showCenterCue = isResolvingAction || battle.status !== 'active' || (battle.status === 'active' && now - battle.turnStartedAt < 950);
+  const showResultReport = battle.status !== 'active' && !(persistentResults && battle.status === 'defeat');
+  const playerCommander = battle.units.find(unit => unit.side === 'player' && unit.kind === 'commander');
+  const commanderHealthRatio = playerCommander
+    ? playerCommander.currentHealth / Math.max(1, playerCommander.maxHealth)
+    : 1;
+  const showCommanderLowHealth = battle.status === 'active' && Boolean(playerCommander) && commanderHealthRatio <= 0.35;
+  const commanderLowHealthStyle = {
+    '--battle-low-health-alpha': Math.max(0.42, Math.min(0.9, 1 - commanderHealthRatio)).toFixed(2),
+  } as CSSProperties;
 
   return (
     <div className="fixed inset-0 z-[70] overflow-hidden bg-black/78 p-1 backdrop-blur-sm">
-      <div className="battle-modal-frame command-panel vine-frame mx-auto flex h-[calc(100vh-0.5rem)] max-w-none flex-col overflow-hidden rounded border text-zinc-100">
+      {showCommanderLowHealth && (
+        <div
+          className={`battle-low-health-vignette ${commanderHealthRatio <= 0.18 ? 'battle-low-health-vignette-critical' : ''}`}
+          style={commanderLowHealthStyle}
+          aria-hidden="true"
+        />
+      )}
+      <div className="battle-modal-frame command-panel vine-frame relative z-[1] mx-auto flex h-[calc(100vh-0.5rem)] max-w-none flex-col overflow-hidden rounded border text-zinc-100">
         <div className="battle-layout grid min-h-0 flex-1 grid-cols-1 gap-2 p-2">
           {recruitOfferPending ? (
             <section className="ui-card col-span-full m-auto w-full max-w-3xl rounded border p-6 text-center">
@@ -653,7 +700,8 @@ export default function BattleModal({
                           alt={template.name}
                           fill
                           className="sprite-soft-glow scale-125 object-contain"
-                          style={{ imageRendering: 'pixelated' }}
+                          sizes="64px"
+                          unoptimized
                         />
                       </span>
                       <div className="mt-2 text-xs font-black text-zinc-100">{template.name}</div>
@@ -674,7 +722,7 @@ export default function BattleModal({
           ) : (
             <>
           <main className="battle-main flex min-h-0 flex-col gap-2">
-            {battle.status !== 'active' && (
+            {showResultReport && (
               <BattleResultReport battle={battle} report={resultReport} onClose={handleLeaveField} />
             )}
 
@@ -692,24 +740,29 @@ export default function BattleModal({
                   isPlayerTurn={isPlayerTurn}
                   selectedSpell={selectedSpell}
                 />
+                <div className="battle-side-block battle-order-card rounded border p-2">
+                  <BattleTurnTimeline battle={battle} vertical />
+                </div>
                 <BattleHeaderActions
                   isPlayerTurn={isPlayerTurn}
+                  isCommanderTurn={isCommanderTurn}
                   isResolvingAction={isResolvingAction}
                   selectedSpell={selectedSpell}
                   canUndoMove={canUndoMove}
                   confirmMoveEnabled={confirmMoveEnabled}
+                  mana={getBattleMana(battle, 'player')}
                   onEndTurn={handleEndTurn}
                   onCommitMove={handleCommitMove}
                   onToggleConfirmMove={handleToggleConfirmMove}
+                  onFocusMana={handleFocusMana}
+                  onToggleSpellMenu={() => setIsSpellMenuOpen(open => !open)}
                   onCancelSpell={handleCancelSpell}
                 />
-                <div className="battle-side-block battle-order-card rounded border p-2">
-                  <BattleTurnTimeline battle={battle} vertical />
-                </div>
               </aside>
 
               <div className="battle-board-shell relative min-h-0">
               <BattleCenterBanner cue={visibleCue} active={showCenterCue} />
+              {bossIntroVisible && <BattleBossIntro enemy={enemy} />}
               <BattleHoverOverlay preview={hoverPreview} visible={Boolean(hoveredCell)} />
               {isCommanderTurn && isSpellMenuOpen && !selectedSpell && (
                 <div className="battle-spell-popover">
@@ -765,6 +818,14 @@ export default function BattleModal({
                 const canDamageSpellTarget = Boolean(canSpellTarget && selectedSpell?.target === 'enemy');
                 const canSupportSpellTarget = Boolean(canSpellTarget && selectedSpell?.target === 'ally');
                 const actionable = canMove || canStrike || canMend || canSpellTarget;
+                const actionBadge = getBattleCellActionBadge({
+                  canMove,
+                  canStrike,
+                  canMend,
+                  canDamageSpellTarget,
+                  canSupportSpellTarget,
+                  selectedSpell,
+                });
                 const floatingText = getFloatingBattleText(battle, unit || defeatedUnit, now);
 
                 return (
@@ -798,6 +859,11 @@ export default function BattleModal({
                       <span className="battle-terrain-chip">{terrainLabel}</span>
                     )}
                     {obstacle && <span className="battle-obstacle-shape" />}
+                    {actionBadge && (
+                      <span className={`battle-action-badge battle-action-badge-${actionBadge.tone}`}>
+                        {actionBadge.label}
+                      </span>
+                    )}
                     {unit && <BattlePiece unit={unit} active={isActiveCell} animation={getBattlePieceAnimation(battle, unit, now)} />}
                     {isActiveCell && isCommanderTurn && !selectedSpell && !canUndoMove && (
                       <BattleUnitActionOrbs
@@ -879,7 +945,8 @@ function BattleUnitActionOrbs({
           className="battle-unit-orb battle-unit-orb-undo"
           title="Undo move"
         >
-          U
+          <span className="battle-unit-orb-symbol">U</span>
+          <span className="battle-unit-orb-label">Undo</span>
         </button>
         <button
           type="button"
@@ -888,7 +955,8 @@ function BattleUnitActionOrbs({
           className="battle-unit-orb battle-unit-orb-done"
           title="Confirm move"
         >
-          OK
+          <span className="battle-unit-orb-symbol">OK</span>
+          <span className="battle-unit-orb-label">Done</span>
         </button>
       </div>
     );
@@ -898,24 +966,51 @@ function BattleUnitActionOrbs({
     <div className="battle-unit-orbs battle-unit-orbs-commander">
       <button
         type="button"
+        aria-label="Open commander spells"
         disabled={isResolvingAction}
         onClick={(event) => stopCellAction(event, onToggleSpellMenu)}
         className="battle-unit-orb battle-unit-orb-spell"
         title="Open spells"
       >
-        S
+        <span className="battle-unit-orb-symbol">S</span>
+        <span className="battle-unit-orb-label">Spell</span>
       </button>
       <button
         type="button"
+        aria-label="Focus commander mana"
         disabled={isResolvingAction}
         onClick={(event) => stopCellAction(event, onFocusMana)}
         className="battle-unit-orb battle-unit-orb-mana"
         title="Focus mana"
       >
-        M
+        <span className="battle-unit-orb-symbol">+</span>
+        <span className="battle-unit-orb-label">Focus</span>
       </button>
     </div>
   );
+}
+
+function getBattleCellActionBadge({
+  canMove,
+  canStrike,
+  canMend,
+  canDamageSpellTarget,
+  canSupportSpellTarget,
+  selectedSpell,
+}: {
+  canMove: boolean;
+  canStrike: boolean;
+  canMend: boolean;
+  canDamageSpellTarget: boolean;
+  canSupportSpellTarget: boolean;
+  selectedSpell?: BattleSpell;
+}): { label: string; tone: 'move' | 'damage' | 'support' | 'spell' } | null {
+  if (canDamageSpellTarget) return { label: selectedSpell?.target === 'enemy' ? 'CAST' : 'SPELL', tone: 'spell' };
+  if (canSupportSpellTarget) return { label: selectedSpell?.description.toLowerCase().includes('heal') ? 'HEAL' : 'BUFF', tone: 'support' };
+  if (canStrike) return { label: 'DMG', tone: 'damage' };
+  if (canMend) return { label: 'HEAL', tone: 'support' };
+  if (canMove) return { label: 'MOVE', tone: 'move' };
+  return null;
 }
 
 function BattleHeaderStatus({
@@ -949,7 +1044,9 @@ function BattleHeaderStatus({
       </div>
       <div className="flex shrink-0 items-center gap-2">
         <span className="ui-pill rounded border px-2 py-1 text-[10px] font-black">{secondsRemaining}s</span>
-        <span className="ui-pill rounded border px-2 py-1 text-[10px] font-black">M {getBattleMana(battle, 'player')}</span>
+        <span className="ui-pill battle-mana-pill rounded border px-2 py-1 text-[10px] font-black" title="Stored commander mana for spells">
+          <BattleManaSigil mana={getBattleMana(battle, 'player')} compact />
+        </span>
         {selectedSpell && (
           <span className="ui-pill rounded border px-2 py-1 text-[10px] font-black text-red-200">Targeting</span>
         )}
@@ -960,23 +1057,31 @@ function BattleHeaderStatus({
 
 function BattleHeaderActions({
   isPlayerTurn,
+  isCommanderTurn,
   isResolvingAction,
   selectedSpell,
   canUndoMove,
   confirmMoveEnabled,
+  mana,
   onEndTurn,
   onCommitMove,
   onToggleConfirmMove,
+  onFocusMana,
+  onToggleSpellMenu,
   onCancelSpell,
 }: {
   isPlayerTurn: boolean;
+  isCommanderTurn: boolean;
   isResolvingAction: boolean;
   selectedSpell?: BattleSpell;
   canUndoMove: boolean;
   confirmMoveEnabled: boolean;
+  mana: number;
   onEndTurn: () => void;
   onCommitMove: () => void;
   onToggleConfirmMove: () => void;
+  onFocusMana: () => void;
+  onToggleSpellMenu: () => void;
   onCancelSpell: () => void;
 }) {
   if (!isPlayerTurn) {
@@ -994,6 +1099,29 @@ function BattleHeaderActions({
       >
         {confirmMoveEnabled ? 'Move Check' : 'Move Auto'}
       </button>
+      {isCommanderTurn && !selectedSpell && !canUndoMove && (
+        <>
+          <button
+            type="button"
+            onClick={onToggleSpellMenu}
+            disabled={isResolvingAction}
+            className="battle-header-action battle-header-action-spell"
+            title="Open commander spells"
+          >
+            Spell
+          </button>
+          <button
+            type="button"
+            onClick={onFocusMana}
+            disabled={isResolvingAction}
+            className="battle-header-action battle-header-action-focus"
+            title={`Focus mana for stronger future spell turns. Current mana ${mana}.`}
+          >
+            <span>Focus</span>
+            <BattleManaSigil mana={mana} />
+          </button>
+        </>
+      )}
       {selectedSpell && (
         <button
           type="button"
@@ -1036,21 +1164,22 @@ function BattleSpellMenu({
   const mana = getBattleMana(battle, 'player');
 
   return (
-    <section className="battle-spell-menu command-panel vine-frame mt-2 rounded border p-2 text-zinc-100">
-      <div className="mb-3 flex items-start justify-between gap-3">
+    <section className="battle-spell-menu command-panel vine-frame mt-2 rounded border p-3 text-zinc-100">
+      <div className="mb-4 flex items-start justify-between gap-3">
         <div>
           <div className="arcane-label">King Spells</div>
-          <h3 className="fantasy-heading text-lg">Choose Spell</h3>
+          <h3 className="fantasy-heading text-xl">Choose Spell</h3>
         </div>
-        <button onClick={onClose} className="ui-button rounded px-2 py-1 text-[10px] font-bold">
+        <button onClick={onClose} className="ui-button rounded px-3 py-2 text-xs font-bold">
           Close
         </button>
       </div>
-      <div className="grid grid-cols-1 gap-2">
+      <div className="battle-spell-grid">
         {spells.map(spell => {
           const enoughMana = mana >= spell.cost;
           const selected = selectedSpellId === spell.id;
           const targetLabel = getSpellTargetLabel(spell.target);
+          const spellVisual = getSpellVisual(spell);
 
           return (
             <button
@@ -1059,7 +1188,7 @@ function BattleSpellMenu({
               onClick={() => onSpellClick(spell)}
               disabled={!enoughMana || isResolvingAction}
               title={spell.description}
-              className={`battle-spell-option spell-card spell-card-${spell.rarity} rounded border px-3 py-3 text-left transition ${
+              className={`battle-spell-option spell-card spell-card-${spell.rarity} rounded border px-4 py-4 text-left transition ${
                 selected
                   ? 'rail-button-active'
                   : enoughMana
@@ -1067,15 +1196,32 @@ function BattleSpellMenu({
                     : 'ui-empty opacity-45'
               }`}
             >
-              <span className="flex items-start justify-between gap-2">
-                <span className="min-w-0">
-                  <span className="block truncate text-xs font-black text-zinc-100">{spell.name}</span>
-                  <span className="ui-faint mt-0.5 block text-[10px] font-black uppercase">{targetLabel} - {spell.rarity}</span>
+              <span className="flex items-start gap-3">
+                <span className={`battle-spell-icon battle-spell-icon-${spellVisual.tone} relative shrink-0 overflow-hidden rounded border`}>
+                  <Image
+                    src={spellVisual.iconPath}
+                    alt=""
+                    fill
+                    sizes="42px"
+                    className="object-contain p-2"
+                    style={{ imageRendering: 'pixelated' }}
+                  />
                 </span>
-                <span className="ui-pill shrink-0 rounded border px-2 py-1 text-[10px] font-black">M {spell.cost}</span>
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-start justify-between gap-2">
+                    <span className="min-w-0">
+                      <span className="block truncate text-sm font-black text-zinc-100">{spell.name}</span>
+                      <span className="ui-faint mt-1 block text-[11px] font-black uppercase">{targetLabel} - {spellVisual.tierLabel}</span>
+                    </span>
+                    <span className="ui-pill shrink-0 rounded border px-2.5 py-1.5 text-[11px] font-black">M {spell.cost}</span>
+                  </span>
+                  <span className="battle-spell-tag mt-2 inline-flex rounded border px-2 py-1 text-[10px] font-black uppercase">
+                    {spellVisual.tagline}
+                  </span>
+                </span>
               </span>
-              <span className="ui-muted mt-2 line-clamp-2 block text-[10px] font-bold">{spell.description}</span>
-              {!enoughMana && <span className="mt-2 block text-[10px] font-black text-red-200">Need {spell.cost - mana} mana</span>}
+              <span className="ui-muted mt-3 block text-xs font-bold leading-relaxed">{spell.description}</span>
+              {!enoughMana && <span className="mt-2 block text-xs font-black text-red-200">Need {spell.cost - mana} mana</span>}
             </button>
           );
         })}
@@ -1093,13 +1239,52 @@ function getSpellTargetLabel(target: BattleSpell['target']): string {
   return 'Field';
 }
 
+function formatManaRoman(mana: number): string {
+  const safeMana = Math.max(0, Math.min(12, Math.floor(mana)));
+  return ['0', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI', 'XII'][safeMana] || String(safeMana);
+}
+
+function BattleManaSigil({ mana, compact = false }: { mana: number; compact?: boolean }) {
+  return (
+    <span className={`battle-mana-sigil ${compact ? 'battle-mana-sigil-compact' : ''}`} title={`${mana} stored mana`}>
+      {formatManaRoman(mana)}
+    </span>
+  );
+}
+
+function getSpellVisual(spell: BattleSpell): { iconPath: string; tierLabel: string; tone: 'damage' | 'support' | 'field'; tagline: string } {
+  const tierLabel = spell.rarity === 'legendary' ? 'Tier III' : spell.rarity === 'rare' ? 'Tier II' : 'Tier I';
+  if (spell.target === 'enemy') {
+    return {
+      iconPath: '/assets/icons/attack.png',
+      tierLabel,
+      tone: 'damage',
+      tagline: spell.rarity === 'legendary' ? 'Finisher' : 'Strike',
+    };
+  }
+  if (spell.target === 'ally') {
+    return {
+      iconPath: '/assets/icons/health.png',
+      tierLabel,
+      tone: 'support',
+      tagline: spell.description.toLowerCase().includes('heal') ? 'Heal' : 'Buff',
+    };
+  }
+  return {
+    iconPath: '/assets/icons/magic.png',
+    tierLabel,
+    tone: 'field',
+    tagline: 'Battlefield',
+  };
+}
+
 function BattleHoverOverlay({ preview, visible }: { preview: BattleHoverPreviewData; visible: boolean }) {
   if (!visible) return null;
 
   return (
     <div className={`battle-hover-overlay rounded border px-3 py-2 ${preview.tone === 'danger' ? 'battle-hover-danger' : preview.tone === 'good' ? 'battle-hover-good' : ''}`}>
       <div className="truncate text-xs font-black text-zinc-100">{preview.title}</div>
-      <div className="ui-muted truncate text-[10px] font-bold">{preview.detail}</div>
+      <div className="ui-muted text-[10px] font-bold">{preview.detail}</div>
     </div>
   );
 }
@@ -1122,7 +1307,8 @@ function BattleTurnTimeline({ battle, vertical = false }: { battle: BattleState;
               alt=""
               fill
               className="object-contain p-0.5"
-              style={{ imageRendering: 'pixelated' }}
+              sizes="42px"
+              unoptimized
             />
           </span>
         ))}
@@ -1147,8 +1333,9 @@ function BattlePiece({ unit, active, animation }: { unit: BattleUnit; active: bo
           src={unit.assetPath}
           alt={unit.name}
           fill
-          sizes="(max-width: 768px) 12vw, 8vw"
+          sizes="(max-width: 768px) 18vw, 140px"
           className="battle-piece-image object-contain object-center"
+          unoptimized
         />
       </span>
       <span className={`battle-piece-role ${unit.side === 'player' ? 'battle-piece-role-player' : 'battle-piece-role-enemy'}`}>
@@ -1168,8 +1355,9 @@ function BattleDeathMarker({ unit }: { unit: BattleUnit }) {
           src={unit.assetPath}
           alt=""
           fill
-          sizes="(max-width: 768px) 12vw, 8vw"
+          sizes="(max-width: 768px) 18vw, 140px"
           className="battle-piece-image object-contain object-center opacity-45 grayscale"
+          unoptimized
         />
       </span>
       <span className="battle-death-ash" />
@@ -1191,7 +1379,19 @@ function getFloatingBattleText(
   const numberMatch = entry.message.match(/\b(\d+)\b/);
   const value = numberMatch?.[1];
 
-  if ((entry.action === 'attack' || entry.action === 'spell') && isTarget && value) {
+  if (entry.action === 'spell' && entry.style === 'spell-drain' && isTarget) {
+    const drainMatch = entry.message.match(/draining\s+(\d+).*restoring\s+(\d+)/i);
+    if (isActor && drainMatch?.[2]) return { text: `+${drainMatch[2]}`, tone: 'heal' };
+    if (!isActor && drainMatch?.[1]) return { text: `-${drainMatch[1]}`, tone: 'damage' };
+  }
+
+  if (entry.action === 'spell' && isTarget && value) {
+    if (entry.style === 'spell-support') return { text: `+${value}`, tone: 'heal' };
+    if (entry.style === 'buff') return { text: 'Ward', tone: 'neutral' };
+    if (entry.style === 'spell-damage' || entry.style === 'spell-control') return { text: `-${value}`, tone: 'damage' };
+  }
+
+  if (entry.action === 'attack' && isTarget && value) {
     return { text: `-${value}`, tone: 'damage' };
   }
 
@@ -1201,6 +1401,10 @@ function getFloatingBattleText(
 
   if (entry.action === 'mana' && isActor) {
     return { text: '+M', tone: 'mana' };
+  }
+
+  if (entry.action === 'wait' && isActor) {
+    return { text: 'Guard', tone: 'neutral' };
   }
 
   return null;
@@ -1220,12 +1424,15 @@ function getBattlePieceAnimation(battle: BattleState, unit: BattleUnit, now: num
     if (entry.action === 'attack') return style === 'ranged' ? 'ranged' : 'melee';
     if (entry.action === 'heal') return 'heal';
     if (entry.action === 'spell') return 'commander-spell';
-    if (entry.action === 'morale' || entry.action === 'mana') return 'morale';
+    if (entry.action === 'mana' || style === 'mana-focus') return 'mana';
+    if (entry.action === 'wait' || style === 'guard') return 'guard';
+    if (entry.action === 'morale') return 'morale';
   }
 
   if (isTarget) {
     if (entry.action === 'attack') return style === 'ranged' ? 'hit-ranged' : 'hit-melee';
     if (entry.action === 'spell') {
+      if (style === 'spell-drain') return entry.actorId === unit.id ? 'heal' : 'spell-hit';
       if (style === 'spell-support' || style === 'heal') return 'heal';
       if (style === 'buff') return 'buff';
       if (style === 'debuff' || style === 'spell-control') return 'debuff';
@@ -1275,6 +1482,34 @@ function BattleSpeedControl({ value, onChange }: { value: BattleSpeed; onChange:
           </button>
         ))}
       </span>
+    </div>
+  );
+}
+
+function BattleBossIntro({ enemy }: { enemy: WorldEnemy }) {
+  const artworkPath = enemy.artworkPath || getPlayerModelAsset(enemy.modelNumber);
+
+  return (
+    <div className="battle-boss-intro pointer-events-none absolute inset-0 z-30 flex items-center justify-center p-4">
+      <div className="battle-boss-intro-card command-panel vine-frame rounded border p-4 text-center">
+        <div className="arcane-label">Boss Alert</div>
+        <div className="battle-boss-intro-art relative mx-auto mt-2 overflow-hidden rounded">
+          <Image
+            src={artworkPath}
+            alt=""
+            fill
+            sizes="220px"
+            className="object-contain"
+            priority
+            unoptimized
+          />
+        </div>
+        <h3 className="fantasy-heading mt-3 text-3xl">{enemy.name}</h3>
+        <p className="ui-accent mt-1 text-xs font-black uppercase">{enemy.subtitle}</p>
+        <p className="ui-muted mx-auto mt-2 max-w-sm text-xs font-bold">
+          {enemy.intro || enemy.story || 'A final commander enters the field.'}
+        </p>
+      </div>
     </div>
   );
 }
@@ -1363,7 +1598,7 @@ function BattleResultReport({
       {status === 'defeat' && (
         <div className="mt-3 grid gap-2 sm:grid-cols-2">
           <BattleResultStat label="Health Lost" value={`-${report?.healthLost ?? 0}`} />
-          <BattleResultStat label="Reward" value="None" />
+          <BattleResultStat label="Respawn" value={report?.respawnTown || 'Nearest town'} />
         </div>
       )}
 
@@ -1437,7 +1672,7 @@ function emitBattleCompletionNotice(battle: BattleState, report: BattleResultRep
   if (status === 'defeat') {
     rewards.push(
       { label: 'Health', value: `-${report?.healthLost ?? 0}`, tone: 'red' },
-      { label: 'Reward', value: 'None', tone: 'neutral' }
+      { label: 'Respawn', value: report?.respawnTown || 'Nearest town', tone: 'gold' }
     );
   }
 
@@ -1457,10 +1692,11 @@ function emitBattleCompletionNotice(battle: BattleState, report: BattleResultRep
     kicker: 'Battle Report',
     title: status === 'defeat' ? 'Defeat' : status === 'recruited' ? 'Oath Accepted' : 'Victory',
     description: status === 'defeat'
-      ? `${battle.enemy.name} held the field.`
+      ? `${battle.enemy.name} held the field. Your commander wakes at ${report?.respawnTown || 'the nearest town'}. Fallen roster units were removed.`
       : status === 'recruited'
         ? `${battle.enemy.name} yielded and joined your army.`
         : `${battle.enemy.name} was defeated and the field reward was claimed.`,
+    artworkPath: status === 'defeat' ? '/assets/reaper.png' : undefined,
     rewards,
     completedAt: report?.completedAt || Date.now(),
   });
@@ -1573,7 +1809,7 @@ function getBattleHoverPreview({
       return {
         title: validTarget ? selectedSpell.name : 'Wrong Target',
         detail: validTarget
-          ? `Cast on ${unitAtCell.name}. Mana cost ${selectedSpell.cost}.`
+          ? `Cast on ${unitAtCell.name}. Mana cost ${selectedSpell.cost}. ${getBattleUnitStatLine(unitAtCell)}`
           : `${selectedSpell.name} cannot target ${unitAtCell.name}.`,
         tone: validTarget && selectedSpell.target === 'ally' ? 'good' : validTarget ? 'danger' : 'neutral',
       };
@@ -1590,7 +1826,7 @@ function getBattleHoverPreview({
     if (isPlayerTurn && canHeal(activeUnit, unitAtCell)) {
       return {
         title: `Heal ${unitAtCell.name}`,
-        detail: `Restores about ${getHealAmount(activeUnit, unitAtCell, battle)} health.`,
+        detail: `Restores about ${getHealAmount(activeUnit, unitAtCell, battle)} health. ${getBattleUnitStatLine(unitAtCell)}`,
         tone: 'good',
       };
     }
@@ -1600,14 +1836,14 @@ function getBattleHoverPreview({
       const defeatText = damage >= unitAtCell.currentHealth ? ' Likely defeat.' : '';
       return {
         title: `Strike ${unitAtCell.name}`,
-        detail: `Deals about ${damage} damage.${defeatText}`,
+        detail: `Deals about ${damage} damage.${defeatText} ${getBattleUnitStatLine(unitAtCell)}`,
         tone: 'danger',
       };
     }
 
     return {
       title: unitAtCell.name,
-      detail: `${unitAtCell.currentHealth}/${unitAtCell.maxHealth} HP on ${terrainLabel}.`,
+      detail: `${getBattleUnitStatLine(unitAtCell)} on ${terrainLabel}.`,
       tone: unitAtCell.side === 'player' ? 'good' : 'danger',
     };
   }
@@ -1635,6 +1871,13 @@ function getBattleHoverPreview({
       : terrainDescription,
     tone: 'neutral',
   };
+}
+
+function getBattleUnitStatLine(unit: BattleUnit): string {
+  const template = unit.templateId ? getMinionTemplate(unit.templateId) : undefined;
+  const role = unit.kind === 'commander' ? 'Commander' : template?.role || 'Unit';
+  const healing = unit.healing > 0 ? ` HEAL ${unit.healing}` : '';
+  return `${unit.currentHealth}/${unit.maxHealth} HP - ATK ${unit.attack} DEF ${unit.defense} MAG ${unit.magic}${healing} - RNG ${unit.range} SPD ${unit.speed} - ${role}`;
 }
 
 function getDefaultBattleCue({
@@ -1713,13 +1956,13 @@ function getDefaultBattleCue({
   };
 }
 
-function applyBattleCasualties(battle: BattleState): MinionCasualtyReport {
+function applyBattleCasualties(battle: BattleState, options: { deleteImmediately?: boolean } = {}): MinionCasualtyReport {
   const deadRosterIds = battle.units
     .filter(unit => unit.side === 'player' && unit.kind === 'minion' && unit.currentHealth <= 0 && unit.rosterId)
     .map(unit => unit.rosterId as string)
     .filter(rosterId => !rosterId.startsWith('loaned-'));
 
-  return applyMinionBattleCasualties(deadRosterIds, battle.enemy.name);
+  return applyMinionBattleCasualties(deadRosterIds, battle.enemy.name, options);
 }
 
 function getFallenPlayerMinions(battle: BattleState): string[] {
@@ -1840,6 +2083,7 @@ function applyVictoryReward(enemy: WorldEnemy): VictoryRewardReport | null {
     type: 'battle',
     title: itemAddResult.rejectedItems.length > 0 ? `Defeated ${enemy.name} (satchel full)` : `Defeated ${enemy.name}`,
     source: enemy.id.startsWith('dungeon-') ? 'Dungeon Battle' : 'Battle',
+    description: [enemy.bossId ? `boss:${enemy.bossId}` : '', enemy.story || enemy.subtitle].filter(Boolean).join(' - '),
     completedAt,
     rewards: {
       gold: reward.gold,
@@ -1873,18 +2117,26 @@ function applyVictoryReward(enemy: WorldEnemy): VictoryRewardReport | null {
   };
 }
 
-function applyDefeatPenalty(enemy: WorldEnemy): number {
+function applyDefeatPenalty(enemy: WorldEnemy): { healthLost: number; respawnTown?: string } {
   const user = getCurrentUser();
-  if (!user) return 0;
+  if (!user) return { healthLost: 0 };
 
   const penalty = Math.min(20 + enemy.level * 2, Math.max(0, user.stats.health - 1));
+  const nearestTown = getStaticPOIs()
+    .filter(poi => poi.type === POIType.TOWN)
+    .sort((a, b) => {
+      const distanceA = Math.hypot((user.x || 0) - a.x, (user.y || 0) - a.y);
+      const distanceB = Math.hypot((user.x || 0) - b.x, (user.y || 0) - b.y);
+      return distanceA - distanceB;
+    })[0];
 
   updateCurrentUser({
+    ...(nearestTown ? { x: nearestTown.x + 4, y: nearestTown.y + 4 } : {}),
     stats: {
       ...user.stats,
       health: Math.max(1, user.stats.health - penalty),
     },
   });
 
-  return penalty;
+  return { healthLost: penalty, respawnTown: nearestTown?.name };
 }

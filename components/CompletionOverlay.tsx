@@ -85,19 +85,22 @@ export default function CompletionOverlay() {
   const victoryTone = activeNotice.kind !== 'defeat';
   const currentUser = getCurrentUser();
   const modelPath = getPlayerModelPath(currentUser?.selectedModel || 3);
+  const artworkPath = activeNotice.artworkPath || (activeNotice.kind === 'defeat' ? '/assets/reaper.png' : modelPath);
+  const artworkAlt = activeNotice.kind === 'defeat' ? 'Fallen reaper' : '';
 
   return (
     <div className="completion-overlay fixed inset-0 z-[95] flex items-center justify-center bg-black/20 p-4 text-zinc-100 backdrop-blur-[2px]">
       {phase === 'burst' ? (
         <div className={`completion-burst ${victoryTone ? 'completion-burst-victory' : 'completion-burst-defeat'} text-center`}>
-          <div className="completion-avatar-wrap relative mx-auto mb-5 h-44 w-44 sm:h-56 sm:w-56">
+          <div className={`completion-avatar-wrap relative mx-auto mb-5 h-44 w-44 sm:h-56 sm:w-56 ${activeNotice.kind === 'defeat' ? 'completion-avatar-wrap-defeat' : ''}`}>
             <Image
-              src={modelPath}
-              alt=""
+              src={artworkPath}
+              alt={artworkAlt}
               fill
               sizes="224px"
-              className="player-model-art object-contain"
+              className={`object-contain ${activeNotice.kind === 'defeat' ? 'completion-avatar-defeat-art' : 'player-model-art'}`}
               priority
+              unoptimized
             />
           </div>
           <div className="arcane-label">{activeNotice.kicker || 'Report'}</div>
@@ -106,12 +109,26 @@ export default function CompletionOverlay() {
       ) : (
         <section className={`completion-report command-panel vine-frame w-full max-w-2xl rounded border p-5 ${victoryTone ? 'completion-report-victory' : 'completion-report-defeat'}`}>
           <div className="flex flex-wrap items-start justify-between gap-4">
-            <div>
-              <div className="arcane-label">{activeNotice.kicker || 'Completion'}</div>
-              <h2 className="fantasy-heading text-3xl">{activeNotice.title}</h2>
-              {activeNotice.description && (
-                <p className="ui-muted mt-2 max-w-xl text-sm font-bold">{activeNotice.description}</p>
+            <div className="flex min-w-0 flex-1 items-start gap-4">
+              {activeNotice.kind === 'defeat' && (
+                <span className="completion-report-art relative hidden shrink-0 overflow-hidden rounded border sm:block">
+                  <Image
+                    src={artworkPath}
+                    alt={artworkAlt}
+                    fill
+                    sizes="96px"
+                    className="object-contain"
+                    unoptimized
+                  />
+                </span>
               )}
+              <div className="min-w-0">
+                <div className="arcane-label">{activeNotice.kicker || 'Completion'}</div>
+                <h2 className="fantasy-heading text-3xl">{activeNotice.title}</h2>
+                {activeNotice.description && (
+                  <p className="ui-muted mt-2 max-w-xl text-sm font-bold">{activeNotice.description}</p>
+                )}
+              </div>
             </div>
             <button onClick={closeNotice} className="ui-button-primary rounded px-4 py-2 text-xs font-black">
               Continue

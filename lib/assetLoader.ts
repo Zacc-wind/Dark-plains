@@ -81,6 +81,16 @@ export const ASSET_PATHS = {
     model5: '/assets/playermodel5.png',
     model6: '/assets/playermodel6.png',
   },
+  bosses: {
+    boss1: '/assets/bosses/boss1.png',
+    boss2: '/assets/bosses/boss2.png',
+    boss3: '/assets/bosses/boss3.png',
+    boss4: '/assets/bosses/boss4.png',
+    boss5: '/assets/bosses/boss5.png',
+    boss6: '/assets/bosses/boss6.png',
+    boss7: '/assets/bosses/boss7.png',
+    boss8: '/assets/bosses/boss8.png',
+  },
 };
 
 export function getPlayerModelPath(modelNumber = 3): string {
@@ -96,6 +106,7 @@ export async function preloadAllAssets(): Promise<void> {
     ...Object.values(ASSET_PATHS.towns),
     ...Object.values(ASSET_PATHS.icons),
     ...Object.values(ASSET_PATHS.player),
+    ...Object.values(ASSET_PATHS.bosses),
   ];
 
   await Promise.all(allPaths.map(path => AssetLoader.loadImage(path)));

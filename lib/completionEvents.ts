@@ -12,6 +12,7 @@ export interface CompletionNotice {
   title: string;
   kicker?: string;
   description?: string;
+  artworkPath?: string;
   rewards?: CompletionRewardLine[];
   completedAt?: number;
 }

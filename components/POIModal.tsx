@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { getCurrentUser, getJobRewardPreview, getTravelTimeModifier, startJob } from '@/lib/auth';
+import { getCurrentUser, getJobRewardPreview, getJobTravelDurationMs, startJob } from '@/lib/auth';
 import { emitFxEvent } from '@/lib/fxEvents';
 import { POI } from '@/lib/mapData';
 
@@ -9,9 +9,10 @@ interface POIModalProps {
   poi: POI | null;
   onClose: () => void;
   onSelectJob: (poiId: string, job: string) => void;
+  onTravel: () => void;
 }
 
-export default function POIModal({ poi, onClose, onSelectJob }: POIModalProps) {
+export default function POIModal({ poi, onClose, onSelectJob, onTravel }: POIModalProps) {
   const [user, setUser] = useState(getCurrentUser());
   const [error, setError] = useState('');
   const [now, setNow] = useState(() => Date.now());
@@ -50,8 +51,8 @@ export default function POIModal({ poi, onClose, onSelectJob }: POIModalProps) {
   const distanceX = !user || atLocation ? 0 : routeStartX < poi.x ? poi.x - routeStartX : Math.max(0, routeStartX - (poi.x + poiWidth - 1));
   const distanceY = !user || atLocation ? 0 : routeStartY < poi.y ? poi.y - routeStartY : Math.max(0, routeStartY - (poi.y + poiHeight - 1));
   const distance = distanceX + distanceY;
-  const speedModifier = user ? getTravelTimeModifier(user) : 1;
-  const travelMinutes = Math.ceil((directTravelRemainingMs / 60000) + distance * 0.75 * speedModifier);
+  const travelEtaMs = directTravelRemainingMs + (user ? getJobTravelDurationMs(user, distance) : 0);
+  const travelEtaLabel = formatPoiTravelEta(travelEtaMs);
 
   const handleStartJob = (jobName: string, jobIndex: number) => {
     const result = startJob(poi.id, poi.name, jobName, jobIndex, poiTargetX, poiTargetY, poi.type);
@@ -92,11 +93,24 @@ export default function POIModal({ poi, onClose, onSelectJob }: POIModalProps) {
                 ? 'A dry traveler camp for healing, rumors, and short rests before the next road.'
                 : 'Queue work here or preview the route while your commander is already walking.')}
             </p>
+            {!atLocation && (
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                <span className="ui-faint text-xs font-black uppercase">Route {travelEtaLabel}</span>
+                <button
+                  type="button"
+                  onClick={onTravel}
+                  disabled={!user || Boolean(user.traveling)}
+                  className="ui-button-primary rounded px-3 py-2 text-xs font-black disabled:opacity-40"
+                >
+                  {user?.traveling ? 'Walking' : 'Walk Here'}
+                </button>
+              </div>
+            )}
           </div>
 
           <div className="grid grid-cols-3 gap-2 text-center">
             <InfoPill label="Queue" value={`${queuedJobs}/4`} />
-            <InfoPill label="Route" value={atLocation ? 'Here' : `${travelMinutes} min`} />
+            <InfoPill label="Route" value={atLocation ? 'Here' : travelEtaLabel} />
             <InfoPill label="Board" value={isCampfire ? 'Rest' : 'Jobs'} />
           </div>
 
@@ -129,7 +143,7 @@ export default function POIModal({ poi, onClose, onSelectJob }: POIModalProps) {
                       {rewardLines.map(line => (
                         <span key={line} className={getJobRewardLineClass(line)}>{line}</span>
                       ))}
-                      {!atLocation && <span className="ui-accent">route +{travelMinutes} min</span>}
+                      {!atLocation && <span className="ui-accent">route +{travelEtaLabel}</span>}
                     </div>
                     {reward.rewardNote && <p className="ui-faint mt-2 text-[10px] font-bold">{reward.rewardNote}</p>}
                   </div>
@@ -152,6 +166,12 @@ export default function POIModal({ poi, onClose, onSelectJob }: POIModalProps) {
       </div>
     </div>
   );
+}
+
+function formatPoiTravelEta(ms: number): string {
+  const seconds = Math.max(0, Math.ceil(ms / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  return `${Math.ceil(seconds / 60)}m`;
 }
 
 function formatJobRewardLines(reward: ReturnType<typeof getJobRewardPreview>): string[] {

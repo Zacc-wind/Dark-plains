@@ -73,6 +73,7 @@ export interface QuestNpc {
   town: QuestTown;
   line: string;
   questHook: string;
+  requirement: QuestRequirementSpec;
   rewards: QuestRewardSpec;
 }
 
@@ -157,7 +158,7 @@ export const CITY_QUESTS: CityQuestTemplate[] = [
     town: 'Harborview',
     faction: 'Road Pilgrims',
     name: 'Pilgrim Scrip',
-    description: 'Collect signed scrips from workers who still travel under holy protection.',
+    description: 'Complete Harborview-area jobs for road workers; each finished job returns one signed pilgrim scrip.',
     requirement: { type: 'complete_jobs', count: 5 },
     rewards: { gold: 210, exp: 130, rareGems: 1 },
   },
@@ -504,8 +505,8 @@ export const STORY_CHAPTERS: StoryChapter[] = [
         order: 15,
         requiredLevel: 15,
         name: 'The Broken Crown',
-        lore: 'The Eclipsed Warlord keeps a broken crown for anyone who still believes commanders rule alone.',
-        requirement: { type: 'defeat_boss', count: 1, bossId: 'eclipsed-warlord' },
+        lore: 'Emperor Grave-Aurel keeps a broken crown for anyone who still believes commanders rule alone.',
+        requirement: { type: 'defeat_boss', count: 1, bossId: 'emperor-grave-aurel' },
         rewards: { gold: 900, exp: 600, equipmentRarity: 'legendary', minionTier: 'tier3', spellIds: ['eclipse-nova', 'time-crown-edict'] },
       },
     ],
@@ -525,6 +526,7 @@ export const QUEST_NPCS: QuestNpc[] = [
     town: 'Harborview',
     line: 'The first wounds are small. That is why commanders ignore them until armies fall.',
     questHook: 'Introduces early healing contracts and the First Banner story chain.',
+    requirement: { type: 'complete_jobs', count: 1 },
     rewards: { gold: 35, exp: 20, healthRestore: 40 },
   },
   {
@@ -539,6 +541,7 @@ export const QUEST_NPCS: QuestNpc[] = [
     town: 'Harborview',
     line: 'Bring me proof that your soldiers follow orders after moonrise.',
     questHook: 'Points players toward Harborview city contracts and mid-road enemies.',
+    requirement: { type: 'win_battles', count: 1 },
     rewards: { gold: 75, exp: 45, equipmentRarity: 'decent' },
   },
   {
@@ -553,6 +556,7 @@ export const QUEST_NPCS: QuestNpc[] = [
     town: 'Riverside',
     line: 'Law is only magic that everyone agreed to fear.',
     questHook: 'Introduces Riverside contracts, star-law motifs, and rare gem requirements.',
+    requirement: { type: 'complete_jobs', count: 3 },
     rewards: { gold: 90, exp: 55, rareGems: 1 },
   },
   {
@@ -567,6 +571,7 @@ export const QUEST_NPCS: QuestNpc[] = [
     town: 'Riverside',
     line: 'Every bell has a ghost in it. Some are more punctual than others.',
     questHook: 'Routes players toward longer timed jobs and bridge-region contracts.',
+    requirement: { type: 'complete_timed_jobs', count: 2, minDuration: FIFTEEN_MINUTES },
     rewards: { gold: 120, exp: 80, minionTier: 'tier1' },
   },
   {
@@ -581,6 +586,7 @@ export const QUEST_NPCS: QuestNpc[] = [
     town: 'Riverside',
     line: 'Skip a command. Let the mana stack. Then you will learn what a king is.',
     questHook: 'Teaches spell-power, Focus Mana, and eastern combat prep.',
+    requirement: { type: 'win_battles', count: 2 },
     rewards: { gold: 180, exp: 115, equipmentRarity: 'rare', rareGems: 1 },
   },
   {
@@ -595,6 +601,7 @@ export const QUEST_NPCS: QuestNpc[] = [
     town: 'Harborview',
     line: 'The southeast does not need roads. It has teeth.',
     questHook: 'Foreshadows boss country, dungeon fights, and the Broken Crown finale.',
+    requirement: { type: 'win_battles', count: 3 },
     rewards: { gold: 260, exp: 160, equipmentRarity: 'epic', minionTier: 'tier2' },
   },
 ];

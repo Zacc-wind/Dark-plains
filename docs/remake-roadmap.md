@@ -191,7 +191,8 @@
 - [x] Add direct Daily Run launcher on the main map UI.
 - [x] Let the player draft random minions until 7 slots are filled.
 - [x] Add formation setup before run battles, allowing player units to be placed in the starting two columns.
-- [x] Chain 5-6 tactical battles into one roguelike run.
+- [x] Chain 9-12 tactical battles into one roguelike run.
+- [x] Add branching daily road choices with safer battles, elite fights, shops, omens, and a final boss node.
 - [x] Offer 4 reward choices after every victory.
 - [x] Add 20 first-pass run buffs including stat boosts, resurrection, recruits, upgrades, and run gold.
 - [x] Add once-per-day completion lockout, streak rewards, and local leaderboard/report history.
@@ -289,7 +290,7 @@
 - [x] Reorder Inventory so equipped gear is primary, available gear is higher, and satchel upgrade sits at the bottom.
 - [x] Hide locked/claimed quest clutter from the main Quests view.
 - [x] Hide visible scrollbars in command and town panels while preserving scroll behavior where content overflows.
-- [ ] Finish full-screen command panel polish so tabs read as actions, not separate data dumps.
+- [x] Finish full-screen command panel polish so tabs read as actions, not separate data dumps.
 - [x] Rework town panels into clear service columns: board, shop, blacksmith, local players.
 - [x] Add subtle UI transition states for opening command, town, quest/world popup, and daily panels.
 

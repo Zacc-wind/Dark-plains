@@ -6,6 +6,7 @@ import {
   getCityQuestTemplate,
   getRotatingCityQuests,
   type CityQuestTemplate,
+  type QuestRequirementSpec,
   type QuestRewardSpec,
   type StoryQuestTemplate,
 } from './questData';
@@ -16,6 +17,7 @@ import {
 } from './travelEvents';
 import { readGameJson, removeGameStorageItem, writeGameJson } from './gameStore';
 import { getStaticPOIs, MAP_CONFIG, POIType } from './mapData';
+import { BOSS_PROFILES, type BossProfile } from './bosses';
 
 export { CITY_QUESTS, QUEST_NPCS, STORY_CHAPTERS, getCityQuestTemplate, getRotatingCityQuests };
 export { TRAVEL_EVENT_CONTENT_COUNTS };
@@ -135,6 +137,7 @@ export interface MinionStack {
   injuredUntil?: number;
   injuryCount?: number;
   lastInjuredAt?: number;
+  runCurrentHealth?: number;
 }
 
 export interface MinionCasualtyReport {
@@ -284,8 +287,12 @@ export interface DailyRunChallenge {
   weekKey: string;
   name: string;
   subtitle: string;
+  bossId: string;
   bossName: string;
   bossSubtitle: string;
+  bossStory: string;
+  bossIntro: string;
+  bossArtworkPath: string;
   bossModelNumber: 1 | 2 | 3 | 4 | 5 | 6;
   modifiers: DailyRunModifier[];
   weeklyRewardName: string;
@@ -955,7 +962,7 @@ function getPoiFootprintSize(type: POIType): { width: number; height: number } {
   return { width: 4, height: 4 };
 }
 
-function getQuestTargetPoi(requirement: StoryQuestTemplate['requirement'] | CityQuestTemplate['requirement']) {
+function getQuestTargetPoi(requirement: QuestRequirementSpec) {
   if (!requirement.poiId && !requirement.poiName) return null;
   return getStaticPOIs().find(poi => (
     (requirement.poiId && poi.id === requirement.poiId) ||
@@ -972,7 +979,7 @@ function getPoiAtTile(x: number, y: number) {
   return getStaticPOIs().find(poi => isTileInsidePoiFootprint(x, y, poi)) || null;
 }
 
-function hasVisitedQuestPoi(user: User, requirement: StoryQuestTemplate['requirement'] | CityQuestTemplate['requirement']): boolean {
+function hasVisitedQuestPoi(user: User, requirement: QuestRequirementSpec): boolean {
   const targetPoi = getQuestTargetPoi(requirement);
   if (!targetPoi) return false;
 
@@ -1000,7 +1007,7 @@ function getStoryQuestTemplate(questId: string): StoryQuestTemplate | undefined 
 
 function getQuestRequirementProgressValue(
   user: User,
-  requirement: StoryQuestTemplate['requirement'] | CityQuestTemplate['requirement'],
+  requirement: QuestRequirementSpec,
   acceptedProgress = 0
 ): number {
   switch (requirement.type) {
@@ -1300,6 +1307,24 @@ export function hasClaimedQuestNpcReward(user: Pick<User, 'activityLog'> | null,
   return Boolean((user?.activityLog || []).some(entry => entry.id.startsWith(`activity-quest-npc-${npcId}-`)));
 }
 
+export function getQuestNpcStatus(
+  user: User | null | undefined,
+  npcId: string
+): { progress: number; required: number; complete: boolean; claimed: boolean; requirement?: QuestRequirementSpec } {
+  const npc = QUEST_NPCS.find(item => item.id === npcId);
+  const required = npc?.requirement.count || 1;
+  const claimed = hasClaimedQuestNpcReward(user || null, npcId);
+  const progress = user && npc ? Math.min(required, getQuestRequirementProgressValue(user, npc.requirement, 0)) : 0;
+
+  return {
+    progress,
+    required,
+    complete: progress >= required,
+    claimed,
+    requirement: npc?.requirement,
+  };
+}
+
 export function claimQuestNpcReward(npcId: string): {
   success: boolean;
   rewards?: RewardSummary;
@@ -1311,6 +1336,10 @@ export function claimQuestNpcReward(npcId: string): {
   const npc = QUEST_NPCS.find(item => item.id === npcId);
   if (!npc) return { success: false, error: 'Quest contact not found.' };
   if (hasClaimedQuestNpcReward(currentUser, npcId)) return { success: false, error: 'This counsel was already claimed.' };
+  const status = getQuestNpcStatus(currentUser, npcId);
+  if (!status.complete) {
+    return { success: false, error: `Complete the counsel task first (${status.progress}/${status.required}).` };
+  }
 
   const reward = buildQuestRewardSummary(npc.rewards);
   const spellUnlock = applySpellUnlocks(currentUser, reward.spellIds);
@@ -1498,7 +1527,7 @@ export const MINION_TEMPLATES: MinionTemplate[] = [
     name: 'Templar Initiate',
     role: 'Low-tier holy fighter',
     assetName: 'templar-initiate.png',
-    stats: { attack: 4, defense: 7, magic: 2, healing: 2, health: 34, movement: 2, range: 1 },
+    stats: { attack: 4, defense: 7, magic: 2, healing: 0, health: 34, movement: 2, range: 1 },
   },
   {
     templateId: 'templar-crusader',
@@ -1507,7 +1536,7 @@ export const MINION_TEMPLATES: MinionTemplate[] = [
     name: 'Crusader',
     role: 'Mid-tier holy fighter',
     assetName: 'templar-crusader.png',
-    stats: { attack: 7, defense: 10, magic: 3, healing: 3, health: 52, movement: 2, range: 1 },
+    stats: { attack: 7, defense: 10, magic: 3, healing: 0, health: 52, movement: 2, range: 1 },
   },
   {
     templateId: 'templar-paragon',
@@ -1516,7 +1545,7 @@ export const MINION_TEMPLATES: MinionTemplate[] = [
     name: 'Templar Paragon',
     role: 'High-tier holy fighter',
     assetName: 'templar-paragon.png',
-    stats: { attack: 10, defense: 15, magic: 5, healing: 5, health: 76, movement: 2, range: 1 },
+    stats: { attack: 10, defense: 15, magic: 5, healing: 0, health: 76, movement: 2, range: 1 },
   },
   {
     templateId: 'priest-acolyte',
@@ -2780,6 +2809,53 @@ export function getTravelTimeModifier(user: Pick<User, 'stats' | 'equipment' | '
   return Math.max(0.35, modifier);
 }
 
+const DIRECT_TRAVEL_MS_PER_TILE = 450;
+const DIRECT_TRAVEL_MIN_DURATION_MS = 1200;
+const DIRECT_TRAVEL_MAX_DURATION_MS = 60000;
+const JOB_TRAVEL_MS_PER_TILE = 1500;
+const JOB_TRAVEL_MIN_DURATION_MS = 1200;
+const JOB_TRAVEL_MAX_DURATION_MS = 60000;
+
+function getScaledTravelDurationMs(
+  distance: number,
+  speedModifier: number,
+  msPerTile: number,
+  minDuration: number,
+  maxDuration: number
+): number {
+  if (distance <= 0) return 0;
+  const scaledDuration = Math.ceil(distance * msPerTile * speedModifier);
+  return Math.min(maxDuration, Math.max(minDuration, scaledDuration));
+}
+
+export function getDirectTravelDurationMs(
+  user: Pick<User, 'x' | 'y' | 'stats' | 'equipment' | 'equippedSlots'>,
+  targetX: number,
+  targetY: number
+): number {
+  const distance = Math.abs(targetX - user.x) + Math.abs(targetY - user.y);
+  return getScaledTravelDurationMs(
+    distance,
+    getTravelTimeModifier(user),
+    DIRECT_TRAVEL_MS_PER_TILE,
+    DIRECT_TRAVEL_MIN_DURATION_MS,
+    DIRECT_TRAVEL_MAX_DURATION_MS
+  );
+}
+
+export function getJobTravelDurationMs(
+  user: Pick<User, 'stats' | 'equipment' | 'equippedSlots'>,
+  distance: number
+): number {
+  return getScaledTravelDurationMs(
+    distance,
+    getTravelTimeModifier(user),
+    JOB_TRAVEL_MS_PER_TILE,
+    JOB_TRAVEL_MIN_DURATION_MS,
+    JOB_TRAVEL_MAX_DURATION_MS
+  );
+}
+
 function getGoldRewardMultiplier(user: User): number {
   return hasEquippedPassive(user, 'Wealthy') ? 1.5 : 1;
 }
@@ -3287,7 +3363,11 @@ export function equipBattleSpellSet(spellIds: string[]): { success: boolean; err
   return { success: true };
 }
 
-export function applyMinionBattleCasualties(minionIds: string[], source = 'Battle'): MinionCasualtyReport {
+export function applyMinionBattleCasualties(
+  minionIds: string[],
+  source = 'Battle',
+  options: { deleteImmediately?: boolean } = {}
+): MinionCasualtyReport {
   const emptyReport: MinionCasualtyReport = { injuredNames: [], deadNames: [] };
   const uniqueIds = Array.from(new Set(minionIds.filter(id => id && !id.startsWith('loaned-'))));
   if (uniqueIds.length === 0) return emptyReport;
@@ -3308,7 +3388,7 @@ export function applyMinionBattleCasualties(minionIds: string[], source = 'Battl
     const name = template?.name || minion.templateId;
     const injuryCount = Math.max(0, Math.floor(minion.injuryCount || 0));
 
-    if (injuryCount >= MINION_SAFE_INJURIES) {
+    if (options.deleteImmediately || injuryCount >= MINION_SAFE_INJURIES) {
       report.deadNames.push(name);
       return roster;
     }
@@ -3747,15 +3827,7 @@ export function startTravel(targetX: number, targetY: number): void {
   const currentUser = getCurrentUser();
   if (!currentUser) return;
 
-  // Calculate distance (Manhattan distance)
-  const distance = Math.abs(targetX - currentUser.x) + Math.abs(targetY - currentUser.y);
-  
-  // Base time: 3 minutes per tile for direct world travel.
-  const baseTimePerTile = 180000;
-  
-  // Morale reduces travel time. Swift legendary gear pushes it further.
-  const speedModifier = getTravelTimeModifier(currentUser);
-  const duration = distance * baseTimePerTile * speedModifier;
+  const duration = getDirectTravelDurationMs(currentUser, targetX, targetY);
 
   const travelState: TravelState = {
     targetX,
@@ -4095,9 +4167,7 @@ export function startJob(poiId: string, poiName: string, jobName: string, jobInd
   
   // Calculate travel time from where player will be (not current location)
   const distance = Math.abs(poiX - startX) + Math.abs(poiY - startY);
-  const baseTimePerTile = 45000; // 45 seconds per tile for queued job travel
-  const speedModifier = getTravelTimeModifier(currentUser);
-  const travelTime = distance * baseTimePerTile * speedModifier;
+  const travelTime = getJobTravelDurationMs(currentUser, distance);
   
   const totalDuration = travelTime + workDuration;
   
@@ -4356,14 +4426,13 @@ function getJobTravelPosition(job: JobState, now = Date.now()): { x: number; y: 
 }
 
 function rebaseJobQueue(queue: JobState[], sourceX: number, sourceY: number, startAt: number, user: User): JobState[] {
-  const speedModifier = getTravelTimeModifier(user);
   let nextStartTime = startAt;
   let nextStartX = sourceX;
   let nextStartY = sourceY;
 
   return queue.map((job) => {
     const distance = Math.abs(job.targetX - nextStartX) + Math.abs(job.targetY - nextStartY);
-    const travelTime = distance * 45000 * speedModifier;
+    const travelTime = getJobTravelDurationMs(user, distance);
     const duration = travelTime + job.workDuration;
     const travelComplete = distance === 0;
     const rebasedJob: JobState = {
@@ -4491,9 +4560,7 @@ export function getJobTimeRemaining(job: JobState, now = Date.now()): number {
     if (!currentUser) return job.duration;
     
     const remainingDistance = Math.abs(job.targetX - currentUser.x) + Math.abs(job.targetY - currentUser.y);
-    const baseTimePerTile = 45000; // 45 seconds per tile
-    const speedModifier = getTravelTimeModifier(currentUser);
-    const estimatedTravelTimeRemaining = remainingDistance * baseTimePerTile * speedModifier;
+    const estimatedTravelTimeRemaining = getJobTravelDurationMs(currentUser, remainingDistance);
     
     return estimatedTravelTimeRemaining + job.workDuration;
   } else if (job.travelCompleteTime) {
@@ -4825,16 +4892,7 @@ const DAILY_RUN_MODIFIERS: DailyRunModifier[] = [
   },
 ];
 
-const DAILY_RUN_BOSSES: Array<Pick<DailyRunChallenge, 'bossName' | 'bossSubtitle' | 'bossModelNumber'>> = [
-  { bossName: 'Abbess Nocturne', bossSubtitle: 'Final commander of the Candle Choir', bossModelNumber: 6 },
-  { bossName: 'Sir Veyr the Hollow', bossSubtitle: 'Oathless knight of the black causeway', bossModelNumber: 1 },
-  { bossName: 'Moonwell Adjudicator', bossSubtitle: 'Arcane judge of the drowned road', bossModelNumber: 2 },
-  { bossName: 'Candle-Key Warden', bossSubtitle: 'Keeper of the sealed pilgrim gate', bossModelNumber: 4 },
-  { bossName: 'Marshal of Ash Glass', bossSubtitle: 'War captain beneath the red moon', bossModelNumber: 5 },
-  { bossName: 'The Bell Hermit', bossSubtitle: 'Exiled prophet with a borrowed army', bossModelNumber: 3 },
-  { bossName: 'Dame Rook Saint', bossSubtitle: 'Relic shield duelist of the western vigil', bossModelNumber: 6 },
-  { bossName: 'Vicar Thorn-Mask', bossSubtitle: 'Field priest of a broken crusade', bossModelNumber: 4 },
-];
+const DAILY_RUN_BOSSES: BossProfile[] = BOSS_PROFILES;
 
 const DAILY_RUN_TITLES = [
   'Candle Road Trial',
@@ -4941,24 +4999,34 @@ export function getDailyRunChallenge(now = Date.now()): DailyRunChallenge {
   const weeklyReward = pickDailySeeded(DAILY_RUN_WEEKLY_REWARDS, weekKey, 'weekly-reward');
   const modifiers = pickDailySeededDistinct(DAILY_RUN_MODIFIERS, date, 2);
   const targetBattleBonus = modifiers.reduce((total, modifier) => total + (modifier.targetBattleBonus || 0), 0);
-  const baseBattles = 5 + Math.floor(seededDailyNumber(date, 'battle-count') * 2);
-  const targetBattles = Math.max(5, Math.min(7, baseBattles + targetBattleBonus));
+  const routeLengthRoll = seededDailyNumber(date, 'battle-count');
+  const baseBattles = routeLengthRoll > 0.82 ? 16 : routeLengthRoll > 0.52 ? 14 : 12;
+  const targetBattles = Math.max(12, Math.min(18, baseBattles + targetBattleBonus));
+  const routeRewardMultiplier = targetBattles >= 16 ? 1.22 : targetBattles >= 14 ? 1.12 : 1;
   const enemyLevelOffset = modifiers.reduce((total, modifier) => total + (modifier.enemyLevelOffset || 0), 0);
   const rewardGoldMultiplier = roundRewardMultiplier(
-    weeklyReward.goldMultiplier * modifiers.reduce((total, modifier) => total * (modifier.rewardGoldMultiplier || 1), 1)
+    weeklyReward.goldMultiplier *
+    modifiers.reduce((total, modifier) => total * (modifier.rewardGoldMultiplier || 1), 1) *
+    routeRewardMultiplier
   );
   const rewardExpMultiplier = roundRewardMultiplier(
-    weeklyReward.expMultiplier * modifiers.reduce((total, modifier) => total * (modifier.rewardExpMultiplier || 1), 1)
+    weeklyReward.expMultiplier *
+    modifiers.reduce((total, modifier) => total * (modifier.rewardExpMultiplier || 1), 1) *
+    (1 + (routeRewardMultiplier - 1) * 0.7)
   );
 
   return {
     date,
     weekKey,
     name: title,
-    subtitle: `${modifiers.map(modifier => modifier.name).join(' + ')} against ${boss.bossName}`,
-    bossName: boss.bossName,
-    bossSubtitle: boss.bossSubtitle,
-    bossModelNumber: boss.bossModelNumber,
+    subtitle: `${modifiers.map(modifier => modifier.name).join(' + ')} against ${boss.name}`,
+    bossId: boss.id,
+    bossName: boss.name,
+    bossSubtitle: boss.subtitle,
+    bossStory: boss.story,
+    bossIntro: boss.intro,
+    bossArtworkPath: boss.assetPath,
+    bossModelNumber: boss.modelNumber,
     modifiers,
     weeklyRewardName: weeklyReward.name,
     weeklyRewardDescription: weeklyReward.description,

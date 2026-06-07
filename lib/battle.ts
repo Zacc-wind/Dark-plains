@@ -11,6 +11,7 @@ import {
 import { getPlayerModelPath } from './assetLoader';
 import { readGameJson, removeGameStorageItem, writeGameJson } from './gameStore';
 import { MAP_CONFIG, POIType, TileType, getStaticMap, getStaticPOIs } from './mapData';
+import { BOSS_PROFILES, type BossProfile } from './bosses';
 
 export type BattleSide = 'player' | 'enemy';
 export type BattleStatus = 'active' | 'victory' | 'defeat' | 'recruited';
@@ -19,7 +20,20 @@ export type BattleSpellTarget = 'enemy' | 'ally' | 'none';
 export type PlayerModelNumber = 1 | 2 | 3 | 4 | 5 | 6;
 export type EnemyAiPersonality = 'balanced' | 'aggressive' | 'defensive' | 'arcane' | 'boss';
 export type BattleLogAction = 'round' | 'move' | 'attack' | 'heal' | 'spell' | 'wait' | 'mana' | 'morale' | 'system';
-export type BattleLogStyle = 'move' | 'melee' | 'ranged' | 'heal' | 'buff' | 'debuff' | 'morale' | 'spell-damage' | 'spell-support' | 'spell-control';
+export type BattleLogStyle =
+  | 'move'
+  | 'melee'
+  | 'ranged'
+  | 'heal'
+  | 'buff'
+  | 'debuff'
+  | 'guard'
+  | 'mana-focus'
+  | 'morale'
+  | 'spell-damage'
+  | 'spell-drain'
+  | 'spell-support'
+  | 'spell-control';
 export type BattleChallengeStatus = 'pending' | 'ready' | 'declined' | 'expired' | 'cancelled';
 
 export interface BoardCell {
@@ -49,8 +63,12 @@ export interface BattleMapTemplate {
 
 export interface WorldEnemy {
   id: string;
+  bossId?: string;
   name: string;
   subtitle: string;
+  story?: string;
+  intro?: string;
+  artworkPath?: string;
   x: number;
   y: number;
   homeX?: number;
@@ -62,7 +80,7 @@ export interface WorldEnemy {
   spawnedAt?: number;
   expiresAt?: number;
   spawnRegionId?: string;
-  spawnKind?: 'regional' | 'nearby';
+  spawnKind?: 'regional' | 'nearby' | 'world-boss';
   lootMultiplier?: number;
 }
 
@@ -98,6 +116,7 @@ export interface BattleUnit {
   range: number;
   x: number;
   y: number;
+  retaliatedRound?: number;
 }
 
 export interface BattleSpell {
@@ -181,12 +200,20 @@ export interface CreateNpcBattleOptions {
 
 const CHALLENGES_KEY = 'pirate_game_battle_challenges';
 const DEFEATED_WORLD_ENEMIES_KEY = 'pirate_game_defeated_world_enemies';
+const WORLD_ENEMY_SNAPSHOT_KEY = 'pirate_game_world_enemy_snapshot';
 export const BATTLE_CONFIRM_WINDOW_MS = 60 * 1000;
 export const TURN_TIME_LIMIT_MS = 2 * 60 * 1000;
 export const MAX_PVP_DOWNCHALLENGE_LEVEL_GAP = 5;
 export const WORLD_ENEMY_CAP = 30;
 export const WORLD_ENEMY_CYCLE_MS = 24 * 60 * 60 * 1000;
+const WORLD_BOSS_CYCLE_MS = 60 * 60 * 1000;
 const WORLD_ENEMY_MOVE_STEP_MS = 8 * 60 * 1000;
+
+interface WorldEnemySnapshot {
+  cycle: number;
+  username: string;
+  enemies: WorldEnemy[];
+}
 
 export function canChallengePlayer(
   challenger: Pick<User, 'stats' | 'username'> | null,
@@ -661,6 +688,15 @@ function getWorldEnemyCycle(now = Date.now()): { cycle: number; spawnedAt: numbe
   };
 }
 
+function getWorldBossCycle(now = Date.now()): { cycle: number; spawnedAt: number; expiresAt: number } {
+  const cycle = Math.floor(now / WORLD_BOSS_CYCLE_MS);
+  return {
+    cycle,
+    spawnedAt: cycle * WORLD_BOSS_CYCLE_MS,
+    expiresAt: (cycle + 1) * WORLD_BOSS_CYCLE_MS,
+  };
+}
+
 function getEnemyPoiFootprint(type: POIType): { width: number; height: number } {
   if (type === POIType.TOWN) return { width: 8, height: 8 };
   if (type === POIType.CAMPFIRE) return { width: 2, height: 2 };
@@ -764,6 +800,32 @@ function readDefeatedWorldEnemyIds(cycle: number): Set<string> {
   return new Set(raw.ids || []);
 }
 
+function getWorldEnemySnapshotUsername(user: User | null): string {
+  return user?.username || 'guest';
+}
+
+function readWorldEnemySnapshot(cycle: number, username: string, defeatedEnemyIds: Set<string>): WorldEnemy[] | null {
+  if (typeof window === 'undefined') return null;
+
+  const raw = readGameJson<Partial<WorldEnemySnapshot>>(WORLD_ENEMY_SNAPSHOT_KEY, {});
+  if (raw.cycle !== cycle || raw.username !== username || !Array.isArray(raw.enemies)) {
+    if (raw.cycle !== undefined) removeGameStorageItem(WORLD_ENEMY_SNAPSHOT_KEY);
+    return null;
+  }
+
+  return raw.enemies.filter(enemy => !defeatedEnemyIds.has(enemy.id)).slice(0, WORLD_ENEMY_CAP);
+}
+
+function writeWorldEnemySnapshot(cycle: number, username: string, enemies: WorldEnemy[]): void {
+  if (typeof window === 'undefined') return;
+
+  writeGameJson(WORLD_ENEMY_SNAPSHOT_KEY, {
+    cycle,
+    username,
+    enemies: enemies.slice(0, WORLD_ENEMY_CAP),
+  });
+}
+
 export function markWorldEnemyDefeated(enemy: Pick<WorldEnemy, 'id'>, now = Date.now()): void {
   if (typeof window === 'undefined') return;
   if (enemy.id.startsWith('dungeon-')) return;
@@ -844,6 +906,73 @@ function makeWorldEnemyFromArchetype({
     spawnKind,
     lootMultiplier,
   };
+}
+
+function makeWorldBossEnemy({
+  profile,
+  level,
+  home,
+  patrol,
+  seed,
+  spawnedAt,
+  expiresAt,
+  cycle,
+}: {
+  profile: BossProfile;
+  level: number;
+  home: BoardCell;
+  patrol: BoardCell;
+  seed: number;
+  spawnedAt: number;
+  expiresAt: number;
+  cycle: number;
+}): WorldEnemy {
+  const minionCount = clamp(2 + Math.floor(level / 6), 2, 4);
+  const minions = Array.from({ length: minionCount }, (_, index) => {
+    const templateId = profile.minionTemplates[
+      (index + Math.floor(seededRoll(seed + index * 73) * profile.minionTemplates.length)) % profile.minionTemplates.length
+    ];
+    return makeMinionStack(templateId, `world-boss-${profile.id}-${cycle}-${index}`, true);
+  });
+
+  return {
+    id: `world-boss-${cycle}-${profile.id}`,
+    bossId: profile.id,
+    name: profile.name,
+    subtitle: profile.subtitle,
+    story: profile.story,
+    intro: profile.intro,
+    artworkPath: profile.assetPath,
+    x: patrol.x,
+    y: patrol.y,
+    homeX: home.x,
+    homeY: home.y,
+    level,
+    modelNumber: profile.modelNumber,
+    personality: 'boss',
+    minions,
+    spawnedAt,
+    expiresAt,
+    spawnRegionId: 'hourly-boss',
+    spawnKind: 'world-boss',
+    lootMultiplier: 3.2,
+  };
+}
+
+function getHourlyWorldBoss(user: User | null, now: number, occupied: Set<string>, defeatedEnemyIds: Set<string>): WorldEnemy | null {
+  const { cycle, spawnedAt, expiresAt } = getWorldBossCycle(now);
+  const profile = BOSS_PROFILES[cycle % BOSS_PROFILES.length];
+  const id = `world-boss-${cycle}-${profile.id}`;
+  if (defeatedEnemyIds.has(id)) return null;
+
+  const region = ENEMY_SPAWN_REGIONS[3] || ENEMY_SPAWN_REGIONS[ENEMY_SPAWN_REGIONS.length - 1];
+  const seed = Math.abs(hashText(`hourly-world-boss-${cycle}-${profile.id}`));
+  const home = findWorldEnemyHome(region, seed, occupied, 6);
+  const patrol = getWorldEnemyPatrolPosition(home, region, seed + 317, spawnedAt, occupied, 4);
+  const playerLevel = user?.stats.level || 1;
+  const level = clamp(Math.max(10, playerLevel + 4, getRegionLevelFloor(region) + 4), 10, 24);
+
+  return makeWorldBossEnemy({ profile, level, home, patrol, seed, spawnedAt, expiresAt, cycle });
 }
 
 function getNearbyEnemyRegion(user: User): EnemySpawnRegion {
@@ -1030,6 +1159,14 @@ export function getPlayerModelAsset(modelNumber: number): string {
 export function getNpcEnemiesForUser(user: User | null, now = Date.now()): WorldEnemy[] {
   const { cycle, spawnedAt, expiresAt } = getWorldEnemyCycle(now);
   const defeatedEnemyIds = readDefeatedWorldEnemyIds(cycle);
+  const snapshotUsername = getWorldEnemySnapshotUsername(user);
+  const savedEnemies = readWorldEnemySnapshot(cycle, snapshotUsername, defeatedEnemyIds);
+  if (savedEnemies) {
+    const occupied = new Set(savedEnemies.map(enemy => `${enemy.x}:${enemy.y}`));
+    const activeBoss = getHourlyWorldBoss(user, now, occupied, defeatedEnemyIds);
+    return activeBoss ? [activeBoss, ...savedEnemies] : savedEnemies;
+  }
+
   const homeOccupied = new Set<string>();
   const patrolOccupied = new Set<string>();
   const enemies: WorldEnemy[] = [];
@@ -1043,7 +1180,7 @@ export function getNpcEnemiesForUser(user: User | null, now = Date.now()): World
       if (defeatedEnemyIds.has(id)) return;
 
       const home = findWorldEnemyHome(nearbyRegion, seed, homeOccupied, 3);
-      const patrol = getWorldEnemyPatrolPosition(home, nearbyRegion, seed + 211, now, patrolOccupied, 2);
+      const patrol = getWorldEnemyPatrolPosition(home, nearbyRegion, seed + 211, spawnedAt, patrolOccupied, 2);
 
       enemies.push(makeWorldEnemyFromArchetype({
         id,
@@ -1074,7 +1211,7 @@ export function getNpcEnemiesForUser(user: User | null, now = Date.now()): World
       if (defeatedEnemyIds.has(id)) return;
 
       const home = findWorldEnemyHome(region, seed, homeOccupied, regionIndex >= 2 ? 4 : 5);
-      const patrol = getWorldEnemyPatrolPosition(home, region, seed + 101, now, patrolOccupied, 2);
+      const patrol = getWorldEnemyPatrolPosition(home, region, seed + 101, spawnedAt, patrolOccupied, 2);
 
       enemies.push(makeWorldEnemyFromArchetype({
         id,
@@ -1092,27 +1229,30 @@ export function getNpcEnemiesForUser(user: User | null, now = Date.now()): World
     });
   });
 
-  return enemies.slice(0, WORLD_ENEMY_CAP);
+  const generatedEnemies = enemies.slice(0, WORLD_ENEMY_CAP);
+  writeWorldEnemySnapshot(cycle, snapshotUsername, generatedEnemies);
+  const activeBoss = getHourlyWorldBoss(user, now, patrolOccupied, defeatedEnemyIds);
+  return activeBoss ? [activeBoss, ...generatedEnemies] : generatedEnemies;
 }
 
-function makeCommanderUnit(side: BattleSide, name: string, modelNumber: number, stats: CharacterStats, x: number, y: number): BattleUnit {
+function makeCommanderUnit(side: BattleSide, name: string, modelNumber: number, stats: CharacterStats, x: number, y: number, assetPath?: string): BattleUnit {
   const modifiers = getBattleModifiers(stats);
-  const maxHealth = stats.maxHealth + stats.level * 8 + modifiers.defensivePower * 2;
+  const maxHealth = stats.maxHealth + stats.level * 7 + modifiers.defensivePower;
 
   return {
     id: `${side}-commander`,
     side,
     kind: 'commander',
     name,
-    assetPath: getPlayerModelAsset(modelNumber),
+    assetPath: assetPath || getPlayerModelAsset(modelNumber),
     quantity: 1,
     currentHealth: maxHealth,
     maxHealth,
     healthPerUnit: maxHealth,
-    attack: 4 + Math.floor(modifiers.armyPower / 2),
-    defense: 3 + Math.floor(modifiers.defensivePower / 2),
+    attack: 6 + Math.floor(modifiers.armyPower * 0.75),
+    defense: 2 + Math.floor(modifiers.defensivePower / 3),
     magic: modifiers.spellPower,
-    healing: Math.floor(modifiers.spellPower / 2),
+    healing: 0,
     speed: 5 + Math.floor(modifiers.morale / 2),
     movement: clamp(2 + Math.floor(modifiers.morale / 8), 2, 4),
     range: 1,
@@ -1125,9 +1265,15 @@ function makeMinionUnit(stack: MinionStack, side: BattleSide, x: number, y: numb
   const template = getMinionTemplate(stack.templateId);
   if (!template) return null;
 
-  const maxHealth = template.stats.health + Math.floor(modifiers.defensivePower * 1.4) + Math.floor(modifiers.morale / 2);
+  const maxHealth = template.stats.health + Math.floor(modifiers.defensivePower * 0.9) + Math.floor(modifiers.morale / 2);
+  const currentHealth = typeof stack.runCurrentHealth === 'number'
+    ? clamp(Math.round(stack.runCurrentHealth), 0, maxHealth)
+    : maxHealth;
   const movement = clamp(template.stats.movement + Math.floor(modifiers.morale / 12), 1, 5);
   const range = template.stats.range;
+  const healing = template.class === 'priest'
+    ? template.stats.healing + Math.floor(modifiers.spellPower / 6)
+    : 0;
 
   return {
     id: `${side}-${stack.id}`,
@@ -1138,13 +1284,13 @@ function makeMinionUnit(stack: MinionStack, side: BattleSide, x: number, y: numb
     name: template.name,
     assetPath: `/assets/minions/${template.assetName}`,
     quantity: 1,
-    currentHealth: maxHealth,
+    currentHealth,
     maxHealth,
     healthPerUnit: maxHealth,
-    attack: template.stats.attack + Math.floor(modifiers.armyPower / 4),
-    defense: template.stats.defense + Math.floor(modifiers.defensivePower / 4),
+    attack: template.stats.attack + Math.floor(modifiers.armyPower / 3),
+    defense: template.stats.defense + Math.floor(modifiers.defensivePower / 5),
     magic: template.stats.magic + Math.floor(modifiers.spellPower / 5),
-    healing: template.stats.healing + Math.floor(modifiers.spellPower / 6),
+    healing,
     speed: movement * 3 + template.stats.attack + Math.floor(template.stats.magic / 2),
     movement,
     range,
@@ -1154,13 +1300,15 @@ function makeMinionUnit(stack: MinionStack, side: BattleSide, x: number, y: numb
 }
 
 function makeEnemyCommanderStats(level: number): CharacterStats {
+  const maxHealth = 70 + level * 7;
+
   return {
     armyPower: 4 + Math.floor(level * 0.85),
-    defensivePower: 4 + Math.floor(level * 0.75),
+    defensivePower: 3 + Math.floor(level * 0.58),
     morale: 4 + Math.floor(level * 0.35),
-    spellPower: 3 + Math.floor(level * 0.6),
-    health: 85 + level * 10,
-    maxHealth: 85 + level * 10,
+    spellPower: 2 + Math.floor(level * 0.48),
+    health: maxHealth,
+    maxHealth,
     level,
     unallocatedPoints: 0,
   };
@@ -1339,7 +1487,7 @@ export function createNpcBattleState(user: User, enemy: WorldEnemy, options: Cre
   ];
 
   const enemyUnits = [
-    makeCommanderUnit('enemy', enemy.name, enemy.modelNumber, enemyStats, enemyCommanderSpawn.x, enemyCommanderSpawn.y),
+    makeCommanderUnit('enemy', enemy.name, enemy.modelNumber, enemyStats, enemyCommanderSpawn.x, enemyCommanderSpawn.y, enemy.artworkPath),
     ...enemy.minions
       .slice(0, MAX_FIELD_MINIONS)
       .map((stack, index) => {
@@ -1473,7 +1621,11 @@ export function canAttack(attacker: BattleUnit, target: BattleUnit): boolean {
 }
 
 export function canHeal(healer: BattleUnit, target: BattleUnit): boolean {
+  const template = healer.templateId ? getMinionTemplate(healer.templateId) : undefined;
+  const canUseHealAction = healer.kind === 'minion' && template?.class === 'priest';
+
   return (
+    canUseHealAction &&
     healer.side === target.side &&
     healer.healing > 0 &&
     target.currentHealth > 0 &&
@@ -1536,9 +1688,12 @@ export function getAttackDamage(attacker: BattleUnit, target: BattleUnit, state?
   const auraBonus = state ? getCommanderAuraBonus(state, attacker) : 0;
   const flankingBonus = state ? getFlankingBonus(state, attacker, target) : 0;
   const terrainModifier = state ? getTerrainDamageModifier(state, attacker, target) : 0;
-  const guardPenalty = state && getGuardingAlly(state, target) ? 2 : 0;
-  const rawDamage = attacker.attack + magicBonus + auraBonus + flankingBonus + terrainModifier + 3;
-  return Math.max(1, rawDamage - Math.floor(target.defense / 2) - guardPenalty);
+  const guardPenalty = state && getGuardingAlly(state, target) ? 1 : 0;
+  const commanderDuelBonus = attacker.kind === 'commander' && target.kind === 'commander' ? 3 : 0;
+  const baseDamage = attacker.kind === 'commander' ? 6 : 5;
+  const rawDamage = attacker.attack + magicBonus + auraBonus + flankingBonus + terrainModifier + commanderDuelBonus + baseDamage;
+  const minimumDamage = attacker.kind === 'commander' ? 3 : 2;
+  return Math.max(minimumDamage, rawDamage - Math.ceil(target.defense / 3) - guardPenalty);
 }
 
 export function getHealAmount(healer: BattleUnit, target: BattleUnit, state?: BattleState): number {
@@ -1551,8 +1706,9 @@ export function getHealAmount(healer: BattleUnit, target: BattleUnit, state?: Ba
     : template?.tier === 'tier2'
       ? 0.82
       : 1;
-  const rawHealing = healer.healing + Math.floor(healer.magic / 2) + holyGroundBonus + 4;
-  const healing = Math.max(1, Math.floor(rawHealing * earlyHealerScale));
+  const commanderHealScale = healer.kind === 'commander' ? 0.55 : 1;
+  const rawHealing = healer.healing + Math.floor(healer.magic / 2) + holyGroundBonus + 2;
+  const healing = Math.max(1, Math.floor(rawHealing * earlyHealerScale * commanderHealScale));
   return Math.max(0, Math.min(target.maxHealth, target.currentHealth + healing) - target.currentHealth);
 }
 
@@ -1618,10 +1774,12 @@ export function waitBattleUnit(state: BattleState, unitId: string, message?: str
   const unit = state.units.find(item => item.id === unitId);
   if (!unit) return state;
 
+  const style: BattleLogStyle = action === 'mana' ? 'mana-focus' : 'guard';
+
   return advanceBattleTurn(withBattleLog(
     state,
     message || `${unit.name} waits.`,
-    { side: unit.side, actor: unit.name, actorId: unit.id, action, style: action === 'mana' ? 'morale' : undefined }
+    { side: unit.side, actor: unit.name, actorId: unit.id, targetIds: [unit.id], action, style }
   ));
 }
 
@@ -1680,6 +1838,7 @@ export function attackBattleUnit(state: BattleState, attackerId: string, targetI
   const canRetaliate = Boolean(
     defenderAfterHit &&
     attackerAfterHit &&
+    defenderAfterHit.retaliatedRound !== resolvedState.round &&
     attacker.range <= 1 &&
     defenderAfterHit.range <= 1 &&
     getDistance(defenderAfterHit, attackerAfterHit) === 1
@@ -1691,7 +1850,11 @@ export function attackBattleUnit(state: BattleState, attackerId: string, targetI
     resolvedState = {
       ...resolvedState,
       units: resolvedState.units.map(unit => (
-        unit.id === attackerAfterHit.id ? { ...unit, currentHealth: retaliationHealth } : unit
+        unit.id === attackerAfterHit.id
+          ? { ...unit, currentHealth: retaliationHealth }
+          : unit.id === defenderAfterHit.id
+            ? { ...unit, retaliatedRound: resolvedState.round }
+            : unit
       )),
     };
     resolvedState = withBattleLog(
@@ -1764,6 +1927,8 @@ function getBattleSpellLogStyle(spellId: string): BattleLogStyle {
     return 'spell-control';
   }
 
+  if (spellId === 'blood-star') return 'spell-drain';
+
   return 'spell-damage';
 }
 
@@ -1783,33 +1948,51 @@ export function castBattleSpell(state: BattleState, spellId: string, targetId?: 
   let nextState = setSideMana(state, caster.side, getSideMana(state, caster.side) - spell.cost);
   let logMessage = `${caster.name} casts ${spell.name}.`;
   let spellTargetIds = target ? [target.id] : [];
+  const damageDone = (unit: BattleUnit, amount: number) => Math.min(unit.currentHealth, Math.max(1, amount));
+  const healingDone = (unit: BattleUnit, amount: number) => Math.max(0, Math.min(unit.maxHealth, unit.currentHealth + Math.max(1, amount)) - unit.currentHealth);
 
   switch (spell.id) {
     case 'ember-dart':
-      if (target) nextState = damageUnit(nextState, target.id, 7 + spellPower * 2);
+      if (target) {
+        const damage = 7 + spellPower * 2;
+        nextState = damageUnit(nextState, target.id, damage);
+        logMessage = `${caster.name} casts ${spell.name} on ${target.name} for ${damageDone(target, damage)}.`;
+      }
       break;
     case 'arcane-bolt':
-      if (target) nextState = damageUnit(nextState, target.id, 12 + spellPower * 2);
+      if (target) {
+        const damage = 12 + spellPower * 2;
+        nextState = damageUnit(nextState, target.id, damage);
+        logMessage = `${caster.name} casts ${spell.name} on ${target.name} for ${damageDone(target, damage)}.`;
+      }
       break;
     case 'sanctified-mend':
-      if (target) nextState = healUnit(nextState, target.id, 18 + spellPower * 2);
+      if (target) {
+        const healing = 18 + spellPower * 2;
+        nextState = healUnit(nextState, target.id, healing);
+        logMessage = `${caster.name} casts ${spell.name} on ${target.name}, restoring ${healingDone(target, healing)}.`;
+      }
       break;
     case 'thorn-ward':
       if (target) {
-        nextState = healUnit(nextState, target.id, 8 + spellPower);
+        const healing = 8 + spellPower;
+        nextState = healUnit(nextState, target.id, healing);
         nextState = {
           ...nextState,
           units: nextState.units.map(unit => unit.id === target.id ? { ...unit, defense: unit.defense + 4 } : unit),
         };
+        logMessage = `${caster.name} casts ${spell.name} on ${target.name}, restoring ${healingDone(target, healing)} and raising ward.`;
       }
       break;
     case 'warding-prayer':
       if (target) {
-        nextState = healUnit(nextState, target.id, 7 + spellPower);
+        const healing = 7 + spellPower;
+        nextState = healUnit(nextState, target.id, healing);
         nextState = {
           ...nextState,
           units: nextState.units.map(unit => unit.id === target.id ? { ...unit, defense: unit.defense + 2 } : unit),
         };
+        logMessage = `${caster.name} casts ${spell.name} on ${target.name}, restoring ${healingDone(target, healing)} and bracing defense.`;
       }
       break;
     case 'ashen-step':
@@ -1822,38 +2005,50 @@ export function castBattleSpell(state: BattleState, spellId: string, targetId?: 
             speed: unit.speed + 2,
           } : unit),
         };
+        logMessage = `${caster.name} casts ${spell.name} on ${target.name}, quickening movement.`;
       }
       break;
     case 'withering-curse':
       if (target) {
-        nextState = damageUnit(nextState, target.id, 8 + spellPower);
+        const damage = 8 + spellPower;
+        nextState = damageUnit(nextState, target.id, damage);
         nextState = {
           ...nextState,
           units: nextState.units.map(unit => unit.id === target.id ? { ...unit, attack: Math.max(1, unit.attack - 2) } : unit),
         };
+        logMessage = `${caster.name} casts ${spell.name} on ${target.name} for ${damageDone(target, damage)} and weakens its attack.`;
       }
       break;
     case 'rallying-hymn':
-      spellTargetIds = nextState.units.filter(unit => unit.side === caster.side && unit.currentHealth > 0).map(unit => unit.id);
-      nextState = mutateUnits(nextState, caster.side, unit => ({
-        ...unit,
-        currentHealth: Math.min(unit.maxHealth, unit.currentHealth + 6 + spellPower),
-        speed: unit.speed + 1,
-      }));
+      {
+        const healing = 6 + spellPower;
+        spellTargetIds = nextState.units.filter(unit => unit.side === caster.side && unit.currentHealth > 0).map(unit => unit.id);
+        nextState = mutateUnits(nextState, caster.side, unit => ({
+          ...unit,
+          currentHealth: Math.min(unit.maxHealth, unit.currentHealth + healing),
+          speed: unit.speed + 1,
+        }));
+        logMessage = `${caster.name} sings ${spell.name}, restoring up to ${healing} to all allies.`;
+      }
       break;
     case 'chain-spark':
-      spellTargetIds = nextState.units.filter(unit => unit.side === enemySide && unit.currentHealth > 0).map(unit => unit.id);
-      nextState = {
-        ...nextState,
-        units: nextState.units.map(unit => unit.side === enemySide && unit.currentHealth > 0
-          ? { ...unit, currentHealth: Math.max(0, unit.currentHealth - (6 + spellPower)) }
-          : unit
-        ),
-      };
+      {
+        const damage = 6 + spellPower;
+        spellTargetIds = nextState.units.filter(unit => unit.side === enemySide && unit.currentHealth > 0).map(unit => unit.id);
+        nextState = {
+          ...nextState,
+          units: nextState.units.map(unit => unit.side === enemySide && unit.currentHealth > 0
+            ? { ...unit, currentHealth: Math.max(0, unit.currentHealth - damage) }
+            : unit
+          ),
+        };
+        logMessage = `${caster.name} casts ${spell.name}, striking every enemy for up to ${damage}.`;
+      }
       break;
     case 'gravity-snare':
       if (target) {
-        nextState = damageUnit(nextState, target.id, 7 + spellPower);
+        const damage = 7 + spellPower;
+        nextState = damageUnit(nextState, target.id, damage);
         nextState = {
           ...nextState,
           units: nextState.units.map(unit => unit.id === target.id ? {
@@ -1862,30 +2057,41 @@ export function castBattleSpell(state: BattleState, spellId: string, targetId?: 
             speed: Math.max(1, unit.speed - 3),
           } : unit),
         };
+        logMessage = `${caster.name} casts ${spell.name} on ${target.name} for ${damageDone(target, damage)} and slows it.`;
       }
       break;
     case 'judgement':
-      if (target) nextState = damageUnit(nextState, target.id, 18 + spellPower * 2);
+      if (target) {
+        const damage = 18 + spellPower * 2;
+        nextState = damageUnit(nextState, target.id, damage);
+        logMessage = `${caster.name} casts ${spell.name} on ${target.name} for ${damageDone(target, damage)}.`;
+      }
       break;
     case 'blood-star':
       if (target) {
-        nextState = damageUnit(nextState, target.id, 14 + spellPower * 2);
-        nextState = healUnit(nextState, caster.id, 10 + spellPower);
+        const damage = 14 + spellPower * 2;
+        const healing = 10 + spellPower;
+        nextState = damageUnit(nextState, target.id, damage);
+        nextState = healUnit(nextState, caster.id, healing);
         spellTargetIds = [target.id, caster.id];
+        logMessage = `${caster.name} casts ${spell.name} on ${target.name}, draining ${damageDone(target, damage)} and restoring ${healingDone(caster, healing)}.`;
       }
       break;
     case 'soul-tether':
       if (target) {
-        nextState = healUnit(nextState, target.id, 20 + spellPower * 2);
+        const healing = 20 + spellPower * 2;
+        nextState = healUnit(nextState, target.id, healing);
         nextState = {
           ...nextState,
           units: nextState.units.map(unit => unit.id === target.id ? { ...unit, speed: unit.speed + 2 } : unit),
         };
+        logMessage = `${caster.name} casts ${spell.name} on ${target.name}, restoring ${healingDone(target, healing)} and lifting morale.`;
       }
       break;
     case 'frost-lance':
       if (target) {
-        nextState = damageUnit(nextState, target.id, 10 + spellPower * 2);
+        const damage = 10 + spellPower * 2;
+        nextState = damageUnit(nextState, target.id, damage);
         nextState = {
           ...nextState,
           units: nextState.units.map(unit => unit.id === target.id ? {
@@ -1894,37 +2100,49 @@ export function castBattleSpell(state: BattleState, spellId: string, targetId?: 
             speed: Math.max(1, unit.speed - 4),
           } : unit),
         };
+        logMessage = `${caster.name} casts ${spell.name} on ${target.name} for ${damageDone(target, damage)} and freezes its advance.`;
       }
       break;
     case 'royal-command':
       spellTargetIds = nextState.units.filter(unit => unit.side === caster.side && unit.currentHealth > 0).map(unit => unit.id);
       nextState = mutateUnits(nextState, caster.side, unit => ({ ...unit, attack: unit.attack + 2 }));
+      logMessage = `${caster.name} casts ${spell.name}, raising allied attack.`;
       break;
     case 'moonlit-veil':
       spellTargetIds = nextState.units.filter(unit => unit.side === caster.side && unit.currentHealth > 0).map(unit => unit.id);
       nextState = mutateUnits(nextState, caster.side, unit => ({ ...unit, defense: unit.defense + 3 }));
+      logMessage = `${caster.name} casts ${spell.name}, raising allied defense.`;
       break;
     case 'iron-benediction':
       spellTargetIds = nextState.units.filter(unit => unit.side === caster.side && unit.currentHealth > 0).map(unit => unit.id);
       nextState = mutateUnits(nextState, caster.side, unit => ({ ...unit, attack: unit.attack + 1, defense: unit.defense + 2 }));
+      logMessage = `${caster.name} casts ${spell.name}, strengthening allied attack and defense.`;
       break;
     case 'eclipse-nova':
-      spellTargetIds = nextState.units.filter(unit => unit.side === enemySide && unit.currentHealth > 0).map(unit => unit.id);
-      nextState = {
-        ...nextState,
-        units: nextState.units.map(unit => unit.side === enemySide && unit.currentHealth > 0
-          ? { ...unit, currentHealth: Math.max(0, unit.currentHealth - (14 + spellPower * 2)) }
-          : unit
-        ),
-      };
+      {
+        const damage = 14 + spellPower * 2;
+        spellTargetIds = nextState.units.filter(unit => unit.side === enemySide && unit.currentHealth > 0).map(unit => unit.id);
+        nextState = {
+          ...nextState,
+          units: nextState.units.map(unit => unit.side === enemySide && unit.currentHealth > 0
+            ? { ...unit, currentHealth: Math.max(0, unit.currentHealth - damage) }
+            : unit
+          ),
+        };
+        logMessage = `${caster.name} casts ${spell.name}, bursting across every enemy for up to ${damage}.`;
+      }
       break;
     case 'saint-king-aegis':
-      spellTargetIds = nextState.units.filter(unit => unit.side === caster.side && unit.currentHealth > 0).map(unit => unit.id);
-      nextState = mutateUnits(nextState, caster.side, unit => ({
-        ...unit,
-        currentHealth: Math.min(unit.maxHealth, unit.currentHealth + 16 + spellPower * 2),
-        defense: unit.defense + 4,
-      }));
+      {
+        const healing = 16 + spellPower * 2;
+        spellTargetIds = nextState.units.filter(unit => unit.side === caster.side && unit.currentHealth > 0).map(unit => unit.id);
+        nextState = mutateUnits(nextState, caster.side, unit => ({
+          ...unit,
+          currentHealth: Math.min(unit.maxHealth, unit.currentHealth + healing),
+          defense: unit.defense + 4,
+        }));
+        logMessage = `${caster.name} casts ${spell.name}, restoring up to ${healing} and shielding all allies.`;
+      }
       break;
     case 'time-crown-edict':
       spellTargetIds = nextState.units.filter(unit => unit.currentHealth > 0).map(unit => unit.id);
@@ -1936,10 +2154,11 @@ export function castBattleSpell(state: BattleState, spellId: string, targetId?: 
           return { ...unit, speed: Math.max(1, unit.speed - 3), movement: Math.max(1, unit.movement - 1) };
         }),
       };
+      logMessage = `${caster.name} casts ${spell.name}, hastening allies and slowing enemies.`;
       break;
   }
 
-  if (target && spell.target !== 'none') {
+  if (target && spell.target !== 'none' && logMessage === `${caster.name} casts ${spell.name}.`) {
     logMessage = `${caster.name} casts ${spell.name} on ${target.name}.`;
   }
 

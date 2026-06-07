@@ -44,7 +44,7 @@ Move from the current 60x60 painted world to a 120x120 world with about four tim
 4. Split enemy spawn bands into early, mid, late, boss, and chapter-two reserve regions.
 5. Add camera bookmarks or a world overview modal before reintroducing any minimap.
 6. Retune direct travel and job travel timers for the larger world so long trips feel meaningful but not punishing.
-7. Add map polish passes: travel path preview, fog reveal tuning, marker density, and activity chips.
+7. Add map polish passes: travel path preview [done], fog reveal tuning, marker density, and activity chips.
 
 ## Additional Assets Needed Later
 - 120x120 full world map PNG, `3840x3840`.

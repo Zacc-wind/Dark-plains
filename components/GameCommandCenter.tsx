@@ -41,13 +41,10 @@ import {
   getInventoryUsedSlots,
   getInventoryUpgradeQuote,
   getInventoryItemDefinition,
-  getInventoryItemSellValue,
-  getEquipmentSellValue,
   getJobProgress,
   getJobTimeRemaining,
   getLeaderboardBoards,
   getMinionTemplate,
-  getMinionSellValue,
   getPartyMembers,
   getRareGemCount,
   getSocialChatMessages,
@@ -75,9 +72,6 @@ import {
   toggleMinionFielded,
   unequipItem,
   upgradeInventoryCapacity,
-  sellEquipmentItem,
-  sellInventoryItem,
-  sellMinion,
   activateInventoryItem,
 } from '@/lib/auth';
 import { emitCompletionNotice, type CompletionRewardLine } from '@/lib/completionEvents';
@@ -86,21 +80,28 @@ import { readGameJson, writeGameJson } from '@/lib/gameStore';
 
 type PanelId = 'overview' | 'character' | 'inventory' | 'minions' | 'spells' | 'jobs' | 'quests' | 'social' | 'runs' | 'leaderboards' | 'history';
 type PanelIconName = 'overview' | 'character' | 'inventory' | 'minions' | 'spells' | 'jobs' | 'quests' | 'social' | 'runs' | 'leaderboards' | 'history';
+type PanelButtonConfig = {
+  id: PanelId;
+  label: string;
+  icon: PanelIconName;
+};
 
 interface GameCommandCenterProps {
   onOpenAvatar: () => void;
 }
 
-const panelButtons: Array<{ id: PanelId; label: string; icon: PanelIconName }> = [
+const panelButtons: PanelButtonConfig[] = [
   { id: 'overview', label: 'Overview', icon: 'overview' },
-  { id: 'character', label: 'Character', icon: 'character' },
-  { id: 'inventory', label: 'Inventory', icon: 'inventory' },
+  { id: 'character', label: 'Commander', icon: 'character' },
+  { id: 'inventory', label: 'Gear', icon: 'inventory' },
   { id: 'minions', label: 'Army', icon: 'minions' },
   { id: 'spells', label: 'Spells', icon: 'spells' },
   { id: 'jobs', label: 'Jobs', icon: 'jobs' },
   { id: 'quests', label: 'Quests', icon: 'quests' },
   { id: 'social', label: 'Social', icon: 'social' },
 ];
+const primaryPanelButtons = panelButtons.slice(0, 5);
+const secondaryPanelButtons = panelButtons.slice(5);
 
 function isPanelId(value: unknown): value is PanelId {
   return typeof value === 'string' && panelButtons.some(button => button.id === value);
@@ -280,6 +281,7 @@ export default function GameCommandCenter({ onOpenAvatar }: GameCommandCenterPro
   const [expandedQuestId, setExpandedQuestId] = useState<string | null>(null);
   const [showDailyRun, setShowDailyRun] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
+  const [isSecondaryNavOpen, setIsSecondaryNavOpen] = useState(true);
   const [friendSearch, setFriendSearch] = useState('');
   const [chatChannel, setChatChannel] = useState<SocialChatChannel>('global');
   const [chatDraft, setChatDraft] = useState('');
@@ -590,39 +592,6 @@ export default function GameCommandCenter({ onOpenAvatar }: GameCommandCenterPro
     setUser(getCurrentUser());
   };
 
-  const handleSellInventoryItem = (itemId: string) => {
-    const result = sellInventoryItem(itemId);
-    if (!result.success) {
-      setTemporaryNotice(result.error || 'Could not sell item.');
-      return;
-    }
-
-    setTemporaryNotice(result.message || 'Item sold.');
-    setUser(getCurrentUser());
-  };
-
-  const handleSellEquipmentItem = (equipmentId: string) => {
-    const result = sellEquipmentItem(equipmentId);
-    if (!result.success) {
-      setTemporaryNotice(result.error || 'Could not sell gear.');
-      return;
-    }
-
-    setTemporaryNotice(result.message || 'Gear sold.');
-    setUser(getCurrentUser());
-  };
-
-  const handleSellMinion = (minionId: string) => {
-    const result = sellMinion(minionId);
-    if (!result.success) {
-      setTemporaryNotice(result.error || 'Could not sell unit.');
-      return;
-    }
-
-    setTemporaryNotice(result.message || 'Unit sold.');
-    setUser(getCurrentUser());
-  };
-
   const handleEquipSpellToSelectedSlot = (spellId: string) => {
     const equippedSpellIds = player.equippedSpellIds?.length === 4
       ? [...player.equippedSpellIds]
@@ -691,21 +660,22 @@ export default function GameCommandCenter({ onOpenAvatar }: GameCommandCenterPro
 
   const openPanel = (panelId: PanelId) => {
     setActivePanel(panelId);
+    if (secondaryPanelButtons.some(button => button.id === panelId)) setIsSecondaryNavOpen(true);
     setIsCommandOpen(true);
   };
 
   const getPanelSubtitle = (panelId: PanelId): string => {
     switch (panelId) {
-      case 'overview': return 'status';
-      case 'character': return `level ${player.stats.level}`;
+      case 'overview': return '';
+      case 'character': return `Lv ${player.stats.level}`;
       case 'inventory': return `${inventoryUsed}/${inventorySlots}`;
       case 'minions': return `${fieldedMinions.length}/${minions.length}`;
-      case 'spells': return 'loadout';
+      case 'spells': return '';
       case 'jobs': return `${activeJobs.length}/4`;
-      case 'quests': return 'tracked';
-      case 'social': return `${acceptedFriends.length} friends`;
-      case 'runs': return hudDailyStatus.completedToday ? 'done' : 'open';
-      case 'leaderboards': return 'rankings';
+      case 'quests': return '';
+      case 'social': return String(acceptedFriends.length);
+      case 'runs': return hudDailyStatus.completedToday ? 'Done' : 'Open';
+      case 'leaderboards': return '';
       case 'history': return `${activityLog.length}`;
       default: return '';
     }
@@ -725,6 +695,8 @@ export default function GameCommandCenter({ onOpenAvatar }: GameCommandCenterPro
                 alt="Player Avatar"
                 fill
                 className="player-model-art object-contain"
+                sizes="40px"
+                unoptimized
               />
             </span>
             <span className="min-w-0 text-left">
@@ -835,7 +807,6 @@ export default function GameCommandCenter({ onOpenAvatar }: GameCommandCenterPro
         <div className="grid h-full min-h-0 grid-cols-[14rem_minmax(0,1fr)]">
           <nav className="command-center-nav border-r border-[rgba(232,217,184,0.14)] p-3">
             <div className="mb-4 px-2">
-              <div className="arcane-label">Command</div>
               <div className="flex items-center justify-between gap-2">
                 <div className="fantasy-heading min-w-0 truncate text-2xl">{player.username}</div>
                 <button
@@ -846,35 +817,24 @@ export default function GameCommandCenter({ onOpenAvatar }: GameCommandCenterPro
                 </button>
               </div>
             </div>
-            <div className="grid gap-2">
-              {panelButtons.map(button => (
-                <button
-                  key={button.id}
-                  onClick={() => openPanel(button.id)}
-                  className={`command-center-tab flex items-center gap-3 rounded border px-3 py-3 text-left transition ${
-                    activePanel === button.id
-                      ? 'rail-button-active'
-                      : 'rail-button'
-                  }`}
-                  title={button.label}
-                  aria-label={button.label}
-                >
-                  <span className="flex h-8 w-8 shrink-0 items-center justify-center">
-                    <PanelIcon icon={button.icon} />
-                  </span>
-                  <span className="min-w-0">
-                    <span className="block truncate text-sm font-black text-zinc-100">{button.label}</span>
-                    <span className="ui-faint block text-[10px] font-black uppercase">{getPanelSubtitle(button.id)}</span>
-                  </span>
-                </button>
-              ))}
+            <div className="command-center-nav-groups">
+              <CommandNavGroup buttons={primaryPanelButtons} activePanel={activePanel} onOpen={openPanel} getSubtitle={getPanelSubtitle} />
+              <CommandNavGroup
+                buttons={secondaryPanelButtons}
+                activePanel={activePanel}
+                onOpen={openPanel}
+                getSubtitle={getPanelSubtitle}
+                secondary
+                isOpen={isSecondaryNavOpen}
+                onToggle={() => setIsSecondaryNavOpen(open => !open)}
+              />
             </div>
           </nav>
 
           <div className="flex min-h-0 min-w-0 flex-col">
             <div className="panel-header flex items-center justify-between border-b px-6 py-4">
               <div>
-                <h2 className="fantasy-heading text-3xl">{panelTitle}</h2>
+                <h2 className="fantasy-heading text-2xl">{panelTitle}</h2>
               </div>
             <button
               onClick={() => setIsCommandOpen(false)}
@@ -893,17 +853,19 @@ export default function GameCommandCenter({ onOpenAvatar }: GameCommandCenterPro
           )}
 
           <div className="command-center-content flex-1 overflow-y-auto px-6 py-6">
-            {activePanel === 'overview' && renderOverview()}
-            {activePanel === 'character' && renderCharacter()}
-            {activePanel === 'inventory' && renderInventory()}
-            {activePanel === 'minions' && renderMinions()}
-            {activePanel === 'spells' && renderSpells()}
-            {activePanel === 'jobs' && renderJobs()}
-            {activePanel === 'quests' && renderQuests()}
-            {activePanel === 'social' && renderSocial()}
-            {activePanel === 'runs' && renderRuns()}
-            {activePanel === 'leaderboards' && renderLeaderboards()}
-            {activePanel === 'history' && renderHistory(activityLog)}
+            <div key={activePanel} className="command-center-panel-stage">
+              {activePanel === 'overview' && renderOverview()}
+              {activePanel === 'character' && renderCharacter()}
+              {activePanel === 'inventory' && renderInventory()}
+              {activePanel === 'minions' && renderMinions()}
+              {activePanel === 'spells' && renderSpells()}
+              {activePanel === 'jobs' && renderJobs()}
+              {activePanel === 'quests' && renderQuests()}
+              {activePanel === 'social' && renderSocial()}
+              {activePanel === 'runs' && renderRuns()}
+              {activePanel === 'leaderboards' && renderLeaderboards()}
+              {activePanel === 'history' && renderHistory(activityLog)}
+            </div>
           </div>
           </div>
         </div>
@@ -1090,6 +1052,8 @@ export default function GameCommandCenter({ onOpenAvatar }: GameCommandCenterPro
                         alt=""
                         fill
                         className="player-model-art object-contain"
+                        sizes="48px"
+                        unoptimized
                       />
                     </span>
                     <div className="min-w-0 flex-1">
@@ -1230,6 +1194,8 @@ export default function GameCommandCenter({ onOpenAvatar }: GameCommandCenterPro
                         alt=""
                         fill
                         className="player-model-art object-contain"
+                        sizes="44px"
+                        unoptimized
                       />
                     </span>
                     <div className="min-w-0 flex-1">
@@ -1447,6 +1413,8 @@ export default function GameCommandCenter({ onOpenAvatar }: GameCommandCenterPro
                 alt={player.username}
                 fill
                 className="player-model-art object-contain p-2"
+                sizes="112px"
+                unoptimized
               />
             </span>
             <div className="min-w-0 flex-1">
@@ -1555,60 +1523,40 @@ export default function GameCommandCenter({ onOpenAvatar }: GameCommandCenterPro
           {inventory.length === 0 ? (
             <EmptyState text="No carried items." />
           ) : (
-            <div className="grid gap-2 sm:grid-cols-2">
+            <div className="command-icon-grid">
               {inventory.map(item => {
                 const definition = getInventoryItemDefinition(item.id);
                 const kind = definition?.kind || item.kind || 'material';
                 const rarity = definition?.rarity || item.rarity || 'common';
                 const canUse = kind === 'consumable' || kind === 'container';
-                const canSell = kind !== 'quest';
-                const sellValue = getInventoryItemSellValue(item);
+                const tooltip = `${definition?.name || item.name} - ${kind}, ${rarity}. ${definition?.description || item.description || 'Carried inventory item.'}`;
 
                 return (
-                  <div key={item.id} className={`ui-card rounded border p-3 ${rarity === 'epic' || rarity === 'legendary' ? 'ui-rarity-epic' : rarity === 'rare' ? 'ui-rarity-rare' : ''}`}>
-                    <div className="flex items-start gap-3">
-                      <span className="ui-icon-frame relative h-12 w-12 shrink-0 overflow-hidden rounded border">
-                        <Image
-                          src={getInventoryIconPath(item)}
-                          alt={item.name}
-                          fill
-                          className="object-contain p-1"
-                          style={{ imageRendering: 'pixelated' }}
-                        />
-                      </span>
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="min-w-0">
-                            <div className="truncate text-sm font-black text-zinc-100">{definition?.name || item.name}</div>
-                            <div className="ui-faint text-[10px] font-black uppercase">{kind} - {rarity}</div>
-                          </div>
-                          <div className="ui-value shrink-0 text-xs font-black">x{item.quantity}</div>
-                        </div>
-                        <p className="ui-muted mt-1 line-clamp-2 text-xs font-bold">
-                          {definition?.description || item.description || 'Carried inventory item.'}
-                        </p>
-                        {(canUse || canSell) && (
-                          <div className="mt-2 flex gap-2">
-                            {canUse && (
-                              <button
-                                onClick={() => handleUseInventoryItem(item.id)}
-                                className="ui-button-primary rounded px-3 py-1 text-[11px] font-bold"
-                              >
-                                {definition?.useLabel || 'Use'}
-                              </button>
-                            )}
-                            {canSell && sellValue > 0 && (
-                              <button
-                                onClick={() => handleSellInventoryItem(item.id)}
-                                className="ui-button rounded px-3 py-1 text-[11px] font-bold"
-                              >
-                                Sell {sellValue}
-                              </button>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    </div>
+                  <div key={item.id} className={`command-icon-tile rounded border ${rarityClasses(rarity)}`} title={tooltip}>
+                    <span className="command-icon-image relative block overflow-hidden rounded">
+                      <Image
+                        src={getInventoryIconPath(item)}
+                        alt={definition?.name || item.name}
+                        fill
+                        className="object-contain p-1"
+                        style={{ imageRendering: 'pixelated' }}
+                      />
+                    </span>
+                    <span className="command-icon-quantity">x{item.quantity}</span>
+                    {canUse && (
+                      <button
+                        type="button"
+                        onClick={() => handleUseInventoryItem(item.id)}
+                        className="command-icon-action rounded"
+                      >
+                        {definition?.useLabel || 'Use'}
+                      </button>
+                    )}
+                    <span className="command-icon-tooltip rounded border">
+                      <span className="block text-xs font-black text-zinc-100">{definition?.name || item.name}</span>
+                      <span className="ui-faint mt-1 block text-[10px] font-black uppercase">{kind} - {rarity}</span>
+                      <span className="ui-muted mt-2 block text-xs font-bold">{definition?.description || item.description || 'Carried inventory item.'}</span>
+                    </span>
                   </div>
                 );
               })}
@@ -1621,33 +1569,30 @@ export default function GameCommandCenter({ onOpenAvatar }: GameCommandCenterPro
           {unequippedItems.length === 0 ? (
             <EmptyState text="No unequipped gear." />
           ) : (
-            <div className="space-y-2">
+            <div className="command-icon-grid">
               {unequippedItems.map(item => (
-                <div key={item.id} className={`flex items-center justify-between gap-3 rounded border px-3 py-2 ${rarityClasses(item.rarity)}`}>
-                  <div className="flex min-w-0 items-center gap-3">
-                    <span className="ui-icon-frame relative h-12 w-12 shrink-0 overflow-hidden rounded border">
-                      <Image
-                        src={getEquipmentIconPath(item)}
-                        alt={item.name}
-                        fill
-                        className="object-contain p-1"
-                        style={{ imageRendering: 'pixelated' }}
-                      />
-                    </span>
-                    <div className="min-w-0">
-                      <div className="truncate text-sm font-bold">{item.name}</div>
-                      <div className="text-xs opacity-80">{item.slot.replace('-', ' ')}</div>
-                    </div>
-                  </div>
-                  <div className="flex shrink-0 gap-2">
-                    <button onClick={() => handleEquip(item.id)} className="ui-button-primary rounded px-3 py-1 text-xs font-bold">
-                      Equip
-                    </button>
-                    <button onClick={() => handleSellEquipmentItem(item.id)} className="ui-button rounded px-3 py-1 text-xs font-bold">
-                      Sell {getEquipmentSellValue(item)}
-                    </button>
-                  </div>
-                </div>
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => handleEquip(item.id)}
+                  className={`command-icon-tile rounded border ${rarityClasses(item.rarity)}`}
+                  title={`${item.name} - ${item.slot.replace('-', ' ')}, ${item.rarity}. Click to equip.`}
+                >
+                  <span className="command-icon-image relative block overflow-hidden rounded">
+                    <Image
+                      src={getEquipmentIconPath(item)}
+                      alt={item.name}
+                      fill
+                      className="object-contain p-1"
+                      style={{ imageRendering: 'pixelated' }}
+                    />
+                  </span>
+                  <span className="command-icon-tooltip rounded border">
+                    <span className="block text-xs font-black text-zinc-100">{item.name}</span>
+                    <span className="ui-faint mt-1 block text-[10px] font-black uppercase">{item.slot.replace('-', ' ')} - {item.rarity}</span>
+                    <span className="ui-muted mt-2 block text-xs font-bold">Click to equip this piece.</span>
+                  </span>
+                </button>
               ))}
             </div>
           )}
@@ -1683,7 +1628,8 @@ export default function GameCommandCenter({ onOpenAvatar }: GameCommandCenterPro
                       alt={template.name}
                       fill
                       className="sprite-soft-glow minion-menu-image object-contain p-2"
-                      style={{ imageRendering: 'pixelated' }}
+                      sizes="64px"
+                      unoptimized
                     />
                   ) : (
                     <span className="ui-faint text-xs font-black">{index + 1}</span>
@@ -1935,6 +1881,8 @@ export default function GameCommandCenter({ onOpenAvatar }: GameCommandCenterPro
                   alt=""
                   fill
                   className="player-model-art object-contain"
+                  sizes="44px"
+                  unoptimized
                 />
               </span>
               <div className="min-w-0 flex-1">
@@ -2335,7 +2283,8 @@ export default function GameCommandCenter({ onOpenAvatar }: GameCommandCenterPro
               alt={template.name}
               fill
               className="sprite-soft-glow minion-menu-image object-contain p-1"
-              style={{ imageRendering: 'pixelated' }}
+              sizes="64px"
+              unoptimized
             />
             <span className="absolute left-1 top-1 rounded bg-black/60 px-1 text-[8px] font-black">
               {MINION_TIER_LABELS[template.tier]}
@@ -2373,7 +2322,7 @@ export default function GameCommandCenter({ onOpenAvatar }: GameCommandCenterPro
           </div>
         </div>
 
-        <div className="mt-3 grid grid-cols-3 gap-2">
+        <div className="mt-3 grid grid-cols-2 gap-2">
           <button
             onClick={() => handleToggleMinionField(minion.id)}
             disabled={injured}
@@ -2386,12 +2335,6 @@ export default function GameCommandCenter({ onOpenAvatar }: GameCommandCenterPro
             className="ui-button rounded px-3 py-2 text-xs font-bold"
           >
             Details
-          </button>
-          <button
-            onClick={() => handleSellMinion(minion.id)}
-            className="ui-button rounded px-3 py-2 text-xs font-bold"
-          >
-            Sell {getMinionSellValue(minion)}
           </button>
         </div>
       </div>
@@ -2423,7 +2366,8 @@ export default function GameCommandCenter({ onOpenAvatar }: GameCommandCenterPro
                   alt={template.name}
                   fill
                   className="sprite-soft-glow minion-menu-image object-contain p-2"
-                  style={{ imageRendering: 'pixelated' }}
+                  sizes="96px"
+                  unoptimized
                 />
               </span>
               <div className="min-w-0">
@@ -2550,6 +2494,77 @@ function SectionTitle({ title, action }: { title: string; action?: string }) {
     <div className="mb-3 flex items-center justify-between gap-3 border-b border-[rgba(232,217,184,0.16)] pb-2">
       <h3 className="fantasy-heading font-black">{title}</h3>
       {action && <span className="ui-faint text-xs font-bold">{action}</span>}
+    </div>
+  );
+}
+
+function CommandNavGroup({
+  buttons,
+  activePanel,
+  onOpen,
+  getSubtitle,
+  secondary = false,
+  isOpen = true,
+  onToggle,
+}: {
+  buttons: PanelButtonConfig[];
+  activePanel: PanelId;
+  onOpen: (panel: PanelId) => void;
+  getSubtitle: (panel: PanelId) => string;
+  secondary?: boolean;
+  isOpen?: boolean;
+  onToggle?: () => void;
+}) {
+  const navButtons = (
+    <div className="command-center-nav-collapse-inner">
+      {buttons.map(button => {
+        const subtitle = getSubtitle(button.id);
+        return (
+        <button
+          key={button.id}
+          onClick={() => onOpen(button.id)}
+          className={`command-center-tab flex items-center gap-3 rounded border px-3 py-3 text-left transition ${
+            activePanel === button.id
+              ? 'rail-button-active'
+              : 'rail-button'
+          }`}
+          title={button.label}
+          aria-label={button.label}
+          tabIndex={secondary && !isOpen ? -1 : 0}
+        >
+          <span className="command-center-tab-icon flex h-8 w-8 shrink-0 items-center justify-center">
+            <PanelIcon icon={button.icon} />
+          </span>
+          <span className="command-center-tab-copy flex min-w-0 flex-1 items-center justify-between gap-2">
+            <span className="command-center-tab-action block truncate text-sm font-black text-zinc-100">{button.label}</span>
+            {subtitle && <span className="command-center-tab-count shrink-0">{subtitle}</span>}
+          </span>
+        </button>
+        );
+      })}
+    </div>
+  );
+
+  return (
+    <div className={`command-center-nav-group ${secondary ? 'command-center-nav-secondary' : 'command-center-nav-primary'}`}>
+      {secondary && (
+        <button
+          type="button"
+          onClick={onToggle}
+          className="command-center-nav-toggle rounded border px-3 py-2 text-left"
+          aria-expanded={isOpen}
+        >
+          <span className="min-w-0">
+            <span className="block text-xs font-black uppercase text-zinc-100">More</span>
+          </span>
+          <span className={`command-center-nav-chevron ${isOpen ? 'command-center-nav-chevron-open' : ''}`} aria-hidden="true">v</span>
+        </button>
+      )}
+      {secondary ? (
+        <div className={`command-center-nav-collapse ${isOpen ? 'command-center-nav-collapse-open' : 'command-center-nav-collapse-closed'}`}>
+          {navButtons}
+        </div>
+      ) : navButtons}
     </div>
   );
 }

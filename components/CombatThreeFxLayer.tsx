@@ -26,6 +26,8 @@ interface ParticleRuntime {
   velocity: Float32Array;
 }
 
+type AreaSpellTone = 'damage' | 'support' | 'buff' | 'control';
+
 const COLORS = {
   dust: new THREE.Color(0xd9c7a0),
   melee: new THREE.Color(0xffd9a8),
@@ -37,6 +39,17 @@ const COLORS = {
   gold: new THREE.Color(0xffcc45),
   debuff: new THREE.Color(0x9b5cff),
 };
+
+const AREA_SPELL_NAMES = [
+  'Rallying Hymn',
+  'Chain Spark',
+  'Royal Command',
+  'Moonlit Veil',
+  'Iron Benediction',
+  'Eclipse Nova',
+  'Saint-King Aegis',
+  'Time-Crown Edict',
+];
 
 function disposeObject(object: THREE.Object3D): void {
   object.traverse(child => {
@@ -161,10 +174,16 @@ function getBattleLogStyle(entry: BattleLogEntry, actor?: BattleUnit): BattleLog
   if (entry.style) return entry.style;
   if (entry.action === 'move') return 'move';
   if (entry.action === 'heal') return 'heal';
-  if (entry.action === 'morale' || entry.action === 'mana') return 'morale';
+  if (entry.action === 'mana') return 'mana-focus';
+  if (entry.action === 'wait') return 'guard';
+  if (entry.action === 'morale') return 'morale';
   if (entry.action === 'attack') return actor?.range && actor.range > 1 ? 'ranged' : 'melee';
   if (entry.action === 'spell') return 'spell-damage';
   return undefined;
+}
+
+function isAreaSpellEntry(entry: BattleLogEntry): boolean {
+  return entry.action === 'spell' && AREA_SPELL_NAMES.some(name => entry.message.includes(name));
 }
 
 function easeOut(progress: number): number {
@@ -177,7 +196,7 @@ function createMoveDust(origin: THREE.Vector3): RuntimeCombatEffect {
   return {
     root,
     life: 0,
-    maxLife: 0.58,
+    maxLife: 0.85,
     update: (delta, progress) => {
       updateParticles(particles, delta, progress, 4);
     },
@@ -206,7 +225,7 @@ function createMeleeSlash(origin: THREE.Vector3, direction: THREE.Vector3): Runt
   return {
     root,
     life: 0,
-    maxLife: 0.52,
+    maxLife: 0.82,
     update: (delta, progress) => {
       const scale = Math.sin(Math.min(1, progress * 1.25) * Math.PI);
       root.children.forEach(child => {
@@ -247,7 +266,7 @@ function createProjectile(
   return {
     root,
     life: 0,
-    maxLife: large ? 0.9 : 0.72,
+    maxLife: large ? 1.25 : 1.05,
     update: (delta, progress) => {
       const flightProgress = Math.min(1, progress / 0.58);
       const easedFlight = easeOut(flightProgress);
@@ -277,7 +296,7 @@ function createHealPulse(origin: THREE.Vector3): RuntimeCombatEffect {
   return {
     root,
     life: 0,
-    maxLife: 1.05,
+    maxLife: 1.35,
     update: (delta, progress) => {
       const pulse = easeOut(progress);
       ring.scale.setScalar(0.55 + pulse * 1.8);
@@ -305,7 +324,7 @@ function createShieldPulse(origin: THREE.Vector3, color = COLORS.shield): Runtim
   return {
     root,
     life: 0,
-    maxLife: 1,
+    maxLife: 1.3,
     update: (delta, progress) => {
       const pulse = Math.sin(progress * Math.PI);
       shield.scale.set(0.78 + pulse * 0.7, 0.5 + pulse * 0.42, 1);
@@ -331,7 +350,7 @@ function createDebuffSwirl(origin: THREE.Vector3): RuntimeCombatEffect {
   return {
     root,
     life: 0,
-    maxLife: 0.95,
+    maxLife: 1.25,
     update: (delta, progress) => {
       root.rotation.z += delta * 2.1;
       ring.scale.setScalar(0.68 + progress * 1.25);
@@ -354,12 +373,133 @@ function createMoralePulse(origin: THREE.Vector3): RuntimeCombatEffect {
   return {
     root,
     life: 0,
-    maxLife: 0.95,
+    maxLife: 1.25,
     update: (delta, progress) => {
       ring.position.y = -2 + progress * 12;
       ring.scale.set(0.6 + progress * 1.4, 0.32 + progress * 0.58, 1);
       ring.material.opacity = (1 - progress) * 0.34;
       updateParticles(particles, delta, progress, -4);
+    },
+  };
+}
+
+function createManaFocus(origin: THREE.Vector3): RuntimeCombatEffect {
+  const root = new THREE.Group();
+  root.position.copy(origin);
+  const outerRing = makeRing(COLORS.spell, 12, 16, 0.34);
+  const innerRing = makeRing(COLORS.ranged, 5, 7, 0.24);
+  const core = new THREE.Mesh(
+    new THREE.CircleGeometry(10, 32),
+    makeMaterial(COLORS.spell, 0.14)
+  );
+  core.scale.y = 0.72;
+  root.add(core, outerRing, innerRing);
+  const particles = addParticles(root, new THREE.Vector3(0, 0, 0), COLORS.spell, 30, 11, 34, 2.2);
+
+  return {
+    root,
+    life: 0,
+    maxLife: 1.55,
+    update: (delta, progress) => {
+      const pulse = Math.sin(progress * Math.PI);
+      root.rotation.z += delta * 1.4;
+      outerRing.scale.set(0.64 + progress * 1.25, 0.4 + progress * 0.72, 1);
+      innerRing.scale.setScalar(0.7 + pulse * 0.7);
+      core.scale.set(0.78 + pulse * 0.34, 0.54 + pulse * 0.22, 1);
+      outerRing.material.opacity = (1 - progress) * 0.34;
+      innerRing.material.opacity = (1 - progress) * 0.26;
+      core.material.opacity = pulse * 0.15;
+      updateParticles(particles, delta, progress, -9);
+    },
+  };
+}
+
+function getAveragePoint(points: THREE.Vector3[]): THREE.Vector3 {
+  if (points.length === 0) return new THREE.Vector3(0, 0, 0);
+
+  return points
+    .reduce((total, point) => total.add(point), new THREE.Vector3(0, 0, 0))
+    .multiplyScalar(1 / points.length);
+}
+
+function createAreaSpellWave(origins: THREE.Vector3[], tone: AreaSpellTone): RuntimeCombatEffect {
+  const root = new THREE.Group();
+  const center = getAveragePoint(origins);
+  const color = tone === 'damage'
+    ? COLORS.spell
+    : tone === 'control'
+      ? COLORS.debuff
+      : tone === 'buff'
+        ? COLORS.shield
+        : COLORS.heal;
+  const accent = tone === 'damage'
+    ? COLORS.damage
+    : tone === 'control'
+      ? COLORS.spell
+      : tone === 'buff'
+        ? COLORS.gold
+        : COLORS.shield;
+  const gravity = tone === 'support' ? -12 : tone === 'buff' ? -5 : 8;
+  root.position.copy(center);
+
+  const wave = makeRing(color, 18, 25, 0.34);
+  wave.scale.y = 0.58;
+  const veil = new THREE.Mesh(
+    new THREE.CircleGeometry(30, 56),
+    makeMaterial(accent, tone === 'damage' ? 0.1 : 0.08)
+  );
+  veil.scale.y = 0.58;
+  root.add(veil, wave);
+
+  const targetBursts = origins.map((origin, index) => {
+    const group = new THREE.Group();
+    group.position.copy(new THREE.Vector3().subVectors(origin, center));
+    const targetRing = makeRing(color, tone === 'damage' ? 9 : 11, tone === 'damage' ? 15 : 17, tone === 'damage' ? 0.4 : 0.34);
+    targetRing.scale.y = 0.55;
+    const flare = new THREE.Mesh(
+      new THREE.CircleGeometry(tone === 'damage' ? 12 : 15, 36),
+      makeMaterial(accent, tone === 'damage' ? 0.18 : 0.13)
+    );
+    flare.scale.y = 0.72;
+    group.add(flare, targetRing);
+
+    const particles = addParticles(
+      group,
+      new THREE.Vector3(0, 0, 0),
+      color,
+      tone === 'damage' ? 34 : 28,
+      tone === 'damage' ? 10 : 13,
+      tone === 'damage' ? 58 : 38,
+      tone === 'damage' ? 2.6 : 2.2
+    );
+
+    root.add(group);
+    return { group, targetRing, flare, particles, index };
+  });
+
+  return {
+    root,
+    life: 0,
+    maxLife: tone === 'damage' ? 2.15 : 2.45,
+    update: (delta, progress) => {
+      const eased = easeOut(progress);
+      wave.scale.set(0.45 + eased * 2.7, 0.28 + eased * 1.45, 1);
+      wave.material.opacity = (1 - progress) * 0.34;
+      veil.scale.set(0.7 + eased * 2, 0.42 + eased * 1.05, 1);
+      veil.material.opacity = Math.sin(progress * Math.PI) * (tone === 'damage' ? 0.12 : 0.09);
+      root.rotation.z += delta * (tone === 'control' ? -0.38 : 0.22);
+
+      targetBursts.forEach(({ group, targetRing, flare, particles, index }) => {
+        const delay = index * 0.045;
+        const localProgress = Math.max(0, Math.min(1, (progress - delay) / Math.max(0.1, 1 - delay)));
+        const pulse = Math.sin(localProgress * Math.PI);
+        group.rotation.z += delta * (tone === 'control' ? -0.9 : 0.55);
+        targetRing.scale.set(0.58 + localProgress * 1.55, 0.34 + localProgress * 0.92, 1);
+        targetRing.material.opacity = (1 - localProgress) * (tone === 'damage' ? 0.4 : 0.34);
+        flare.scale.setScalar(0.75 + pulse * 0.58);
+        flare.material.opacity = pulse * (tone === 'damage' ? 0.18 : 0.13);
+        if (localProgress > 0) updateParticles(particles, delta, localProgress, gravity);
+      });
     },
   };
 }
@@ -431,6 +571,30 @@ function createRuntime(mount: HTMLDivElement): RuntimeContext {
       return;
     }
 
+    const resolvedTargets = targets.length > 0 ? targets : actor ? [actor] : [];
+    if (isAreaSpellEntry(entry) && resolvedTargets.length > 1) {
+      const origins = resolvedTargets.map(target => getUnitCenter(target, width, height, battle.boardWidth, battle.boardHeight));
+      if (style === 'spell-damage') {
+        addEffect(createAreaSpellWave(origins, 'damage'));
+        return;
+      }
+
+      if (style === 'spell-control' || style === 'debuff') {
+        addEffect(createAreaSpellWave(origins, 'control'));
+        return;
+      }
+
+      if (style === 'buff') {
+        addEffect(createAreaSpellWave(origins, 'buff'));
+        return;
+      }
+
+      if (style === 'spell-support' || style === 'heal') {
+        addEffect(createAreaSpellWave(origins, 'support'));
+        return;
+      }
+    }
+
     if (style === 'melee') {
       spawnAtTargets(targets, battle, origin => {
         const direction = actorCenter ? new THREE.Vector3().subVectors(origin, actorCenter) : new THREE.Vector3(1, 0, 0);
@@ -441,6 +605,13 @@ function createRuntime(mount: HTMLDivElement): RuntimeContext {
 
     if (style === 'ranged') {
       spawnAtTargets(targets, battle, origin => createProjectile(actorCenter || origin, origin, COLORS.ranged, COLORS.ranged));
+      return;
+    }
+
+    if (style === 'spell-drain') {
+      const drainTargets = actor ? targets.filter(target => target.id !== actor.id) : targets;
+      spawnAtTargets(drainTargets, battle, origin => createProjectile(actorCenter || origin, origin, COLORS.damage, COLORS.spell, true));
+      if (actorCenter) addEffect(createHealPulse(actorCenter));
       return;
     }
 
@@ -461,6 +632,16 @@ function createRuntime(mount: HTMLDivElement): RuntimeContext {
 
     if (style === 'morale') {
       spawnAtTargets(targets.length > 0 ? targets : actor ? [actor] : [], battle, origin => createMoralePulse(origin));
+      return;
+    }
+
+    if (style === 'mana-focus') {
+      spawnAtTargets(targets.length > 0 ? targets : actor ? [actor] : [], battle, origin => createManaFocus(origin));
+      return;
+    }
+
+    if (style === 'guard') {
+      spawnAtTargets(targets.length > 0 ? targets : actor ? [actor] : [], battle, origin => createShieldPulse(origin, COLORS.gold));
       return;
     }
 

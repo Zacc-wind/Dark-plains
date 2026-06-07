@@ -140,7 +140,7 @@ Goal: make battles feel like a polished dark fantasy tactics game: readable like
 - [ ] Add optional sound toggles.
 - [ ] Add UI click, move, strike, heal, spell, victory, defeat sounds.
 - [ ] Add ambient battle loop by region.
-- [ ] Add subtle screen vignette when commander is low health.
+- [x] Add subtle screen vignette when commander is low health.
 - [ ] Add subtle ambient battlefield particles that stay behind units and do not reduce click clarity.
 
 ## Suggested Implementation Order

@@ -10,10 +10,12 @@ import {
   claimQuestNpcReward,
   checkJobsComplete,
   checkTravelComplete,
+  claimStoryQuestReward,
   getFieldedMinions,
   getCurrentUser,
+  getDirectTravelDurationMs,
   getMinionTemplate,
-  getTravelTimeModifier,
+  getQuestNpcStatus,
   getUsers,
   getCityQuestTemplate,
   hasClaimedQuestNpcReward,
@@ -90,9 +92,10 @@ const CHARACTER_GLOWS = {
 const DEFAULT_MAP_ZOOM = 1.75;
 const MAX_MAP_ZOOM = 2.75;
 const ZOOM_STEP = 0.14;
+const DIRECT_TRAVEL_RENDER_INTERVAL_MS = 1000 / 15;
 const MAP_REVEAL_RADIUS = 105;
 const MAP_PLAYER_REVEAL_RADIUS = 70;
-const DIRECT_TRAVEL_MS_PER_TILE = 180000;
+const MAIN_QUEST_TRACKER_HIDDEN_KEY = 'wizardy_main_quest_tracker_hidden';
 
 type TravelIntentKind = 'enemy' | 'player' | 'poi' | 'town' | 'dungeon' | 'quest' | 'tile';
 
@@ -101,6 +104,34 @@ interface PendingTravelIntent {
   targetY: number;
   label: string;
   kind: TravelIntentKind;
+}
+
+function getRenderedUserPosition(user: ReturnType<typeof getCurrentUser>, now: number): { x: number; y: number } | null {
+  if (!user) return null;
+  const travel = user.traveling;
+  if (!travel) return { x: user.x, y: user.y };
+
+  const startX = travel.startX ?? user.x;
+  const startY = travel.startY ?? user.y;
+  const distanceX = Math.abs(travel.targetX - startX);
+  const distanceY = Math.abs(travel.targetY - startY);
+  const totalDistance = distanceX + distanceY;
+
+  if (totalDistance <= 0 || travel.duration <= 0) {
+    return { x: travel.targetX, y: travel.targetY };
+  }
+
+  const progress = Math.max(0, Math.min(1, (now - travel.startTime) / travel.duration));
+  const coveredDistance = totalDistance * progress;
+  const xDirection = travel.targetX >= startX ? 1 : -1;
+  const yDirection = travel.targetY >= startY ? 1 : -1;
+  const xDistance = Math.min(distanceX, coveredDistance);
+  const yDistance = Math.max(0, coveredDistance - distanceX);
+
+  return {
+    x: startX + xDistance * xDirection,
+    y: startY + Math.min(distanceY, yDistance) * yDirection,
+  };
 }
 
 function getFogRevealZoomScale(zoom: number): number {
@@ -378,33 +409,46 @@ function drawCharacterSprite(
     hovered = false,
     glowColor,
   } = options;
+  const drawX = x;
+  const drawY = y;
+  const drawSize = Math.max(1, size);
 
   if (image) {
-    ctx.save();
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = 'high';
     if (glowColor || hovered) {
-      ctx.globalAlpha = hovered ? 0.38 : 0.24;
-      ctx.shadowColor = glowColor || 'rgba(255, 255, 255, 0.55)';
-      ctx.shadowBlur = Math.max(8, Math.min(34, size * (hovered ? 0.42 : 0.3)));
-      ctx.drawImage(image, x, y, size, size);
+      const centerX = drawX + drawSize / 2;
+      const centerY = drawY + drawSize * 0.64;
+      const glowRadius = Math.max(10, Math.min(38, drawSize * (hovered ? 0.58 : 0.46)));
+      const gradient = ctx.createRadialGradient(centerX, centerY, drawSize * 0.08, centerX, centerY, glowRadius);
+      gradient.addColorStop(0, glowColor || 'rgba(255, 255, 255, 0.46)');
+      gradient.addColorStop(0.58, glowColor ? glowColor.replace(/0\.\d+\)/, hovered ? '0.22)' : '0.14)') : 'rgba(255, 255, 255, 0.14)');
+      gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
+
+      ctx.save();
+      ctx.globalAlpha = hovered ? 0.72 : 0.52;
+      ctx.fillStyle = gradient;
+      ctx.beginPath();
+      ctx.ellipse(centerX, centerY, glowRadius * 0.92, glowRadius * 0.56, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
     }
-    ctx.restore();
 
     ctx.save();
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
-    ctx.filter = 'contrast(0.92) saturate(0.96)';
-    ctx.drawImage(image, x, y, size, size);
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.38)';
+    ctx.shadowBlur = Math.max(2, Math.min(7, drawSize * 0.08));
+    ctx.shadowOffsetY = Math.max(1, drawSize * 0.025);
+    ctx.filter = 'brightness(1.015) contrast(1.035) saturate(1.035)';
+    ctx.drawImage(image, drawX, drawY, drawSize, drawSize);
     ctx.restore();
   } else {
     ctx.save();
     if (glowColor || hovered) {
       ctx.shadowColor = glowColor || 'rgba(255, 255, 255, 0.65)';
-      ctx.shadowBlur = Math.max(6, Math.min(26, size * (hovered ? 0.34 : 0.2)));
+      ctx.shadowBlur = Math.max(6, Math.min(26, drawSize * (hovered ? 0.34 : 0.2)));
     }
     ctx.fillStyle = fallbackColor;
-    ctx.fillRect(x + size * 0.2, y + size * 0.2, size * 0.6, size * 0.6);
+    ctx.fillRect(drawX + drawSize * 0.2, drawY + drawSize * 0.2, drawSize * 0.6, drawSize * 0.6);
     ctx.restore();
   }
 
@@ -415,6 +459,82 @@ function drawCharacterSprite(
   if (label) {
     drawMapLabel(ctx, label, x + size / 2, y + size + 10, labelColor);
   }
+}
+
+function drawTravelPathPreview(
+  ctx: CanvasRenderingContext2D,
+  options: {
+    start: { x: number; y: number };
+    target: { x: number; y: number };
+    tileSize: number;
+    cameraX: number;
+    cameraY: number;
+    active: boolean;
+    now: number;
+  }
+): void {
+  const { start, target, tileSize, cameraX, cameraY, active, now } = options;
+  if (Math.abs(start.x - target.x) < 0.02 && Math.abs(start.y - target.y) < 0.02) return;
+
+  const toScreen = (point: { x: number; y: number }) => ({
+    x: point.x * tileSize - cameraX + tileSize / 2,
+    y: point.y * tileSize - cameraY + tileSize / 2,
+  });
+
+  const worldPoints = [
+    start,
+    { x: target.x, y: start.y },
+    target,
+  ].filter((point, index, points) => {
+    if (index === 0) return true;
+    const previous = points[index - 1];
+    return Math.abs(point.x - previous.x) > 0.02 || Math.abs(point.y - previous.y) > 0.02;
+  });
+  const points = worldPoints.map(toScreen);
+  const targetScreen = points[points.length - 1];
+  const primary = active ? 'rgba(125, 211, 252, 0.88)' : 'rgba(244, 221, 176, 0.88)';
+  const glow = active ? 'rgba(56, 189, 248, 0.26)' : 'rgba(244, 221, 176, 0.24)';
+  const shadow = active ? 'rgba(14, 116, 144, 0.3)' : 'rgba(91, 18, 34, 0.22)';
+  const dash = Math.max(7, tileSize * 0.22);
+  const gap = Math.max(5, tileSize * 0.16);
+
+  const strokePath = () => {
+    ctx.beginPath();
+    points.forEach((point, index) => {
+      if (index === 0) ctx.moveTo(point.x, point.y);
+      else ctx.lineTo(point.x, point.y);
+    });
+  };
+
+  ctx.save();
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.shadowColor = shadow;
+  ctx.shadowBlur = Math.max(8, tileSize * 0.22);
+  strokePath();
+  ctx.strokeStyle = glow;
+  ctx.lineWidth = Math.max(6, tileSize * 0.12);
+  ctx.stroke();
+
+  ctx.setLineDash([dash, gap]);
+  ctx.lineDashOffset = active ? -(now / 64) % (dash + gap) : 0;
+  strokePath();
+  ctx.strokeStyle = primary;
+  ctx.lineWidth = Math.max(2, tileSize * 0.04);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  ctx.shadowBlur = Math.max(10, tileSize * 0.18);
+  ctx.strokeStyle = primary;
+  ctx.lineWidth = Math.max(1.5, tileSize * 0.035);
+  ctx.beginPath();
+  ctx.arc(targetScreen.x, targetScreen.y, Math.max(8, tileSize * 0.2), 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(targetScreen.x, targetScreen.y, Math.max(3, tileSize * 0.07), 0, Math.PI * 2);
+  ctx.fillStyle = primary;
+  ctx.fill();
+  ctx.restore();
 }
 
 interface MapRendererProps {
@@ -453,6 +573,10 @@ export default function MapRenderer({
   const [currentUser, setCurrentUser] = useState(getCurrentUser());
   const [worldNow, setWorldNow] = useState(() => Date.now());
   const [pendingTravel, setPendingTravel] = useState<PendingTravelIntent | null>(null);
+  const [mainQuestTrackerHidden, setMainQuestTrackerHidden] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return window.localStorage.getItem(MAIN_QUEST_TRACKER_HIDDEN_KEY) === 'true';
+  });
   const cameraInitialized = useRef(false);
   const dragOriginRef = useRef({ x: 0, y: 0 });
   const hasDraggedRef = useRef(false);
@@ -522,6 +646,19 @@ export default function MapRenderer({
     return () => clearInterval(interval);
   }, []);
 
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      const latestUser = getCurrentUser();
+      if (!latestUser?.traveling) return;
+
+      setWorldNow(Date.now());
+      checkTravelComplete();
+      setCurrentUser(getCurrentUser());
+    }, DIRECT_TRAVEL_RENDER_INTERVAL_MS);
+
+    return () => window.clearInterval(interval);
+  }, []);
+
   // Handle window resize for fullscreen
   useEffect(() => {
     const handleResize = () => {
@@ -558,6 +695,10 @@ export default function MapRenderer({
     if (!currentUser) return [];
     return getUsers().filter(player => player.username !== currentUser.username);
   }, [currentUser]);
+  const renderedUserPosition = useMemo(
+    () => getRenderedUserPosition(currentUser, worldNow),
+    [currentUser, worldNow]
+  );
 
   const worldPanelOpen = Boolean(
     selectedPOI ||
@@ -569,6 +710,12 @@ export default function MapRenderer({
     selectedQuestNpc ||
     pendingTravel
   );
+  const priorityStoryReady = Boolean(selectedTown && currentUser && STORY_CHAPTERS
+    .flatMap(chapter => chapter.quests)
+    .some(story => {
+      const status = getStoryQuestStatus(currentUser, story.id);
+      return status.unlocked && status.complete && !status.claimed;
+    }));
 
   useEffect(() => {
     if (selectedTown) emitFxEvent({ type: 'city', tone: 'gold', intensity: 0.72 });
@@ -614,10 +761,10 @@ export default function MapRenderer({
   const maxCameraY = Math.max(0, MAP_CONFIG.height * scaledTileSize - actualHeight);
 
   useEffect(() => {
-    const playerPoint = currentUser
+    const playerPoint = renderedUserPosition
       ? {
-          x: currentUser.x * scaledTileSize - cameraX + scaledTileSize / 2,
-          y: currentUser.y * scaledTileSize - cameraY + scaledTileSize / 2,
+          x: renderedUserPosition.x * scaledTileSize - cameraX + scaledTileSize / 2,
+          y: renderedUserPosition.y * scaledTileSize - cameraY + scaledTileSize / 2,
         }
       : null;
 
@@ -628,7 +775,7 @@ export default function MapRenderer({
       height: actualHeight,
       zoom: effectiveZoom,
     });
-  }, [actualHeight, actualWidth, cameraX, cameraY, currentUser, cursorScreen, effectiveZoom, scaledTileSize]);
+  }, [actualHeight, actualWidth, cameraX, cameraY, cursorScreen, effectiveZoom, renderedUserPosition, scaledTileSize]);
 
   const clampZoom = (value: number) => Math.max(minMapZoom, Math.min(MAX_MAP_ZOOM, Number(value.toFixed(2))));
 
@@ -660,6 +807,22 @@ export default function MapRenderer({
     if (currentUser.x === targetX && currentUser.y === targetY) return;
 
     setPendingTravel({ targetX, targetY, label, kind });
+  };
+
+  const beginTravel = (targetX: number, targetY: number) => {
+    if (!currentUser || currentUser.traveling) return;
+    if (targetX < 0 || targetX >= MAP_CONFIG.width || targetY < 0 || targetY >= MAP_CONFIG.height) return;
+    if (currentUser.x === targetX && currentUser.y === targetY) return;
+
+    emitFxEvent({ type: 'travel', tone: 'blue', intensity: 0.52 });
+    startTravel(targetX, targetY);
+    setPendingTravel(null);
+    setCurrentUser(getCurrentUser());
+  };
+
+  const setMainQuestTrackerVisibility = (hidden: boolean) => {
+    setMainQuestTrackerHidden(hidden);
+    window.localStorage.setItem(MAIN_QUEST_TRACKER_HIDDEN_KEY, String(hidden));
   };
 
   // Center camera on player initially only once
@@ -702,15 +865,16 @@ export default function MapRenderer({
     // Clear canvas
     ctx.fillStyle = '#000000';
     ctx.fillRect(0, 0, actualWidth, actualHeight);
-    ctx.imageSmoothingEnabled = false;
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
 
     const tileSize = scaledTileSize;
     const mapWidth = MAP_CONFIG.width * tileSize;
     const mapHeight = MAP_CONFIG.height * tileSize;
-    const playerRevealPoint = currentUser
+    const playerRevealPoint = renderedUserPosition
       ? {
-          x: currentUser.x * tileSize - cameraX + tileSize / 2,
-          y: currentUser.y * tileSize - cameraY + tileSize / 2,
+          x: renderedUserPosition.x * tileSize - cameraX + tileSize / 2,
+          y: renderedUserPosition.y * tileSize - cameraY + tileSize / 2,
         }
       : null;
 
@@ -720,6 +884,25 @@ export default function MapRenderer({
     } else {
       ctx.fillStyle = '#182216';
       ctx.fillRect(-cameraX, -cameraY, mapWidth, mapHeight);
+    }
+
+    const activeTravel = currentUser?.traveling;
+    const travelPathTarget = pendingTravel
+      ? { x: pendingTravel.targetX, y: pendingTravel.targetY, active: false }
+      : activeTravel
+        ? { x: activeTravel.targetX, y: activeTravel.targetY, active: true }
+        : null;
+
+    if (renderedUserPosition && travelPathTarget) {
+      drawTravelPathPreview(ctx, {
+        start: renderedUserPosition,
+        target: travelPathTarget,
+        tileSize,
+        cameraX,
+        cameraY,
+        active: travelPathTarget.active,
+        now: worldNow,
+      });
     }
 
     // Draw POIs with images - 4x4 tiles (8x8 for towns)
@@ -838,15 +1021,14 @@ export default function MapRenderer({
           topText: hasQuestMarker ? '!' : undefined,
           topTextColor: '#fef08a',
           hovered: hoveredQuestNpc?.id === npc.id,
-          glowColor: hasQuestMarker ? CHARACTER_GLOWS.quest : CHARACTER_GLOWS.npc,
         });
       }
     });
 
     // Draw current player with model image
-    if (currentUser) {
-      const playerScreenX = currentUser.x * tileSize - cameraX;
-      const playerScreenY = currentUser.y * tileSize - cameraY;
+    if (currentUser && renderedUserPosition) {
+      const playerScreenX = renderedUserPosition.x * tileSize - cameraX;
+      const playerScreenY = renderedUserPosition.y * tileSize - cameraY;
       
       // Only draw if in viewport
       if (playerScreenX >= -tileSize && playerScreenX < actualWidth && 
@@ -908,8 +1090,9 @@ export default function MapRenderer({
     worldEnemies.forEach(enemy => {
       const enemyScreenX = enemy.x * tileSize - cameraX;
       const enemyScreenY = enemy.y * tileSize - cameraY;
-      const enemySize = getCharacterSpriteSize(tileSize, effectiveZoom, 0.88, 25);
-      const enemyImage = AssetLoader.getImage(getPlayerModelAsset(enemy.modelNumber));
+      const isWorldBoss = enemy.spawnKind === 'world-boss';
+      const enemySize = getCharacterSpriteSize(tileSize, effectiveZoom, isWorldBoss ? 1.22 : 0.88, isWorldBoss ? 36 : 25);
+      const enemyImage = AssetLoader.getImage(enemy.artworkPath || getPlayerModelAsset(enemy.modelNumber));
       const enemyRevealed = isEnemyRevealedOnScreen(
         enemy,
         cameraX,
@@ -933,17 +1116,18 @@ export default function MapRenderer({
           y: enemyScreenY + (tileSize - enemySize) / 2 - tileSize * 0.08,
           size: enemySize,
           fallbackColor: '#7f1d1d',
-          topText: `Lv ${enemy.level}`,
-          topTextColor: '#fecaca',
+          topText: isWorldBoss ? 'Boss' : `Lv ${enemy.level}`,
+          topTextColor: isWorldBoss ? '#fca5a5' : '#fecaca',
+          label: isWorldBoss || hoveredEnemy?.id === enemy.id ? enemy.name : undefined,
           labelColor: '#fecaca',
           hovered: hoveredEnemy?.id === enemy.id,
-          glowColor: CHARACTER_GLOWS.enemy,
+          glowColor: isWorldBoss ? 'rgba(248, 113, 113, 0.86)' : CHARACTER_GLOWS.enemy,
         });
       }
     });
 
     ctx.shadowBlur = 0;
-  }, [cameraX, cameraY, actualWidth, actualHeight, hoveredPOI, hoveredEnemy, hoveredDungeon, hoveredQuestNpc, cursorScreen, currentUser, otherPlayers, assetsLoaded, worldEnemies, worldDungeons, visibleQuestNpcs, poisData, scaledTileSize, effectiveZoom]);
+  }, [cameraX, cameraY, actualWidth, actualHeight, hoveredPOI, hoveredEnemy, hoveredDungeon, hoveredQuestNpc, cursorScreen, currentUser, renderedUserPosition, pendingTravel, otherPlayers, assetsLoaded, worldEnemies, worldDungeons, visibleQuestNpcs, poisData, scaledTileSize, effectiveZoom, worldNow]);
 
   // Mouse drag handlers
   const handleMouseDown = (e: React.MouseEvent) => {
@@ -966,10 +1150,10 @@ export default function MapRenderer({
     const tileSize = scaledTileSize;
     const tileX = Math.floor(mouseX / tileSize);
     const tileY = Math.floor(mouseY / tileSize);
-    const playerRevealPoint = currentUser
+    const playerRevealPoint = renderedUserPosition
       ? {
-          x: currentUser.x * tileSize - cameraX + tileSize / 2,
-          y: currentUser.y * tileSize - cameraY + tileSize / 2,
+          x: renderedUserPosition.x * tileSize - cameraX + tileSize / 2,
+          y: renderedUserPosition.y * tileSize - cameraY + tileSize / 2,
         }
       : null;
     const revealedEnemies = worldEnemies.filter(enemy => isEnemyRevealedOnScreen(
@@ -1099,10 +1283,10 @@ export default function MapRenderer({
 
     const clickScreenX = e.clientX - rect.left;
     const clickScreenY = e.clientY - rect.top;
-    const playerRevealPoint = currentUser
+    const playerRevealPoint = renderedUserPosition
       ? {
-          x: currentUser.x * tileSize - cameraX + tileSize / 2,
-          y: currentUser.y * tileSize - cameraY + tileSize / 2,
+          x: renderedUserPosition.x * tileSize - cameraX + tileSize / 2,
+          y: renderedUserPosition.y * tileSize - cameraY + tileSize / 2,
         }
       : null;
     const revealedEnemies = worldEnemies.filter(enemy => isEnemyRevealedOnScreen(
@@ -1117,12 +1301,8 @@ export default function MapRenderer({
     const clickedEnemy = findEnemyAtScreenPoint(revealedEnemies, clickScreenX, clickScreenY, cameraX, cameraY, tileSize, effectiveZoom)
       || revealedEnemies.find(enemy => tileX === enemy.x && tileY === enemy.y);
     if (clickedEnemy) {
-      const isAtEnemy = isCurrentUserAt(clickedEnemy.x, clickedEnemy.y);
-      if (!isAtEnemy) {
-        requestTravelIntent(clickedEnemy.x, clickedEnemy.y, clickedEnemy.name, 'enemy');
-      }
-
       setSelectedEnemy(clickedEnemy);
+      setPendingTravel(null);
       setSelectedPOI(null);
       setSelectedTown(null);
       setSelectedDungeon(null);
@@ -1155,18 +1335,8 @@ export default function MapRenderer({
       tileY < dungeon.y + 3
     ));
     if (clickedDungeon) {
-      if (!isCurrentUserAt(clickedDungeon.x, clickedDungeon.y, 3, 3)) {
-        const target = getFootprintCenterTile(clickedDungeon.x, clickedDungeon.y, 3, 3);
-        requestTravelIntent(target.x, target.y, clickedDungeon.name, 'dungeon');
-        setSelectedDungeon(clickedDungeon);
-        setSelectedPOI(null);
-        setSelectedTown(null);
-        setSelectedQuestNpc(null);
-        setShowPlayerList(false);
-        return;
-      }
-
       setSelectedDungeon(clickedDungeon);
+      setPendingTravel(null);
       setSelectedPOI(null);
       setSelectedTown(null);
       setSelectedQuestNpc(null);
@@ -1181,17 +1351,8 @@ export default function MapRenderer({
       tileY < npc.y + 2
     ));
     if (clickedQuestNpc) {
-      if (!isCurrentUserAt(clickedQuestNpc.x, clickedQuestNpc.y, 2, 2)) {
-        requestTravelIntent(clickedQuestNpc.x, clickedQuestNpc.y, clickedQuestNpc.name, 'quest');
-        setSelectedQuestNpc(clickedQuestNpc);
-        setSelectedDungeon(null);
-        setSelectedPOI(null);
-        setSelectedTown(null);
-        setShowPlayerList(false);
-        return;
-      }
-
       setSelectedQuestNpc(clickedQuestNpc);
+      setPendingTravel(null);
       setSelectedDungeon(null);
       setSelectedPOI(null);
       setSelectedTown(null);
@@ -1210,10 +1371,7 @@ export default function MapRenderer({
     if (clickedPOI) {
       const { width, height } = getPoiFootprint(clickedPOI);
       const isAtClickedPoi = isCurrentUserAt(clickedPOI.x, clickedPOI.y, width, height);
-      if (!isAtClickedPoi) {
-        const target = getFootprintCenterTile(clickedPOI.x, clickedPOI.y, width, height);
-        requestTravelIntent(target.x, target.y, clickedPOI.name, clickedPOI.type === POIType.TOWN ? 'town' : 'poi');
-      }
+      setPendingTravel(null);
 
       // Open town modal for towns, POI modal for others
       if (clickedPOI.type === POIType.TOWN) {
@@ -1261,17 +1419,34 @@ export default function MapRenderer({
   };
 
   const pendingTravelDuration = currentUser && pendingTravel
-    ? (Math.abs(pendingTravel.targetX - currentUser.x) + Math.abs(pendingTravel.targetY - currentUser.y))
-      * DIRECT_TRAVEL_MS_PER_TILE
-      * getTravelTimeModifier(currentUser)
+    ? getDirectTravelDurationMs(currentUser, pendingTravel.targetX, pendingTravel.targetY)
     : 0;
 
   const confirmPendingTravel = () => {
     if (!currentUser || !pendingTravel || currentUser.traveling) return;
-    emitFxEvent({ type: 'travel', tone: 'blue', intensity: 0.52 });
-    startTravel(pendingTravel.targetX, pendingTravel.targetY);
-    setPendingTravel(null);
+    beginTravel(pendingTravel.targetX, pendingTravel.targetY);
+  };
+
+  const claimMainStoryReward = (questId: string): { success: boolean; error?: string } => {
+    const story = STORY_CHAPTERS.flatMap(chapter => chapter.quests).find(item => item.id === questId);
+    const result = claimStoryQuestReward(questId);
+
+    if (!result.success) {
+      return { success: false, error: result.error || 'Could not claim story reward.' };
+    }
+
+    emitCompletionNotice({
+      id: `main-tracker-story-${questId}-${Date.now()}`,
+      kind: 'quest',
+      kicker: 'Story Quest',
+      title: story?.name || 'Story Reward Claimed',
+      description: story?.lore || 'The story reward was claimed.',
+      rewards: rewardSummaryToCompletionRewards(result.rewards),
+      completedAt: Date.now(),
+    });
+    levelUp();
     setCurrentUser(getCurrentUser());
+    return { success: true };
   };
 
   return (
@@ -1299,12 +1474,26 @@ export default function MapRenderer({
         }}
       />
 
-      {!worldPanelOpen && (
-        <MainQuestTracker
-          currentUser={currentUser}
-          poisData={poisData}
-          onTravel={requestTravelIntent}
-        />
+      {(!worldPanelOpen || priorityStoryReady) && (
+        mainQuestTrackerHidden ? (
+          <button
+            type="button"
+            onClick={() => setMainQuestTrackerVisibility(false)}
+            className="main-quest-reopen command-panel vine-frame pointer-events-auto fixed left-4 top-24 z-[88] rounded-full border text-zinc-100"
+            aria-label="Show main quest tracker"
+            title="Show main quest tracker"
+          >
+            !
+          </button>
+        ) : (
+          <MainQuestTracker
+            currentUser={currentUser}
+            poisData={poisData}
+            onTravel={requestTravelIntent}
+            onClaim={claimMainStoryReward}
+            onHide={() => setMainQuestTrackerVisibility(true)}
+          />
+        )
       )}
 
       <POIModal 
@@ -1314,6 +1503,11 @@ export default function MapRenderer({
           setShowPlayerList(false);
         }}
         onSelectJob={handleJobSelect}
+        onTravel={() => {
+          if (!selectedPOI) return;
+          const target = getPoiTravelTarget(selectedPOI);
+          beginTravel(target.x, target.y);
+        }}
       />
 
       <TownModal 
@@ -1321,6 +1515,11 @@ export default function MapRenderer({
         onClose={() => {
           setSelectedTown(null);
           setShowPlayerList(false);
+        }}
+        onTravel={() => {
+          if (!selectedTown) return;
+          const target = getPoiTravelTarget(selectedTown);
+          beginTravel(target.x, target.y);
         }}
       />
 
@@ -1340,6 +1539,7 @@ export default function MapRenderer({
             setActiveBattleEnemy(selectedEnemy);
             setSelectedEnemy(null);
           }}
+          onTravel={() => beginTravel(selectedEnemy.x, selectedEnemy.y)}
           onClose={() => setSelectedEnemy(null)}
         />
       )}
@@ -1360,6 +1560,10 @@ export default function MapRenderer({
             setSelectedDungeonRun(selectedDungeon);
             setSelectedDungeon(null);
           }}
+          onTravel={() => {
+            const target = getFootprintCenterTile(selectedDungeon.x, selectedDungeon.y, 3, 3);
+            beginTravel(target.x, target.y);
+          }}
           onClose={() => setSelectedDungeon(null)}
         />
       )}
@@ -1376,6 +1580,7 @@ export default function MapRenderer({
       {selectedQuestNpc && (
         <QuestNpcModal
           npc={selectedQuestNpc}
+          onTravel={() => beginTravel(selectedQuestNpc.x, selectedQuestNpc.y)}
           onClose={() => setSelectedQuestNpc(null)}
         />
       )}
@@ -1394,6 +1599,31 @@ function formatQuestNpcRewards(rewards: QuestNpc['rewards']): string {
   ].filter(Boolean);
 
   return parts.join(' / ');
+}
+
+function formatQuestRequirementText(requirement: QuestNpc['requirement']): string {
+  switch (requirement.type) {
+    case 'complete_jobs':
+      return `Finish ${requirement.count} road job${requirement.count === 1 ? '' : 's'} from a town board or nearby work site.`;
+    case 'complete_timed_jobs':
+      return `Finish ${requirement.count} longer job${requirement.count === 1 ? '' : 's'} that lasts at least ${Math.round((requirement.minDuration || 0) / 60000)} minutes.`;
+    case 'win_battles':
+      return `Defeat ${requirement.count} enemy warband${requirement.count === 1 ? '' : 's'} on the world map.`;
+    case 'recruit_minions':
+      return `Recruit ${requirement.count} unit${requirement.count === 1 ? '' : 's'} into your army.`;
+    case 'own_rare_gems':
+      return `Carry ${requirement.count} rare gem${requirement.count === 1 ? '' : 's'} in your inventory.`;
+    case 'visit_poi':
+      return `Travel to ${requirement.poiName || 'the marked location'}.`;
+    case 'collect_item':
+      return `Bring ${requirement.count} required quest item${requirement.count === 1 ? '' : 's'}.`;
+    case 'player_level':
+      return `Reach commander level ${requirement.count}.`;
+    case 'defeat_boss':
+      return 'Defeat the named boss.';
+    default:
+      return 'Complete the counsel task.';
+  }
 }
 
 function rewardSummaryToCompletionRewards(rewards?: RewardSummary): CompletionRewardLine[] {
@@ -1419,9 +1649,9 @@ function getStoryRequirementLabel(story: StoryQuestForTracker): string {
 
   switch (requirement.type) {
     case 'complete_jobs':
-      return `Finish ${requirement.count} road job${requirement.count === 1 ? '' : 's'}`;
+      return `Finish ${requirement.count} road job${requirement.count === 1 ? '' : 's'} from a town board or work site`;
     case 'complete_timed_jobs':
-      return `Finish ${requirement.count} longer job${requirement.count === 1 ? '' : 's'}`;
+      return `Finish ${requirement.count} longer job${requirement.count === 1 ? '' : 's'} of at least ${Math.round((requirement.minDuration || 0) / 60000)} minutes`;
     case 'player_level':
       return `Reach level ${requirement.count}`;
     case 'own_rare_gems':
@@ -1431,7 +1661,7 @@ function getStoryRequirementLabel(story: StoryQuestForTracker): string {
     case 'recruit_minions':
       return `Recruit ${requirement.count} unit${requirement.count === 1 ? '' : 's'}`;
     case 'win_battles':
-      return `Win ${requirement.count} battle${requirement.count === 1 ? '' : 's'}`;
+      return `Defeat ${requirement.count} enemy warband${requirement.count === 1 ? '' : 's'} on the world map`;
     case 'visit_poi':
       return `Reach ${requirement.poiName || 'the marked place'}`;
     case 'defeat_boss':
@@ -1450,11 +1680,16 @@ function MainQuestTracker({
   currentUser,
   poisData,
   onTravel,
+  onClaim,
+  onHide,
 }: {
   currentUser: ReturnType<typeof getCurrentUser>;
   poisData: POI[];
   onTravel: (targetX: number, targetY: number, label: string, kind: TravelIntentKind) => void;
+  onClaim: (questId: string) => { success: boolean; error?: string };
+  onHide: () => void;
 }) {
+  const [claimError, setClaimError] = useState('');
   const storyQuests = STORY_CHAPTERS
     .flatMap(chapter => chapter.quests)
     .sort((left, right) => left.order - right.order);
@@ -1480,32 +1715,58 @@ function MainQuestTracker({
         ? currentUser.traveling ? 'Walking' : 'Travel'
         : actionPanel === 'jobs' ? 'Jobs' : 'Quests';
   const targetKind: TravelIntentKind = targetPoi?.type === POIType.TOWN ? 'town' : 'poi';
+  const trackerDetail = status.complete
+    ? 'Reward ready.'
+    : targetPoi
+      ? `Travel to ${targetPoi.name}.`
+      : getStoryRequirementLabel(activeStory);
 
   return (
-    <aside className="main-quest-tracker command-panel vine-frame pointer-events-auto fixed left-4 top-24 z-40 w-[min(22rem,calc(100vw-2rem))] rounded border p-3 text-zinc-100">
+    <aside className="main-quest-tracker main-quest-guide command-panel vine-frame pointer-events-auto fixed left-4 top-24 z-[120] w-[min(24rem,calc(100vw-2rem))] rounded border p-4 text-zinc-100">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="arcane-label">Main Quest</div>
           <h3 className="fantasy-heading truncate text-lg">{activeStory.name}</h3>
-          <p className="ui-muted mt-1 line-clamp-2 text-xs font-bold">{getStoryRequirementLabel(activeStory)}</p>
+          <p className="ui-muted mt-1 line-clamp-2 text-xs font-bold">{trackerDetail}</p>
         </div>
-        <button
-          type="button"
-          disabled={!status.unlocked || Boolean(currentUser.traveling && targetPoi)}
-          onClick={() => {
-            if (!status.unlocked) return;
-            if (targetPoi && !status.complete) {
-              const target = getPoiTravelTarget(targetPoi);
-              onTravel(target.x, target.y, targetPoi.name, targetKind);
-              return;
-            }
-            openCommandPanel(actionPanel);
-          }}
-          className="ui-button-primary shrink-0 rounded px-3 py-2 text-xs font-black disabled:opacity-45"
-        >
-          {actionLabel}
-        </button>
+        <div className="flex shrink-0 items-start gap-2">
+          <button
+            type="button"
+            onClick={onHide}
+            className="ui-button rounded px-2 py-1 text-[10px] font-black"
+            aria-label="Hide main quest tracker"
+            title="Hide main quest tracker"
+          >
+            Hide
+          </button>
+        </div>
       </div>
+      <button
+        type="button"
+        disabled={!status.unlocked || Boolean(currentUser.traveling && targetPoi)}
+        onClick={() => {
+          setClaimError('');
+          if (!status.unlocked) return;
+
+          if (status.complete) {
+            const result = onClaim(activeStory.id);
+            if (!result.success) setClaimError(result.error || 'Could not claim reward.');
+            return;
+          }
+
+          if (targetPoi) {
+            const target = getPoiTravelTarget(targetPoi);
+            onTravel(target.x, target.y, targetPoi.name, targetKind);
+            return;
+          }
+
+          openCommandPanel(actionPanel);
+        }}
+        className="first-step-row mt-3 flex w-full items-center justify-between rounded px-3 py-2 text-left text-xs font-bold disabled:opacity-45"
+      >
+        <span>{status.complete ? 'Claim story reward' : getStoryRequirementLabel(activeStory)}</span>
+        <span className="ui-accent font-black">{actionLabel}</span>
+      </button>
       <div className="ui-progress-track mt-3 h-1.5 overflow-hidden rounded border">
         <div className="ui-progress-fill h-full" style={{ width: `${progress}%` }} />
       </div>
@@ -1513,6 +1774,7 @@ function MainQuestTracker({
         <span>{status.unlocked ? `${status.progress}/${status.required}` : 'Locked'}</span>
         <span>{targetPoi ? targetPoi.name : status.complete ? 'Ready' : actionPanel}</span>
       </div>
+      {claimError && <div className="mt-2 text-xs font-black text-red-100">{claimError}</div>}
     </aside>
   );
 }
@@ -1576,10 +1838,11 @@ function TravelConfirmModal({
   );
 }
 
-function QuestNpcModal({ npc, onClose }: { npc: QuestNpc; onClose: () => void }) {
+function QuestNpcModal({ npc, onTravel, onClose }: { npc: QuestNpc; onTravel: () => void; onClose: () => void }) {
   const [user, setUser] = useState(getCurrentUser());
   const [notice, setNotice] = useState('');
-  const claimed = hasClaimedQuestNpcReward(user, npc.id);
+  const counselStatus = getQuestNpcStatus(user, npc.id);
+  const claimed = counselStatus.claimed;
   const atNpc = Boolean(user && isTileInsideFootprint(user.x, user.y, npc.x, npc.y, 2, 2));
 
   const handleClaimCounsel = () => {
@@ -1629,6 +1892,8 @@ function QuestNpcModal({ npc, onClose }: { npc: QuestNpc; onClose: () => void })
                 alt={npc.name}
                 fill
                 className="player-model-art object-contain"
+                sizes="80px"
+                unoptimized
               />
             </span>
             <div>
@@ -1640,6 +1905,19 @@ function QuestNpcModal({ npc, onClose }: { npc: QuestNpc; onClose: () => void })
           <div className="ui-card rounded border p-3 text-xs font-bold text-yellow-100">
             {npc.questHook}
           </div>
+          <div className={`ui-card rounded border p-3 text-xs font-bold ${counselStatus.complete ? 'text-emerald-100' : 'text-yellow-100'}`}>
+            <div className="arcane-label">Counsel Task</div>
+            <div className="mt-1">{formatQuestRequirementText(npc.requirement)}</div>
+            <div className="ui-progress-track mt-3 h-1.5 overflow-hidden rounded border">
+              <div
+                className="ui-progress-fill h-full"
+                style={{ width: `${Math.min(100, (counselStatus.progress / Math.max(1, counselStatus.required)) * 100)}%` }}
+              />
+            </div>
+            <div className="ui-faint mt-2 text-[10px] font-black uppercase">
+              {counselStatus.progress}/{counselStatus.required}
+            </div>
+          </div>
           <div className="ui-pill rounded border p-3 text-xs font-bold text-[var(--ui-muted)]">
             <div className="arcane-label">Counsel Reward</div>
             <div className="mt-1 text-zinc-100">{formatQuestNpcRewards(npc.rewards)}</div>
@@ -1650,11 +1928,18 @@ function QuestNpcModal({ npc, onClose }: { npc: QuestNpc; onClose: () => void })
             </div>
           )}
           <button
-            onClick={handleClaimCounsel}
-            disabled={claimed || !atNpc}
+            onClick={() => {
+              if (!atNpc) {
+                onTravel();
+                setUser(getCurrentUser());
+                return;
+              }
+              handleClaimCounsel();
+            }}
+            disabled={claimed || (atNpc && !counselStatus.complete) || Boolean(user?.traveling && !atNpc)}
             className="ui-button-primary w-full rounded px-4 py-3 text-sm font-black disabled:opacity-40"
           >
-            {claimed ? 'Counsel Claimed' : atNpc ? 'Claim Counsel' : 'Walk Here First'}
+            {claimed ? 'Counsel Claimed' : atNpc ? counselStatus.complete ? 'Claim Counsel' : 'Complete Task First' : user?.traveling ? 'Walking Here' : 'Walk Here'}
           </button>
         </div>
       </div>
@@ -1667,12 +1952,14 @@ function EnemyScoutModal({
   currentUser,
   canStart,
   onStart,
+  onTravel,
   onClose,
 }: {
   enemy: WorldEnemy;
   currentUser: ReturnType<typeof getCurrentUser>;
   canStart: boolean;
   onStart: () => void;
+  onTravel: () => void;
   onClose: () => void;
 }) {
   const preview = currentUser ? getBattleRatingPreview(currentUser, enemy) : null;
@@ -1706,16 +1993,23 @@ function EnemyScoutModal({
           <div className="flex items-center gap-4">
             <span className="ui-icon-frame relative h-24 w-24 shrink-0 overflow-hidden rounded border">
               <Image
-                src={getPlayerModelPath(enemy.modelNumber)}
+                src={enemy.artworkPath || getPlayerModelPath(enemy.modelNumber)}
                 alt={enemy.name}
                 fill
                 className="player-model-art object-contain p-2"
+                sizes="96px"
+                unoptimized
               />
             </span>
             <div className="min-w-0 flex-1">
-              <div className="arcane-label">Scout Report</div>
+            <div className="arcane-label">Scout Report</div>
+              {enemy.spawnKind === 'world-boss' && (
+                <div className="ui-rarity-legendary mt-1 inline-flex rounded border px-2 py-1 text-[10px] font-black uppercase">
+                  Hourly Boss
+                </div>
+              )}
               <p className="ui-muted mt-1 text-sm font-bold">
-                {preview?.summary || 'Scout data unavailable.'}
+                {enemy.story || preview?.summary || 'Scout data unavailable.'}
               </p>
               {preview && (
                 <span className={`mt-3 inline-flex rounded border px-3 py-1 text-xs font-black uppercase ${toneClass}`}>
@@ -1755,11 +2049,11 @@ function EnemyScoutModal({
           </div>
 
           <button
-            onClick={onStart}
-            disabled={!currentUser || !canStart}
+            onClick={canStart ? onStart : onTravel}
+            disabled={!currentUser || Boolean(currentUser.traveling && !canStart)}
             className="ui-button-primary w-full rounded px-4 py-3 text-sm font-black disabled:opacity-40"
           >
-            {canStart ? 'Start Battle' : currentUser?.traveling ? 'Walking to Enemy' : 'Reach Enemy to Battle'}
+            {canStart ? 'Start Battle' : currentUser?.traveling ? 'Walking to Enemy' : 'Walk Here'}
           </button>
         </div>
       </div>
@@ -1772,12 +2066,14 @@ function DungeonModal({
   now,
   currentUser,
   onEnter,
+  onTravel,
   onClose,
 }: {
   dungeon: WorldDungeon;
   now: number;
   currentUser: ReturnType<typeof getCurrentUser>;
   onEnter: () => void;
+  onTravel: () => void;
   onClose: () => void;
 }) {
   const region = getRegionForTile(dungeon.x, dungeon.y);
@@ -1810,19 +2106,34 @@ function DungeonModal({
           </div>
           <div className="ui-card rounded border p-3">
             <div className="arcane-label">Boss</div>
-            <div className="fantasy-heading text-base">{dungeon.bossName}</div>
-            <p className="ui-muted mt-1 text-xs font-bold">{dungeon.bossSubtitle}</p>
+            <div className="mt-2 flex items-center gap-3">
+              <span className="ui-icon-frame relative h-20 w-20 shrink-0 overflow-hidden rounded border">
+                <Image
+                  src={dungeon.bossArtworkPath}
+                  alt=""
+                  fill
+                  className="object-contain"
+                  sizes="80px"
+                  unoptimized
+                />
+              </span>
+              <span className="min-w-0">
+                <span className="fantasy-heading block text-base">{dungeon.bossName}</span>
+                <span className="ui-muted mt-1 block text-xs font-bold">{dungeon.bossSubtitle}</span>
+                <span className="ui-faint mt-1 block text-[11px] font-bold">{dungeon.bossStory}</span>
+              </span>
+            </div>
           </div>
           <div className="grid grid-cols-2 gap-2 text-center">
             <DungeonPill label="Required" value={`${requiredMinions} units`} />
             <DungeonPill label="Fielded" value={`${fieldedCount} units`} />
           </div>
           <button
-            onClick={onEnter}
-            disabled={!canEnter}
+            onClick={!atDungeon ? onTravel : onEnter}
+            disabled={!currentUser || Boolean(currentUser.traveling && !atDungeon) || (atDungeon && !canEnter)}
             className="ui-button-primary w-full rounded px-4 py-3 text-sm font-black disabled:opacity-40"
           >
-            {!atDungeon ? 'Walk Here First' : canEnter ? 'Enter Dungeon Run' : 'More Units Needed'}
+            {!atDungeon ? currentUser?.traveling ? 'Walking Here' : 'Walk Here' : canEnter ? 'Enter Dungeon Run' : 'More Units Needed'}
           </button>
           <p className="ui-muted text-xs font-bold">
             Dungeon runs now use a short chamber path with battles, shops, chance pools, and a boss reward.

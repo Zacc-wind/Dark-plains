@@ -45,7 +45,11 @@ import { POI } from '@/lib/mapData';
 interface TownModalProps {
   town: POI | null;
   onClose: () => void;
+  onTravel: () => void;
 }
+
+type TownServiceKey = 'quests' | 'shop' | 'blacksmith' | 'players';
+type TownShopSection = 'buy' | 'exchange' | 'sell';
 
 function rewardSummaryToCompletionRewards(rewards?: RewardSummary): CompletionRewardLine[] {
   if (!rewards) return [];
@@ -63,14 +67,17 @@ function rewardSummaryToCompletionRewards(rewards?: RewardSummary): CompletionRe
   return lines;
 }
 
-function getCityQuestRequirementText(quest: { requirement: { type: string; count: number; itemId?: string; minDuration?: number; poiName?: string } }): string {
+function getCityQuestRequirementText(quest: { id?: string; town?: string; requirement: { type: string; count: number; itemId?: string; minDuration?: number; poiName?: string } }): string {
   const { requirement } = quest;
 
   switch (requirement.type) {
     case 'complete_jobs':
-      return `Finish ${requirement.count} local job${requirement.count === 1 ? '' : 's'}.`;
+      if (quest.id === 'hv-pilgrim-scrip') {
+        return `Finish ${requirement.count} Harborview road jobs; each completed job counts as one signed scrip from workers.`;
+      }
+      return `Finish ${requirement.count} ${quest.town || 'local'} job${requirement.count === 1 ? '' : 's'} from the town board or nearby work sites.`;
     case 'complete_timed_jobs':
-      return `Finish ${requirement.count} longer job${requirement.count === 1 ? '' : 's'}.`;
+      return `Finish ${requirement.count} longer ${quest.town || 'local'} job${requirement.count === 1 ? '' : 's'} lasting at least ${Math.round((requirement.minDuration || 0) / 60000)} minutes.`;
     case 'player_level':
       return `Reach level ${requirement.count}.`;
     case 'own_rare_gems':
@@ -82,7 +89,7 @@ function getCityQuestRequirementText(quest: { requirement: { type: string; count
     case 'recruit_minions':
       return `Recruit ${requirement.count} unit${requirement.count === 1 ? '' : 's'}.`;
     case 'win_battles':
-      return `Win ${requirement.count} battle${requirement.count === 1 ? '' : 's'}.`;
+      return `Defeat ${requirement.count} enemy warband${requirement.count === 1 ? '' : 's'} on the world map.`;
     case 'visit_poi':
       return `Reach ${requirement.poiName || 'the marked place'}.`;
     default:
@@ -90,11 +97,12 @@ function getCityQuestRequirementText(quest: { requirement: { type: string; count
   }
 }
 
-export default function TownModal({ town, onClose }: TownModalProps) {
+export default function TownModal({ town, onClose, onTravel }: TownModalProps) {
   const [user, setUser] = useState(getCurrentUser());
   const [notice, setNotice] = useState('');
   const [selectedForgeItemId, setSelectedForgeItemId] = useState<string | null>(null);
-  const [openPanels, setOpenPanels] = useState({ quests: true, shop: true, blacksmith: true });
+  const [activeService, setActiveService] = useState<TownServiceKey>('quests');
+  const [activeShopSection, setActiveShopSection] = useState<TownShopSection>('buy');
 
   useEffect(() => {
     const interval = window.setInterval(() => setUser(getCurrentUser()), 1000);
@@ -135,6 +143,12 @@ export default function TownModal({ town, onClose }: TownModalProps) {
   const townPlayers = [
     ...(user && atTown ? [user] : []),
     ...getPlayersAtLocation(town.x, town.y).filter(player => player.username !== user?.username),
+  ];
+  const townServices: Array<{ key: TownServiceKey; label: string; detail: string }> = [
+    { key: 'quests', label: 'Board', detail: `${cityQuests.length} contracts` },
+    { key: 'shop', label: 'Shop', detail: `${offers.length} offers` },
+    { key: 'blacksmith', label: 'Forge', detail: `${forgeEquipment.length} gear` },
+    { key: 'players', label: 'Players', detail: `${townPlayers.length} here` },
   ];
 
   const handleBuy = (offerId: string) => {
@@ -235,10 +249,6 @@ export default function TownModal({ town, onClose }: TownModalProps) {
     window.setTimeout(() => setNotice(''), 2500);
   };
 
-  const togglePanel = (panel: keyof typeof openPanels) => {
-    setOpenPanels(current => ({ ...current, [panel]: !current[panel] }));
-  };
-
   const handleAddForgeBonus = () => {
     if (!atTown) {
       setNotice('Walk into town before using the blacksmith.');
@@ -307,17 +317,29 @@ export default function TownModal({ town, onClose }: TownModalProps) {
                 )}
               </div>
               <div className="grid grid-cols-2 gap-2 p-4 text-center">
-                <TownPill label="Access" value={atTown ? 'Here' : 'Travel'} />
-                <TownPill label="Services" value="Board / Shop / Forge" />
+                <TownPill label="Access" value={atTown ? 'Here' : user?.traveling ? 'Walking' : 'Walk'} />
+                <TownPill label="Service" value={townServices.find(service => service.key === activeService)?.label || 'Board'} />
               </div>
             </div>
 
-            <button
-              onClick={onClose}
-              className="ui-button-danger rounded px-4 py-2 text-sm font-black transition"
-            >
-              Close
-            </button>
+            <div className="town-top-actions">
+              {!atTown && (
+                <button
+                  type="button"
+                  onClick={onTravel}
+                  disabled={!user || Boolean(user.traveling)}
+                  className="ui-button-primary rounded px-4 py-2 text-sm font-black transition disabled:opacity-40"
+                >
+                  {user?.traveling ? 'Walking' : 'Walk Here'}
+                </button>
+              )}
+              <button
+                onClick={onClose}
+                className="ui-button-danger rounded px-4 py-2 text-sm font-black transition"
+              >
+                Close
+              </button>
+            </div>
           </div>
 
           <div className="town-notice-slot">
@@ -325,14 +347,27 @@ export default function TownModal({ town, onClose }: TownModalProps) {
           </div>
 
           <div className="town-service-layout">
+            <nav className="command-panel vine-frame town-service-menu rounded border p-2 text-zinc-100" aria-label="Town services">
+              {townServices.map(service => (
+                <button
+                  key={service.key}
+                  type="button"
+                  onClick={() => setActiveService(service.key)}
+                  className={`town-service-tab rounded px-3 py-2 text-left ${activeService === service.key ? 'town-service-tab-active' : ''}`}
+                >
+                  <span className="block text-sm font-black text-zinc-100">{service.label}</span>
+                  <span className="ui-faint mt-0.5 block text-[10px] font-black uppercase">{service.detail}</span>
+                </button>
+              ))}
+            </nav>
+
+            {activeService === 'quests' && (
             <div className="command-panel vine-frame town-service-panel rounded border text-zinc-100">
               <TownSectionHeader
                 title="City Quest Board"
                 subtitle="Rotating contracts"
-                open={openPanels.quests}
-                onToggle={() => togglePanel('quests')}
               />
-              {openPanels.quests && <div className="town-service-body space-y-3">
+              <div className="town-service-body space-y-3">
                 {cityQuests.map(quest => {
                   const status = getCityQuestStatus(user, quest.id);
                   const progressPercent = Math.min(100, (status.progress / status.required) * 100);
@@ -389,43 +424,44 @@ export default function TownModal({ town, onClose }: TownModalProps) {
                     </div>
                   );
                 })}
-              </div>}
+              </div>
             </div>
+            )}
 
+            {activeService === 'shop' && (
             <div className="command-panel vine-frame town-service-panel rounded border text-zinc-100">
               <TownSectionHeader
                 title="Town Shop"
-                subtitle={`${user?.gold || 0} gold - rotating stock`}
-                open={openPanels.shop}
-                onToggle={() => togglePanel('shop')}
+                subtitle={`${user?.gold || 0} gold - buy, exchange, or sell`}
               />
-              {openPanels.shop && (
-                <div className="town-service-body space-y-3">
-                  {offers.map(offer => (
-                    <div key={offer.id} className="town-board-card ui-card flex items-center gap-3 rounded border p-3">
-                      <span className="ui-icon-frame relative h-14 w-14 shrink-0 overflow-hidden rounded border">
-                        <Image
-                          src={offer.imagePath}
-                          alt={offer.name}
-                          fill
-                          className="object-contain p-1"
-                          style={{ imageRendering: 'pixelated' }}
-                        />
-                      </span>
-                      <div className="min-w-0 flex-1">
-                        <div className="truncate text-sm font-black text-zinc-100">{offer.name}</div>
-                        <div className="ui-muted text-xs font-bold">{offer.description}</div>
-                        <div className="ui-gold mt-1 text-xs font-black">{offer.price} gold</div>
-                      </div>
-                      <button
-                        onClick={() => handleBuy(offer.id)}
-                        disabled={!user || user.gold < offer.price || !atTown}
-                        className="ui-button-primary rounded px-3 py-2 text-xs font-bold disabled:opacity-40"
-                      >
-                        Buy
-                      </button>
+              <div className="town-service-body space-y-3">
+                <TownShopTabs active={activeShopSection} onChange={setActiveShopSection} />
+                {activeShopSection === 'buy' && offers.map(offer => (
+                  <div key={offer.id} className="town-board-card ui-card flex items-center gap-3 rounded border p-3">
+                    <span className="ui-icon-frame relative h-12 w-12 shrink-0 overflow-hidden rounded border">
+                      <Image
+                        src={offer.imagePath}
+                        alt={offer.name}
+                        fill
+                        className="object-contain p-1"
+                        style={{ imageRendering: 'pixelated' }}
+                      />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm font-black text-zinc-100">{offer.name}</div>
+                      <div className="ui-muted text-xs font-bold">{offer.description}</div>
+                      <div className="ui-gold mt-1 text-xs font-black">{offer.price} gold</div>
                     </div>
-                  ))}
+                    <button
+                      onClick={() => handleBuy(offer.id)}
+                      disabled={!user || user.gold < offer.price || !atTown}
+                      className="ui-button-primary rounded px-3 py-2 text-xs font-bold disabled:opacity-40"
+                    >
+                      Buy
+                    </button>
+                  </div>
+                ))}
+                {activeShopSection === 'exchange' && (
                   <TownExchangePanel
                     offers={TRADE_EXCHANGE_OFFERS}
                     inventory={user?.inventory || []}
@@ -433,6 +469,8 @@ export default function TownModal({ town, onClose }: TownModalProps) {
                     atTown={atTown}
                     onExchange={handleTradeExchange}
                   />
+                )}
+                {activeShopSection === 'sell' && (
                   <TownSellPanel
                     items={sellableItems}
                     equipment={sellableGear}
@@ -442,32 +480,32 @@ export default function TownModal({ town, onClose }: TownModalProps) {
                     onSellGear={handleSellGear}
                     onSellUnit={handleSellUnit}
                   />
-                </div>
-              )}
+                )}
+              </div>
             </div>
+            )}
 
+            {activeService === 'blacksmith' && (
             <div className="command-panel vine-frame town-service-panel rounded border text-zinc-100">
               <TownSectionHeader
                 title="Blacksmith"
                 subtitle={`${user?.inventory?.find(item => item.id === 'rare-gem')?.quantity || 0} gems - socket and upgrade gear`}
-                open={openPanels.blacksmith}
-                onToggle={() => togglePanel('blacksmith')}
               />
-              {openPanels.blacksmith && (
-                <div className="town-service-body">
-                  <BlacksmithPanel
-                    equipment={forgeEquipment}
-                    selectedItem={selectedForgeItem}
-                    socketQuote={forgeSocketQuote}
-                    atTown={atTown}
-                    onSelect={setSelectedForgeItemId}
-                    onAddBonus={handleAddForgeBonus}
-                    onUpgradeBonus={handleUpgradeForgeBonus}
-                  />
-                </div>
-              )}
+              <div className="town-service-body">
+                <BlacksmithPanel
+                  equipment={forgeEquipment}
+                  selectedItem={selectedForgeItem}
+                  socketQuote={forgeSocketQuote}
+                  atTown={atTown}
+                  onSelect={setSelectedForgeItemId}
+                  onAddBonus={handleAddForgeBonus}
+                  onUpgradeBonus={handleUpgradeForgeBonus}
+                />
+              </div>
             </div>
+            )}
 
+            {activeService === 'players' && (
             <div className="command-panel vine-frame town-service-panel rounded border text-zinc-100">
               <div className="panel-header border-b px-5 py-4">
                 <h2 className="fantasy-heading text-xl">Players Here</h2>
@@ -475,6 +513,7 @@ export default function TownModal({ town, onClose }: TownModalProps) {
               </div>
               <TownPlayersPanel players={townPlayers} currentUsername={user?.username} />
             </div>
+            )}
           </div>
         </div>
       </div>
@@ -491,16 +530,35 @@ function TownPill({ label, value }: { label: string; value: string }) {
   );
 }
 
+function TownShopTabs({ active, onChange }: { active: TownShopSection; onChange: (section: TownShopSection) => void }) {
+  const tabs: Array<{ id: TownShopSection; label: string }> = [
+    { id: 'buy', label: 'Buy' },
+    { id: 'exchange', label: 'Exchange' },
+    { id: 'sell', label: 'Sell' },
+  ];
+
+  return (
+    <div className="town-shop-tabs rounded">
+      {tabs.map(tab => (
+        <button
+          key={tab.id}
+          type="button"
+          onClick={() => onChange(tab.id)}
+          className={`town-shop-tab rounded ${active === tab.id ? 'town-shop-tab-active' : ''}`}
+        >
+          {tab.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function TownSectionHeader({
   title,
   subtitle,
-  open,
-  onToggle,
 }: {
   title: string;
   subtitle: string;
-  open: boolean;
-  onToggle: () => void;
 }) {
   return (
     <div className="panel-header flex items-start justify-between gap-3 border-b px-5 py-4">
@@ -508,9 +566,6 @@ function TownSectionHeader({
         <h2 className="fantasy-heading text-xl">{title}</h2>
         <p className="arcane-label">{subtitle}</p>
       </div>
-      <button onClick={onToggle} className="ui-button rounded px-3 py-2 text-[11px] font-black">
-        {open ? 'Hide' : 'Show'}
-      </button>
     </div>
   );
 }

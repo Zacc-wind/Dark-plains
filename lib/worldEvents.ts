@@ -1,5 +1,6 @@
 import { MAP_CONFIG } from './mapData';
 import type { EnemyAiPersonality, PlayerModelNumber } from './battle';
+import { BOSS_PROFILES, getBossProfileById } from './bosses';
 
 export interface RegionBand {
   id: string;
@@ -16,8 +17,12 @@ export interface WorldDungeon {
   id: string;
   templateId: string;
   name: string;
+  bossId: string;
   bossName: string;
   bossSubtitle: string;
+  bossStory: string;
+  bossIntro: string;
+  bossArtworkPath: string;
   bossModelNumber: PlayerModelNumber;
   bossPersonality: EnemyAiPersonality;
   bossMinionTemplates: string[];
@@ -76,6 +81,7 @@ export const REGION_BANDS: RegionBand[] = [
 export interface DungeonTemplate {
   id: string;
   name: string;
+  bossId?: string;
   bossName: string;
   bossSubtitle: string;
   x: number;
@@ -91,6 +97,7 @@ export const DUNGEON_TEMPLATES: DungeonTemplate[] = [
   {
     id: 'ossuary-cellar',
     name: 'Ossuary Cellar',
+    bossId: 'mother-cindervein',
     bossName: 'Ossuary Candlekeeper',
     bossSubtitle: 'Bone-lit crypt boss',
     x: 18,
@@ -104,6 +111,7 @@ export const DUNGEON_TEMPLATES: DungeonTemplate[] = [
   {
     id: 'moonwell-descent',
     name: 'Moonwell Descent',
+    bossId: 'prior-moon-voss',
     bossName: 'Moonwell Binder',
     bossSubtitle: 'Mistbound ritualist',
     x: 33,
@@ -117,6 +125,7 @@ export const DUNGEON_TEMPLATES: DungeonTemplate[] = [
   {
     id: 'blackroot-shrine',
     name: 'Blackroot Shrine',
+    bossId: 'blackroot-vessel',
     bossName: 'Root-Saint Heretic',
     bossSubtitle: 'Thorn relic keeper',
     x: 37,
@@ -130,6 +139,7 @@ export const DUNGEON_TEMPLATES: DungeonTemplate[] = [
   {
     id: 'drowned-reliquary',
     name: 'Drowned Reliquary',
+    bossId: 'key-saint-ardan',
     bossName: 'Drowned Relic Warden',
     bossSubtitle: 'Blackwater guardian',
     x: 50,
@@ -143,6 +153,7 @@ export const DUNGEON_TEMPLATES: DungeonTemplate[] = [
   {
     id: 'blue-flame-vault',
     name: 'Blue Flame Vault',
+    bossId: 'lady-mirror-veyra',
     bossName: 'Blue Flame Magus',
     bossSubtitle: 'Vault spellwarden',
     x: 58,
@@ -156,6 +167,7 @@ export const DUNGEON_TEMPLATES: DungeonTemplate[] = [
   {
     id: 'saintless-tower',
     name: 'Saintless Tower',
+    bossId: 'scarlet-matron-yvane',
     bossName: 'Saintless Adjudicator',
     bossSubtitle: 'Tower court tyrant',
     x: 75,
@@ -169,6 +181,7 @@ export const DUNGEON_TEMPLATES: DungeonTemplate[] = [
   {
     id: 'iron-choir-pit',
     name: 'Iron Choir Pit',
+    bossId: 'ser-kael-duskplate',
     bossName: 'Iron Choir Marshal',
     bossSubtitle: 'Pit war-chanter',
     x: 62,
@@ -182,6 +195,7 @@ export const DUNGEON_TEMPLATES: DungeonTemplate[] = [
   {
     id: 'warlord-sepulcher',
     name: 'Warlord Sepulcher',
+    bossId: 'emperor-grave-aurel',
     bossName: 'Sepulcher Warlord',
     bossSubtitle: 'Eclipse dungeon lord',
     x: 78,
@@ -221,6 +235,7 @@ export function getActiveDungeons(now = Date.now(), playerLevel = 1): WorldDunge
   return Array.from({ length: count }, (_, index) => {
     const seed = hashText(`dungeon-${cycle}-${index}`);
     const template = DUNGEON_TEMPLATES[(startIndex + index * 3) % DUNGEON_TEMPLATES.length];
+    const bossProfile = getBossProfileById(template.bossId) || BOSS_PROFILES[(startIndex + index) % BOSS_PROFILES.length];
     const offsetX = Math.floor(seededRoll(seed + 7) * 7) - 3;
     const offsetY = Math.floor(seededRoll(seed + 11) * 7) - 3;
     const x = Math.max(2, Math.min(MAP_CONFIG.width - 4, template.x + offsetX));
@@ -232,11 +247,15 @@ export function getActiveDungeons(now = Date.now(), playerLevel = 1): WorldDunge
       id: `dungeon-${cycle}-${index}`,
       templateId: template.id,
       name: template.name,
-      bossName: template.bossName,
-      bossSubtitle: template.bossSubtitle,
-      bossModelNumber: template.bossModelNumber,
-      bossPersonality: template.bossPersonality,
-      bossMinionTemplates: template.bossMinionTemplates,
+      bossId: bossProfile.id,
+      bossName: bossProfile.name,
+      bossSubtitle: bossProfile.subtitle,
+      bossStory: bossProfile.story,
+      bossIntro: bossProfile.intro,
+      bossArtworkPath: bossProfile.assetPath,
+      bossModelNumber: bossProfile.modelNumber || template.bossModelNumber,
+      bossPersonality: bossProfile.personality || template.bossPersonality,
+      bossMinionTemplates: bossProfile.minionTemplates.length > 0 ? bossProfile.minionTemplates : template.bossMinionTemplates,
       x,
       y,
       level: Math.max(regionFloor, Math.min(25, playerLevel + regionFloor + template.levelBonus + index)),

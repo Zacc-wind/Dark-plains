@@ -75,6 +75,8 @@ export default function PlayerModelSelector({ isOpen, onClose }: PlayerModelSele
                     alt={`Model ${modelNumber}`}
                     fill
                     className="player-model-art object-contain"
+                    sizes="96px"
+                    unoptimized
                   />
                 </span>
                 <span className="font-fantasy text-sm font-black">Model {modelNumber}</span>
