@@ -249,6 +249,8 @@ interface DungeonRunModalProps {
 const MINION_ICON_BASE = '/assets/minions';
 const RUN_EVENT_LABELS = ['Pool', 'Shrine', 'Cache', 'Ambush'];
 const DAILY_RUN_SESSION_PREFIX = 'pirate_game_daily_run_session';
+const RUN_REWARD_CHOICE_COUNT = 2;
+const RUN_SHOP_CHOICE_COUNT = 4;
 
 const RUN_BUFFS: RunRewardChoice[] = [
   makeStatBuff('army-drill', 'Army Drill', '+2 Army Power for this run.', { armyPower: 2 }),
@@ -405,6 +407,7 @@ function RunController({
   const previousPhaseRef = useRef<RunPhase | null>(null);
   const completionIntroTimeoutRef = useRef<number | null>(null);
   const [showCompletionIntro, setShowCompletionIntro] = useState(false);
+  const [runStatsOpen, setRunStatsOpen] = useState(false);
   const isFormationPhase = session.phase === 'formation';
   const isMapPhase = session.phase === 'map';
 
@@ -599,36 +602,26 @@ function RunController({
   }
 
   return (
-    <div className="run-modal-layer fixed inset-0 z-[68] flex items-center justify-center bg-black/76 p-4 text-zinc-100 backdrop-blur-sm">
-      <section className={`run-modal-panel command-panel vine-frame flex max-h-[94vh] w-full flex-col overflow-hidden rounded border ${isFormationPhase ? 'run-formation-modal max-w-5xl' : isMapPhase ? 'run-map-modal h-[calc(100vh-0.5rem)] max-h-[calc(100vh-0.5rem)] max-w-none' : 'max-w-6xl'}`}>
-        <header className="panel-header flex items-start justify-between gap-4 border-b px-5 py-4">
-          <div>
-            <div className="arcane-label">{isFormationPhase ? 'Formation' : kicker || (session.mode === 'daily' ? 'Daily roguelike chain' : 'Dungeon path')}</div>
-            <h2 className="fantasy-heading text-2xl">{session.title}</h2>
-            <p className="ui-muted mt-1 text-xs font-bold">
-              {isFormationPhase
-                ? `${getAliveRunStacks(session).length}/${session.minions.length} units ready`
-                : `${session.wins}/${session.targetBattles} battles won - ${getAliveRunStacks(session).length}/${session.minions.length} units standing - ${session.runGold} run gold`}
-            </p>
-            {!isFormationPhase && session.dailyChallenge && (
-              <p className="ui-faint mt-1 text-xs font-bold">
-                {session.dailyChallenge.subtitle} - {session.dailyChallenge.weeklyRewardName}
-              </p>
-            )}
-          </div>
-          <button onClick={onClose} className="ui-button rounded px-3 py-2 text-xs font-bold">
-            Close
-          </button>
-        </header>
+    <div className={`run-modal-layer fixed inset-0 z-[68] flex items-center justify-center bg-black/76 text-zinc-100 backdrop-blur-sm ${isMapPhase ? 'p-1' : 'p-4'}`}>
+      <section className={`run-modal-panel command-panel vine-frame flex w-full flex-col overflow-hidden rounded border ${isFormationPhase ? 'run-formation-modal max-h-[94vh] max-w-5xl' : isMapPhase ? 'run-map-modal h-[calc(100vh-0.5rem)] max-h-[calc(100vh-0.5rem)] max-w-none' : 'max-h-[94vh] max-w-6xl'}`}>
+        <RunSessionHeader
+          session={session}
+          kicker={kicker}
+          isFormationPhase={isFormationPhase}
+          isMapPhase={isMapPhase}
+          onClose={onClose}
+        />
 
         {session.notice && session.phase !== 'complete' && (
-          <div className="ui-notice border-b px-5 py-3 text-sm font-bold">
+          <div className={`ui-notice border-b font-bold ${isMapPhase || isFormationPhase ? 'run-map-notice px-3 py-1.5 text-[11px]' : 'px-5 py-3 text-sm'}`}>
             {session.notice}
           </div>
         )}
 
-        <div className={`grid min-h-0 flex-1 gap-5 ${isFormationPhase ? 'overflow-hidden p-3' : session.phase === 'complete' ? 'overflow-y-auto p-5' : isMapPhase ? 'run-map-layout overflow-hidden p-4 lg:grid-cols-[17rem_minmax(0,1fr)]' : 'overflow-y-auto p-5 lg:grid-cols-[18rem_minmax(0,1fr)]'}`}>
-          {!isFormationPhase && session.phase !== 'complete' && <RunRoster session={session} />}
+        <div className={`grid min-h-0 flex-1 ${isFormationPhase ? 'gap-5 overflow-hidden p-3' : session.phase === 'complete' ? 'gap-5 overflow-y-auto p-5' : isMapPhase ? 'run-map-layout gap-3 overflow-hidden p-2 lg:grid-cols-[15rem_minmax(0,1fr)]' : 'gap-5 overflow-y-auto p-5 lg:grid-cols-[18rem_minmax(0,1fr)]'}`}>
+          {!isFormationPhase && session.phase !== 'complete' && (
+            <RunRoster session={session} onOpenStats={() => setRunStatsOpen(true)} />
+          )}
 
           <main className="min-h-0">
             {session.phase === 'draft' && (
@@ -652,6 +645,7 @@ function RunController({
                 onChangeFormation={(formation) => setSession(current => current ? { ...current, formation } : current)}
                 onStart={handleStartFormation}
                 onBack={() => setSession(current => current ? { ...current, phase: 'map', activeEnemy: null, notice: undefined } : current)}
+                onOpenStats={() => setRunStatsOpen(true)}
               />
             )}
 
@@ -671,9 +665,9 @@ function RunController({
             )}
 
             {session.phase === 'event' && (
-              <EventPanel
+              <OmenPanel
                 session={session}
-                onResolve={() => setSession(current => current ? resolveDungeonEvent(current) : current)}
+                onComplete={(outcome) => setSession(current => current ? applyDungeonEventOutcome(current, outcome) : current)}
               />
             )}
 
@@ -690,6 +684,10 @@ function RunController({
             )}
           </main>
         </div>
+
+        {runStatsOpen && (
+          <RunStatsModal session={session} onClose={() => setRunStatsOpen(false)} />
+        )}
       </section>
     </div>
   );
@@ -737,11 +735,13 @@ function FormationPanel({
   onChangeFormation,
   onStart,
   onBack,
+  onOpenStats,
 }: {
   session: RunSession;
   onChangeFormation: (formation: Record<string, BoardCell>) => void;
   onStart: () => void;
   onBack: () => void;
+  onOpenStats: () => void;
 }) {
   const aliveUnits = getAliveRunStacks(session);
   const [selectedStackId, setSelectedStackId] = useState(aliveUnits[0]?.id || '');
@@ -790,6 +790,9 @@ function FormationPanel({
           <span className="ui-faint text-[10px] font-black">{selectedIndex + 1}/{aliveUnits.length}</span>
         </div>
         <div className="formation-toolbar-actions">
+          <button type="button" onClick={onOpenStats} className="run-formation-stats-button ui-button rounded px-3 py-2 text-xs font-bold">
+            Status
+          </button>
           <button type="button" onClick={onBack} className="ui-button rounded px-4 py-2 text-xs font-bold">
             Back
           </button>
@@ -929,7 +932,7 @@ function RunMapPanel({
   };
 
   return (
-    <div className="run-map-panel space-y-5">
+    <div className={`run-map-panel ${branchMap ? 'run-map-panel-full' : 'space-y-5'}`}>
       {!branchMap && (
         <section className="ui-card rounded border p-4">
           <div className="arcane-label">{mapSummary.label}</div>
@@ -943,7 +946,6 @@ function RunMapPanel({
           session={session}
           reachableIds={reachableIds}
           onSelectDungeonNode={onSelectDungeonNode}
-          summary={mapSummary}
         />
       ) : (
         <div className="run-node-map grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
@@ -999,34 +1001,27 @@ function DailyRouteMap({
   session,
   reachableIds,
   onSelectDungeonNode,
-  summary,
 }: {
   session: RunSession;
   reachableIds: Set<string>;
   onSelectDungeonNode: (node: DungeonNode) => void;
-  summary: { label: string; title: string; detail: string };
 }) {
   const rows = getDailyNodeRows(session.nodes);
-  const connections = getDailyMapConnections(rows);
-  const mapHeightRem = Math.max(46, rows.length * 4.9);
+  const mapHeightRem = getRunMapHeightRem(rows.length);
+  const connections = getDailyMapConnections(rows, mapHeightRem);
 
   return (
-    <div className="run-route-shell rounded border p-3">
-      <div className="run-route-map-frame">
-        <div className="run-route-summary rounded border px-3 py-2">
-          <div className="arcane-label">{summary.label}</div>
-          <h3 className="fantasy-heading text-lg">{summary.title}</h3>
-          <p className="ui-muted mt-0.5 text-[11px] font-bold">{summary.detail}</p>
-        </div>
+    <div className="run-route-shell run-route-shell-full">
+      <div className="run-route-map-frame run-route-map-frame-full">
         <div className="run-route-map" style={{ minHeight: `${mapHeightRem}rem` }}>
           <svg className="run-route-lines" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
             {connections.map(connection => {
               const state = getRunConnectionState(connection.from, connection.to, reachableIds);
+              const path = getRunConnectionPath(connection);
               return (
                 <path
                   key={`${connection.from.id}-${connection.to.id}`}
-                  d={getRunConnectionPath(connection)}
-                  fill="none"
+                  d={path}
                   className={`run-route-line run-route-line-${state}`}
                 />
               );
@@ -1038,7 +1033,7 @@ function DailyRouteMap({
                 const state = getRunNodeState(session, node, reachableIds);
                 const battleNumber = node.battleNumber || null;
                 const x = getRunMapLaneX(row.nodes.length, node.lane ?? 0);
-                const y = getRunMapRowY(rowIndex, rows.length);
+                const y = getRunMapRowTopRem(rowIndex);
                 const reachable = state === 'reachable';
                 const tooltipPosition = rowIndex < 2 ? 'below' : 'above';
 
@@ -1050,7 +1045,7 @@ function DailyRouteMap({
                       if (reachable) onSelectDungeonNode(node);
                     }}
                     className={`run-route-node run-route-node-${node.type} run-route-node-${state} rounded transition ${reachable ? 'run-route-node-clickable' : ''}`}
-                    style={{ left: `${x}%`, top: `${y}%` }}
+                    style={{ left: `${x}%`, top: `${y}rem` }}
                     aria-label={`${getRunNodeStateLabel(node, state)} ${battleNumber ? `fight ${battleNumber}` : node.type}: ${node.label}`}
                     title={state === 'reachable' ? `${getRunNodeActionLabel(node)}: ${node.label}` : node.label}
                   >
@@ -1059,7 +1054,8 @@ function DailyRouteMap({
                         src={node.iconPath}
                         alt=""
                         fill
-                        className="object-contain p-2"
+                        sizes="120px"
+                        className="object-contain p-1.5"
                         style={{ imageRendering: 'pixelated' }}
                       />
                     </span>
@@ -1172,18 +1168,31 @@ function getRunNodeActionLabel(node: DungeonNode): string {
   return 'Start Fight';
 }
 
+const RUN_MAP_ROW_START_REM = 6.5;
+const RUN_MAP_ROW_GAP_REM = 10.25;
+const RUN_MAP_BOTTOM_PAD_REM = 8.5;
+
+function getRunMapHeightRem(rowCount: number): number {
+  if (rowCount <= 0) return 56;
+  if (rowCount === 1) return RUN_MAP_ROW_START_REM + RUN_MAP_BOTTOM_PAD_REM;
+  return RUN_MAP_ROW_START_REM + (rowCount - 1) * RUN_MAP_ROW_GAP_REM + RUN_MAP_BOTTOM_PAD_REM;
+}
+
+function getRunMapRowTopRem(rowIndex: number): number {
+  return RUN_MAP_ROW_START_REM + rowIndex * RUN_MAP_ROW_GAP_REM;
+}
+
+function getRunMapRowYViewBox(rowIndex: number, mapHeightRem: number): number {
+  return (getRunMapRowTopRem(rowIndex) / mapHeightRem) * 100;
+}
+
 function getRunMapLaneX(rowSize: number, lane: number): number {
   if (rowSize <= 1) return 50;
   if (rowSize === 2) return lane === 0 ? 28 : 72;
-  return [18, 50, 82][clamp(lane, 0, 2)] || 50;
+  return [20, 50, 80][clamp(lane, 0, 2)] || 50;
 }
 
-function getRunMapRowY(rowIndex: number, rowCount: number): number {
-  if (rowCount <= 1) return 50;
-  return 6 + rowIndex * (88 / (rowCount - 1));
-}
-
-function getDailyMapConnections(rows: Array<{ row: number; nodes: DungeonNode[] }>): Array<{
+function getDailyMapConnections(rows: Array<{ row: number; nodes: DungeonNode[] }>, mapHeightRem: number): Array<{
   from: DungeonNode;
   to: DungeonNode;
   x1: number;
@@ -1207,9 +1216,9 @@ function getDailyMapConnections(rows: Array<{ row: number; nodes: DungeonNode[] 
             from: node,
             to: nextNode,
             x1: getRunMapLaneX(row.nodes.length, node.lane ?? 0),
-            y1: getRunMapRowY(rowIndex, rows.length),
+            y1: getRunMapRowYViewBox(rowIndex, mapHeightRem),
             x2: getRunMapLaneX(nextRow.nodes.length, nextNode.lane ?? 0),
-            y2: getRunMapRowY(nextRowIndex, rows.length),
+            y2: getRunMapRowYViewBox(nextRowIndex, mapHeightRem),
           };
         })
     ))
@@ -1339,7 +1348,7 @@ function ShopPanel({
   onBuy: (choice: RunRewardChoice, cost: number) => void;
   onSkip: () => void;
 }) {
-  const choices = pickRunRewardChoices(session).slice(0, 4);
+  const choices = pickRunRewardChoices(session, RUN_SHOP_CHOICE_COUNT);
 
   return (
     <div className="space-y-5">
@@ -1372,19 +1381,119 @@ function ShopPanel({
   );
 }
 
-function EventPanel({ session, onResolve }: { session: RunSession; onResolve: () => void }) {
+type OmenTone = 'curse' | 'blessing' | 'gold' | 'recruit' | 'ward';
+
+interface OmenOutcome {
+  id: string;
+  title: string;
+  detail: string;
+  flavor: string;
+  tone: OmenTone;
+  apply: (session: RunSession) => RunSession;
+}
+
+const OMEN_CHANNEL_MS = 2400;
+
+function OmenPanel({
+  session,
+  onComplete,
+}: {
+  session: RunSession;
+  onComplete: (outcome: OmenOutcome) => void;
+}) {
   const node = session.nodes[session.currentNodeIndex];
+  const outcomeRef = useRef<OmenOutcome | null>(null);
+  const [stage, setStage] = useState<'channeling' | 'revealed'>('channeling');
+  const [outcome, setOutcome] = useState<OmenOutcome | null>(null);
+
+  useEffect(() => {
+    const rolled = rollDungeonEventOutcome(session);
+    outcomeRef.current = rolled;
+
+    const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (prefersReducedMotion) {
+      setOutcome(rolled);
+      setStage('revealed');
+      emitFxEvent({
+        type: 'status',
+        tone: rolled.tone === 'curse' ? 'red' : rolled.tone === 'gold' ? 'gold' : 'violet',
+        intensity: 0.72,
+      });
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      setOutcome(rolled);
+      setStage('revealed');
+      emitFxEvent({
+        type: 'status',
+        tone: rolled.tone === 'curse' ? 'red' : rolled.tone === 'gold' ? 'gold' : 'violet',
+        intensity: 0.72,
+      });
+    }, OMEN_CHANNEL_MS);
+
+    return () => window.clearTimeout(timer);
+  }, [session.currentNodeIndex, session.id]);
+
+  if (stage === 'channeling') {
+    return (
+      <div className="run-omen-stage flex min-h-[28rem] items-center justify-center p-4">
+        <section className="run-omen-panel run-omen-channeling w-full max-w-xl rounded border p-8 text-center">
+          <div className="run-omen-sigil-wrap mx-auto mb-5">
+            <span className="run-omen-sigil-ring run-omen-sigil-ring-outer" aria-hidden="true" />
+            <span className="run-omen-sigil-ring run-omen-sigil-ring-inner" aria-hidden="true" />
+            <span className="run-omen-sigil-icon relative mx-auto block h-20 w-20 overflow-hidden rounded-full border">
+              <Image
+                src={node?.iconPath || DUNGEON_NODE_ICONS.event}
+                alt=""
+                fill
+                sizes="80px"
+                className="object-contain p-3"
+                style={{ imageRendering: 'pixelated' }}
+              />
+            </span>
+          </div>
+          <div className="arcane-label">Omen</div>
+          <h3 className="fantasy-heading mt-1 text-3xl">{node?.label || 'Dark Pool'}</h3>
+          <p className="run-omen-channel-copy ui-muted mx-auto mt-3 max-w-md text-sm font-bold leading-relaxed">
+            {node?.description || 'The chamber hums as fate gathers around your warband.'}
+          </p>
+          <p className="run-omen-channel-status mt-6 text-xs font-black uppercase tracking-[0.24em] text-violet-100/80">
+            Reading the omen
+          </p>
+        </section>
+      </div>
+    );
+  }
+
+  const resolved = outcome || outcomeRef.current;
+  if (!resolved) return null;
 
   return (
-    <div className="space-y-5">
-      <section className="ui-card rounded border p-5 text-center">
-        <div className="arcane-label">{node?.label || 'Chance Pool'}</div>
-        <h3 className="fantasy-heading text-2xl">Touch the Dark Pool</h3>
-        <p className="ui-muted mx-auto mt-2 max-w-lg text-sm font-bold">
-          The chamber can bless the warband, call a recruit, steal coin, or wound a unit.
+    <div className="run-omen-stage flex min-h-[28rem] items-center justify-center p-4">
+      <section className={`run-omen-panel run-omen-reveal run-omen-${resolved.tone} w-full max-w-xl rounded border p-8 text-center`}>
+        <div className="run-omen-result-icon relative mx-auto mb-4 h-16 w-16 overflow-hidden rounded-full border">
+          <Image
+            src={DUNGEON_NODE_ICONS.event}
+            alt=""
+            fill
+            sizes="64px"
+            className="object-contain p-2.5"
+            style={{ imageRendering: 'pixelated' }}
+          />
+        </div>
+        <div className="arcane-label">Omen Resolved</div>
+        <h3 className="fantasy-heading mt-1 text-3xl">{resolved.title}</h3>
+        <p className="ui-muted mx-auto mt-3 max-w-md text-sm font-bold leading-relaxed">{resolved.flavor}</p>
+        <p className="run-omen-result-detail mx-auto mt-4 max-w-md rounded border px-4 py-3 text-sm font-black leading-relaxed text-zinc-100">
+          {resolved.detail}
         </p>
-        <button onClick={onResolve} className="ui-button-primary mt-5 rounded px-5 py-3 text-sm font-black">
-          Resolve Event
+        <button
+          type="button"
+          onClick={() => onComplete(resolved)}
+          className="ui-button-primary mt-6 rounded px-6 py-3 text-sm font-black"
+        >
+          Continue Road
         </button>
       </section>
     </div>
@@ -1589,20 +1698,10 @@ function RunBattleReportCard({ report }: { report: RunBattleReport }) {
   );
 }
 
-function RunRoster({ session }: { session: RunSession }) {
+function RunRoster({ session, onOpenStats }: { session: RunSession; onOpenStats: () => void }) {
   return (
-    <aside className="space-y-4">
-      <section className="ui-card rounded border p-4">
-        <div className="arcane-label">Commander</div>
-        <div className="mt-2 grid grid-cols-2 gap-2 text-center text-[10px] font-black">
-          <RunStat label="Army" value={session.stats.armyPower} />
-          <RunStat label="Ward" value={session.stats.defensivePower} />
-          <RunStat label="Morale" value={session.stats.morale} />
-          <RunStat label="Spell" value={session.stats.spellPower} />
-        </div>
-      </section>
-
-      <section>
+    <aside className="run-roster-aside flex min-h-0 flex-col gap-3">
+      <section className="run-roster-list min-h-0 flex-1 overflow-y-auto">
         <div className="mb-3 flex items-center justify-between gap-3 border-b border-[rgba(232,217,184,0.16)] pb-2">
           <h3 className="fantasy-heading font-black">Run Roster</h3>
           <span className="ui-faint text-xs font-bold">{getAliveRunStacks(session).length}/{session.minions.length}</span>
@@ -1630,6 +1729,8 @@ function RunRoster({ session }: { session: RunSession }) {
           )}
         </div>
       </section>
+
+      <RunStatsLaunch session={session} onOpen={onOpenStats} />
     </aside>
   );
 }
@@ -1669,6 +1770,230 @@ function RunStat({ label, value }: { label: string; value: number | string }) {
       <span className="ui-faint block">{label}</span>
       <span className="ui-value block">{value}</span>
     </span>
+  );
+}
+
+const RUN_HEADER_ICONS = {
+  battles: '/assets/icons/attack.png',
+  roster: '/assets/icons/health.png',
+  gold: '/assets/icons/gold.png',
+  challenge: '/assets/icons/rare-gem.png',
+} as const;
+
+const COMMANDER_STAT_ICONS = {
+  Army: '/assets/icons/attack.png',
+  Ward: '/assets/icons/defense.png',
+  Morale: '/assets/icons/speed.png',
+  Spell: '/assets/icons/magic.png',
+} as const;
+
+function RunHeaderChip({
+  icon,
+  value,
+  title,
+  tone,
+}: {
+  icon: string;
+  value: string;
+  title: string;
+  tone?: 'gold';
+}) {
+  return (
+    <span
+      className={`run-header-chip ${tone === 'gold' ? 'run-header-chip-gold' : ''}`}
+      title={title}
+    >
+      <Image
+        src={icon}
+        alt=""
+        width={16}
+        height={16}
+        className="run-header-chip-icon"
+        unoptimized
+      />
+      <span className="run-header-chip-value">{value}</span>
+    </span>
+  );
+}
+
+function RunStatsChipRow({ session }: { session: RunSession }) {
+  const aliveCount = getAliveRunStacks(session).length;
+  const challengeHint = session.dailyChallenge
+    ? `${session.dailyChallenge.subtitle} — ${session.dailyChallenge.weeklyRewardName}`
+    : undefined;
+
+  return (
+    <>
+      <RunHeaderChip
+        icon={RUN_HEADER_ICONS.battles}
+        value={`${session.wins}/${session.targetBattles}`}
+        title="Battles won"
+      />
+      <RunHeaderChip
+        icon={RUN_HEADER_ICONS.roster}
+        value={`${aliveCount}/${session.minions.length}`}
+        title="Units standing"
+      />
+      <RunHeaderChip
+        icon={RUN_HEADER_ICONS.gold}
+        value={String(session.runGold)}
+        title="Run gold"
+        tone="gold"
+      />
+      {challengeHint && (
+        <span className="run-header-chip run-header-chip-challenge" title={challengeHint}>
+          <Image
+            src={RUN_HEADER_ICONS.challenge}
+            alt=""
+            width={16}
+            height={16}
+            className="run-header-chip-icon"
+            unoptimized
+          />
+        </span>
+      )}
+    </>
+  );
+}
+
+function RunStatsLaunch({ session, onOpen }: { session: RunSession; onOpen: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className="run-roster-stats-launch first-step-row w-full shrink-0 rounded border px-3 py-2.5 text-left transition"
+      aria-label="Open run status"
+    >
+      <span className="flex items-center justify-between gap-2">
+        <span className="arcane-label text-[9px]">Run Status</span>
+        <span className="ui-faint text-[10px] font-black uppercase tracking-[0.12em]">Details</span>
+      </span>
+      <span className="run-header-stats mt-2 flex flex-wrap gap-1">
+        <RunStatsChipRow session={session} />
+      </span>
+    </button>
+  );
+}
+
+function RunCommanderStat({
+  label,
+  value,
+  icon,
+}: {
+  label: keyof typeof COMMANDER_STAT_ICONS;
+  value: number;
+  icon: string;
+}) {
+  return (
+    <div className="run-commander-stat ui-card flex items-center gap-3 rounded border p-3">
+      <span className="run-commander-stat-icon ui-icon-frame relative h-10 w-10 shrink-0 overflow-hidden rounded border">
+        <Image src={icon} alt="" fill sizes="40px" className="object-contain p-1.5" unoptimized />
+      </span>
+      <div className="min-w-0">
+        <div className="ui-faint text-[10px] font-black uppercase">{label}</div>
+        <div className="ui-value text-xl font-black leading-none">{value}</div>
+      </div>
+    </div>
+  );
+}
+
+function RunStatsModal({ session, onClose }: { session: RunSession; onClose: () => void }) {
+  const challenge = session.dailyChallenge;
+
+  return (
+    <div
+      className="run-stats-modal-layer fixed inset-0 z-[69] flex items-center justify-center bg-black/65 p-4 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <section
+        className="run-stats-modal command-panel vine-frame w-full max-w-md rounded border p-4 text-zinc-100"
+        onClick={event => event.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="arcane-label">Run Status</div>
+            <h3 className="fantasy-heading truncate text-xl">{session.title}</h3>
+          </div>
+          <button type="button" onClick={onClose} className="ui-button shrink-0 rounded px-2 py-1 text-[10px] font-bold">
+            Close
+          </button>
+        </div>
+
+        <div className="run-header-stats mt-4 flex flex-wrap gap-1.5">
+          <RunStatsChipRow session={session} />
+        </div>
+
+        <div className="mt-4 grid grid-cols-2 gap-2">
+          <RunCommanderStat label="Army" value={session.stats.armyPower} icon={COMMANDER_STAT_ICONS.Army} />
+          <RunCommanderStat label="Ward" value={session.stats.defensivePower} icon={COMMANDER_STAT_ICONS.Ward} />
+          <RunCommanderStat label="Morale" value={session.stats.morale} icon={COMMANDER_STAT_ICONS.Morale} />
+          <RunCommanderStat label="Spell" value={session.stats.spellPower} icon={COMMANDER_STAT_ICONS.Spell} />
+        </div>
+
+        {challenge && (
+          <div className="ui-card mt-4 rounded border p-3">
+            <div className="arcane-label">Weekly Challenge</div>
+            <p className="ui-muted mt-1 text-xs font-bold">{challenge.subtitle}</p>
+            <p className="ui-faint mt-1 text-[11px] font-bold">{challenge.weeklyRewardName}</p>
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function RunSessionHeader({
+  session,
+  kicker,
+  isFormationPhase,
+  isMapPhase,
+  onClose,
+}: {
+  session: RunSession;
+  kicker?: string;
+  isFormationPhase: boolean;
+  isMapPhase: boolean;
+  onClose: () => void;
+}) {
+  const aliveCount = getAliveRunStacks(session).length;
+  const headerLabel = isFormationPhase
+    ? 'Formation'
+    : kicker || (session.mode === 'daily' ? 'Daily run' : 'Dungeon path');
+  const useCompactHeader = isMapPhase || isFormationPhase;
+
+  if (useCompactHeader) {
+    return (
+      <header className="run-map-header panel-header flex items-center gap-2 border-b px-3 py-2 sm:gap-3">
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          <span className="run-map-header-kicker arcane-label shrink-0 text-[9px]">{headerLabel}</span>
+          <h2 className="fantasy-heading min-w-0 truncate text-base leading-none sm:text-lg">{session.title}</h2>
+        </div>
+
+        <button onClick={onClose} className="ui-button shrink-0 rounded px-2 py-1 text-[10px] font-bold sm:px-3 sm:text-xs">
+          Close
+        </button>
+      </header>
+    );
+  }
+
+  return (
+    <header className="panel-header flex items-start justify-between gap-4 border-b px-5 py-4">
+      <div>
+        <div className="arcane-label">{headerLabel}</div>
+        <h2 className="fantasy-heading text-2xl">{session.title}</h2>
+        <p className="ui-muted mt-1 text-xs font-bold">
+          {`${session.wins}/${session.targetBattles} battles won · ${aliveCount}/${session.minions.length} units · ${session.runGold} run gold`}
+        </p>
+        {session.dailyChallenge && (
+          <p className="ui-faint mt-1 text-xs font-bold">
+            {session.dailyChallenge.subtitle} — {session.dailyChallenge.weeklyRewardName}
+          </p>
+        )}
+      </div>
+      <button onClick={onClose} className="ui-button rounded px-3 py-2 text-xs font-bold">
+        Close
+      </button>
+    </header>
   );
 }
 
@@ -2028,7 +2353,7 @@ function startDungeonNode(session: RunSession, node: DungeonNode): RunSession {
   }
 
   if (node.type === 'event') {
-    return { ...session, currentNodeIndex: nodeIndex, phase: 'event', notice: 'The chamber hums with a random omen.' };
+    return { ...session, currentNodeIndex: nodeIndex, phase: 'event', notice: undefined };
   }
 
   return {
@@ -2524,10 +2849,10 @@ function formatRunDuration(durationMs: number): string {
   return minutes > 0 ? `${minutes}m ${remainingSeconds}s` : `${remainingSeconds}s`;
 }
 
-function pickRunRewardChoices(session: RunSession): RunRewardChoice[] {
+function pickRunRewardChoices(session: RunSession, count = RUN_REWARD_CHOICE_COUNT): RunRewardChoice[] {
   const available = RUN_BUFFS.filter(choice => !choice.isAvailable || choice.isAvailable(session));
-  const pool = available.length >= 4 ? available : RUN_BUFFS.filter(choice => !choice.isAvailable);
-  return shuffle(pool).slice(0, 4);
+  const pool = available.length >= count ? available : RUN_BUFFS.filter(choice => !choice.isAvailable);
+  return shuffle(pool).slice(0, count);
 }
 
 function buyShopReward(session: RunSession, choice: RunRewardChoice, cost: number): RunSession {
@@ -2538,27 +2863,94 @@ function buyShopReward(session: RunSession, choice: RunRewardChoice, cost: numbe
   });
 }
 
-function resolveDungeonEvent(session: RunSession): RunSession {
+function rollDungeonEventOutcome(session: RunSession): OmenOutcome {
   const roll = Math.random();
 
   if (roll < 0.2) {
-    const wounded = woundRandomMinion(session);
-    return completeDungeonNode({ ...wounded, notice: 'A curse bites the chamber. One minion falls for the run.' });
+    const alive = session.minions
+      .map((unit, index) => ({ unit, index }))
+      .filter(item => item.unit.alive);
+    const chosen = shuffle(alive)[0];
+
+    if (!chosen) {
+      return {
+        id: 'curse-gold',
+        title: 'Hollow Tithe',
+        flavor: 'The omen finds no living target and takes coin instead.',
+        detail: '30 run gold is pulled from your purse.',
+        tone: 'curse',
+        apply: current => ({ ...current, runGold: Math.max(0, current.runGold - 30) }),
+      };
+    }
+
+    const name = getMinionTemplate(chosen.unit.stack.templateId)?.name || 'A minion';
+    return {
+      id: 'curse',
+      title: 'Black Sigil',
+      flavor: 'A curse bites the chamber and the warband recoils.',
+      detail: `${name} is struck down by the omen.`,
+      tone: 'curse',
+      apply: current => woundSpecificMinion(current, chosen.index),
+    };
   }
 
   if (roll < 0.4) {
-    return completeDungeonNode(addRandomRunMinion(session, 'tier1', 'A lost pilgrim joins the run.'));
+    const template = shuffle(MINION_TEMPLATES.filter(item => item.tier === 'tier1'))[0] || MINION_TEMPLATES[0];
+    return {
+      id: 'recruit',
+      title: 'Lost Pilgrim',
+      flavor: 'A wanderer steps out of the smoke and kneels at your banner.',
+      detail: `${template.name} joins the run.`,
+      tone: 'recruit',
+      apply: current => addRunMinionFromTemplate(current, template, `${template.name} joins the run.`),
+    };
   }
 
   if (roll < 0.6) {
-    return completeDungeonNode(makeStatBuff('event-ward', 'Event Ward', '+2 Defensive Power from the pool.', { defensivePower: 2 }).apply(session));
+    return {
+      id: 'ward',
+      title: 'Event Ward',
+      flavor: 'Moonlit water clings to your armor like a blessing.',
+      detail: '+2 Defensive Power for the rest of this run.',
+      tone: 'ward',
+      apply: current => makeStatBuff('event-ward', 'Event Ward', '+2 Defensive Power from the pool.', { defensivePower: 2 }).apply(current),
+    };
   }
 
   if (roll < 0.8) {
-    return completeDungeonNode(resurrectMinions({ ...session, notice: 'The pool restores one fallen minion.' }, 1));
+    if (!hasFallenMinions(session)) {
+      return {
+        id: 'gold-fallback',
+        title: 'Quiet Echo',
+        flavor: 'No fallen soul answers the bell, so the omen leaves coin instead.',
+        detail: 'You gain 40 run gold.',
+        tone: 'gold',
+        apply: current => ({ ...current, runGold: current.runGold + 40 }),
+      };
+    }
+
+    return {
+      id: 'revive',
+      title: 'Pool Revival',
+      flavor: 'Cold water surges and drags a fallen fighter back to their feet.',
+      detail: 'One fallen minion returns to the run.',
+      tone: 'blessing',
+      apply: current => resurrectMinions(current, 1),
+    };
   }
 
-  return completeDungeonNode({ ...session, runGold: session.runGold + 70, notice: 'The pool leaves 70 black coins in your palm.' });
+  return {
+    id: 'gold',
+    title: 'Black Coin Spill',
+    flavor: 'The pool coughs up treasure before sinking back into silence.',
+    detail: 'You gain 70 run gold.',
+    tone: 'gold',
+    apply: current => ({ ...current, runGold: current.runGold + 70 }),
+  };
+}
+
+function applyDungeonEventOutcome(session: RunSession, outcome: OmenOutcome): RunSession {
+  return completeDungeonNode({ ...outcome.apply(session), notice: outcome.detail });
 }
 
 function grantCompletionReward(session: RunSession): string {
@@ -2775,18 +3167,49 @@ function getNextTierTemplate(templateId: string): MinionTemplate | undefined {
   return MINION_TEMPLATES.find(item => item.class === template.class && item.tier === nextTier);
 }
 
+function woundSpecificMinion(session: RunSession, index: number): RunSession {
+  const target = session.minions[index];
+  if (!target?.alive) return session;
+
+  return {
+    ...session,
+    minions: session.minions.map((unit, unitIndex) => (
+      unitIndex === index
+        ? { ...unit, alive: false, stack: { ...unit.stack, runCurrentHealth: 0 } }
+        : unit
+    )),
+  };
+}
+
 function woundRandomMinion(session: RunSession): RunSession {
   const alive = session.minions.map((unit, index) => ({ unit, index })).filter(item => item.unit.alive);
   const chosen = shuffle(alive)[0];
   if (!chosen) return { ...session, runGold: Math.max(0, session.runGold - 30) };
+  return woundSpecificMinion(session, chosen.index);
+}
+
+function addRunMinionFromTemplate(session: RunSession, template: MinionTemplate, notice: string): RunSession {
+  const replacementIndex = session.minions.findIndex(unit => !unit.alive);
+  const newUnit: RunUnit = {
+    stack: cloneRunStack(template.templateId, `loaned-reward-${session.id}-${Date.now()}`),
+    alive: true,
+    origin: 'reward',
+  };
+
+  if (replacementIndex >= 0) {
+    return {
+      ...session,
+      minions: session.minions.map((unit, index) => index === replacementIndex ? newUnit : unit),
+      notice,
+    };
+  }
+
+  if (session.minions.length >= MAX_FIELD_MINIONS) return { ...session, notice };
 
   return {
     ...session,
-    minions: session.minions.map((unit, index) => (
-      index === chosen.index
-        ? { ...unit, alive: false, stack: { ...unit.stack, runCurrentHealth: 0 } }
-        : unit
-    )),
+    minions: [...session.minions, newUnit],
+    notice,
   };
 }
 

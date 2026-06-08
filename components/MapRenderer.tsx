@@ -1,6 +1,7 @@
 'use client';
 
 import { type WheelEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import Image from 'next/image';
 import { getStaticPOIs, MAP_CONFIG, POI, POIType } from '@/lib/mapData';
 import { AssetLoader, ASSET_PATHS, getPlayerModelPath, preloadAllAssets } from '@/lib/assetLoader';
@@ -109,7 +110,30 @@ interface PendingTravelIntent {
 function getRenderedUserPosition(user: ReturnType<typeof getCurrentUser>, now: number): { x: number; y: number } | null {
   if (!user) return null;
   const travel = user.traveling;
-  if (!travel) return { x: user.x, y: user.y };
+  if (!travel) {
+    const activeJob = user.jobQueue?.[0];
+    const activeJobTravelDuration = activeJob ? Math.max(0, activeJob.duration - activeJob.workDuration) : 0;
+    if (activeJob && now >= activeJob.startTime && !activeJob.travelComplete && activeJobTravelDuration > 0) {
+      const distanceX = Math.abs(activeJob.targetX - activeJob.startX);
+      const distanceY = Math.abs(activeJob.targetY - activeJob.startY);
+      const totalDistance = distanceX + distanceY;
+      if (totalDistance <= 0) return { x: activeJob.targetX, y: activeJob.targetY };
+
+      const progress = Math.max(0, Math.min(1, (now - activeJob.startTime) / activeJobTravelDuration));
+      const coveredDistance = totalDistance * progress;
+      const xDirection = activeJob.targetX >= activeJob.startX ? 1 : -1;
+      const yDirection = activeJob.targetY >= activeJob.startY ? 1 : -1;
+      const xDistance = Math.min(distanceX, coveredDistance);
+      const yDistance = Math.max(0, coveredDistance - distanceX);
+
+      return {
+        x: activeJob.startX + xDistance * xDirection,
+        y: activeJob.startY + Math.min(distanceY, yDistance) * yDirection,
+      };
+    }
+
+    return { x: user.x, y: user.y };
+  }
 
   const startX = travel.startX ?? user.x;
   const startY = travel.startY ?? user.y;
@@ -567,6 +591,7 @@ export default function MapRenderer({
   const [cursorScreen, setCursorScreen] = useState<{ x: number; y: number } | null>(null);
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
   const [dimensionsReady, setDimensionsReady] = useState(false);
+  const [isMounted, setIsMounted] = useState(false);
   const [assetsLoaded, setAssetsLoaded] = useState(false);
   const [showPlayerList, setShowPlayerList] = useState(false);
   const [playerListLocation, setPlayerListLocation] = useState<{ x: number; y: number } | null>(null);
@@ -592,6 +617,10 @@ export default function MapRenderer({
   useEffect(() => {
     selectedDungeonRunRef.current = selectedDungeonRun;
   }, [selectedDungeonRun]);
+
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
 
   // Preload all assets
   useEffect(() => {
@@ -649,9 +678,17 @@ export default function MapRenderer({
   useEffect(() => {
     const interval = window.setInterval(() => {
       const latestUser = getCurrentUser();
-      if (!latestUser?.traveling) return;
+      if (!latestUser) return;
+      const activeJob = latestUser.jobQueue?.[0];
+      const activeJobTraveling = Boolean(
+        activeJob &&
+        Date.now() >= activeJob.startTime &&
+        !activeJob.travelComplete
+      );
+      if (!latestUser.traveling && !activeJobTraveling) return;
 
       setWorldNow(Date.now());
+      if (activeJobTraveling) updateJobTravelProgress();
       checkTravelComplete();
       setCurrentUser(getCurrentUser());
     }, DIRECT_TRAVEL_RENDER_INTERVAL_MS);
@@ -733,6 +770,11 @@ export default function MapRenderer({
     document.body.classList.toggle('world-panel-open', worldPanelOpen);
     return () => document.body.classList.remove('world-panel-open');
   }, [worldPanelOpen]);
+
+  useEffect(() => {
+    document.body.classList.toggle('battle-open', Boolean(activeBattleEnemy));
+    return () => document.body.classList.remove('battle-open');
+  }, [activeBattleEnemy]);
 
   useEffect(() => {
     const signature = worldEnemies.map(enemy => enemy.id).join('|');
@@ -887,10 +929,18 @@ export default function MapRenderer({
     }
 
     const activeTravel = currentUser?.traveling;
+    const activeJob = currentUser?.jobQueue?.[0];
+    const activeJobTraveling = Boolean(
+      activeJob &&
+      worldNow >= activeJob.startTime &&
+      !activeJob.travelComplete
+    );
     const travelPathTarget = pendingTravel
       ? { x: pendingTravel.targetX, y: pendingTravel.targetY, active: false }
       : activeTravel
         ? { x: activeTravel.targetX, y: activeTravel.targetY, active: true }
+        : activeJobTraveling
+          ? { x: activeJob.targetX, y: activeJob.targetY, active: true }
         : null;
 
     if (renderedUserPosition && travelPathTarget) {
@@ -1449,7 +1499,32 @@ export default function MapRenderer({
     return { success: true };
   };
 
+  const mainQuestUi = (!worldPanelOpen || priorityStoryReady) && !activeBattleEnemy
+    ? (
+      mainQuestTrackerHidden ? (
+        <button
+          type="button"
+          onClick={() => setMainQuestTrackerVisibility(false)}
+          className="main-quest-reopen command-panel vine-frame pointer-events-auto fixed left-4 top-24 z-40 rounded-full border text-zinc-100"
+          aria-label="Show main quest tracker"
+          title="Show main quest tracker"
+        >
+          !
+        </button>
+      ) : (
+        <MainQuestTracker
+          currentUser={currentUser}
+          poisData={poisData}
+          onTravel={requestTravelIntent}
+          onClaim={claimMainStoryReward}
+          onHide={() => setMainQuestTrackerVisibility(true)}
+        />
+      )
+    )
+    : null;
+
   return (
+    <>
     <div ref={containerRef} className="game-map-shell">
       <canvas
         ref={canvasRef}
@@ -1467,34 +1542,13 @@ export default function MapRenderer({
       <TravelConfirmModal
         pendingTravel={pendingTravel}
         durationMs={pendingTravelDuration}
+        activeJobCount={currentUser?.jobQueue.length || 0}
         onConfirm={confirmPendingTravel}
         onCancel={() => {
           emitFxEvent({ type: 'travel', tone: 'bone', intensity: 0.34 });
           setPendingTravel(null);
         }}
       />
-
-      {(!worldPanelOpen || priorityStoryReady) && (
-        mainQuestTrackerHidden ? (
-          <button
-            type="button"
-            onClick={() => setMainQuestTrackerVisibility(false)}
-            className="main-quest-reopen command-panel vine-frame pointer-events-auto fixed left-4 top-24 z-[88] rounded-full border text-zinc-100"
-            aria-label="Show main quest tracker"
-            title="Show main quest tracker"
-          >
-            !
-          </button>
-        ) : (
-          <MainQuestTracker
-            currentUser={currentUser}
-            poisData={poisData}
-            onTravel={requestTravelIntent}
-            onClaim={claimMainStoryReward}
-            onHide={() => setMainQuestTrackerVisibility(true)}
-          />
-        )
-      )}
 
       <POIModal 
         poi={selectedPOI}
@@ -1506,7 +1560,9 @@ export default function MapRenderer({
         onTravel={() => {
           if (!selectedPOI) return;
           const target = getPoiTravelTarget(selectedPOI);
-          beginTravel(target.x, target.y);
+          requestTravelIntent(target.x, target.y, selectedPOI.name, 'poi');
+          setSelectedPOI(null);
+          setShowPlayerList(false);
         }}
       />
 
@@ -1519,7 +1575,9 @@ export default function MapRenderer({
         onTravel={() => {
           if (!selectedTown) return;
           const target = getPoiTravelTarget(selectedTown);
-          beginTravel(target.x, target.y);
+          requestTravelIntent(target.x, target.y, selectedTown.name, 'town');
+          setSelectedTown(null);
+          setShowPlayerList(false);
         }}
       />
 
@@ -1539,7 +1597,10 @@ export default function MapRenderer({
             setActiveBattleEnemy(selectedEnemy);
             setSelectedEnemy(null);
           }}
-          onTravel={() => beginTravel(selectedEnemy.x, selectedEnemy.y)}
+          onTravel={() => {
+            requestTravelIntent(selectedEnemy.x, selectedEnemy.y, selectedEnemy.name, 'enemy');
+            setSelectedEnemy(null);
+          }}
           onClose={() => setSelectedEnemy(null)}
         />
       )}
@@ -1562,7 +1623,8 @@ export default function MapRenderer({
           }}
           onTravel={() => {
             const target = getFootprintCenterTile(selectedDungeon.x, selectedDungeon.y, 3, 3);
-            beginTravel(target.x, target.y);
+            requestTravelIntent(target.x, target.y, selectedDungeon.name, 'dungeon');
+            setSelectedDungeon(null);
           }}
           onClose={() => setSelectedDungeon(null)}
         />
@@ -1580,11 +1642,16 @@ export default function MapRenderer({
       {selectedQuestNpc && (
         <QuestNpcModal
           npc={selectedQuestNpc}
-          onTravel={() => beginTravel(selectedQuestNpc.x, selectedQuestNpc.y)}
+          onTravel={() => {
+            requestTravelIntent(selectedQuestNpc.x, selectedQuestNpc.y, selectedQuestNpc.name, 'quest');
+            setSelectedQuestNpc(null);
+          }}
           onClose={() => setSelectedQuestNpc(null)}
         />
       )}
     </div>
+    {isMounted && mainQuestUi ? createPortal(mainQuestUi, document.body) : null}
+    </>
   );
 }
 
@@ -1715,19 +1782,16 @@ function MainQuestTracker({
         ? currentUser.traveling ? 'Walking' : 'Travel'
         : actionPanel === 'jobs' ? 'Jobs' : 'Quests';
   const targetKind: TravelIntentKind = targetPoi?.type === POIType.TOWN ? 'town' : 'poi';
-  const trackerDetail = status.complete
-    ? 'Reward ready.'
-    : targetPoi
-      ? `Travel to ${targetPoi.name}.`
-      : getStoryRequirementLabel(activeStory);
+  const objectiveLabel = status.complete
+    ? 'Story reward ready to claim.'
+    : getStoryRequirementLabel(activeStory);
 
   return (
-    <aside className="main-quest-tracker main-quest-guide command-panel vine-frame pointer-events-auto fixed left-4 top-24 z-[120] w-[min(24rem,calc(100vw-2rem))] rounded border p-4 text-zinc-100">
+    <aside className="main-quest-tracker main-quest-guide command-panel vine-frame pointer-events-auto fixed left-4 top-24 z-40 w-[min(24rem,calc(100vw-2rem))] rounded border p-4 text-zinc-100">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="arcane-label">Main Quest</div>
-          <h3 className="fantasy-heading truncate text-lg">{activeStory.name}</h3>
-          <p className="ui-muted mt-1 line-clamp-2 text-xs font-bold">{trackerDetail}</p>
+          <h3 className="fantasy-heading text-lg leading-tight">{activeStory.name}</h3>
         </div>
         <div className="flex shrink-0 items-start gap-2">
           <button
@@ -1762,10 +1826,10 @@ function MainQuestTracker({
 
           openCommandPanel(actionPanel);
         }}
-        className="first-step-row mt-3 flex w-full items-center justify-between rounded px-3 py-2 text-left text-xs font-bold disabled:opacity-45"
+        className="main-quest-action first-step-row mt-3 block w-full rounded px-3 py-2.5 text-left text-xs font-bold disabled:opacity-45"
       >
-        <span>{status.complete ? 'Claim story reward' : getStoryRequirementLabel(activeStory)}</span>
-        <span className="ui-accent font-black">{actionLabel}</span>
+        <span className="block leading-snug text-zinc-100">{objectiveLabel}</span>
+        <span className="ui-accent mt-2 block text-[10px] font-black uppercase tracking-[0.12em]">{actionLabel}</span>
       </button>
       <div className="ui-progress-track mt-3 h-1.5 overflow-hidden rounded border">
         <div className="ui-progress-fill h-full" style={{ width: `${progress}%` }} />
@@ -1782,14 +1846,22 @@ function MainQuestTracker({
 function TravelConfirmModal({
   pendingTravel,
   durationMs,
+  activeJobCount,
   onConfirm,
   onCancel,
 }: {
   pendingTravel: PendingTravelIntent | null;
   durationMs: number;
+  activeJobCount: number;
   onConfirm: () => void;
   onCancel: () => void;
 }) {
+  const [confirmCancelJobs, setConfirmCancelJobs] = useState(false);
+
+  useEffect(() => {
+    setConfirmCancelJobs(false);
+  }, [pendingTravel?.targetX, pendingTravel?.targetY, pendingTravel?.kind, pendingTravel?.label, activeJobCount]);
+
   if (!pendingTravel) return null;
 
   const kindLabel: Record<TravelIntentKind, string> = {
@@ -1815,21 +1887,45 @@ function TravelConfirmModal({
             <p className="ui-muted mt-1 text-xs font-bold">
               Estimated road time: {formatTravelEta(durationMs)}.
             </p>
+            {activeJobCount > 0 && (
+              <p className="mt-2 rounded border border-amber-200/35 bg-amber-900/35 px-2 py-1 text-[11px] font-black text-amber-100">
+                Walking now cancels {activeJobCount} queued job{activeJobCount === 1 ? '' : 's'}.
+              </p>
+            )}
+            {activeJobCount > 0 && confirmCancelJobs && (
+              <div className="mt-2 rounded border border-red-300/40 bg-red-950/45 px-2 py-2 text-[11px] font-black text-red-100">
+                Are you sure? Your current job queue will be canceled and cannot be restored.
+              </div>
+            )}
           </div>
           <div className="flex shrink-0 gap-2">
             <button
               type="button"
-              onClick={onCancel}
+              onClick={() => {
+                if (confirmCancelJobs) {
+                  setConfirmCancelJobs(false);
+                  return;
+                }
+                onCancel();
+              }}
               className="ui-button rounded px-3 py-2 text-xs font-black"
             >
-              Cancel
+              {confirmCancelJobs ? 'Back' : 'Cancel'}
             </button>
             <button
               type="button"
-              onClick={onConfirm}
+              onClick={() => {
+                if (activeJobCount > 0 && !confirmCancelJobs) {
+                  setConfirmCancelJobs(true);
+                  return;
+                }
+                onConfirm();
+              }}
               className="ui-button-primary rounded px-4 py-2 text-xs font-black"
             >
-              Walk
+              {activeJobCount > 0
+                ? (confirmCancelJobs ? `Cancel ${activeJobCount} Job${activeJobCount === 1 ? '' : 's'} & Walk` : 'Walk')
+                : 'Walk'}
             </button>
           </div>
         </div>

@@ -330,6 +330,11 @@ export default function GameCommandCenter({ onOpenAvatar }: GameCommandCenterPro
   }, [showDailyRun]);
 
   useEffect(() => {
+    document.body.classList.toggle('command-center-open', isCommandOpen);
+    return () => document.body.classList.remove('command-center-open');
+  }, [isCommandOpen]);
+
+  useEffect(() => {
     if (!user) return;
     const key = `wizardy_first_steps_seen_${user.username}`;
     const alreadySeen = readGameJson<boolean>(key, false);
@@ -803,7 +808,7 @@ export default function GameCommandCenter({ onOpenAvatar }: GameCommandCenterPro
       )}
 
       {isCommandOpen && (
-      <aside className="command-panel command-center-shell vine-frame fixed bottom-4 left-4 right-4 top-20 z-40 overflow-hidden rounded border text-zinc-100">
+      <aside className="command-panel command-center-shell vine-frame fixed bottom-4 left-4 right-4 top-20 z-50 overflow-hidden rounded border text-zinc-100">
         <div className="grid h-full min-h-0 grid-cols-[14rem_minmax(0,1fr)]">
           <nav className="command-center-nav border-r border-[rgba(232,217,184,0.14)] p-3">
             <div className="mb-4 px-2">
@@ -1523,22 +1528,26 @@ export default function GameCommandCenter({ onOpenAvatar }: GameCommandCenterPro
           {inventory.length === 0 ? (
             <EmptyState text="No carried items." />
           ) : (
-            <div className="command-icon-grid">
+            <div className="command-icon-grid inventory-item-grid">
               {inventory.map(item => {
                 const definition = getInventoryItemDefinition(item.id);
                 const kind = definition?.kind || item.kind || 'material';
                 const rarity = definition?.rarity || item.rarity || 'common';
                 const canUse = kind === 'consumable' || kind === 'container';
-                const tooltip = `${definition?.name || item.name} - ${kind}, ${rarity}. ${definition?.description || item.description || 'Carried inventory item.'}`;
 
                 return (
-                  <div key={item.id} className={`command-icon-tile rounded border ${rarityClasses(rarity)}`} title={tooltip}>
-                    <span className="command-icon-image relative block overflow-hidden rounded">
+                  <div
+                    key={item.id}
+                    tabIndex={0}
+                    className={`command-icon-tile rounded border ${canUse ? 'command-icon-tile-has-action' : ''} ${rarityClasses(rarity)}`}
+                  >
+                    <span className="command-icon-image overflow-hidden rounded">
                       <Image
                         src={getInventoryIconPath(item)}
-                        alt={definition?.name || item.name}
+                        alt=""
                         fill
-                        className="object-contain p-1"
+                        sizes="80px"
+                        className="object-contain p-1.5"
                         style={{ imageRendering: 'pixelated' }}
                       />
                     </span>
@@ -1553,9 +1562,11 @@ export default function GameCommandCenter({ onOpenAvatar }: GameCommandCenterPro
                       </button>
                     )}
                     <span className="command-icon-tooltip rounded border">
-                      <span className="block text-xs font-black text-zinc-100">{definition?.name || item.name}</span>
-                      <span className="ui-faint mt-1 block text-[10px] font-black uppercase">{kind} - {rarity}</span>
-                      <span className="ui-muted mt-2 block text-xs font-bold">{definition?.description || item.description || 'Carried inventory item.'}</span>
+                      <span className="command-icon-tooltip-title block font-black text-zinc-100">{definition?.name || item.name}</span>
+                      <span className="command-icon-tooltip-meta ui-faint block font-black uppercase">{kind} - {rarity}</span>
+                      <span className="command-icon-tooltip-copy ui-muted block font-bold">
+                        {definition?.description || item.description || 'Carried inventory item.'}
+                      </span>
                     </span>
                   </div>
                 );
@@ -1569,28 +1580,29 @@ export default function GameCommandCenter({ onOpenAvatar }: GameCommandCenterPro
           {unequippedItems.length === 0 ? (
             <EmptyState text="No unequipped gear." />
           ) : (
-            <div className="command-icon-grid">
+            <div className="command-icon-grid gear-available-grid">
               {unequippedItems.map(item => (
                 <button
                   key={item.id}
                   type="button"
                   onClick={() => handleEquip(item.id)}
                   className={`command-icon-tile rounded border ${rarityClasses(item.rarity)}`}
-                  title={`${item.name} - ${item.slot.replace('-', ' ')}, ${item.rarity}. Click to equip.`}
+                  aria-label={`Equip ${item.name}`}
                 >
-                  <span className="command-icon-image relative block overflow-hidden rounded">
+                  <span className="command-icon-image overflow-hidden rounded">
                     <Image
                       src={getEquipmentIconPath(item)}
-                      alt={item.name}
+                      alt=""
                       fill
-                      className="object-contain p-1"
+                      sizes="88px"
+                      className="object-contain p-1.5"
                       style={{ imageRendering: 'pixelated' }}
                     />
                   </span>
                   <span className="command-icon-tooltip rounded border">
-                    <span className="block text-xs font-black text-zinc-100">{item.name}</span>
-                    <span className="ui-faint mt-1 block text-[10px] font-black uppercase">{item.slot.replace('-', ' ')} - {item.rarity}</span>
-                    <span className="ui-muted mt-2 block text-xs font-bold">Click to equip this piece.</span>
+                    <span className="command-icon-tooltip-title block font-black text-zinc-100">{item.name}</span>
+                    <span className="command-icon-tooltip-meta ui-faint block font-black uppercase">{item.slot.replace('-', ' ')} - {item.rarity}</span>
+                    <span className="command-icon-tooltip-copy ui-muted block font-bold">Click to equip this piece.</span>
                   </span>
                 </button>
               ))}

@@ -2812,7 +2812,7 @@ export function getTravelTimeModifier(user: Pick<User, 'stats' | 'equipment' | '
 const DIRECT_TRAVEL_MS_PER_TILE = 450;
 const DIRECT_TRAVEL_MIN_DURATION_MS = 1200;
 const DIRECT_TRAVEL_MAX_DURATION_MS = 60000;
-const JOB_TRAVEL_MS_PER_TILE = 1500;
+const JOB_TRAVEL_MS_PER_TILE = DIRECT_TRAVEL_MS_PER_TILE;
 const JOB_TRAVEL_MIN_DURATION_MS = 1200;
 const JOB_TRAVEL_MAX_DURATION_MS = 60000;
 
@@ -3828,18 +3828,23 @@ export function startTravel(targetX: number, targetY: number): void {
   if (!currentUser) return;
 
   const duration = getDirectTravelDurationMs(currentUser, targetX, targetY);
+  const startTime = Date.now();
 
   const travelState: TravelState = {
     targetX,
     targetY,
     startX: currentUser.x,
     startY: currentUser.y,
-    startTime: Date.now(),
+    startTime,
     duration,
-    eventSeed: `${currentUser.username}-walk-${currentUser.x}-${currentUser.y}-${targetX}-${targetY}-${Date.now()}`,
+    eventSeed: `${currentUser.username}-walk-${currentUser.x}-${currentUser.y}-${targetX}-${targetY}-${startTime}`,
   };
 
-  updateCurrentUser({ traveling: travelState });
+  // Taking direct control of movement invalidates queued road work.
+  updateCurrentUser({
+    traveling: travelState,
+    jobQueue: currentUser.jobQueue.length > 0 ? [] : currentUser.jobQueue,
+  });
 }
 
 function getRoutePosition(
@@ -4215,7 +4220,7 @@ export function startJob(poiId: string, poiName: string, jobName: string, jobInd
 
 export function updateJobTravelProgress(): void {
   const currentUser = getCurrentUser();
-  if (!currentUser || currentUser.jobQueue.length === 0) return;
+  if (!currentUser || currentUser.jobQueue.length === 0 || currentUser.traveling) return;
 
   const now = Date.now();
   const updatedQueue = [...currentUser.jobQueue];
