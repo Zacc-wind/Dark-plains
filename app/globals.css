@@ -1613,8 +1613,10 @@ button.vine-frame::before,
 
 .run-minion-portrait-image {
   object-position: center center;
-  transform: scale(0.9);
+  transform: scale(0.92);
   transform-origin: center center;
+  image-rendering: auto;
+  filter: drop-shadow(0 2px 5px rgba(0, 0, 0, 0.32));
 }
 
 .ui-icon-frame .sprite-soft-glow:not(.run-minion-portrait-image) {
@@ -2811,12 +2813,27 @@ button.vine-frame::before,
   width: clamp(4.75rem, 6.8vw, 6.5rem);
   height: clamp(4.75rem, 6.8vw, 6.5rem);
   place-items: center;
-  border: 3px solid rgba(232, 217, 184, 0.3);
+  border: 2px solid rgba(232, 217, 184, 0.24);
   border-radius: 999px;
   background:
-    radial-gradient(circle at 38% 24%, rgba(255, 255, 255, 0.22), transparent 28%),
+    radial-gradient(circle at 38% 24%, rgba(255, 255, 255, 0.16), transparent 30%),
     linear-gradient(180deg, rgba(10, 13, 14, 0.94), rgba(1, 2, 3, 0.92));
   box-shadow: inset 0 0 18px rgba(244, 221, 176, 0.04), 0 12px 24px rgba(0, 0, 0, 0.38);
+}
+
+.run-ui-art,
+.run-route-node-icon img,
+.run-reward-icon img,
+.run-omen-sigil-icon img,
+.run-omen-result-icon img {
+  image-rendering: auto;
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
+}
+
+.run-route-node-icon img {
+  padding: 0.85rem;
+  filter: drop-shadow(0 3px 6px rgba(0, 0, 0, 0.34));
 }
 
 .run-route-node-title {
@@ -2836,7 +2853,6 @@ button.vine-frame::before,
 
 .run-route-node-reachable {
   color: #fff8e7;
-  filter: brightness(1.1);
 }
 
 .run-route-node-reachable .run-route-node-icon {
@@ -2997,7 +3013,8 @@ button.vine-frame::before,
   display: block;
   flex-shrink: 0;
   object-fit: contain;
-  filter: drop-shadow(0 0 4px rgba(0, 0, 0, 0.45));
+  image-rendering: auto;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.35));
 }
 
 .run-header-chip-value {
@@ -3032,6 +3049,14 @@ button.vine-frame::before,
 
 .run-roster-stats-launch {
   cursor: pointer;
+  border-color: rgba(232, 217, 184, 0.16);
+  background: linear-gradient(180deg, rgba(13, 21, 24, 0.78), rgba(4, 8, 10, 0.68));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.055), 0 10px 28px rgba(0, 0, 0, 0.28);
+}
+
+.run-roster-stats-launch:hover {
+  border-color: rgba(232, 217, 184, 0.3);
+  background: linear-gradient(180deg, var(--ui-card-hover), rgba(5, 10, 12, 0.78));
 }
 
 .run-roster-stats-launch .run-header-chip {

@@ -974,8 +974,7 @@ function RunMapPanel({
                         src={node.iconPath}
                         alt=""
                         fill
-                        className="object-contain p-1.5"
-                        style={{ imageRendering: 'pixelated' }}
+                        className="run-ui-art object-contain"
                       />
                     </span>
                     <div className="min-w-0">
@@ -1055,8 +1054,7 @@ function DailyRouteMap({
                         alt=""
                         fill
                         sizes="120px"
-                        className="object-contain p-1.5"
-                        style={{ imageRendering: 'pixelated' }}
+                        className="run-ui-art object-contain"
                       />
                     </span>
                     <span className="run-route-node-title">
@@ -1280,8 +1278,7 @@ function RunRewardCard({
             alt=""
             fill
             sizes="48px"
-            className="object-contain p-2"
-            style={{ imageRendering: 'pixelated' }}
+            className="run-ui-art object-contain p-2"
           />
         </span>
         <span className="min-w-0 flex-1">
@@ -1448,8 +1445,7 @@ function OmenPanel({
                 alt=""
                 fill
                 sizes="80px"
-                className="object-contain p-3"
-                style={{ imageRendering: 'pixelated' }}
+                className="run-ui-art object-contain p-3"
               />
             </span>
           </div>
@@ -1478,8 +1474,7 @@ function OmenPanel({
             alt=""
             fill
             sizes="64px"
-            className="object-contain p-2.5"
-            style={{ imageRendering: 'pixelated' }}
+            className="run-ui-art object-contain p-2.5"
           />
         </div>
         <div className="arcane-label">Omen Resolved</div>
@@ -1680,7 +1675,7 @@ function RunBattleReportCard({ report }: { report: RunBattleReport }) {
                 src={unit.assetPath}
                 alt={unit.name}
                 fill
-                className="run-minion-portrait-image sprite-soft-glow object-contain"
+                className="run-minion-portrait-image run-ui-art object-contain"
                 sizes="36px"
                 unoptimized
               />
@@ -1756,7 +1751,7 @@ function MinionPortrait({ template, size = 'small' }: { template: MinionTemplate
         src={`${MINION_ICON_BASE}/${template.assetName}`}
         alt={template.name}
         fill
-        className="run-minion-portrait-image sprite-soft-glow object-contain"
+        className="run-minion-portrait-image run-ui-art object-contain"
         sizes={size === 'large' ? '112px' : size === 'formation' ? '84px' : size === 'tiny' ? '48px' : '56px'}
         unoptimized
       />
@@ -1861,7 +1856,7 @@ function RunStatsLaunch({ session, onOpen }: { session: RunSession; onOpen: () =
     <button
       type="button"
       onClick={onOpen}
-      className="run-roster-stats-launch first-step-row w-full shrink-0 rounded border px-3 py-2.5 text-left transition"
+      className="run-roster-stats-launch ui-card w-full shrink-0 rounded border px-3 py-2.5 text-left transition"
       aria-label="Open run status"
     >
       <span className="flex items-center justify-between gap-2">
