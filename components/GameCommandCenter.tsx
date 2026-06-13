@@ -1,10 +1,16 @@
 'use client';
 
-import { type DragEvent, useEffect, useRef, useState } from 'react';
+import { type CSSProperties, type DragEvent, useEffect, useRef, useState } from 'react';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { getPlayerModelPath } from '@/lib/assetLoader';
-import { BATTLE_SPELLS } from '@/lib/battle';
+import { BATTLE_SPELLS, type BattleSpell } from '@/lib/battle';
+import {
+  COMBAT_SPEED_OPTIONS,
+  CombatSpeed,
+  readCombatSpeedSetting,
+  writeCombatSpeedSetting,
+} from '@/lib/combatSettings';
 import { DailyRunModal, getSavedDailyRunSummary } from './RoguelikeRunModal';
 import {
   ActivityEntry,
@@ -77,9 +83,23 @@ import {
 import { emitCompletionNotice, type CompletionRewardLine } from '@/lib/completionEvents';
 import { emitFxEvent } from '@/lib/fxEvents';
 import { readGameJson, writeGameJson } from '@/lib/gameStore';
+import {
+  getMusicVolumePercent,
+  isMusicMuted,
+  setMusicMuted,
+  setMusicVolumePercent,
+} from '@/lib/backgroundMusic';
+import {
+  getGameSoundVolumePercent,
+  isGameSoundId,
+  playGameSound,
+  preloadGameSounds,
+  setGameSoundVolumePercent,
+} from '@/lib/sound';
+import { getSpellIconPath } from '@/lib/spellAssets';
 
-type PanelId = 'overview' | 'character' | 'inventory' | 'minions' | 'spells' | 'jobs' | 'quests' | 'social' | 'runs' | 'leaderboards' | 'history';
-type PanelIconName = 'overview' | 'character' | 'inventory' | 'minions' | 'spells' | 'jobs' | 'quests' | 'social' | 'runs' | 'leaderboards' | 'history';
+type PanelId = 'overview' | 'character' | 'inventory' | 'minions' | 'spells' | 'jobs' | 'quests' | 'social' | 'settings' | 'runs' | 'leaderboards' | 'history';
+type PanelIconName = 'overview' | 'character' | 'inventory' | 'minions' | 'spells' | 'jobs' | 'quests' | 'social' | 'settings' | 'runs' | 'leaderboards' | 'history';
 type PanelButtonConfig = {
   id: PanelId;
   label: string;
@@ -99,6 +119,7 @@ const panelButtons: PanelButtonConfig[] = [
   { id: 'jobs', label: 'Jobs', icon: 'jobs' },
   { id: 'quests', label: 'Quests', icon: 'quests' },
   { id: 'social', label: 'Social', icon: 'social' },
+  { id: 'settings', label: 'Settings', icon: 'settings' },
 ];
 const primaryPanelButtons = panelButtons.slice(0, 5);
 const secondaryPanelButtons = panelButtons.slice(5);
@@ -123,15 +144,6 @@ const statIconPaths: Record<string, string> = {
   Minions: '/assets/icons/attack.png',
   XP: '/assets/icons/xp.png',
 };
-
-function getSpellInitials(name: string): string {
-  return name
-    .split(' ')
-    .map(part => part[0])
-    .join('')
-    .slice(0, 2)
-    .toUpperCase();
-}
 
 function getEquipmentIconPath(item: Pick<Equipment, 'slot' | 'rarity'>): string {
   return `${EQUIPMENT_ICON_BASE}/${item.slot}-${item.rarity}.png`;
@@ -286,8 +298,90 @@ export default function GameCommandCenter({ onOpenAvatar }: GameCommandCenterPro
   const [chatChannel, setChatChannel] = useState<SocialChatChannel>('global');
   const [chatDraft, setChatDraft] = useState('');
   const [isChatDockOpen, setIsChatDockOpen] = useState(false);
+  const [effectsVolume, setEffectsVolume] = useState(() => getGameSoundVolumePercent());
+  const [musicVolume, setMusicVolume] = useState(() => getMusicVolumePercent());
+  const [musicMuted, setMusicMutedState] = useState(() => isMusicMuted());
+  const [combatSpeed, setCombatSpeed] = useState<CombatSpeed>(() => readCombatSpeedSetting());
   const lastActivityNoticeId = useRef<string | null>(null);
   const router = useRouter();
+
+  useEffect(() => {
+    preloadGameSounds();
+
+    const getInteractiveTarget = (target: EventTarget | null): HTMLElement | null => {
+      if (!(target instanceof Element)) return null;
+      return target.closest<HTMLElement>('button, [role="button"], a[href], input[type="button"], input[type="submit"]');
+    };
+
+    const isDisabled = (target: HTMLElement): boolean =>
+      target.getAttribute('aria-disabled') === 'true' ||
+      (target instanceof HTMLButtonElement && target.disabled) ||
+      (target instanceof HTMLInputElement && target.disabled);
+
+    let lastHoverTarget: HTMLElement | null = null;
+
+    const handlePointerOver = (event: PointerEvent) => {
+      const target = getInteractiveTarget(event.target);
+      if (!target || isDisabled(target) || target === lastHoverTarget || target.dataset.soundHover === 'off') return;
+      lastHoverTarget = target;
+      playGameSound('ui.hover', { throttleMs: 90 });
+    };
+
+    const handlePointerOut = (event: PointerEvent) => {
+      const target = getInteractiveTarget(event.target);
+      const relatedTarget = event.relatedTarget instanceof Node ? event.relatedTarget : null;
+      if (target && relatedTarget && target.contains(relatedTarget)) return;
+      lastHoverTarget = null;
+    };
+
+    const handleClick = (event: MouseEvent) => {
+      const target = getInteractiveTarget(event.target);
+      if (!target || isDisabled(target) || target.dataset.soundClick === 'off') return;
+
+      const explicitSound = target.dataset.sound;
+      if (explicitSound && isGameSoundId(explicitSound)) {
+        playGameSound(explicitSound);
+        return;
+      }
+
+      const className = String(target.className || '');
+      const label = target.textContent?.trim().toLowerCase() || '';
+      if (label.includes('claim')) {
+        playGameSound('quest.claim');
+        return;
+      }
+      if (label.includes('buy') || label.includes('sell')) {
+        playGameSound('inventory.coins');
+        return;
+      }
+      if (label.includes('start') || label.includes('open')) {
+        playGameSound('ui.modalOpen');
+        return;
+      }
+      const isSoftAction =
+        className.includes('ui-button-danger') ||
+        label.includes('close') ||
+        label.includes('cancel') ||
+        label.includes('leave') ||
+        label.includes('retreat') ||
+        label.includes('logout');
+      const isTabAction =
+        className.includes('rail-button') ||
+        className.includes('spell-icon-card') ||
+        className.includes('command-center-tab');
+
+      playGameSound(isSoftAction ? 'ui.clickSoft' : isTabAction ? 'ui.tab' : 'ui.click');
+    };
+
+    document.addEventListener('pointerover', handlePointerOver, true);
+    document.addEventListener('pointerout', handlePointerOut, true);
+    document.addEventListener('click', handleClick, true);
+    return () => {
+      document.removeEventListener('pointerover', handlePointerOver, true);
+      document.removeEventListener('pointerout', handlePointerOut, true);
+      document.removeEventListener('click', handleClick, true);
+    };
+  }, []);
 
   useEffect(() => {
     const interval = window.setInterval(() => {
@@ -661,9 +755,40 @@ export default function GameCommandCenter({ onOpenAvatar }: GameCommandCenterPro
     setUser(getCurrentUser());
   };
 
+  const handleEffectsVolumeChange = (value: number) => {
+    setGameSoundVolumePercent(value);
+    setEffectsVolume(getGameSoundVolumePercent());
+  };
+
+  const handleMusicVolumeChange = (value: number) => {
+    setMusicVolumePercent(value);
+    setMusicVolume(getMusicVolumePercent());
+    setMusicMutedState(isMusicMuted());
+  };
+
+  const handleMusicMutedToggle = () => {
+    const nextMuted = !musicMuted;
+    setMusicMuted(nextMuted);
+    setMusicMutedState(isMusicMuted());
+    setMusicVolume(getMusicVolumePercent());
+    playGameSound('ui.toggle', { throttleMs: 100 });
+  };
+
+  const handleCombatSpeedChange = (speed: CombatSpeed) => {
+    setCombatSpeed(speed);
+    writeCombatSpeedSetting(speed);
+    playGameSound('ui.toggle', { throttleMs: 100 });
+  };
+
   const panelTitle = panelButtons.find(button => button.id === activePanel)?.label || 'Overview';
 
   const openPanel = (panelId: PanelId) => {
+    if (panelId === 'settings') {
+      setEffectsVolume(getGameSoundVolumePercent());
+      setMusicVolume(getMusicVolumePercent());
+      setMusicMutedState(isMusicMuted());
+      setCombatSpeed(readCombatSpeedSetting());
+    }
     setActivePanel(panelId);
     if (secondaryPanelButtons.some(button => button.id === panelId)) setIsSecondaryNavOpen(true);
     setIsCommandOpen(true);
@@ -679,6 +804,7 @@ export default function GameCommandCenter({ onOpenAvatar }: GameCommandCenterPro
       case 'jobs': return `${activeJobs.length}/4`;
       case 'quests': return '';
       case 'social': return String(acceptedFriends.length);
+      case 'settings': return musicMuted ? 'Muted' : `${musicVolume}%`;
       case 'runs': return hudDailyStatus.completedToday ? 'Done' : 'Open';
       case 'leaderboards': return '';
       case 'history': return `${activityLog.length}`;
@@ -721,40 +847,7 @@ export default function GameCommandCenter({ onOpenAvatar }: GameCommandCenterPro
         </div>
       </header>
 
-      {!isCommandOpen && (
-        <button
-          onClick={() => {
-            emitFxEvent({ type: 'interface', tone: 'bone', intensity: 0.42 });
-            setIsCommandOpen(true);
-          }}
-          className="main-menu-launch command-panel vine-frame fixed right-3 top-20 z-40 rounded border px-3 py-2 text-sm font-black text-zinc-100"
-          title="Open command panel"
-        >
-          Menu
-        </button>
-      )}
-
-      <button
-        type="button"
-        onClick={() => {
-          emitFxEvent({ type: 'daily', tone: 'blue', intensity: 0.72 });
-          setShowDailyRun(true);
-        }}
-        className={`daily-run-launch command-panel vine-frame fixed right-24 top-20 z-40 flex items-center gap-2 rounded border px-3 py-2 text-sm font-black text-zinc-100 ${savedDailyRun ? 'daily-run-launch-resume' : ''}`}
-        title={savedDailyRun ? `Resume ${savedDailyRun.title}` : `Open ${dailyChallenge.name}`}
-      >
-        <span className="relative h-5 w-5 overflow-hidden rounded-full">
-          <Image
-            src="/assets/icons/xp.png"
-            alt=""
-            fill
-            className="object-contain"
-            style={{ imageRendering: 'pixelated' }}
-          />
-        </span>
-        <span>{hudDailyStatus.completedToday ? 'Done' : savedDailyRun ? 'Resume' : 'Daily'}</span>
-      </button>
-
+      {!isCommandOpen && !showDailyRun && renderMapActionRail()}
       {!isCommandOpen && !showDailyRun && renderChatDock()}
 
       {renderActionChips()}
@@ -857,8 +950,15 @@ export default function GameCommandCenter({ onOpenAvatar }: GameCommandCenterPro
             </div>
           )}
 
-          <div className="command-center-content flex-1 overflow-y-auto px-6 py-6">
-            <div key={activePanel} className="command-center-panel-stage">
+          <div
+            className={`command-center-content flex-1 px-6 ${
+              activePanel === 'spells' ? 'command-center-content-spells py-3' : 'overflow-y-auto py-6'
+            }`}
+          >
+            <div
+              key={activePanel}
+              className={activePanel === 'spells' ? 'command-center-panel-stage command-center-panel-spells' : 'command-center-panel-stage'}
+            >
               {activePanel === 'overview' && renderOverview()}
               {activePanel === 'character' && renderCharacter()}
               {activePanel === 'inventory' && renderInventory()}
@@ -867,6 +967,7 @@ export default function GameCommandCenter({ onOpenAvatar }: GameCommandCenterPro
               {activePanel === 'jobs' && renderJobs()}
               {activePanel === 'quests' && renderQuests()}
               {activePanel === 'social' && renderSocial()}
+              {activePanel === 'settings' && renderSettings()}
               {activePanel === 'runs' && renderRuns()}
               {activePanel === 'leaderboards' && renderLeaderboards()}
               {activePanel === 'history' && renderHistory(activityLog)}
@@ -961,22 +1062,87 @@ export default function GameCommandCenter({ onOpenAvatar }: GameCommandCenterPro
     );
   }
 
-  function renderChatDock() {
-    if (!isChatDockOpen) {
-      return (
+  function renderMapActionRail() {
+    const dailyLabel = hudDailyStatus.completedToday ? 'Claimed' : savedDailyRun ? 'Resume' : 'Daily Run';
+    const dailyDetail = hudDailyStatus.completedToday
+      ? 'Reward claimed'
+      : savedDailyRun
+        ? `${savedDailyRun.phaseLabel} ${savedDailyRun.wins}/${savedDailyRun.targetBattles}`
+        : dailyChallenge.name;
+
+    return (
+      <nav className="map-action-rail command-panel vine-frame fixed right-4 top-20 z-40 w-[min(18.5rem,calc(100vw-2rem))] rounded border p-1.5 text-zinc-100" aria-label="World actions">
         <button
           type="button"
-          onClick={() => setIsChatDockOpen(true)}
-          className="social-chat-dock command-panel vine-frame fixed bottom-4 right-3 z-40 rounded border px-3 py-2 text-xs font-black text-zinc-100"
-          title="Open chat"
+          onClick={() => {
+            emitFxEvent({ type: 'daily', tone: 'blue', intensity: 0.72 });
+            setShowDailyRun(true);
+          }}
+          className={`map-action-button map-action-button-primary ${savedDailyRun ? 'map-action-button-resume' : ''}`}
+          title={savedDailyRun ? `Resume ${savedDailyRun.title}` : `Open ${dailyChallenge.name}`}
         >
-          Chat
+          <span className="map-action-icon map-action-icon-daily relative overflow-hidden">
+            <Image
+              src="/assets/icons/xp.png"
+              alt=""
+              fill
+              className="object-contain p-1"
+              style={{ imageRendering: 'pixelated' }}
+            />
+          </span>
+          <span className="map-action-copy">
+            <span className="map-action-label">{dailyLabel}</span>
+            <span className="map-action-detail">{dailyDetail}</span>
+          </span>
+          <span className="map-action-badge">{hudDailyStatus.completedToday ? 'Done' : savedDailyRun ? 'Run' : 'New'}</span>
         </button>
-      );
+
+        <button
+          type="button"
+          onClick={() => {
+            emitFxEvent({ type: 'interface', tone: 'bone', intensity: 0.42 });
+            setIsCommandOpen(true);
+          }}
+          className="map-action-button"
+          title="Open command center"
+        >
+          <span className="map-action-icon">
+            <PanelIcon icon="overview" />
+          </span>
+          <span className="map-action-copy">
+            <span className="map-action-label">Command</span>
+            <span className="map-action-detail">Army, gear, quests</span>
+          </span>
+          <span className="map-action-badge">{inventoryUsed}/{inventorySlots}</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setIsChatDockOpen(open => !open)}
+          className={`map-action-button ${isChatDockOpen ? 'map-action-button-active' : ''}`}
+          title={isChatDockOpen ? 'Close chat' : 'Open chat'}
+          aria-expanded={isChatDockOpen}
+        >
+          <span className="map-action-icon">
+            <PanelIcon icon="social" />
+          </span>
+          <span className="map-action-copy">
+            <span className="map-action-label">Chat</span>
+            <span className="map-action-detail">{chatChannel === 'party' ? 'Party channel' : 'Global channel'}</span>
+          </span>
+          <span className="map-action-badge">{chatMessages.length}</span>
+        </button>
+      </nav>
+    );
+  }
+
+  function renderChatDock() {
+    if (!isChatDockOpen) {
+      return null;
     }
 
     return (
-      <aside className="social-chat-dock command-panel vine-frame fixed bottom-4 right-3 z-40 w-[min(24rem,calc(100vw-2rem))] overflow-hidden rounded border text-zinc-100">
+      <aside className="social-chat-dock social-chat-panel command-panel vine-frame fixed right-4 top-[18.5rem] z-40 w-[min(24rem,calc(100vw-2rem))] overflow-hidden rounded border text-zinc-100">
         <div className="panel-header flex items-center justify-between border-b px-3 py-2">
           <div className="flex items-center gap-2">
             {(['global', 'party'] as SocialChatChannel[]).map(channel => (
@@ -1276,6 +1442,114 @@ export default function GameCommandCenter({ onOpenAvatar }: GameCommandCenterPro
               Send
             </button>
           </form>
+        </section>
+      </div>
+    );
+  }
+
+  function renderSettings() {
+    const activeSpeedLabel = COMBAT_SPEED_OPTIONS.find(option => option.id === combatSpeed)?.label || 'Normal';
+    const musicStatusLabel = musicMuted ? 'Muted' : `${musicVolume}%`;
+
+    return (
+      <div className="grid gap-4 xl:grid-cols-2">
+        <section className="ui-card rounded border p-4">
+          <SectionTitle title="Audio" action={`FX ${effectsVolume}%`} />
+          <div className="grid gap-3">
+            <label className="settings-volume-card rounded border px-4 py-3">
+              <span className="mb-3 flex items-center justify-between gap-3">
+                <span className="min-w-0">
+                  <span className="block text-sm font-black text-zinc-100">Sound Effects</span>
+                  <span className="ui-faint block text-xs font-bold">UI, map, combat, and inventory sounds</span>
+                </span>
+                <span className="ui-pill shrink-0 rounded border px-3 py-1 text-xs font-black">{effectsVolume}%</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                step={5}
+                value={effectsVolume}
+                onChange={(event) => handleEffectsVolumeChange(Number(event.target.value))}
+                className="settings-volume-range"
+                aria-label="Sound effects volume"
+                style={{ '--settings-volume': `${effectsVolume}%` } as CSSProperties}
+              />
+            </label>
+
+            <label className="settings-volume-card rounded border px-4 py-3">
+              <span className="mb-3 flex items-center justify-between gap-3">
+                <span className="min-w-0">
+                  <span className="block text-sm font-black text-zinc-100">Background Music</span>
+                  <span className="ui-faint block text-xs font-bold">Looping tavern ambience while you play</span>
+                </span>
+                <span className="ui-pill shrink-0 rounded border px-3 py-1 text-xs font-black">{musicStatusLabel}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                step={5}
+                value={musicVolume}
+                onChange={(event) => handleMusicVolumeChange(Number(event.target.value))}
+                className="settings-volume-range"
+                aria-label="Background music volume"
+                disabled={musicMuted}
+                style={{ '--settings-volume': `${musicVolume}%` } as CSSProperties}
+              />
+            </label>
+
+            <button
+              type="button"
+              onClick={handleMusicMutedToggle}
+              className={`settings-speed-option rounded border px-4 py-3 text-left ${musicMuted ? 'settings-speed-option-active' : ''}`}
+              aria-pressed={musicMuted}
+            >
+              <span className="block text-sm font-black text-zinc-100">
+                {musicMuted ? 'Unmute Background Music' : 'Mute Background Music'}
+              </span>
+              <span className="ui-faint mt-1 block text-xs font-bold">
+                {musicMuted ? 'Resume looping music at your saved volume' : 'Silence looping music while keeping sound effects'}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              data-sound-click="off"
+              onClick={() => playGameSound('ui.click', { throttleMs: 80 })}
+              disabled={effectsVolume <= 0}
+              className="ui-button rounded px-4 py-3 text-sm font-black disabled:opacity-40"
+            >
+              Test Sound Effects
+            </button>
+          </div>
+        </section>
+
+        <section className="ui-card rounded border p-4">
+          <SectionTitle title="Combat Speed" action={activeSpeedLabel} />
+          <div className="grid gap-3">
+            <div className="settings-speed-grid">
+              {COMBAT_SPEED_OPTIONS.map(option => (
+                <button
+                  key={option.id}
+                  type="button"
+                  onClick={() => handleCombatSpeedChange(option.id)}
+                  className={`settings-speed-option rounded border px-4 py-3 text-left ${combatSpeed === option.id ? 'settings-speed-option-active' : ''}`}
+                  aria-pressed={combatSpeed === option.id}
+                >
+                  <span className="block text-sm font-black text-zinc-100">{option.label}</span>
+                  <span className="ui-faint mt-1 block text-xs font-bold">
+                    {option.id === 'normal' ? 'Readable combat pacing' : option.id === 'fast' ? 'Shorter action pauses' : 'Minimum waits'}
+                  </span>
+                </button>
+              ))}
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <StatusPill label="Active" value={activeSpeedLabel} />
+              <StatusPill label="Scope" value="Combat" />
+            </div>
+          </div>
         </section>
       </div>
     );
@@ -1704,12 +1978,47 @@ export default function GameCommandCenter({ onOpenAvatar }: GameCommandCenterPro
       BATTLE_SPELLS.find(spell => spell.id === (hoveredSpellId || selectedSlotSpell?.id)) ||
       selectedSlotSpell ||
       BATTLE_SPELLS[0];
+    const inspectedEquippedIndex = equippedSpellIds.findIndex(spellId => spellId === inspectedSpell.id);
+    const inspectedKnown = knownSpellIds.has(inspectedSpell.id);
+    const spellTargetLabel =
+      inspectedSpell.target === 'enemy' ? 'Enemy' : inspectedSpell.target === 'ally' ? 'Ally' : 'Field';
 
     return (
-      <div className="spells-layout-grid">
-        <section className="ui-card rounded border p-4">
-          <SectionTitle title="Loadout" action={`Slot ${selectedSpellSlot + 1}`} />
-          <div className="grid grid-cols-4 gap-3">
+      <div className="spells-panel">
+        <section className={`spells-spotlight ui-card spell-card spell-card-${inspectedSpell.rarity} rounded border p-3`}>
+          <div className="spells-spotlight-art">
+            <SpellArt spell={inspectedSpell} variant="hero" dimmed={!inspectedKnown} />
+          </div>
+          <div className="spells-spotlight-copy min-w-0">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="ui-pill rounded border px-2 py-0.5 text-[10px] font-black uppercase tracking-[0.12em]">
+                {inspectedSpell.rarity}
+              </span>
+              <span className="ui-pill rounded border px-2 py-0.5 text-[10px] font-black uppercase tracking-[0.12em]">
+                {spellTargetLabel}
+              </span>
+              <span className="ui-pill rounded border px-2 py-0.5 text-[10px] font-black uppercase tracking-[0.12em]">
+                M {inspectedSpell.cost}
+              </span>
+              {inspectedEquippedIndex !== -1 && (
+                <span className="spells-equipped-pill rounded border px-2 py-0.5 text-[10px] font-black uppercase tracking-[0.12em]">
+                  Slot {inspectedEquippedIndex + 1}
+                </span>
+              )}
+              {!inspectedKnown && (
+                <span className="rounded border border-zinc-500/40 px-2 py-0.5 text-[10px] font-black uppercase tracking-[0.12em] text-zinc-400">
+                  Locked
+                </span>
+              )}
+            </div>
+            <h3 className="fantasy-heading mt-2 text-2xl leading-tight">{inspectedSpell.name}</h3>
+            <p className="ui-muted mt-1.5 text-sm font-bold leading-relaxed">{inspectedSpell.description}</p>
+          </div>
+        </section>
+
+        <section className="spells-loadout-section ui-card rounded border p-3">
+          <SectionTitle title="Loadout" action={`Slot ${selectedSpellSlot + 1}`} compact />
+          <div className="spells-loadout-slots">
             {equippedSpells.map((spell, index) => (
               <button
                 key={`${spell.id}-${index}`}
@@ -1720,30 +2029,19 @@ export default function GameCommandCenter({ onOpenAvatar }: GameCommandCenterPro
                 }}
                 onMouseEnter={() => setHoveredSpellId(spell.id)}
                 onFocus={() => setHoveredSpellId(spell.id)}
-                className={`spell-icon-card spell-card spell-card-${spell.rarity} rounded p-3 text-center transition ${selectedSpellSlot === index ? 'spell-card-equipped' : ''}`}
+                className={`spells-loadout-slot transition ${selectedSpellSlot === index ? 'spell-loadout-slot-selected' : ''}`}
+                aria-pressed={selectedSpellSlot === index}
               >
-                <span className={`spell-glyph spell-glyph-${spell.rarity}`}>{getSpellInitials(spell.name)}</span>
-                <span className="mt-2 block truncate text-xs font-black text-zinc-100">Slot {index + 1}</span>
-                <span className="ui-faint block text-[10px] font-black">M {spell.cost}</span>
+                <SpellArt spell={spell} variant="loadout" />
+                <span className="spells-loadout-slot-label">Slot {index + 1}</span>
               </button>
             ))}
           </div>
-
-          <div className="spell-detail-panel mt-4 rounded p-4">
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <div className="arcane-label">{inspectedSpell.rarity} - {inspectedSpell.target}</div>
-                <h3 className="fantasy-heading truncate text-2xl">{inspectedSpell.name}</h3>
-              </div>
-              <span className="ui-pill shrink-0 rounded border px-3 py-2 text-xs font-black">M {inspectedSpell.cost}</span>
-            </div>
-            <p className="ui-muted mt-3 text-sm font-bold">{inspectedSpell.description}</p>
-          </div>
         </section>
 
-        <section className="ui-card rounded border p-4">
-          <SectionTitle title="Archive" action={`${knownSpellIds.size} known`} />
-          <div className="spell-icon-grid grid gap-2">
+        <section className="spells-archive-section ui-card rounded border p-3">
+          <SectionTitle title="Archive" action={`${knownSpellIds.size} / ${BATTLE_SPELLS.length}`} compact />
+          <div className="spells-archive-grid">
             {BATTLE_SPELLS.map(spell => {
               const known = knownSpellIds.has(spell.id);
               const equippedIndex = equippedSpellIds.findIndex(id => id === spell.id);
@@ -1760,12 +2058,15 @@ export default function GameCommandCenter({ onOpenAvatar }: GameCommandCenterPro
                   onMouseEnter={() => setHoveredSpellId(spell.id)}
                   onFocus={() => setHoveredSpellId(spell.id)}
                   aria-disabled={!known}
-                  className={`spell-icon-card spell-archive-card spell-card spell-card-${spell.rarity} rounded p-3 text-center transition ${!known ? 'opacity-45' : ''} ${equipped ? 'spell-card-equipped' : ''}`}
+                  className={`spells-archive-tile transition ${!known ? 'spells-archive-tile-locked' : ''} ${equipped ? 'spells-archive-tile-equipped' : ''} ${hoveredSpellId === spell.id ? 'spells-archive-tile-active' : ''}`}
                 >
-                  <span className={`spell-glyph spell-glyph-${spell.rarity}`}>{getSpellInitials(spell.name)}</span>
-                  <span className="mt-2 block truncate text-xs font-black text-zinc-100">{spell.name}</span>
-                  <span className="ui-faint block text-[10px] font-black">
-                    {!known ? 'Locked' : equipped ? `Slot ${equippedIndex + 1}` : `M ${spell.cost}`}
+                  <span className="spells-archive-tile-art">
+                    <SpellArt spell={spell} variant="archive" dimmed={!known} />
+                    {equipped && <span className="spells-archive-slot-badge">{equippedIndex + 1}</span>}
+                  </span>
+                  <span className="spells-archive-tile-name">{spell.name}</span>
+                  <span className="spells-archive-tile-meta">
+                    {!known ? 'Locked' : equipped ? 'Equipped' : `M ${spell.cost}`}
                   </span>
                 </button>
               );
@@ -2501,9 +2802,39 @@ function HudMetric({ label, value, tone, progress }: { label: string; value: str
   );
 }
 
-function SectionTitle({ title, action }: { title: string; action?: string }) {
+function SpellArt({
+  spell,
+  variant = 'archive',
+  dimmed = false,
+}: {
+  spell: BattleSpell;
+  variant?: 'hero' | 'loadout' | 'archive';
+  dimmed?: boolean;
+}) {
+  const sizeMap = {
+    hero: 84,
+    loadout: 62,
+    archive: 54,
+  } as const;
+  const size = sizeMap[variant];
+
   return (
-    <div className="mb-3 flex items-center justify-between gap-3 border-b border-[rgba(232,217,184,0.16)] pb-2">
+    <span className={`spell-art spell-art-${variant} ${dimmed ? 'spell-art-dimmed' : ''}`}>
+      <Image
+        src={getSpellIconPath(spell)}
+        alt=""
+        width={size}
+        height={size}
+        className="spell-art-image object-contain"
+        unoptimized
+      />
+    </span>
+  );
+}
+
+function SectionTitle({ title, action, compact = false }: { title: string; action?: string; compact?: boolean }) {
+  return (
+    <div className={`flex items-center justify-between gap-3 border-b border-[rgba(232,217,184,0.16)] pb-2 ${compact ? 'mb-2' : 'mb-3'}`}>
       <h3 className="fantasy-heading font-black">{title}</h3>
       {action && <span className="ui-faint text-xs font-bold">{action}</span>}
     </div>
@@ -2700,6 +3031,12 @@ function PanelIcon({ icon }: { icon: PanelIconName }) {
           <path {...common} d="M8 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM16 10a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z" />
           <path {...common} d="M3.5 20c.9-4 2.4-6 4.5-6s3.6 2 4.5 6M13 18.5c.8-2.9 2-4.3 3.7-4.3 1.5 0 2.7 1 3.8 3" />
           <path {...common} d="M18.5 9.5h2M19.5 8.5v2" />
+        </>
+      )}
+      {icon === 'settings' && (
+        <>
+          <path {...common} d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" />
+          <path {...common} d="M19 12a7.4 7.4 0 0 0-.1-1.1l2-1.5-2-3.4-2.4 1a7.2 7.2 0 0 0-1.9-1.1L14.3 3h-4.6l-.3 2.9A7.2 7.2 0 0 0 7.5 7l-2.4-1-2 3.4 2 1.5A7.4 7.4 0 0 0 5 12c0 .4 0 .8.1 1.1l-2 1.5 2 3.4 2.4-1a7.2 7.2 0 0 0 1.9 1.1l.3 2.9h4.6l.3-2.9a7.2 7.2 0 0 0 1.9-1.1l2.4 1 2-3.4-2-1.5c.1-.3.1-.7.1-1.1Z" />
         </>
       )}
       {icon === 'runs' && (

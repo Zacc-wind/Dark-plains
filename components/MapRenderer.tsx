@@ -591,13 +591,13 @@ export default function MapRenderer({
   const [cursorScreen, setCursorScreen] = useState<{ x: number; y: number } | null>(null);
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
   const [dimensionsReady, setDimensionsReady] = useState(false);
-  const [isMounted, setIsMounted] = useState(false);
   const [assetsLoaded, setAssetsLoaded] = useState(false);
   const [showPlayerList, setShowPlayerList] = useState(false);
   const [playerListLocation, setPlayerListLocation] = useState<{ x: number; y: number } | null>(null);
   const [currentUser, setCurrentUser] = useState(getCurrentUser());
   const [worldNow, setWorldNow] = useState(() => Date.now());
   const [pendingTravel, setPendingTravel] = useState<PendingTravelIntent | null>(null);
+  const [isMounted, setIsMounted] = useState(false);
   const [mainQuestTrackerHidden, setMainQuestTrackerHidden] = useState(() => {
     if (typeof window === 'undefined') return false;
     return window.localStorage.getItem(MAIN_QUEST_TRACKER_HIDDEN_KEY) === 'true';
@@ -619,7 +619,8 @@ export default function MapRenderer({
   }, [selectedDungeonRun]);
 
   useEffect(() => {
-    setIsMounted(true);
+    const frameId = window.requestAnimationFrame(() => setIsMounted(true));
+    return () => window.cancelAnimationFrame(frameId);
   }, []);
 
   // Preload all assets
@@ -939,7 +940,7 @@ export default function MapRenderer({
       ? { x: pendingTravel.targetX, y: pendingTravel.targetY, active: false }
       : activeTravel
         ? { x: activeTravel.targetX, y: activeTravel.targetY, active: true }
-        : activeJobTraveling
+        : activeJob && activeJobTraveling
           ? { x: activeJob.targetX, y: activeJob.targetY, active: true }
         : null;
 
@@ -1856,11 +1857,11 @@ function TravelConfirmModal({
   onConfirm: () => void;
   onCancel: () => void;
 }) {
-  const [confirmCancelJobs, setConfirmCancelJobs] = useState(false);
-
-  useEffect(() => {
-    setConfirmCancelJobs(false);
-  }, [pendingTravel?.targetX, pendingTravel?.targetY, pendingTravel?.kind, pendingTravel?.label, activeJobCount]);
+  const travelKey = pendingTravel
+    ? `${pendingTravel.kind}:${pendingTravel.targetX}:${pendingTravel.targetY}:${pendingTravel.label}:${activeJobCount}`
+    : 'none';
+  const [confirmCancelState, setConfirmCancelState] = useState({ key: 'none', confirmed: false });
+  const confirmCancelJobs = confirmCancelState.key === travelKey && confirmCancelState.confirmed;
 
   if (!pendingTravel) return null;
 
@@ -1889,12 +1890,12 @@ function TravelConfirmModal({
             </p>
             {activeJobCount > 0 && (
               <p className="mt-2 rounded border border-amber-200/35 bg-amber-900/35 px-2 py-1 text-[11px] font-black text-amber-100">
-                Walking now cancels {activeJobCount} queued job{activeJobCount === 1 ? '' : 's'}.
+                Walking now cancels {activeJobCount} active or queued job{activeJobCount === 1 ? '' : 's'}.
               </p>
             )}
             {activeJobCount > 0 && confirmCancelJobs && (
               <div className="mt-2 rounded border border-red-300/40 bg-red-950/45 px-2 py-2 text-[11px] font-black text-red-100">
-                Are you sure? Your current job queue will be canceled and cannot be restored.
+                Are you sure? Current job progress will be canceled and cannot be restored.
               </div>
             )}
           </div>
@@ -1903,7 +1904,7 @@ function TravelConfirmModal({
               type="button"
               onClick={() => {
                 if (confirmCancelJobs) {
-                  setConfirmCancelJobs(false);
+                  setConfirmCancelState({ key: travelKey, confirmed: false });
                   return;
                 }
                 onCancel();
@@ -1916,7 +1917,7 @@ function TravelConfirmModal({
               type="button"
               onClick={() => {
                 if (activeJobCount > 0 && !confirmCancelJobs) {
-                  setConfirmCancelJobs(true);
+                  setConfirmCancelState({ key: travelKey, confirmed: true });
                   return;
                 }
                 onConfirm();

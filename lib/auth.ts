@@ -3823,6 +3823,73 @@ export function getPlayersAtLocation(x: number, y: number): User[] {
   return users.filter(u => u.x === x && u.y === y);
 }
 
+function makeJobQueueCanceledActivity(
+  user: User,
+  canceledJobs: JobState[],
+  reason: string,
+  completedAt = Date.now()
+): ActivityEntry {
+  const firstJob = canceledJobs[0];
+
+  return {
+    id: `activity-job-queue-canceled-${completedAt}`,
+    type: 'travel',
+    title: canceledJobs.length === 1 ? 'Job Canceled' : `${canceledJobs.length} Jobs Canceled`,
+    source: firstJob?.poiName || 'World Map',
+    completedAt,
+    rewards: {},
+    description: reason,
+  };
+}
+
+function clearJobQueueForMovement(user: User, reason: string, completedAt = Date.now()): Partial<User> {
+  const canceledJobs = user.jobQueue || [];
+  if (canceledJobs.length === 0) return {};
+
+  return {
+    jobQueue: [],
+    activityLog: pushActivityEntry(
+      user.activityLog,
+      makeJobQueueCanceledActivity(user, canceledJobs, reason, completedAt)
+    ),
+  };
+}
+
+function getInvalidJobQueueLocationReason(user: User, now = Date.now()): string | null {
+  const activeJob = user.jobQueue?.[0];
+  if (!activeJob || user.traveling) return null;
+
+  if (now < activeJob.startTime) {
+    const stillAtQueuedStart = user.x === activeJob.startX && user.y === activeJob.startY;
+    return stillAtQueuedStart
+      ? null
+      : `Queued jobs were canceled because the commander left ${activeJob.startX}:${activeJob.startY}.`;
+  }
+
+  if (activeJob.travelComplete) {
+    const stillAtWorkSite = user.x === activeJob.targetX && user.y === activeJob.targetY;
+    return stillAtWorkSite
+      ? null
+      : `Job work at ${activeJob.poiName} was canceled because the commander left the work site.`;
+  }
+
+  const travelNotAdvanced = activeJob.lastMoveTime <= activeJob.startTime;
+  const stillAtTravelStart = user.x === activeJob.startX && user.y === activeJob.startY;
+  if (travelNotAdvanced && !stillAtTravelStart) {
+    return `Queued jobs were canceled because the commander left ${activeJob.startX}:${activeJob.startY}.`;
+  }
+
+  return null;
+}
+
+function cancelInvalidJobQueueForLocation(user: User, now = Date.now()): boolean {
+  const reason = getInvalidJobQueueLocationReason(user, now);
+  if (!reason) return false;
+
+  updateCurrentUser(clearJobQueueForMovement(user, reason, now));
+  return true;
+}
+
 export function startTravel(targetX: number, targetY: number): void {
   const currentUser = getCurrentUser();
   if (!currentUser) return;
@@ -3843,7 +3910,11 @@ export function startTravel(targetX: number, targetY: number): void {
   // Taking direct control of movement invalidates queued road work.
   updateCurrentUser({
     traveling: travelState,
-    jobQueue: currentUser.jobQueue.length > 0 ? [] : currentUser.jobQueue,
+    ...clearJobQueueForMovement(
+      currentUser,
+      `Walking to ${targetX}:${targetY} canceled the current job queue.`,
+      startTime
+    ),
   });
 }
 
@@ -3963,6 +4034,10 @@ export function cancelTravel(): { success: boolean; x?: number; y?: number; mess
   }
 
   updateCurrentUser({
+    ...clearJobQueueForMovement(
+      currentUser,
+      `Stopping at ${travelPosition.x}:${travelPosition.y} canceled queued jobs tied to the previous route.`
+    ),
     x: travelPosition.x,
     y: travelPosition.y,
     traveling: null,
@@ -4223,6 +4298,8 @@ export function updateJobTravelProgress(): void {
   if (!currentUser || currentUser.jobQueue.length === 0 || currentUser.traveling) return;
 
   const now = Date.now();
+  if (cancelInvalidJobQueueForLocation(currentUser, now)) return;
+
   const updatedQueue = [...currentUser.jobQueue];
   let positionChanged = false;
   let travelUpdates: Partial<User> = {};
@@ -4278,6 +4355,8 @@ export function checkJobsComplete(): void {
   if (!currentUser || currentUser.jobQueue.length === 0) return;
 
   const now = Date.now();
+  if (cancelInvalidJobQueueForLocation(currentUser, now)) return;
+
   const updatedQueue = [...currentUser.jobQueue];
   let goldEarned = 0;
   let expEarned = 0;

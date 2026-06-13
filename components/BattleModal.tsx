@@ -7,6 +7,7 @@ import {
   BATTLE_SPELLS,
   BATTLE_TERRAIN_DESCRIPTIONS,
   BATTLE_TERRAIN_LABELS,
+  BattleLogEntry,
   BattleState,
   BattleSpell,
   BattleTerrainType,
@@ -61,8 +62,16 @@ import {
   updateCurrentUser,
 } from '@/lib/auth';
 import { emitCompletionNotice, type CompletionRewardLine } from '@/lib/completionEvents';
+import {
+  COMBAT_SPEED_OPTIONS,
+  CombatSpeed,
+  readCombatSpeedSetting,
+  writeCombatSpeedSetting,
+} from '@/lib/combatSettings';
 import { emitFxEvent, type FxEventType } from '@/lib/fxEvents';
 import { readGameJson, writeGameJson } from '@/lib/gameStore';
+import { playGameSound, preloadGameSounds, type GameSoundId } from '@/lib/sound';
+import { getSpellIconPath } from '@/lib/spellAssets';
 import CombatThreeFxLayer from './CombatThreeFxLayer';
 
 interface BattleModalProps {
@@ -91,7 +100,16 @@ interface BattleHoverPreviewData {
   tone: 'neutral' | 'good' | 'danger';
 }
 
-type BattleSpeed = 'normal' | 'fast' | 'instant';
+interface BattleHoverForecastData {
+  unit: BattleUnit;
+  actionLabel?: string;
+  amount?: number;
+  tone: 'neutral' | 'good' | 'danger';
+  currentHealth: number;
+  projectedHealth: number;
+  maxHealth: number;
+}
+
 type BattlePieceAnimation =
   | 'move'
   | 'melee'
@@ -140,13 +158,54 @@ interface BattleResultReportData {
   completedAt: number;
 }
 
-const BATTLE_SPEEDS: Record<BattleSpeed, BattleSpeedConfig> = {
+interface BattleSpellCastNoticeData {
+  id: string;
+  spell: BattleSpell;
+  side?: 'player' | 'enemy';
+}
+
+interface BattleSpellImpactData {
+  spell: BattleSpell;
+  iconPath: string;
+  tone: 'damage' | 'support';
+}
+
+const BATTLE_SPEEDS: Record<CombatSpeed, BattleSpeedConfig> = {
   normal: { label: 'Normal', playerDelayMs: 950, enemyDelayMs: 1550 },
   fast: { label: 'Fast', playerDelayMs: 760, enemyDelayMs: 1050 },
   instant: { label: 'Instant', playerDelayMs: 420, enemyDelayMs: 620 },
 };
 
-const BATTLE_SPEED_ORDER: BattleSpeed[] = ['normal', 'fast', 'instant'];
+const BATTLE_PRELOAD_SOUND_IDS: GameSoundId[] = [
+  'combat.weaponDraw',
+  'combat.meleeSlice',
+  'combat.meleeHeavy',
+  'combat.bladeHit',
+  'combat.armorHit',
+  'combat.unitHurt',
+  'combat.unitDeath',
+  'combat.moveDust',
+  'combat.wait',
+  'combat.guard',
+  'combat.heal',
+  'combat.manaFocus',
+  'combat.ranged',
+  'combat.rangedRelease',
+  'combat.rangedImpact',
+  'combat.spellCast',
+  'combat.spellHit',
+  'combat.spellFire',
+  'combat.spellBuff',
+  'combat.spellControl',
+  'combat.spellFlame',
+  'combat.spellLightning',
+  'combat.spellShadow',
+  'combat.spellFrost',
+  'combat.spellHoly',
+  'combat.victory',
+  'combat.defeat',
+];
+
 const CONFIRM_MOVE_SETTING_KEY = 'pirate_game_confirm_move_enabled';
 
 export default function BattleModal({
@@ -171,21 +230,34 @@ export default function BattleModal({
   });
   const [selectedSpellId, setSelectedSpellId] = useState<string | null>(null);
   const [isSpellMenuOpen, setIsSpellMenuOpen] = useState(false);
-  const [battleSpeed, setBattleSpeed] = useState<BattleSpeed>('normal');
+  const [battleSpeed, setBattleSpeed] = useState<CombatSpeed>(() => readCombatSpeedSetting());
+  const [spellCastNotice, setSpellCastNotice] = useState<BattleSpellCastNoticeData | null>(null);
   const [resultReport, setResultReport] = useState<BattleResultReportData | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [isResolvingAction, setIsResolvingAction] = useState(false);
   const [battleCue, setBattleCue] = useState<BattleCue | null>(null);
   const [hoveredCell, setHoveredCell] = useState<{ x: number; y: number } | null>(null);
+  const [hoverCursor, setHoverCursor] = useState<{ x: number; y: number } | null>(null);
   const [pendingMoveUndo, setPendingMoveUndo] = useState<BattleState | null>(null);
   const [confirmMoveEnabled, setConfirmMoveEnabled] = useState(() => readGameJson(CONFIRM_MOVE_SETTING_KEY, false));
   const enemyTimer = useRef<number | null>(null);
   const playerActionTimer = useRef<number | null>(null);
+  const defeatExitTimer = useRef<number | null>(null);
+  const battleSoundTimers = useRef<number[]>([]);
+  const spellNoticeTimer = useRef<number | null>(null);
+  const lastSoundLogEntryId = useRef<string | null>(null);
   const rewardClaimed = useRef(false);
   const battleEndNotified = useRef(false);
+  const completionNoticeEmitted = useRef(false);
+  const closeRequested = useRef(false);
+  const resultSoundEmitted = useRef(false);
   const speedConfig = BATTLE_SPEEDS[battleSpeed];
   const activeSpellIds = availableSpellIds || getCurrentUser()?.equippedSpellIds || DEFAULT_EQUIPPED_SPELL_IDS;
   const availableSpells = BATTLE_SPELLS.filter(spell => activeSpellIds.includes(spell.id)).slice(0, 4);
+
+  useEffect(() => {
+    preloadGameSounds(BATTLE_PRELOAD_SOUND_IDS);
+  }, []);
 
   useEffect(() => {
     const interval = window.setInterval(() => setNow(Date.now()), 1000);
@@ -195,7 +267,44 @@ export default function BattleModal({
   useEffect(() => () => {
     if (enemyTimer.current) window.clearTimeout(enemyTimer.current);
     if (playerActionTimer.current) window.clearTimeout(playerActionTimer.current);
+    if (defeatExitTimer.current) window.clearTimeout(defeatExitTimer.current);
+    if (spellNoticeTimer.current) window.clearTimeout(spellNoticeTimer.current);
+    battleSoundTimers.current.forEach(timer => window.clearTimeout(timer));
+    battleSoundTimers.current = [];
   }, []);
+
+  useEffect(() => {
+    if (!battle) return;
+    const entry = battle.log[0];
+    if (!entry) return;
+
+    if (lastSoundLogEntryId.current === null) {
+      lastSoundLogEntryId.current = entry.id;
+      return;
+    }
+
+    if (lastSoundLogEntryId.current === entry.id) return;
+    lastSoundLogEntryId.current = entry.id;
+
+    battleSoundTimers.current.forEach(timer => window.clearTimeout(timer));
+    battleSoundTimers.current = getBattleLogSoundPlan(battle, entry, battleSpeed).map(sound => (
+      window.setTimeout(() => {
+        playGameSound(sound.id, { volumeScale: sound.volumeScale, throttleMs: sound.throttleMs });
+      }, sound.delayMs)
+    ));
+
+    if (entry.action === 'spell') {
+      const spell = getBattleSpellFromLogEntry(entry);
+      if (spell) {
+        if (spellNoticeTimer.current) window.clearTimeout(spellNoticeTimer.current);
+        const notice = { id: entry.id, spell, side: entry.side };
+        spellNoticeTimer.current = window.setTimeout(() => {
+          setSpellCastNotice(notice);
+          spellNoticeTimer.current = window.setTimeout(() => setSpellCastNotice(null), 1450);
+        }, 0);
+      }
+    }
+  }, [battle, battleSpeed]);
 
   useEffect(() => {
     if (!battle || battle.status !== 'active') return;
@@ -240,6 +349,10 @@ export default function BattleModal({
     if (!battle || rewardClaimed.current) return;
 
     if (battle.status === 'victory') {
+      if (!resultSoundEmitted.current) {
+        playGameSound('combat.victory', { throttleMs: 800 });
+        resultSoundEmitted.current = true;
+      }
       const casualtyReport = persistentResults ? applyBattleCasualties(battle) : undefined;
       if (persistentResults) {
         markWorldEnemyDefeated(battle.enemy);
@@ -261,23 +374,41 @@ export default function BattleModal({
       }
       rewardClaimed.current = true;
     } else if (battle.status === 'defeat') {
+      if (!resultSoundEmitted.current) {
+        playGameSound('combat.defeat', { throttleMs: 800 });
+        resultSoundEmitted.current = true;
+      }
       const casualtyReport = persistentResults ? applyBattleCasualties(battle) : undefined;
       const healthLost = persistentResults ? applyDefeatPenalty(battle.enemy) : 0;
+      const defeatReport: BattleResultReportData = {
+        status: 'defeat',
+        healthLost,
+        casualtyReport,
+        completedAt: Date.now(),
+      };
       window.setTimeout(() => {
-        setResultReport({
-          status: 'defeat',
-          healthLost,
-          casualtyReport,
-          completedAt: Date.now(),
-        });
+        setResultReport(defeatReport);
       }, 0);
       if (!battleEndNotified.current) {
         onBattleEnd?.({ status: 'defeat', battle, healthLost });
         battleEndNotified.current = true;
       }
+      if (!onBattleEnd) {
+        defeatExitTimer.current = window.setTimeout(() => {
+          defeatExitTimer.current = null;
+          if (!completionNoticeEmitted.current) {
+            emitBattleCompletionNotice(battle, defeatReport);
+            completionNoticeEmitted.current = true;
+          }
+          if (!closeRequested.current) {
+            closeRequested.current = true;
+            onClose();
+          }
+        }, 900);
+      }
       rewardClaimed.current = true;
     }
-  }, [battle, onBattleEnd, persistentResults]);
+  }, [battle, onBattleEnd, onClose, persistentResults]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -312,6 +443,7 @@ export default function BattleModal({
 
       if (event.key.toLowerCase() === 's' && keyboardActiveUnit.kind === 'commander') {
         event.preventDefault();
+        playGameSound('ui.modalOpen', { throttleMs: 140 });
         setSelectedSpellId(null);
         setIsSpellMenuOpen(open => !open);
       }
@@ -388,6 +520,7 @@ export default function BattleModal({
 
     if (isCommanderTurn && unitAtCell?.id === activeUnit.id) {
       emitFxEvent({ type: 'spell', tone: 'violet', intensity: 0.5 });
+      playGameSound('ui.modalOpen', { throttleMs: 140 });
       setIsSpellMenuOpen(open => !open);
       return;
     }
@@ -468,10 +601,13 @@ export default function BattleModal({
   const handleEndTurn = () => {
     if (!battle || !isPlayerTurn || isResolvingAction) return;
     setSelectedSpellId(null);
+    const priestCharge = Boolean(activeUnit && activeUnit.kind === 'minion' && activeUnit.healing > 0);
     queuePlayerAction(waitBattleUnit(battle, activeUnit?.id || ''), {
-      headline: 'Hold',
-      detail: `${activeUnit?.name || 'Unit'} waits for a better opening.`,
-      tone: 'neutral',
+      headline: priestCharge ? 'Blessing Charged' : 'Hold',
+      detail: priestCharge
+        ? `${activeUnit?.name || 'Priest'} prepares a stronger next heal.`
+        : `${activeUnit?.name || 'Unit'} waits for a better opening.`,
+      tone: priestCharge ? 'player' : 'neutral',
     });
   };
 
@@ -491,6 +627,7 @@ export default function BattleModal({
     if (getBattleMana(battle, 'player') < spell.cost) {
       setSelectedSpellId(null);
       setIsSpellMenuOpen(true);
+      playGameSound('ui.clickSoft', { throttleMs: 120 });
       emitFxEvent({ type: 'status', tone: 'red', intensity: 0.4 });
       return;
     }
@@ -603,10 +740,20 @@ export default function BattleModal({
   };
 
   const handleLeaveField = () => {
-    if (battle && battle.status !== 'active') {
-      emitBattleCompletionNotice(battle, resultReport);
+    if (defeatExitTimer.current) {
+      window.clearTimeout(defeatExitTimer.current);
+      defeatExitTimer.current = null;
     }
-    onClose();
+    if (battle && battle.status !== 'active') {
+      if (!completionNoticeEmitted.current) {
+        emitBattleCompletionNotice(battle, resultReport);
+        completionNoticeEmitted.current = true;
+      }
+    }
+    if (!closeRequested.current) {
+      closeRequested.current = true;
+      onClose();
+    }
   };
 
   const defaultCue = getDefaultBattleCue({
@@ -627,6 +774,16 @@ export default function BattleModal({
     isResolvingAction,
     movementLocked: canUndoMove,
   });
+  const hoverForecast = getBattleHoverForecast({
+    battle,
+    activeUnit,
+    hoveredCell,
+    isPlayerTurn,
+    selectedSpell,
+    isResolvingAction,
+    movementLocked: canUndoMove,
+  });
+  const hoverOverlayStyle = getHoverOverlayStyle(hoverCursor);
   const showCenterCue = isResolvingAction || battle.status !== 'active' || (battle.status === 'active' && now - battle.turnStartedAt < 950);
 
   return (
@@ -674,7 +831,7 @@ export default function BattleModal({
           ) : (
             <>
           <main className="battle-main flex min-h-0 flex-col gap-2">
-            {battle.status !== 'active' && (
+            {battle.status !== 'active' && battle.status !== 'defeat' && (
               <BattleResultReport battle={battle} report={resultReport} onClose={handleLeaveField} />
             )}
 
@@ -710,7 +867,13 @@ export default function BattleModal({
 
               <div className="battle-board-shell relative min-h-0">
               <BattleCenterBanner cue={visibleCue} active={showCenterCue} />
-              <BattleHoverOverlay preview={hoverPreview} visible={Boolean(hoveredCell)} />
+              {spellCastNotice && <BattleSpellCastNotice key={spellCastNotice.id} notice={spellCastNotice} />}
+              <BattleHoverOverlay
+                preview={hoverPreview}
+                forecast={hoverForecast}
+                visible={Boolean(hoveredCell && hoverCursor && !(isCommanderTurn && isSpellMenuOpen && !selectedSpell))}
+                style={hoverOverlayStyle}
+              />
               {isCommanderTurn && isSpellMenuOpen && !selectedSpell && (
                 <div className="battle-spell-popover">
                   <BattleSpellMenu
@@ -766,21 +929,34 @@ export default function BattleModal({
                 const canSupportSpellTarget = Boolean(canSpellTarget && selectedSpell?.target === 'ally');
                 const actionable = canMove || canStrike || canMend || canSpellTarget;
                 const floatingText = getFloatingBattleText(battle, unit || defeatedUnit, now);
+                const spellImpact = getBattleSpellImpact(battle, unit || defeatedUnit, now);
 
                 return (
                   <div
                     key={`${x}-${y}`}
                     role="button"
                     tabIndex={0}
+                    data-sound-click="off"
+                    data-sound-hover="off"
                     onClick={() => handleCellClick(x, y)}
                     onKeyDown={(event) => {
                       if (event.key !== 'Enter' && event.key !== ' ') return;
                       event.preventDefault();
                       handleCellClick(x, y);
                     }}
-                    onMouseEnter={() => setHoveredCell({ x, y })}
-                    onMouseLeave={() => setHoveredCell(null)}
-                    title={`${cellPreview.title}\n${cellPreview.detail}`}
+                    onMouseEnter={(event) => {
+                      setHoveredCell({ x, y });
+                      setHoverCursor({ x: event.clientX, y: event.clientY });
+                    }}
+                    onMouseMove={(event) => {
+                      setHoveredCell({ x, y });
+                      setHoverCursor({ x: event.clientX, y: event.clientY });
+                    }}
+                    onMouseLeave={() => {
+                      setHoveredCell(null);
+                      setHoverCursor(null);
+                    }}
+                    aria-label={`${cellPreview.title}. ${cellPreview.detail}`}
                     aria-disabled={isResolvingAction || obstacle || (!canMove && !canStrike && !canMend && !canSpellTarget && !isActiveCell)}
                     className={`battle-cell ${getBattleTerrainClassName(terrain)} relative overflow-hidden text-left transition ${
                       obstacle
@@ -804,7 +980,10 @@ export default function BattleModal({
                         mode="commander"
                         isResolvingAction={isResolvingAction}
                         onFocusMana={handleFocusMana}
-                        onToggleSpellMenu={() => setIsSpellMenuOpen(open => !open)}
+                        onToggleSpellMenu={() => {
+                          playGameSound('ui.modalOpen', { throttleMs: 140 });
+                          setIsSpellMenuOpen(open => !open);
+                        }}
                       />
                     )}
                     {isActiveCell && canUndoMove && (
@@ -816,6 +995,7 @@ export default function BattleModal({
                       />
                     )}
                     {defeatedUnit && <BattleDeathMarker unit={defeatedUnit} />}
+                    {spellImpact && <BattleSpellIconImpact impact={spellImpact} />}
                     {floatingText && <BattleFloatingText text={floatingText.text} tone={floatingText.tone} />}
                   </div>
                 );
@@ -824,7 +1004,14 @@ export default function BattleModal({
               </div>
             </div>
               <aside className="battle-side-panel battle-side-panel-right">
-                <BattleSpeedControl value={battleSpeed} onChange={setBattleSpeed} />
+                <BattleSpeedControl
+                  value={battleSpeed}
+                  onChange={(speed) => {
+                    setBattleSpeed(speed);
+                    writeCombatSpeedSetting(speed);
+                    playGameSound('ui.toggle', { throttleMs: 100 });
+                  }}
+                />
                 <div className="battle-header-controls flex items-start justify-end gap-2">
                   {battle.status === 'active' && (
                     <button onClick={handleRetreat} className="ui-button-danger rounded px-3 py-2 text-xs font-bold">
@@ -1036,15 +1223,20 @@ function BattleSpellMenu({
   const mana = getBattleMana(battle, 'player');
 
   return (
-    <section className="battle-spell-menu command-panel vine-frame mt-2 rounded border p-3 text-zinc-100">
-      <div className="mb-4 flex items-start justify-between gap-3">
+    <section className="battle-spell-menu command-panel vine-frame mt-2 rounded border p-4 text-zinc-100">
+      <div className="battle-spell-menu-header mb-4 flex items-start justify-between gap-4">
         <div>
           <div className="arcane-label">King Spells</div>
-          <h3 className="fantasy-heading text-xl">Choose Spell</h3>
+          <h3 className="fantasy-heading text-2xl">Choose Spell</h3>
         </div>
-        <button onClick={onClose} className="ui-button rounded px-3 py-2 text-xs font-bold">
-          Close
-        </button>
+        <div className="flex items-center gap-2">
+          <span className="battle-spell-mana rounded border px-3 py-2 text-xs font-black uppercase">
+            Mana <strong>{mana}</strong>
+          </span>
+          <button onClick={onClose} className="ui-button rounded px-4 py-2 text-xs font-bold">
+            Close
+          </button>
+        </div>
       </div>
       <div className="battle-spell-grid">
         {spells.map(spell => {
@@ -1065,34 +1257,35 @@ function BattleSpellMenu({
                   ? 'rail-button-active'
                   : enoughMana
                     ? ''
-                    : 'ui-empty opacity-45'
+                    : 'battle-spell-option-locked'
               }`}
             >
-              <span className="flex items-start gap-3">
+              <span className="battle-spell-card-top flex items-start gap-4">
                 <span className={`battle-spell-icon battle-spell-icon-${spellVisual.tone} relative shrink-0 overflow-hidden rounded border`}>
                   <Image
                     src={spellVisual.iconPath}
                     alt=""
                     fill
-                    sizes="42px"
-                    className="object-contain p-2"
+                    sizes="72px"
+                    className="object-contain p-2.5"
                     style={{ imageRendering: 'pixelated' }}
+                    unoptimized
                   />
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="flex items-start justify-between gap-2">
                     <span className="min-w-0">
-                      <span className="block truncate text-sm font-black text-zinc-100">{spell.name}</span>
+                      <span className="battle-spell-name block font-black text-zinc-100">{spell.name}</span>
                       <span className="ui-faint mt-1 block text-[11px] font-black uppercase">{targetLabel} - {spellVisual.tierLabel}</span>
                     </span>
-                    <span className="ui-pill shrink-0 rounded border px-2.5 py-1.5 text-[11px] font-black">M {spell.cost}</span>
+                    <span className="battle-spell-cost ui-pill shrink-0 rounded border px-3 py-2 text-[11px] font-black">Mana {spell.cost}</span>
                   </span>
                   <span className="battle-spell-tag mt-2 inline-flex rounded border px-2 py-1 text-[10px] font-black uppercase">
                     {spellVisual.tagline}
                   </span>
                 </span>
               </span>
-              <span className="ui-muted mt-3 block text-xs font-bold leading-relaxed">{spell.description}</span>
+              <span className="battle-spell-description ui-muted mt-4 block font-bold leading-relaxed">{spell.description}</span>
               {!enoughMana && <span className="mt-2 block text-xs font-black text-red-200">Need {spell.cost - mana} mana</span>}
             </button>
           );
@@ -1113,9 +1306,10 @@ function getSpellTargetLabel(target: BattleSpell['target']): string {
 
 function getSpellVisual(spell: BattleSpell): { iconPath: string; tierLabel: string; tone: 'damage' | 'support' | 'field'; tagline: string } {
   const tierLabel = spell.rarity === 'legendary' ? 'Tier III' : spell.rarity === 'rare' ? 'Tier II' : 'Tier I';
+  const iconPath = getSpellIconPath(spell);
   if (spell.target === 'enemy') {
     return {
-      iconPath: '/assets/icons/attack.png',
+      iconPath,
       tierLabel,
       tone: 'damage',
       tagline: spell.rarity === 'legendary' ? 'Finisher' : 'Strike',
@@ -1123,29 +1317,153 @@ function getSpellVisual(spell: BattleSpell): { iconPath: string; tierLabel: stri
   }
   if (spell.target === 'ally') {
     return {
-      iconPath: '/assets/icons/health.png',
+      iconPath,
       tierLabel,
       tone: 'support',
       tagline: spell.description.toLowerCase().includes('heal') ? 'Heal' : 'Buff',
     };
   }
   return {
-    iconPath: '/assets/icons/magic.png',
+    iconPath,
     tierLabel,
     tone: 'field',
     tagline: 'Battlefield',
   };
 }
 
-function BattleHoverOverlay({ preview, visible }: { preview: BattleHoverPreviewData; visible: boolean }) {
-  if (!visible) return null;
+function BattleSpellCastNotice({ notice }: { notice: BattleSpellCastNoticeData }) {
+  const tone = notice.spell.target === 'enemy' ? 'damage' : notice.spell.target === 'ally' ? 'support' : 'field';
 
   return (
-    <div className={`battle-hover-overlay rounded border px-3 py-2 ${preview.tone === 'danger' ? 'battle-hover-danger' : preview.tone === 'good' ? 'battle-hover-good' : ''}`}>
+    <div className={`battle-spell-cast-notice battle-spell-cast-notice-${tone}`} aria-hidden="true">
+      <span className="battle-spell-cast-icon relative overflow-hidden rounded-full border">
+        <Image
+          src={getSpellIconPath(notice.spell)}
+          alt=""
+          fill
+          sizes="112px"
+          className="object-contain p-2"
+          unoptimized
+        />
+      </span>
+      <span className="battle-spell-cast-copy">
+        <span className="arcane-label">{notice.side === 'enemy' ? 'Enemy Spell' : 'Commander Spell'}</span>
+        <span className="fantasy-heading">{notice.spell.name}</span>
+      </span>
+    </div>
+  );
+}
+
+function getHoverOverlayStyle(cursor: { x: number; y: number } | null): CSSProperties | undefined {
+  if (!cursor) return undefined;
+
+  const width = 286;
+  const height = 186;
+  const offset = 18;
+  const viewportWidth = typeof window === 'undefined' ? cursor.x + width + offset : window.innerWidth;
+  const viewportHeight = typeof window === 'undefined' ? cursor.y + height + offset : window.innerHeight;
+
+  return {
+    left: Math.max(8, Math.min(cursor.x + offset, viewportWidth - width - 8)),
+    top: Math.max(8, Math.min(cursor.y + offset, viewportHeight - height - 8)),
+  };
+}
+
+function BattleHoverOverlay({
+  preview,
+  forecast,
+  visible,
+  style,
+}: {
+  preview: BattleHoverPreviewData;
+  forecast: BattleHoverForecastData | null;
+  visible: boolean;
+  style?: CSSProperties;
+}) {
+  if (!visible) return null;
+
+  if (forecast) {
+    const currentPct = getHealthPercent(forecast.currentHealth, forecast.maxHealth);
+    const projectedPct = getHealthPercent(forecast.projectedHealth, forecast.maxHealth);
+    const delta = forecast.projectedHealth - forecast.currentHealth;
+    const toneClass = forecast.tone === 'danger'
+      ? 'battle-forecast-danger'
+      : forecast.tone === 'good'
+        ? 'battle-forecast-good'
+        : '';
+
+    return (
+      <div className={`battle-hover-overlay battle-forecast-tooltip rounded border p-3 ${toneClass}`} style={style}>
+        <div className="flex items-start gap-3">
+          <span className="battle-forecast-portrait relative shrink-0 overflow-hidden rounded border">
+            <Image
+              src={forecast.unit.assetPath}
+              alt=""
+              fill
+              className="object-contain"
+              sizes="44px"
+              unoptimized
+            />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-xs font-black text-zinc-100">{forecast.unit.name}</span>
+            <span className="ui-faint block text-[10px] font-black uppercase">
+              {forecast.unit.kind} - {forecast.unit.side}
+            </span>
+            {forecast.actionLabel && (
+              <span className={`battle-forecast-action mt-1 inline-flex rounded border px-2 py-0.5 text-[10px] font-black uppercase ${toneClass}`}>
+                {forecast.actionLabel}
+              </span>
+            )}
+          </span>
+          {typeof forecast.amount === 'number' && forecast.amount > 0 && (
+            <span className={`battle-forecast-delta rounded border px-2 py-1 text-xs font-black ${delta < 0 ? 'text-red-200' : 'text-emerald-200'}`}>
+              {delta < 0 ? '-' : '+'}{forecast.amount}
+            </span>
+          )}
+        </div>
+
+        <div className="mt-3">
+          <div className="mb-1 flex justify-between text-[10px] font-black uppercase text-[var(--ui-faint)]">
+            <span>Health</span>
+            <span>{forecast.currentHealth} / {forecast.maxHealth}</span>
+          </div>
+          <div className="battle-forecast-health-track">
+            <span className="battle-forecast-health-current" style={{ width: `${currentPct}%` }} />
+            <span
+              className={`battle-forecast-health-projected ${delta < 0 ? 'battle-forecast-health-damage' : delta > 0 ? 'battle-forecast-health-heal' : ''}`}
+              style={{ width: `${projectedPct}%` }}
+            />
+          </div>
+          {delta !== 0 && (
+            <div className="mt-1 text-[10px] font-black text-[var(--ui-muted)]">
+              After action: {forecast.projectedHealth} / {forecast.maxHealth}
+            </div>
+          )}
+        </div>
+
+        <div className="battle-forecast-stats mt-3 grid grid-cols-5 gap-1 text-center">
+          <span><b>{forecast.unit.attack}</b><em>Atk</em></span>
+          <span><b>{forecast.unit.defense}</b><em>Def</em></span>
+          <span><b>{forecast.unit.magic}</b><em>Mag</em></span>
+          <span><b>{forecast.unit.healing}</b><em>Heal</em></span>
+          <span><b>{forecast.unit.range}</b><em>Rng</em></span>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className={`battle-hover-overlay rounded border px-3 py-2 ${preview.tone === 'danger' ? 'battle-hover-danger' : preview.tone === 'good' ? 'battle-hover-good' : ''}`} style={style}>
       <div className="truncate text-xs font-black text-zinc-100">{preview.title}</div>
       <div className="ui-muted truncate text-[10px] font-bold">{preview.detail}</div>
     </div>
   );
+}
+
+function getHealthPercent(current: number, max: number): number {
+  if (max <= 0) return 0;
+  return Math.max(0, Math.min(100, (current / max) * 100));
 }
 
 function BattleTurnTimeline({ battle, vertical = false }: { battle: BattleState; vertical?: boolean }) {
@@ -1185,6 +1503,11 @@ function BattlePiece({ unit, active, animation }: { unit: BattleUnit; active: bo
       <span className="battle-piece-health">
         <span className={unit.side === 'player' ? 'bg-emerald-300' : 'bg-red-300'} style={{ width: `${healthPercent}%` }} />
       </span>
+      {unit.chargedHeal && (
+        <span className="battle-piece-status battle-piece-status-blessing" title="Blessing charged: next heal is stronger">
+          +
+        </span>
+      )}
       <span className={`battle-piece-body ${isCommander ? 'battle-piece-body-commander' : 'battle-piece-body-minion'} ${animationClass}`}>
         <span className={`battle-piece-base ${unit.side === 'player' ? 'battle-piece-base-player' : 'battle-piece-base-enemy'} ${isCommander ? 'battle-piece-base-commander' : ''}`} />
         <Image
@@ -1221,6 +1544,62 @@ function BattleDeathMarker({ unit }: { unit: BattleUnit }) {
   );
 }
 
+function BattleSpellIconImpact({ impact }: { impact: BattleSpellImpactData }) {
+  const style = { '--spell-icon': `url("${impact.iconPath}")` } as CSSProperties;
+
+  return (
+    <span className={`battle-spell-impact battle-spell-impact-${impact.tone}`} style={style} aria-hidden="true">
+      <Image
+        src={impact.iconPath}
+        alt=""
+        fill
+        sizes="64px"
+        className="battle-spell-impact-image object-contain"
+        unoptimized
+      />
+      {impact.tone === 'damage' && (
+        <>
+          <span className="battle-spell-impact-fragment battle-spell-impact-fragment-1" />
+          <span className="battle-spell-impact-fragment battle-spell-impact-fragment-2" />
+          <span className="battle-spell-impact-fragment battle-spell-impact-fragment-3" />
+        </>
+      )}
+    </span>
+  );
+}
+
+function getBattleSpellFromLogEntry(entry: BattleLogEntry): BattleSpell | undefined {
+  if (entry.spellId) return BATTLE_SPELLS.find(spell => spell.id === entry.spellId);
+  return BATTLE_SPELLS.find(spell => entry.message.toLowerCase().includes(spell.name.toLowerCase()));
+}
+
+function getBattleSpellImpact(
+  battle: BattleState,
+  unit: BattleUnit | undefined,
+  now: number
+): BattleSpellImpactData | null {
+  if (!unit) return null;
+  const entry = battle.log[0];
+  if (!entry || entry.action !== 'spell' || now - entry.createdAt > 1700) return null;
+  if (!entry.targetIds?.includes(unit.id)) return null;
+
+  const spell = getBattleSpellFromLogEntry(entry);
+  if (!spell) return null;
+
+  const isSupportTone =
+    entry.style === 'spell-support' ||
+    entry.style === 'heal' ||
+    entry.style === 'buff' ||
+    entry.style === 'morale' ||
+    (entry.style === 'spell-control' && entry.side === unit.side);
+
+  return {
+    spell,
+    iconPath: getSpellIconPath(spell),
+    tone: isSupportTone ? 'support' : 'damage',
+  };
+}
+
 function getFloatingBattleText(
   battle: BattleState,
   unit: BattleUnit | undefined,
@@ -1247,6 +1626,10 @@ function getFloatingBattleText(
     return { text: '+M', tone: 'mana' };
   }
 
+  if (entry.action === 'wait' && entry.style === 'buff' && isActor) {
+    return { text: 'Blessed', tone: 'mana' };
+  }
+
   return null;
 }
 
@@ -1264,6 +1647,7 @@ function getBattlePieceAnimation(battle: BattleState, unit: BattleUnit, now: num
     if (entry.action === 'attack') return style === 'ranged' ? 'ranged' : 'melee';
     if (entry.action === 'heal') return 'heal';
     if (entry.action === 'spell') return 'commander-spell';
+    if (entry.action === 'wait' && style === 'buff') return 'buff';
     if (entry.action === 'morale' || entry.action === 'mana') return 'morale';
   }
 
@@ -1301,12 +1685,12 @@ function getBattleTerrainClassName(terrain: BattleTerrainType): string {
   return terrain === 'highGround' ? 'battle-terrain-high-ground' : `battle-terrain-${terrain}`;
 }
 
-function BattleSpeedControl({ value, onChange }: { value: BattleSpeed; onChange: (speed: BattleSpeed) => void }) {
+function BattleSpeedControl({ value, onChange }: { value: CombatSpeed; onChange: (speed: CombatSpeed) => void }) {
   return (
     <div className="battle-speed-control rounded border px-2 py-1.5">
       <span className="arcane-label mr-2 align-middle">Speed</span>
       <span className="inline-flex gap-1 align-middle">
-        {BATTLE_SPEED_ORDER.map(speed => (
+        {COMBAT_SPEED_OPTIONS.map(({ id: speed, label }) => (
           <button
             key={speed}
             type="button"
@@ -1315,7 +1699,7 @@ function BattleSpeedControl({ value, onChange }: { value: BattleSpeed; onChange:
               value === speed ? 'battle-speed-active' : 'text-[var(--ui-muted)] hover:text-zinc-100'
             }`}
           >
-            {BATTLE_SPEEDS[speed].label}
+            {label}
           </button>
         ))}
       </span>
@@ -1561,6 +1945,294 @@ function getBattleCueFxType(cue: BattleCue): FxEventType {
   return 'status';
 }
 
+type BattleLogSoundPlan = Array<{
+  id: GameSoundId;
+  delayMs: number;
+  throttleMs?: number;
+  volumeScale?: number;
+}>;
+
+function getBattleSoundDelay(speed: CombatSpeed, phase: 'start' | 'impact' | 'death'): number {
+  if (speed === 'instant') {
+    if (phase === 'start') return 0;
+    if (phase === 'impact') return 70;
+    return 260;
+  }
+
+  if (speed === 'fast') {
+    if (phase === 'start') return 45;
+    if (phase === 'impact') return 170;
+    return 420;
+  }
+
+  if (phase === 'start') return 70;
+  if (phase === 'impact') return 250;
+  return 560;
+}
+
+function hasDefeatedLogTarget(battle: BattleState, entry: BattleLogEntry): boolean {
+  return Boolean(entry.targetIds?.some(targetId => {
+    const unit = battle.units.find(candidate => candidate.id === targetId);
+    return unit && unit.currentHealth <= 0;
+  }));
+}
+
+function getBattleLogNumericAmount(entry: BattleLogEntry): number {
+  const amountMatch =
+    entry.message.match(/\b(?:for|restoring|draining|up to)\s+(\d+)\b/i) ||
+    entry.message.match(/\b(\d+)\b/);
+  return amountMatch ? Number.parseInt(amountMatch[1], 10) : 0;
+}
+
+function getBattleLogPrimaryTarget(battle: BattleState, entry: BattleLogEntry): BattleUnit | undefined {
+  return entry.targetIds
+    ?.map(targetId => battle.units.find(unit => unit.id === targetId))
+    .find((unit): unit is BattleUnit => Boolean(unit));
+}
+
+function getAttackImpactSound(battle: BattleState, entry: BattleLogEntry): GameSoundId {
+  const actor = entry.actorId ? battle.units.find(unit => unit.id === entry.actorId) : undefined;
+  const target = getBattleLogPrimaryTarget(battle, entry);
+  const amount = getBattleLogNumericAmount(entry);
+
+  if (actor?.kind === 'commander' || amount >= 10) return 'combat.meleeHeavy';
+  if ((target?.defense || 0) >= 5) return 'combat.armorHit';
+  return 'combat.bladeHit';
+}
+
+function shouldPlayHurtAccent(battle: BattleState, entry: BattleLogEntry): boolean {
+  const target = getBattleLogPrimaryTarget(battle, entry);
+  if (!target || target.currentHealth <= 0) return false;
+  const amount = getBattleLogNumericAmount(entry);
+  return amount >= 5 || target.kind === 'commander';
+}
+
+function getSpellImpactSound(entry: BattleLogEntry): GameSoundId {
+  switch (entry.spellId) {
+    case 'ember-dart':
+      return 'combat.spellFlame';
+    case 'chain-spark':
+      return 'combat.spellLightning';
+    case 'judgement':
+    case 'sanctified-mend':
+    case 'rallying-hymn':
+    case 'soul-tether':
+    case 'saint-king-aegis':
+      return 'combat.spellHoly';
+    case 'gravity-snare':
+    case 'frost-lance':
+    case 'time-crown-edict':
+      return 'combat.spellFrost';
+    case 'withering-curse':
+    case 'blood-star':
+    case 'eclipse-nova':
+      return 'combat.spellShadow';
+    case 'royal-command':
+    case 'moonlit-veil':
+    case 'iron-benediction':
+    case 'ashen-step':
+    case 'thorn-ward':
+    case 'warding-prayer':
+      return 'combat.spellBuff';
+    case 'arcane-bolt':
+      return 'combat.spellHit';
+  }
+
+  switch (entry.style) {
+    case 'spell-support':
+    case 'heal':
+      return 'combat.spellHoly';
+    case 'buff':
+    case 'morale':
+      return 'combat.spellBuff';
+    case 'spell-drain':
+      return 'combat.spellShadow';
+    case 'spell-damage':
+      return 'combat.spellFire';
+    case 'debuff':
+    case 'spell-control':
+      return 'combat.spellControl';
+    default:
+      return 'combat.spellHit';
+  }
+}
+
+function getBattleLogSoundPlan(battle: BattleState, entry: BattleLogEntry, speed: CombatSpeed): BattleLogSoundPlan {
+  const startDelay = getBattleSoundDelay(speed, 'start');
+  const impactDelay = getBattleSoundDelay(speed, 'impact');
+  const deathDelay = getBattleSoundDelay(speed, 'death');
+  const plan: BattleLogSoundPlan = [];
+
+  if (entry.action === 'move') {
+    return [{ id: 'combat.moveDust', delayMs: startDelay, throttleMs: 120, volumeScale: 0.82 }];
+  }
+
+  if (entry.action === 'attack') {
+    if (entry.style === 'ranged') {
+      plan.push({ id: 'combat.rangedRelease', delayMs: startDelay + 35, throttleMs: 110, volumeScale: 0.82 });
+      plan.push({ id: 'combat.rangedImpact', delayMs: impactDelay, throttleMs: 110, volumeScale: 0.78 });
+    } else {
+      const impactSound = getAttackImpactSound(battle, entry);
+      plan.push({ id: 'combat.meleeSlice', delayMs: startDelay + 40, throttleMs: 100, volumeScale: impactSound === 'combat.meleeHeavy' ? 1 : 0.94 });
+      plan.push({ id: impactSound, delayMs: impactDelay, throttleMs: 100, volumeScale: 0.9 });
+    }
+    if (shouldPlayHurtAccent(battle, entry)) {
+      plan.push({ id: 'combat.unitHurt', delayMs: impactDelay + 120, throttleMs: 150, volumeScale: 0.24 });
+    }
+  }
+
+  if (entry.action === 'heal') {
+    plan.push({ id: 'combat.heal', delayMs: impactDelay, throttleMs: 140, volumeScale: 0.9 });
+  }
+
+  if (entry.action === 'spell') {
+    plan.push({ id: 'combat.spellCast', delayMs: startDelay, throttleMs: 140, volumeScale: 0.75 });
+    plan.push({ id: getSpellImpactSound(entry), delayMs: impactDelay + 70, throttleMs: 140 });
+  }
+
+  if (entry.action === 'mana') {
+    plan.push({ id: 'combat.manaFocus', delayMs: impactDelay, throttleMs: 160 });
+  }
+
+  if (entry.action === 'morale') {
+    plan.push({ id: 'combat.spellBuff', delayMs: impactDelay, throttleMs: 180, volumeScale: 0.72 });
+  }
+
+  if (entry.action === 'wait' && entry.style === 'buff') {
+    plan.push({ id: 'combat.spellBuff', delayMs: impactDelay, throttleMs: 150, volumeScale: 0.78 });
+  } else if (entry.action === 'wait') {
+    plan.push({ id: 'combat.wait', delayMs: startDelay, throttleMs: 120, volumeScale: 0.68 });
+  }
+
+  if ((entry.action === 'attack' || entry.action === 'spell') && hasDefeatedLogTarget(battle, entry)) {
+    plan.push({ id: 'combat.unitDeath', delayMs: deathDelay, throttleMs: 180 });
+  }
+
+  return plan;
+}
+
+function getBattleHoverForecast({
+  battle,
+  activeUnit,
+  hoveredCell,
+  isPlayerTurn,
+  selectedSpell,
+  isResolvingAction,
+  movementLocked = false,
+}: {
+  battle: BattleState;
+  activeUnit?: BattleUnit;
+  hoveredCell: { x: number; y: number } | null;
+  isPlayerTurn: boolean;
+  selectedSpell?: BattleSpell;
+  isResolvingAction: boolean;
+  movementLocked?: boolean;
+}): BattleHoverForecastData | null {
+  if (!hoveredCell) return null;
+
+  const unitAtCell = getUnitAt(battle, hoveredCell.x, hoveredCell.y);
+  if (!unitAtCell) return null;
+
+  const baseForecast: BattleHoverForecastData = {
+    unit: unitAtCell,
+    tone: unitAtCell.side === 'player' ? 'good' : 'danger',
+    currentHealth: unitAtCell.currentHealth,
+    projectedHealth: unitAtCell.currentHealth,
+    maxHealth: unitAtCell.maxHealth,
+  };
+
+  if (battle.status !== 'active' || isResolvingAction || !isPlayerTurn || !activeUnit) {
+    return baseForecast;
+  }
+
+  if (selectedSpell) {
+    const validTarget =
+      (selectedSpell.target === 'enemy' && unitAtCell.side !== activeUnit.side) ||
+      (selectedSpell.target === 'ally' && unitAtCell.side === activeUnit.side);
+
+    if (!validTarget) return baseForecast;
+
+    const spellForecast = getSelectedSpellForecast(activeUnit, selectedSpell, unitAtCell);
+    return {
+      ...baseForecast,
+      ...spellForecast,
+      actionLabel: spellForecast.actionLabel || selectedSpell.name,
+    };
+  }
+
+  if (!movementLocked && canAttack(activeUnit, unitAtCell)) {
+    const damage = getAttackDamage(activeUnit, unitAtCell, battle);
+    return {
+      ...baseForecast,
+      actionLabel: activeUnit.range > 1 ? 'Ranged damage' : 'Melee damage',
+      amount: Math.min(unitAtCell.currentHealth, damage),
+      projectedHealth: Math.max(0, unitAtCell.currentHealth - damage),
+      tone: 'danger',
+    };
+  }
+
+  if (canHeal(activeUnit, unitAtCell)) {
+    const healing = getHealAmount(activeUnit, unitAtCell, battle);
+    return {
+      ...baseForecast,
+      actionLabel: 'Heal',
+      amount: healing,
+      projectedHealth: Math.min(unitAtCell.maxHealth, unitAtCell.currentHealth + healing),
+      tone: 'good',
+    };
+  }
+
+  return baseForecast;
+}
+
+function getSelectedSpellForecast(
+  caster: BattleUnit,
+  spell: BattleSpell,
+  target: BattleUnit
+): Partial<BattleHoverForecastData> {
+  const spellPower = caster.magic;
+  const damageBySpell: Record<string, number> = {
+    'ember-dart': 7 + spellPower * 2,
+    'arcane-bolt': 12 + spellPower * 2,
+    'withering-curse': 8 + spellPower,
+    'gravity-snare': 7 + spellPower,
+    judgement: 18 + spellPower * 2,
+    'blood-star': 14 + spellPower * 2,
+    'frost-lance': 10 + spellPower * 2,
+  };
+  const healingBySpell: Record<string, number> = {
+    'sanctified-mend': 18 + spellPower * 2,
+    'thorn-ward': 8 + spellPower,
+    'warding-prayer': 7 + spellPower,
+    'soul-tether': 20 + spellPower * 2,
+  };
+
+  const damage = damageBySpell[spell.id];
+  if (typeof damage === 'number') {
+    return {
+      actionLabel: spell.name,
+      amount: Math.min(target.currentHealth, damage),
+      projectedHealth: Math.max(0, target.currentHealth - damage),
+      tone: 'danger',
+    };
+  }
+
+  const healing = healingBySpell[spell.id];
+  if (typeof healing === 'number') {
+    return {
+      actionLabel: spell.name,
+      amount: Math.min(target.maxHealth - target.currentHealth, healing),
+      projectedHealth: Math.min(target.maxHealth, target.currentHealth + healing),
+      tone: 'good',
+    };
+  }
+
+  return {
+    actionLabel: spell.name,
+    tone: spell.target === 'ally' ? 'good' : 'danger',
+  };
+}
+
 function getBattleHoverPreview({
   battle,
   activeUnit,
@@ -1594,7 +2266,9 @@ function getBattleHoverPreview({
     const terrain = getTerrainAt(battle, activeUnit.x, activeUnit.y);
     return {
       title: activeUnit.name,
-      detail: `${BATTLE_TERRAIN_LABELS[terrain]}: ${BATTLE_TERRAIN_DESCRIPTIONS[terrain]}`,
+      detail: activeUnit.chargedHeal
+        ? `Blessing charged. Next heal is stronger. ${BATTLE_TERRAIN_LABELS[terrain]}: ${BATTLE_TERRAIN_DESCRIPTIONS[terrain]}`
+        : `${BATTLE_TERRAIN_LABELS[terrain]}: ${BATTLE_TERRAIN_DESCRIPTIONS[terrain]}`,
       tone: activeUnit.side === 'player' ? 'good' : 'danger',
     };
   }
@@ -1634,7 +2308,9 @@ function getBattleHoverPreview({
     if (isPlayerTurn && canHeal(activeUnit, unitAtCell)) {
       return {
         title: `Heal ${unitAtCell.name}`,
-        detail: `Restores about ${getHealAmount(activeUnit, unitAtCell, battle)} health.`,
+        detail: activeUnit.chargedHeal
+          ? `Blessed heal restores about ${getHealAmount(activeUnit, unitAtCell, battle)} health.`
+          : `Restores about ${getHealAmount(activeUnit, unitAtCell, battle)} health.`,
         tone: 'good',
       };
     }
@@ -1745,7 +2421,9 @@ function getDefaultBattleCue({
   if (activeUnit.healing > 0) {
     return {
       headline: 'Your Turn',
-      detail: `${activeUnit.name} can move, strike, or heal a wounded ally in range.`,
+      detail: activeUnit.chargedHeal
+        ? `${activeUnit.name}'s blessing is ready. Heal a wounded ally for a stronger restore.`
+        : `${activeUnit.name} can move, strike, heal a wounded ally, or wait to charge a stronger heal.`,
       tone: 'player',
     };
   }

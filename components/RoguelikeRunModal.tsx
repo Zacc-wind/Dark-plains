@@ -666,6 +666,7 @@ function RunController({
 
             {session.phase === 'event' && (
               <OmenPanel
+                key={`${session.id}:${session.currentNodeIndex}`}
                 session={session}
                 onComplete={(outcome) => setSession(current => current ? applyDungeonEventOutcome(current, outcome) : current)}
               />
@@ -1399,38 +1400,28 @@ function OmenPanel({
   onComplete: (outcome: OmenOutcome) => void;
 }) {
   const node = session.nodes[session.currentNodeIndex];
-  const outcomeRef = useRef<OmenOutcome | null>(null);
-  const [stage, setStage] = useState<'channeling' | 'revealed'>('channeling');
-  const [outcome, setOutcome] = useState<OmenOutcome | null>(null);
+  const revealKey = `${session.id}:${session.currentNodeIndex}`;
+  const [outcome] = useState(() => rollDungeonEventOutcome(session));
+  const [revealState, setRevealState] = useState<{ key: string; stage: 'channeling' | 'revealed' }>({
+    key: revealKey,
+    stage: 'channeling',
+  });
+  const stage = revealState.key === revealKey ? revealState.stage : 'channeling';
 
   useEffect(() => {
-    const rolled = rollDungeonEventOutcome(session);
-    outcomeRef.current = rolled;
-
     const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    if (prefersReducedMotion) {
-      setOutcome(rolled);
-      setStage('revealed');
-      emitFxEvent({
-        type: 'status',
-        tone: rolled.tone === 'curse' ? 'red' : rolled.tone === 'gold' ? 'gold' : 'violet',
-        intensity: 0.72,
-      });
-      return;
-    }
-
+    const delay = prefersReducedMotion ? 0 : OMEN_CHANNEL_MS;
     const timer = window.setTimeout(() => {
-      setOutcome(rolled);
-      setStage('revealed');
+      setRevealState({ key: revealKey, stage: 'revealed' });
       emitFxEvent({
         type: 'status',
-        tone: rolled.tone === 'curse' ? 'red' : rolled.tone === 'gold' ? 'gold' : 'violet',
+        tone: outcome.tone === 'curse' ? 'red' : outcome.tone === 'gold' ? 'gold' : 'violet',
         intensity: 0.72,
       });
-    }, OMEN_CHANNEL_MS);
+    }, delay);
 
     return () => window.clearTimeout(timer);
-  }, [session.currentNodeIndex, session.id]);
+  }, [outcome.tone, revealKey]);
 
   if (stage === 'channeling') {
     return (
@@ -1462,12 +1453,9 @@ function OmenPanel({
     );
   }
 
-  const resolved = outcome || outcomeRef.current;
-  if (!resolved) return null;
-
   return (
     <div className="run-omen-stage flex min-h-[28rem] items-center justify-center p-4">
-      <section className={`run-omen-panel run-omen-reveal run-omen-${resolved.tone} w-full max-w-xl rounded border p-8 text-center`}>
+      <section className={`run-omen-panel run-omen-reveal run-omen-${outcome.tone} w-full max-w-xl rounded border p-8 text-center`}>
         <div className="run-omen-result-icon relative mx-auto mb-4 h-16 w-16 overflow-hidden rounded-full border">
           <Image
             src={DUNGEON_NODE_ICONS.event}
@@ -1478,14 +1466,14 @@ function OmenPanel({
           />
         </div>
         <div className="arcane-label">Omen Resolved</div>
-        <h3 className="fantasy-heading mt-1 text-3xl">{resolved.title}</h3>
-        <p className="ui-muted mx-auto mt-3 max-w-md text-sm font-bold leading-relaxed">{resolved.flavor}</p>
+        <h3 className="fantasy-heading mt-1 text-3xl">{outcome.title}</h3>
+        <p className="ui-muted mx-auto mt-3 max-w-md text-sm font-bold leading-relaxed">{outcome.flavor}</p>
         <p className="run-omen-result-detail mx-auto mt-4 max-w-md rounded border px-4 py-3 text-sm font-black leading-relaxed text-zinc-100">
-          {resolved.detail}
+          {outcome.detail}
         </p>
         <button
           type="button"
-          onClick={() => onComplete(resolved)}
+          onClick={() => onComplete(outcome)}
           className="ui-button-primary mt-6 rounded px-6 py-3 text-sm font-black"
         >
           Continue Road
@@ -1587,7 +1575,7 @@ function CompletionPanel({
           </div>
 
           <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.35fr)]">
-            <RunRoster session={session} />
+            <RunRoster session={session} onOpenStats={() => setShowDetails(true)} />
             <div className="space-y-3">
               <div className="flex items-center justify-between gap-3 border-b border-[rgba(232,217,184,0.14)] pb-2">
                 <h3 className="fantasy-heading font-black">Combat Data</h3>
@@ -3174,13 +3162,6 @@ function woundSpecificMinion(session: RunSession, index: number): RunSession {
         : unit
     )),
   };
-}
-
-function woundRandomMinion(session: RunSession): RunSession {
-  const alive = session.minions.map((unit, index) => ({ unit, index })).filter(item => item.unit.alive);
-  const chosen = shuffle(alive)[0];
-  if (!chosen) return { ...session, runGold: Math.max(0, session.runGold - 30) };
-  return woundSpecificMinion(session, chosen.index);
 }
 
 function addRunMinionFromTemplate(session: RunSession, template: MinionTemplate, notice: string): RunSession {

@@ -289,7 +289,7 @@ export default function TownModal({ town, onClose, onTravel }: TownModalProps) {
 
   return (
     <div
-      className="fixed inset-0 z-[82] bg-black"
+      className="town-modal-root fixed inset-0 z-[82] bg-black"
       onClick={onClose}
     >
       <div
@@ -300,11 +300,11 @@ export default function TownModal({ town, onClose, onTravel }: TownModalProps) {
           src={backgroundPath}
           alt={town.name}
           fill
-          className="object-cover"
+          className="town-modal-bg object-cover"
           priority
         />
 
-        <div className="absolute inset-0 bg-black/15" />
+        <div className="town-modal-scrim absolute inset-0 bg-black/15" />
 
         <div className="town-modal-layer">
           <div className="town-modal-top">

@@ -284,6 +284,29 @@ function createProjectile(
   };
 }
 
+function createSpellParticleBurst(
+  origin: THREE.Vector3,
+  color: THREE.Color,
+  accent = color,
+  gravity = 5
+): RuntimeCombatEffect {
+  const root = new THREE.Group();
+  root.position.copy(origin);
+  const embers = addParticles(root, new THREE.Vector3(0, 0, 0), color, 34, 11, 44, 2.3);
+  const sparks = addParticles(root, new THREE.Vector3(0, 0, 0), accent, 18, 7, 30, 1.7);
+
+  return {
+    root,
+    life: 0,
+    maxLife: 1.18,
+    update: (delta, progress) => {
+      root.rotation.z += delta * 0.26;
+      updateParticles(embers, delta, progress, gravity);
+      updateParticles(sparks, delta, progress, gravity * 0.45);
+    },
+  };
+}
+
 function createHealPulse(origin: THREE.Vector3): RuntimeCombatEffect {
   const root = new THREE.Group();
   root.position.copy(origin);
@@ -442,26 +465,11 @@ function createAreaSpellWave(origins: THREE.Vector3[], tone: AreaSpellTone): Run
   const gravity = tone === 'support' ? -12 : tone === 'buff' ? -5 : 8;
   root.position.copy(center);
 
-  const wave = makeRing(color, 18, 25, 0.34);
-  wave.scale.y = 0.58;
-  const veil = new THREE.Mesh(
-    new THREE.CircleGeometry(30, 56),
-    makeMaterial(accent, tone === 'damage' ? 0.1 : 0.08)
-  );
-  veil.scale.y = 0.58;
-  root.add(veil, wave);
+  const centerParticles = addParticles(root, new THREE.Vector3(0, 0, 0), accent, 42, 22, 74, 2.1);
 
   const targetBursts = origins.map((origin, index) => {
     const group = new THREE.Group();
     group.position.copy(new THREE.Vector3().subVectors(origin, center));
-    const targetRing = makeRing(color, tone === 'damage' ? 9 : 11, tone === 'damage' ? 15 : 17, tone === 'damage' ? 0.4 : 0.34);
-    targetRing.scale.y = 0.55;
-    const flare = new THREE.Mesh(
-      new THREE.CircleGeometry(tone === 'damage' ? 12 : 15, 36),
-      makeMaterial(accent, tone === 'damage' ? 0.18 : 0.13)
-    );
-    flare.scale.y = 0.72;
-    group.add(flare, targetRing);
 
     const particles = addParticles(
       group,
@@ -474,7 +482,7 @@ function createAreaSpellWave(origins: THREE.Vector3[], tone: AreaSpellTone): Run
     );
 
     root.add(group);
-    return { group, targetRing, flare, particles, index };
+    return { group, particles, index };
   });
 
   return {
@@ -482,22 +490,13 @@ function createAreaSpellWave(origins: THREE.Vector3[], tone: AreaSpellTone): Run
     life: 0,
     maxLife: tone === 'damage' ? 2.15 : 2.45,
     update: (delta, progress) => {
-      const eased = easeOut(progress);
-      wave.scale.set(0.45 + eased * 2.7, 0.28 + eased * 1.45, 1);
-      wave.material.opacity = (1 - progress) * 0.34;
-      veil.scale.set(0.7 + eased * 2, 0.42 + eased * 1.05, 1);
-      veil.material.opacity = Math.sin(progress * Math.PI) * (tone === 'damage' ? 0.12 : 0.09);
       root.rotation.z += delta * (tone === 'control' ? -0.38 : 0.22);
+      updateParticles(centerParticles, delta, progress, gravity * 0.25);
 
-      targetBursts.forEach(({ group, targetRing, flare, particles, index }) => {
+      targetBursts.forEach(({ group, particles, index }) => {
         const delay = index * 0.045;
         const localProgress = Math.max(0, Math.min(1, (progress - delay) / Math.max(0.1, 1 - delay)));
-        const pulse = Math.sin(localProgress * Math.PI);
         group.rotation.z += delta * (tone === 'control' ? -0.9 : 0.55);
-        targetRing.scale.set(0.58 + localProgress * 1.55, 0.34 + localProgress * 0.92, 1);
-        targetRing.material.opacity = (1 - localProgress) * (tone === 'damage' ? 0.4 : 0.34);
-        flare.scale.setScalar(0.75 + pulse * 0.58);
-        flare.material.opacity = pulse * (tone === 'damage' ? 0.18 : 0.13);
         if (localProgress > 0) updateParticles(particles, delta, localProgress, gravity);
       });
     },
@@ -610,8 +609,23 @@ function createRuntime(mount: HTMLDivElement): RuntimeContext {
 
     if (style === 'spell-drain') {
       const drainTargets = actor ? targets.filter(target => target.id !== actor.id) : targets;
-      spawnAtTargets(drainTargets, battle, origin => createProjectile(actorCenter || origin, origin, COLORS.damage, COLORS.spell, true));
-      if (actorCenter) addEffect(createHealPulse(actorCenter));
+      spawnAtTargets(drainTargets, battle, origin => createSpellParticleBurst(origin, COLORS.damage, COLORS.spell, 7));
+      if (actorCenter) addEffect(createSpellParticleBurst(actorCenter, COLORS.heal, COLORS.shield, -9));
+      return;
+    }
+
+    if (entry.action === 'spell' && (style === 'heal' || style === 'spell-support')) {
+      spawnAtTargets(targets.length > 0 ? targets : actor ? [actor] : [], battle, origin => createSpellParticleBurst(origin, COLORS.heal, COLORS.shield, -10));
+      return;
+    }
+
+    if (entry.action === 'spell' && style === 'buff') {
+      spawnAtTargets(targets.length > 0 ? targets : actor ? [actor] : [], battle, origin => createSpellParticleBurst(origin, COLORS.shield, COLORS.gold, -5));
+      return;
+    }
+
+    if (entry.action === 'spell' && (style === 'debuff' || style === 'spell-control')) {
+      spawnAtTargets(targets.length > 0 ? targets : actor ? [actor] : [], battle, origin => createSpellParticleBurst(origin, COLORS.debuff, COLORS.spell, 5));
       return;
     }
 
@@ -646,7 +660,7 @@ function createRuntime(mount: HTMLDivElement): RuntimeContext {
     }
 
     if (style === 'spell-damage') {
-      spawnAtTargets(targets, battle, origin => createProjectile(actorCenter || origin, origin, COLORS.spell, COLORS.debuff, true));
+      spawnAtTargets(targets, battle, origin => createSpellParticleBurst(origin, COLORS.spell, COLORS.damage, 7));
     }
   };
 

@@ -67,7 +67,7 @@ export default function POIModal({ poi, onClose, onSelectJob, onTravel }: POIMod
   };
 
   return (
-    <div className="world-popup-layer pointer-events-none fixed inset-0 flex items-center justify-center px-4">
+    <div className="world-popup-layer poi-modal-layer pointer-events-none fixed inset-0 flex items-center justify-center px-4">
       <div
         className="world-popup-panel poi-job-panel command-panel vine-frame pointer-events-auto relative w-full max-w-xl overflow-hidden rounded border text-zinc-100"
         onClick={(event) => event.stopPropagation()}

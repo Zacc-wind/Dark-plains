@@ -320,6 +320,9 @@
 - [x] Upgrade AI to use terrain, heal intelligently, block chokepoints, and prioritize kill shots.
 - [x] Add battle result report and combat-speed settings.
 - [x] Nerf early-tier healing units and improve movement tile affordance/sprite fit.
+- [x] Add differentiated combat sound routing and priest charged-heal choice.
+- [x] Fix NPC enemy turns so movement ends the action and cannot also trigger an attack.
+- [x] Polish commander spell selection and convert spell FX overlays to particle-only accents around icon animations.
 
 ## Content Targets
 - [x] 15 main story quests.

@@ -5,7 +5,7 @@ Goal: make battles feel like a polished dark fantasy tactics game: readable like
 ## Status Audit - 2026-06-04
 - Recent combat polish is mostly reflected already: board-first layout, terrain-styled maps, pre-combat formation, clearer highlights, movement/hit/heal/spell/result animation palettes, board-anchored Three.js combat effects, death fade/ash, floating numbers, restrained Three.js FX bursts, combat speed settings, result reports, tactical mechanics, and AI priorities are checked.
 - Deployment and database integration are intentionally out of scope for this audit.
-- Remaining combat details are mostly second-pass polish: finish class-specific tactical choices, define/tune duration targets, add AI debug tooling, and add optional audio/low-health ambience.
+- Remaining combat details are mostly second-pass polish: define/tune duration targets, add AI debug tooling, and add optional ambient/low-health ambience.
 
 ## Current Combat Baseline
 - 10x7 square tactical board.
@@ -29,6 +29,10 @@ Goal: make battles feel like a polished dark fantasy tactics game: readable like
 - [x] Add victory/defeat animation variants for daily, dungeon, story boss, and recruit/surrender outcomes.
 - [x] Tune default combat speed one step slower and reserve instant mode for repeat farming.
 - [x] Add battle-start camera/board settle animation before the first unit acts.
+- [x] Add priest charge choice: waiting stores a blessing that makes the next heal stronger.
+- [x] Fix NPC movement so moving consumes the enemy action instead of chaining into a hidden attack.
+- [x] Enlarge and clarify the commander spell book with readable icons, mana costs, and disabled spell states.
+- [x] Replace old spell ring overlays with particle-only Three.js spell accents around the icon-based cast/impact animation.
 
 ## Design Pillars
 - Readable first: every unit, target, turn, and danger zone must be obvious at a glance.
@@ -101,7 +105,7 @@ Goal: make battles feel like a polished dark fantasy tactics game: readable like
 - [x] Add morale events: high morale can grant a small bonus action or mana; low morale can reduce movement.
 - [x] Add flanking bonus when attacking from opposite sides.
 - [x] Add commander aura: nearby minions gain small stat bonuses based on player stats.
-- [ ] Add priest choice: heal, bless, or wait to charge stronger heal.
+- [x] Add priest choice: heal now, strike, or wait to charge a stronger blessed heal.
 - [ ] Add wizard choice: ranged attack, splash spell, or terrain interaction.
 - [x] Add knight/templar passive guard to protect adjacent allies.
 - [x] Add first boss mechanics through boss personality, aura pressure, and stronger AI priorities.
@@ -137,8 +141,8 @@ Goal: make battles feel like a polished dark fantasy tactics game: readable like
 - [x] Add responsive mobile/tablet battle layout.
 
 ## Phase 10: Audio And Polish Later
-- [ ] Add optional sound toggles.
-- [ ] Add UI click, move, strike, heal, spell, victory, defeat sounds.
+- [x] Add optional sound toggles.
+- [x] Add UI click, move, strike, heal, spell, victory, defeat sounds.
 - [ ] Add ambient battle loop by region.
 - [x] Add subtle screen vignette when commander is low health.
 - [ ] Add subtle ambient battlefield particles that stay behind units and do not reduce click clarity.

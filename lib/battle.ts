@@ -117,6 +117,7 @@ export interface BattleUnit {
   x: number;
   y: number;
   retaliatedRound?: number;
+  chargedHeal?: boolean;
 }
 
 export interface BattleSpell {
@@ -137,6 +138,7 @@ export interface BattleLogEntry {
   targetIds?: string[];
   action: BattleLogAction;
   style?: BattleLogStyle;
+  spellId?: string;
   message: string;
   createdAt: number;
 }
@@ -1125,7 +1127,7 @@ function grantCommanderMana(state: BattleState, unit: BattleUnit | undefined): B
 function createBattleLogEntry(
   state: Pick<BattleState, 'round'>,
   message: string,
-  options: Partial<Pick<BattleLogEntry, 'side' | 'actor' | 'actorId' | 'targetIds' | 'action' | 'style'>> = {}
+  options: Partial<Pick<BattleLogEntry, 'side' | 'actor' | 'actorId' | 'targetIds' | 'action' | 'style' | 'spellId'>> = {}
 ): BattleLogEntry {
   return {
     id: `log-${Date.now()}-${Math.random().toString(16).slice(2)}`,
@@ -1136,6 +1138,7 @@ function createBattleLogEntry(
     actorId: options.actorId,
     targetIds: options.targetIds,
     style: options.style,
+    spellId: options.spellId,
     message,
     createdAt: Date.now(),
   };
@@ -1144,7 +1147,7 @@ function createBattleLogEntry(
 function withBattleLog(
   state: BattleState,
   message: string,
-  options: Partial<Pick<BattleLogEntry, 'side' | 'actor' | 'actorId' | 'targetIds' | 'action' | 'style'>> = {}
+  options: Partial<Pick<BattleLogEntry, 'side' | 'actor' | 'actorId' | 'targetIds' | 'action' | 'style' | 'spellId'>> = {}
 ): BattleState {
   return {
     ...state,
@@ -1621,17 +1624,18 @@ export function canAttack(attacker: BattleUnit, target: BattleUnit): boolean {
 }
 
 export function canHeal(healer: BattleUnit, target: BattleUnit): boolean {
-  const template = healer.templateId ? getMinionTemplate(healer.templateId) : undefined;
-  const canUseHealAction = healer.kind === 'minion' && template?.class === 'priest';
-
   return (
-    canUseHealAction &&
+    canChargePriestHeal(healer) &&
     healer.side === target.side &&
-    healer.healing > 0 &&
     target.currentHealth > 0 &&
     target.currentHealth < target.maxHealth &&
     getDistance(healer, target) <= healer.range
   );
+}
+
+function canChargePriestHeal(unit: BattleUnit): boolean {
+  const template = unit.templateId ? getMinionTemplate(unit.templateId) : undefined;
+  return unit.kind === 'minion' && template?.class === 'priest' && unit.healing > 0 && unit.currentHealth > 0;
 }
 
 function getAdjacentAllies(state: BattleState, unit: BattleUnit): BattleUnit[] {
@@ -1707,8 +1711,9 @@ export function getHealAmount(healer: BattleUnit, target: BattleUnit, state?: Ba
       ? 0.82
       : 1;
   const commanderHealScale = healer.kind === 'commander' ? 0.55 : 1;
+  const chargedHealScale = healer.chargedHeal ? 1.55 : 1;
   const rawHealing = healer.healing + Math.floor(healer.magic / 2) + holyGroundBonus + 2;
-  const healing = Math.max(1, Math.floor(rawHealing * earlyHealerScale * commanderHealScale));
+  const healing = Math.max(1, Math.floor(rawHealing * earlyHealerScale * commanderHealScale * chargedHealScale));
   return Math.max(0, Math.min(target.maxHealth, target.currentHealth + healing) - target.currentHealth);
 }
 
@@ -1774,11 +1779,23 @@ export function waitBattleUnit(state: BattleState, unitId: string, message?: str
   const unit = state.units.find(item => item.id === unitId);
   if (!unit) return state;
 
-  const style: BattleLogStyle = action === 'mana' ? 'mana-focus' : 'guard';
+  const chargesPriestHeal = action === 'wait' && canChargePriestHeal(unit);
+  const nextState = chargesPriestHeal
+    ? {
+      ...state,
+      units: state.units.map(item => item.id === unit.id ? { ...item, chargedHeal: true } : item),
+    }
+    : state;
+  const style: BattleLogStyle = action === 'mana' ? 'mana-focus' : chargesPriestHeal ? 'buff' : 'guard';
+  const logMessage = chargesPriestHeal
+    ? unit.chargedHeal
+      ? `${unit.name} keeps a healing blessing ready.`
+      : `${unit.name} chants a blessing. The next heal will be stronger.`
+    : message || `${unit.name} waits.`;
 
   return advanceBattleTurn(withBattleLog(
-    state,
-    message || `${unit.name} waits.`,
+    nextState,
+    logMessage,
     { side: unit.side, actor: unit.name, actorId: unit.id, targetIds: [unit.id], action, style }
   ));
 }
@@ -1877,12 +1894,18 @@ export function healBattleUnit(state: BattleState, healerId: string, targetId: s
   const nextHealth = Math.min(target.maxHealth, target.currentHealth + healing);
   const healedState = {
     ...state,
-    units: state.units.map(unit => unit.id === targetId ? { ...unit, currentHealth: nextHealth } : unit),
+    units: state.units.map(unit => {
+      let nextUnit = unit;
+      if (unit.id === targetId) nextUnit = { ...nextUnit, currentHealth: nextHealth };
+      if (unit.id === healerId) nextUnit = { ...nextUnit, chargedHeal: false };
+      return nextUnit;
+    }),
   };
+  const chargedText = healer.chargedHeal ? ' with a stored blessing' : '';
 
   return withBattleLog(
     healedState,
-    `${healer.name} heals ${target.name} for ${nextHealth - target.currentHealth}.`,
+    `${healer.name} heals ${target.name}${chargedText} for ${nextHealth - target.currentHealth}.`,
     { side: healer.side, actor: healer.name, actorId: healer.id, targetIds: [target.id], action: 'heal', style: 'heal' }
   );
 }
@@ -2165,7 +2188,7 @@ export function castBattleSpell(state: BattleState, spellId: string, targetId?: 
   return advanceBattleTurn(updateBattleStatus(withBattleLog(
     nextState,
     logMessage,
-    { side: caster.side, actor: caster.name, actorId: caster.id, targetIds: spellTargetIds, action: 'spell', style: getBattleSpellLogStyle(spell.id) }
+    { side: caster.side, actor: caster.name, actorId: caster.id, targetIds: spellTargetIds, action: 'spell', style: getBattleSpellLogStyle(spell.id), spellId: spell.id }
   )));
 }
 
@@ -2357,17 +2380,7 @@ export function runEnemyBattleTurn(state: BattleState): BattleState {
       .slice(0, getEnemyMoveCandidateCount(personality));
     const bestCell = personality === 'balanced' ? getRandomItem(goodCells) || goodCells[0] : goodCells[0];
     const movedState = moveBattleUnit(state, activeUnit.id, bestCell.x, bestCell.y);
-    const movedUnit = getActiveUnit(movedState);
-
-    if (movedUnit) {
-      const targetsAfterMove = getAttackTargets(movedState, movedUnit);
-      if (targetsAfterMove.length > 0 && Math.random() < 0.5) {
-        const rankedAfterMove = sortTargetsForPersonality(personality, movedUnit, targetsAfterMove, movedState);
-        const target = personality === 'balanced' ? getRandomItem(rankedAfterMove) || rankedAfterMove[0] : rankedAfterMove[0];
-        return advanceBattleTurn(attackBattleUnit(movedState, movedUnit.id, target.id));
-      }
-    }
-
+    // Enemy movement consumes the action; otherwise NPCs get a hidden move-then-strike turn.
     return advanceBattleTurn(movedState);
   }
 

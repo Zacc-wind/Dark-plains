@@ -72,7 +72,7 @@ export default function TravelIndicator() {
           Stop Here
         </button>
 
-        <p className="text-center text-[11px] font-bold text-zinc-500">You can inspect towns, quests, and queue jobs while walking.</p>
+        <p className="text-center text-[11px] font-bold text-zinc-500">You can inspect towns, quests, and queue jobs while walking. Stopping early cancels queued jobs.</p>
       </div>
     </div>
   );

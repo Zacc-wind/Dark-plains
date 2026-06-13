@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth';
+import BackgroundMusic from '@/components/BackgroundMusic';
 import MapRenderer from '@/components/MapRenderer';
 import GameCommandCenter from '@/components/GameCommandCenter';
 import PlayerModelSelector from '@/components/PlayerModelSelector';
@@ -37,6 +38,7 @@ export default function GamePage() {
 
   return (
     <div className="fantasy-ui flex min-h-screen flex-col bg-[#05080a] text-[var(--ui-text)]">
+      <BackgroundMusic />
       <GameCommandCenter onOpenAvatar={() => setShowAvatar(true)} />
       <main className="flex-1">
         <MapRenderer />
