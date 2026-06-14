@@ -1,7 +1,9 @@
 'use client';
 
-import Image from 'next/image';
+import { buildQuestRewardChips } from '@/lib/rewardDisplay';
+import RewardIconStrip from '@/components/RewardIconStrip';
 import { useEffect, useState } from 'react';
+import Image from 'next/image';
 import { ASSET_PATHS, getPlayerModelPath } from '@/lib/assetLoader';
 import {
   addEquipmentSocketBonus,
@@ -390,13 +392,10 @@ export default function TownModal({ town, onClose, onTravel }: TownModalProps) {
                           <div className="ui-progress-fill h-full" style={{ width: `${progressPercent}%` }} />
                         </div>
                       )}
-                      <div className="mt-3 flex items-center justify-between gap-3">
-                        <div className="ui-muted text-[11px] font-bold">
-                          {quest.rewards.gold ? `${quest.rewards.gold} gold` : ''}
-                          {quest.rewards.exp ? ` / ${getBalancedQuestExp(quest.rewards.exp)} XP` : ''}
-                          {quest.rewards.equipmentRarity ? ` / ${quest.rewards.equipmentRarity} gear` : ''}
-                          {quest.rewards.minionTier ? ` / minion` : ''}
-                        </div>
+                      <div className="mt-3 flex items-end justify-between gap-3">
+                        <RewardIconStrip
+                          chips={buildQuestRewardChips(quest.rewards, { formatExp: getBalancedQuestExp })}
+                        />
                         {!status.accepted && (
                           <button
                             onClick={() => handleAcceptQuest(quest.id)}

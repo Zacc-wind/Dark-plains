@@ -33,6 +33,9 @@ Goal: make battles feel like a polished dark fantasy tactics game: readable like
 - [x] Fix NPC movement so moving consumes the enemy action instead of chaining into a hidden attack.
 - [x] Enlarge and clarify the commander spell book with readable icons, mana costs, and disabled spell states.
 - [x] Replace old spell ring overlays with particle-only Three.js spell accents around the icon-based cast/impact animation.
+- [x] Add retaliation damage preview, including adjacent ranged attackers being countered by melee defenders.
+- [x] Add colorblind-safe combat indicators with patterned move, damage, support, threat, and health cues.
+- [x] Slow enemy action handoff so NPC movement and commander spells remain readable across all combat speeds.
 
 ## Design Pillars
 - Readable first: every unit, target, turn, and danger zone must be obvious at a glance.
@@ -76,6 +79,7 @@ Goal: make battles feel like a polished dark fantasy tactics game: readable like
 - [x] Move active-unit and target details into hover previews so the board keeps more space.
 - [x] Add hover preview for movement destination and final position.
 - [x] Add attack preview: expected damage and likely defeat.
+- [x] Add counterattack preview showing retaliatory damage and projected attacker health.
 - [x] Add heal preview: expected healing.
 - [x] Add spell preview before confirming target.
 - [x] Add a one-click cancel/escape flow for selected spells.
@@ -101,7 +105,7 @@ Goal: make battles feel like a polished dark fantasy tactics game: readable like
 - [x] Finish distinct animation palettes for melee, ranged, heal, buff, debuff, morale, and commander spells.
 
 ## Phase 6: Fun Tactical Mechanics
-- [x] Add melee retaliation for some unit classes, once per round.
+- [x] Add melee retaliation for some unit classes, once per round, including counters against adjacent ranged attackers.
 - [x] Add morale events: high morale can grant a small bonus action or mana; low morale can reduce movement.
 - [x] Add flanking bonus when attacking from opposite sides.
 - [x] Add commander aura: nearby minions gain small stat bonuses based on player stats.

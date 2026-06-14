@@ -301,7 +301,7 @@ $minionAssets = @(
 )
 
 foreach ($asset in $minionAssets) {
-  Save-TrimmedSprite $asset (Join-Path $minionsRoot $asset) 256 12
+  Save-TrimmedSprite $asset (Join-Path $minionsRoot $asset) 512 20
 }
 
 $sheetPath = Join-Path $sourceRoot 'Equipment Icons sheet.png'

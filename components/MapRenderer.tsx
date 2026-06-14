@@ -37,8 +37,7 @@ import { WorldDungeon, formatDungeonTimeRemaining, getActiveDungeons, getRegionF
 import POIModal from './POIModal';
 import TownModal from './TownModal';
 import PlayerListModal from './PlayerListModal';
-import BattleModal from './BattleModal';
-import { DungeonRunModal } from './RoguelikeRunModal';
+import { DungeonRunModal, EncounterRunModal, getEncounterRunBattleCount } from './RoguelikeRunModal';
 
 // POI image mapping
 const POI_IMAGE_PATHS: Record<POIType, string> = {
@@ -267,10 +266,8 @@ function getQuestGuideNpc(requiredLevel: number, town?: string): QuestNpc | unde
     .sort((left, right) => getNpcLevelDistance(left.levelRange, requiredLevel) - getNpcLevelDistance(right.levelRange, requiredLevel))[0];
 }
 
-function shouldShowQuestNpcMarker(currentUser: ReturnType<typeof getCurrentUser>, npc: QuestNpc): boolean {
-  if (!currentUser || hasClaimedQuestNpcReward(currentUser, npc.id)) return false;
-  if (isLevelInsideNpcRange(npc.levelRange, currentUser.stats.level)) return true;
-
+function isQuestNpcRequestedByActiveQuest(currentUser: ReturnType<typeof getCurrentUser>, npc: QuestNpc): boolean {
+  if (!currentUser) return false;
   const activeStoryNpc = STORY_CHAPTERS
     .flatMap(chapter => chapter.quests)
     .sort((left, right) => left.order - right.order)
@@ -286,6 +283,13 @@ function shouldShowQuestNpcMarker(currentUser: ReturnType<typeof getCurrentUser>
     const template = getCityQuestTemplate(progress.questId);
     return Boolean(template && getQuestGuideNpc(currentUser.stats.level, template.town)?.id === npc.id);
   });
+}
+
+function shouldShowQuestNpcMarker(currentUser: ReturnType<typeof getCurrentUser>, npc: QuestNpc): boolean {
+  if (!currentUser) return false;
+  if (isQuestNpcRequestedByActiveQuest(currentUser, npc)) return true;
+  if (hasClaimedQuestNpcReward(currentUser, npc.id)) return false;
+  return isLevelInsideNpcRange(npc.levelRange, currentUser.stats.level);
 }
 
 function getEnemyScreenCenter(
@@ -726,7 +730,7 @@ export default function MapRenderer({
     [currentUser?.stats.level, worldNow]
   );
   const visibleQuestNpcs = useMemo(
-    () => QUEST_NPCS.filter(npc => !hasClaimedQuestNpcReward(currentUser, npc.id)),
+    () => QUEST_NPCS.filter(npc => shouldShowQuestNpcMarker(currentUser, npc)),
     [currentUser]
   );
   const otherPlayers = useMemo(() => {
@@ -1607,8 +1611,9 @@ export default function MapRenderer({
       )}
 
       {activeBattleEnemy && (
-        <BattleModal
+        <EncounterRunModal
           enemy={activeBattleEnemy}
+          currentUser={currentUser}
           onClose={() => setActiveBattleEnemy(null)}
         />
       )}
@@ -2070,6 +2075,7 @@ function EnemyScoutModal({
   const unitNames = enemy.minions
     .map(minion => getMinionTemplate(minion.templateId)?.name || minion.templateId)
     .slice(0, 5);
+  const routeBattles = getEncounterRunBattleCount(enemy.level);
 
   return (
     <div className="world-popup-layer pointer-events-none fixed inset-0 flex items-center justify-center px-4">
@@ -2126,6 +2132,13 @@ function EnemyScoutModal({
           )}
 
           <div className="ui-card rounded border p-3">
+            <div className="arcane-label">Road Structure</div>
+            <p className="ui-muted mt-1 text-xs font-bold">
+              {routeBattles} fight{routeBattles === 1 ? '' : 's'} total. The marked enemy is the final boss; shops and omens may appear between fights on longer roads.
+            </p>
+          </div>
+
+          <div className="ui-card rounded border p-3">
             <div className="arcane-label">Enemy Warband</div>
             <div className="mt-2 flex flex-wrap gap-2">
               {unitNames.length > 0 ? (
@@ -2150,7 +2163,7 @@ function EnemyScoutModal({
             disabled={!currentUser || Boolean(currentUser.traveling && !canStart)}
             className="ui-button-primary w-full rounded px-4 py-3 text-sm font-black disabled:opacity-40"
           >
-            {canStart ? 'Start Battle' : currentUser?.traveling ? 'Walking to Enemy' : 'Walk Here'}
+            {canStart ? 'Start Road' : currentUser?.traveling ? 'Walking to Enemy' : 'Walk Here'}
           </button>
         </div>
       </div>

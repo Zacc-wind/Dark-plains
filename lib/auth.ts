@@ -223,7 +223,25 @@ export interface DailyRunHistoryEntry {
   equipmentNames?: string[];
   challengeName?: string;
   weeklyRewardName?: string;
+  score?: number;
+  durationMs?: number;
+  bossesDefeated?: string[];
+  routeSummary?: string[];
+  shopBuys?: string[];
+  omens?: string[];
+  unlockedSpellNames?: string[];
+  runLevelAfter?: number;
   streakAfter: number;
+}
+
+export interface RandomRunPermanentStats {
+  armyPower: number;
+  defensivePower: number;
+  morale: number;
+  spellPower: number;
+  maxHealth: number;
+  unitPower: number;
+  unitWard: number;
 }
 
 export interface DailyRunState {
@@ -232,6 +250,10 @@ export interface DailyRunState {
   bestWins: number;
   completions: number;
   history: DailyRunHistoryEntry[];
+  runLevel: number;
+  runExp: number;
+  runUpgradePoints: number;
+  permanentStats: RandomRunPermanentStats;
 }
 
 export interface DailyRunStatus {
@@ -4059,13 +4081,17 @@ export function getTravelProgress(): number {
   return Math.min(100, (elapsed / currentUser.traveling.duration) * 100);
 }
 
-// Job duration mapping (in milliseconds)
-const JOB_DURATIONS = [
+// Job duration mapping (in milliseconds) — same tiers for every POI
+export const JOB_WORK_DURATIONS_MS = [
+  20 * 1000,       // 20 seconds
+  1 * 60 * 1000,   // 1 minute
   5 * 60 * 1000,   // 5 minutes
   15 * 60 * 1000,  // 15 minutes
-  30 * 60 * 1000,  // 30 minutes
-  60 * 60 * 1000,  // 1 hour
-];
+] as const;
+
+export const JOB_DURATION_LABELS = ['20 sec', '1 min', '5 min', '15 min'] as const;
+
+const JOB_DURATIONS = JOB_WORK_DURATIONS_MS;
 
 interface JobRewardProfile {
   gold: number[];
@@ -4705,11 +4731,11 @@ export function generateEquipment(jobDuration: number, forcedRarity?: EquipmentR
     
     // Determine rarity based on percentages
     if (random < 2) {
-      // Can only drop from 30min+ jobs
-      if (jobDuration < 1800000) return null;
+      // Can only drop from longest job tier (15 min work)
+      if (jobDuration < 15 * 60 * 1000) return null;
       rarity = 'legendary';
     } else if (random < 7 + bonus * 0.2) { // 2 + 5, with small lucky bump
-      if (jobDuration < 1800000) return null;
+      if (jobDuration < 15 * 60 * 1000) return null;
       rarity = 'epic';
     } else if (random < 19 + bonus * 0.55) { // 7 + 12, with lucky bump
       rarity = 'rare';
@@ -4778,21 +4804,21 @@ export function generateEquipment(jobDuration: number, forcedRarity?: EquipmentR
 function rollMinionTier(workDuration: number): MinionTier | null {
   const random = Math.random() * 100;
 
-  if (workDuration >= 60 * 60 * 1000) {
+  if (workDuration >= 15 * 60 * 1000) {
     if (random < 20) return 'tier1';
     if (random < 30) return 'tier2';
     if (random < 34) return 'tier3';
     return null;
   }
 
-  if (workDuration >= 30 * 60 * 1000) {
+  if (workDuration >= 5 * 60 * 1000) {
     if (random < 16) return 'tier1';
     if (random < 22) return 'tier2';
     if (random < 24) return 'tier3';
     return null;
   }
 
-  if (workDuration >= 15 * 60 * 1000) {
+  if (workDuration >= 1 * 60 * 1000) {
     if (random < 12) return 'tier1';
     if (random < 15) return 'tier2';
     return null;
@@ -5122,7 +5148,104 @@ export function getDailyRunChallenge(now = Date.now()): DailyRunChallenge {
   };
 }
 
+export const DEFAULT_RANDOM_RUN_PERMANENT_STATS: RandomRunPermanentStats = {
+  armyPower: 0,
+  defensivePower: 0,
+  morale: 0,
+  spellPower: 0,
+  maxHealth: 0,
+  unitPower: 0,
+  unitWard: 0,
+};
+
+export const RANDOM_RUN_BALANCE = {
+  levelCap: 15,
+  routeBattleMin: 12,
+  routeBattleMax: 15,
+  enemyLevelCap: 15,
+  bossSpacing: 5,
+  minBosses: 2,
+  currentContentBosses: 3,
+  maxBankedCapLevels: 2,
+} as const;
+
+export function getRandomRunEffectiveLevel(level: number): number {
+  return Math.max(1, Math.min(RANDOM_RUN_BALANCE.levelCap, Math.floor(toFiniteNumber(level, 1))));
+}
+
+export function getRandomRunProgressRatio(level: number): number {
+  if (RANDOM_RUN_BALANCE.levelCap <= 1) return 1;
+  return (getRandomRunEffectiveLevel(level) - 1) / (RANDOM_RUN_BALANCE.levelCap - 1);
+}
+
+function capRandomRunPermanentStats(stats: RandomRunPermanentStats, runLevel: number = RANDOM_RUN_BALANCE.levelCap): RandomRunPermanentStats {
+  const effectiveLevel = getRandomRunEffectiveLevel(runLevel);
+  const commanderStatCap = Math.max(0, Math.ceil((effectiveLevel - 1) / 2));
+  const unitStatCap = Math.max(0, Math.ceil((effectiveLevel - 1) / 3));
+  const healthCap = Math.max(0, Math.ceil((effectiveLevel - 1) / 2) * 10);
+
+  return {
+    armyPower: Math.min(stats.armyPower, commanderStatCap),
+    defensivePower: Math.min(stats.defensivePower, commanderStatCap),
+    morale: Math.min(stats.morale, commanderStatCap),
+    spellPower: Math.min(stats.spellPower, commanderStatCap),
+    maxHealth: Math.min(stats.maxHealth, healthCap),
+    unitPower: Math.min(stats.unitPower, unitStatCap),
+    unitWard: Math.min(stats.unitWard, unitStatCap),
+  };
+}
+
+function normalizeRandomRunPermanentStats(stats?: Partial<RandomRunPermanentStats> | null): RandomRunPermanentStats {
+  const normalized = {
+    armyPower: Math.max(0, Math.floor(toFiniteNumber(stats?.armyPower, 0))),
+    defensivePower: Math.max(0, Math.floor(toFiniteNumber(stats?.defensivePower, 0))),
+    morale: Math.max(0, Math.floor(toFiniteNumber(stats?.morale, 0))),
+    spellPower: Math.max(0, Math.floor(toFiniteNumber(stats?.spellPower, 0))),
+    maxHealth: Math.max(0, Math.floor(toFiniteNumber(stats?.maxHealth, 0))),
+    unitPower: Math.max(0, Math.floor(toFiniteNumber(stats?.unitPower, 0))),
+    unitWard: Math.max(0, Math.floor(toFiniteNumber(stats?.unitWard, 0))),
+  };
+
+  return capRandomRunPermanentStats(normalized);
+}
+
+export function getRandomRunExpNeeded(level: number): number {
+  const safeLevel = getRandomRunEffectiveLevel(level);
+  return 160 + safeLevel * 75 + safeLevel * safeLevel * 10;
+}
+
+function applyAutomaticRandomRunUpgrade(stats: RandomRunPermanentStats, newLevel: number): RandomRunPermanentStats {
+  const upgraded = { ...stats };
+  switch (newLevel % 7) {
+    case 0:
+      upgraded.maxHealth += 10;
+      break;
+    case 1:
+      upgraded.armyPower += 1;
+      break;
+    case 2:
+      upgraded.defensivePower += 1;
+      break;
+    case 3:
+      upgraded.spellPower += 1;
+      break;
+    case 4:
+      upgraded.morale += 1;
+      break;
+    case 5:
+      upgraded.unitPower += 1;
+      break;
+    default:
+      upgraded.unitWard += 1;
+      break;
+  }
+  return upgraded;
+}
+
 function normalizeDailyRunState(state?: Partial<DailyRunState> | null): DailyRunState {
+  const runLevel = getRandomRunEffectiveLevel(toFiniteNumber(state?.runLevel, 1));
+  const runExp = Math.max(0, Math.floor(toFiniteNumber(state?.runExp, 0)));
+
   return {
     lastCompletedDate: state?.lastCompletedDate,
     streak: Math.max(0, Math.floor(toFiniteNumber(state?.streak, 0))),
@@ -5135,8 +5258,20 @@ function normalizeDailyRunState(state?: Partial<DailyRunState> | null): DailyRun
       unitsStanding: Math.max(0, Math.floor(toFiniteNumber(entry.unitsStanding, 0))),
       gold: Math.max(0, Math.floor(toFiniteNumber(entry.gold, 0))),
       exp: Math.max(0, Math.floor(toFiniteNumber(entry.exp, 0))),
+      score: Math.max(0, Math.floor(toFiniteNumber(entry.score, 0))),
+      durationMs: Math.max(0, Math.floor(toFiniteNumber(entry.durationMs, 0))),
+      bossesDefeated: (entry.bossesDefeated || []).slice(0, 6),
+      routeSummary: (entry.routeSummary || []).slice(0, 24),
+      shopBuys: (entry.shopBuys || []).slice(0, 24),
+      omens: (entry.omens || []).slice(0, 24),
+      unlockedSpellNames: (entry.unlockedSpellNames || []).slice(0, 12),
+      runLevelAfter: Math.max(1, Math.floor(toFiniteNumber(entry.runLevelAfter, runLevel))),
       streakAfter: Math.max(0, Math.floor(toFiniteNumber(entry.streakAfter, 0))),
     })),
+    runLevel,
+    runExp,
+    runUpgradePoints: Math.max(0, Math.floor(toFiniteNumber(state?.runUpgradePoints, 0))),
+    permanentStats: capRandomRunPermanentStats(normalizeRandomRunPermanentStats(state?.permanentStats), runLevel),
   };
 }
 
@@ -5280,8 +5415,8 @@ export function getLeaderboardBoards(): LeaderboardBoard[] {
     },
     {
       id: 'daily',
-      title: 'Daily Run',
-      subtitle: 'Streak first, then best chain and total clears.',
+      title: 'Random Run',
+      subtitle: 'Run chain, best clear depth, and total clears.',
       entries: makeLeaderboardEntries(
         'daily',
         users,
@@ -5343,11 +5478,31 @@ export function recordDailyRunCompletionState(
 ): DailyRunState {
   const state = getDailyRunState(user);
   const completedDate = formatLocalDate(new Date(report.completedAt));
-  const nextStreak = getNextDailyRunStreak(user, report.completedAt);
+  const nextStreak = state.streak + 1;
+  const gainedRunExp = Math.max(0, Math.floor(toFiniteNumber(report.exp, 0)));
+  let runLevel = state.runLevel;
+  let runExp = state.runExp + gainedRunExp;
+  let permanentStats = normalizeRandomRunPermanentStats(state.permanentStats);
+  let levelUps = 0;
+
+  while (runExp >= getRandomRunExpNeeded(runLevel) && runLevel < RANDOM_RUN_BALANCE.levelCap) {
+    runExp -= getRandomRunExpNeeded(runLevel);
+    runLevel += 1;
+    levelUps += 1;
+    permanentStats = applyAutomaticRandomRunUpgrade(permanentStats, runLevel);
+  }
+
+  if (runLevel >= RANDOM_RUN_BALANCE.levelCap) {
+    runExp = Math.min(runExp, getRandomRunExpNeeded(runLevel) * RANDOM_RUN_BALANCE.maxBankedCapLevels);
+  }
+
+  permanentStats = capRandomRunPermanentStats(permanentStats, runLevel);
+
   const entry: DailyRunHistoryEntry = {
     ...report,
-    id: `daily-run-${completedDate}-${report.completedAt}`,
+    id: `random-run-${completedDate}-${report.completedAt}`,
     date: completedDate,
+    runLevelAfter: runLevel,
     streakAfter: nextStreak,
   };
 
@@ -5355,8 +5510,12 @@ export function recordDailyRunCompletionState(
     lastCompletedDate: completedDate,
     streak: nextStreak,
     bestWins: Math.max(state.bestWins, report.wins),
-    completions: state.lastCompletedDate === completedDate ? state.completions : state.completions + 1,
-    history: [entry, ...state.history.filter(item => item.date !== completedDate)].slice(0, 12),
+    completions: state.completions + 1,
+    history: [entry, ...state.history].slice(0, 12),
+    runLevel,
+    runExp,
+    runUpgradePoints: Math.max(0, state.runUpgradePoints + levelUps),
+    permanentStats,
   };
 }
 
@@ -5391,7 +5550,7 @@ function initializeDailyQuests(now = Date.now()): DailyQuestState {
         requirement: {
           type: 'complete_timed_jobs',
           count: 5,
-          minDuration: 900000 // 15 minutes
+          minDuration: 5 * 60 * 1000 // 5 minute work tier
         },
         progress: 0,
         claimed: false,
@@ -5415,7 +5574,7 @@ function initializeDailyQuests(now = Date.now()): DailyQuestState {
         requirement: {
           type: 'complete_timed_jobs',
           count: 10,
-          minDuration: 900000 // 15 minutes
+          minDuration: 5 * 60 * 1000 // 5 minute work tier
         },
         progress: 0,
         claimed: false,

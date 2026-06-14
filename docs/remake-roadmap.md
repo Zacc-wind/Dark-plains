@@ -202,6 +202,11 @@
 - [x] Keep daily saved-run resume state in the main Daily button and command Overview without a redundant map report card.
 - [x] Add post-run summary pacing: short victory/defeat burst, then compact stats, then reward choices/history.
 - [x] Add clearer draft/formation errors so players know when units are not placed or duplicated.
+- [x] Convert the old daily-run framing into repeatable random roguelike runs with separate run progression and no main-map penalty on retreat/defeat.
+- [x] Rebuild the random-run lobby and unit draft into full-screen cinematic flows.
+- [x] Add random route rewards so hard-route fights and boss fights are followed by a shop or omen stop.
+- [x] Balance long-term random-run progression around a configurable content cap: permanent unlock pacing, encounter scaling, run-shop economy, and boss spacing.
+- [ ] Raise the random-run cap beyond 15 once there are enough bosses, enemies, run rewards, and late-run events to support it.
 
 ## Phase 10: PVP And Social Map
 - [x] Show nearby real players on the map.
@@ -323,6 +328,9 @@
 - [x] Add differentiated combat sound routing and priest charged-heal choice.
 - [x] Fix NPC enemy turns so movement ends the action and cannot also trigger an attack.
 - [x] Polish commander spell selection and convert spell FX overlays to particle-only accents around icon animations.
+- [x] Add combat retaliation forecasts, enemy hover threat previews, board wait control, colorblind-safe indicators, and slower enemy action handoff.
+- [x] Let daily-run shops sell multiple offers per stop, with 3 run-wide shop rerolls and no duplicate reward categories where possible.
+- [x] Add daily-run hard-route payoff: immediate boon plus a guaranteed positive omen, with 1 run-wide omen reroll.
 
 ## Content Targets
 - [x] 15 main story quests.

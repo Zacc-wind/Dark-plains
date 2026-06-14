@@ -77,8 +77,9 @@ export interface QuestNpc {
   rewards: QuestRewardSpec;
 }
 
-const FIFTEEN_MINUTES = 15 * 60 * 1000;
-const THIRTY_MINUTES = 30 * 60 * 1000;
+const ONE_MINUTE = 1 * 60 * 1000;
+const FIVE_MINUTES = 5 * 60 * 1000;
+const THIRTY_MINUTES = FIVE_MINUTES;
 
 export const CITY_QUESTS: CityQuestTemplate[] = [
   {
@@ -96,7 +97,7 @@ export const CITY_QUESTS: CityQuestTemplate[] = [
     faction: 'Relic Weighers',
     name: 'Relic Ledger',
     description: 'Audit the dockside relic trade and expose false saint-bone shipments.',
-    requirement: { type: 'complete_timed_jobs', count: 2, minDuration: FIFTEEN_MINUTES },
+    requirement: { type: 'complete_timed_jobs', count: 2, minDuration: ONE_MINUTE },
     rewards: { gold: 120, exp: 55, rareGems: 1 },
   },
   {
@@ -168,7 +169,7 @@ export const CITY_QUESTS: CityQuestTemplate[] = [
     faction: 'Abbey Masons',
     name: 'Abbey Stone',
     description: 'Haul grave-black granite for a chapel wall that refuses to stay built.',
-    requirement: { type: 'complete_timed_jobs', count: 3, minDuration: FIFTEEN_MINUTES },
+    requirement: { type: 'complete_timed_jobs', count: 3, minDuration: ONE_MINUTE },
     rewards: { gold: 260, exp: 150, equipmentRarity: 'rare' },
   },
   {
@@ -231,7 +232,7 @@ export const CITY_QUESTS: CityQuestTemplate[] = [
     faction: 'River Shrine',
     name: 'River Offering',
     description: 'Carry votive lamps to the old river shrines without letting the flames die.',
-    requirement: { type: 'complete_timed_jobs', count: 1, minDuration: FIFTEEN_MINUTES },
+    requirement: { type: 'complete_timed_jobs', count: 1, minDuration: ONE_MINUTE },
     rewards: { gold: 125, exp: 55, rareGems: 1 },
   },
   {
@@ -267,7 +268,7 @@ export const CITY_QUESTS: CityQuestTemplate[] = [
     faction: 'Moon Observers',
     name: 'Moon Observance',
     description: 'Chart the moon through river mist for scholars who distrust daylight.',
-    requirement: { type: 'complete_timed_jobs', count: 2, minDuration: FIFTEEN_MINUTES },
+    requirement: { type: 'complete_timed_jobs', count: 2, minDuration: ONE_MINUTE },
     rewards: { gold: 230, exp: 120, equipmentRarity: 'rare' },
   },
   {
@@ -330,7 +331,7 @@ export const CITY_QUESTS: CityQuestTemplate[] = [
     faction: 'Lotus Scriptorium',
     name: 'Black Lotus Margin',
     description: 'Annotate forbidden diagrams without waking the ink in the margins.',
-    requirement: { type: 'complete_timed_jobs', count: 3, minDuration: FIFTEEN_MINUTES },
+    requirement: { type: 'complete_timed_jobs', count: 3, minDuration: ONE_MINUTE },
     rewards: { gold: 460, exp: 280, equipmentRarity: 'epic' },
   },
   {
@@ -426,7 +427,7 @@ export const STORY_CHAPTERS: StoryChapter[] = [
         requiredLevel: 7,
         name: 'Moonwell Descent',
         lore: 'A temporary breach opens where the moon is reflected in dead water. Something below is recruiting.',
-        requirement: { type: 'complete_timed_jobs', count: 3, minDuration: FIFTEEN_MINUTES },
+        requirement: { type: 'complete_timed_jobs', count: 3, minDuration: ONE_MINUTE },
         rewards: { gold: 300, exp: 190, rareGems: 2 },
       },
       {
@@ -571,7 +572,7 @@ export const QUEST_NPCS: QuestNpc[] = [
     town: 'Riverside',
     line: 'Every bell has a ghost in it. Some are more punctual than others.',
     questHook: 'Routes players toward longer timed jobs and bridge-region contracts.',
-    requirement: { type: 'complete_timed_jobs', count: 2, minDuration: FIFTEEN_MINUTES },
+    requirement: { type: 'complete_timed_jobs', count: 2, minDuration: ONE_MINUTE },
     rewards: { gold: 120, exp: 80, minionTier: 'tier1' },
   },
   {

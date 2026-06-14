@@ -6,9 +6,12 @@ import { useRouter } from 'next/navigation';
 import { getPlayerModelPath } from '@/lib/assetLoader';
 import { BATTLE_SPELLS, type BattleSpell } from '@/lib/battle';
 import {
+  CombatIndicatorMode,
   COMBAT_SPEED_OPTIONS,
   CombatSpeed,
+  readCombatIndicatorMode,
   readCombatSpeedSetting,
+  writeCombatIndicatorMode,
   writeCombatSpeedSetting,
 } from '@/lib/combatSettings';
 import { DailyRunModal, getSavedDailyRunSummary } from './RoguelikeRunModal';
@@ -38,9 +41,10 @@ import {
   equipBattleSpellSet,
   getBalancedQuestExp,
   getCurrentUser,
-  getDailyRunChallenge,
   getDailyRunLeaderboard,
+  getDailyRunState,
   getDailyRunStatus,
+  getRandomRunExpNeeded,
   getExpNeeded,
   getEquipmentSocketBonusValue,
   getFieldedMinions,
@@ -302,6 +306,7 @@ export default function GameCommandCenter({ onOpenAvatar }: GameCommandCenterPro
   const [musicVolume, setMusicVolume] = useState(() => getMusicVolumePercent());
   const [musicMuted, setMusicMutedState] = useState(() => isMusicMuted());
   const [combatSpeed, setCombatSpeed] = useState<CombatSpeed>(() => readCombatSpeedSetting());
+  const [combatIndicatorMode, setCombatIndicatorMode] = useState<CombatIndicatorMode>(() => readCombatIndicatorMode());
   const lastActivityNoticeId = useRef<string | null>(null);
   const router = useRouter();
 
@@ -483,9 +488,8 @@ export default function GameCommandCenter({ onOpenAvatar }: GameCommandCenterPro
   const inventoryUsed = getInventoryUsedSlots(inventory);
   const inventoryUpgradeQuote = getInventoryUpgradeQuote(player);
   const rareGemCount = getRareGemCount(player);
-  const dailyChallenge = getDailyRunChallenge();
-  const hudDailyStatus = getDailyRunStatus(player);
-  const savedDailyRun = getSavedDailyRunSummary(player, dailyChallenge);
+  const hudRunState = getDailyRunState(player);
+  const savedDailyRun = getSavedDailyRunSummary(player);
   const socialState = getSocialState(player);
   const acceptedFriends = socialState.friends.filter(friend => friend.status === 'accepted');
   const incomingFriendRequests = socialState.friends.filter(
@@ -780,6 +784,12 @@ export default function GameCommandCenter({ onOpenAvatar }: GameCommandCenterPro
     playGameSound('ui.toggle', { throttleMs: 100 });
   };
 
+  const handleCombatIndicatorModeChange = (mode: CombatIndicatorMode) => {
+    setCombatIndicatorMode(mode);
+    writeCombatIndicatorMode(mode);
+    playGameSound('ui.toggle', { throttleMs: 100 });
+  };
+
   const panelTitle = panelButtons.find(button => button.id === activePanel)?.label || 'Overview';
 
   const openPanel = (panelId: PanelId) => {
@@ -788,6 +798,7 @@ export default function GameCommandCenter({ onOpenAvatar }: GameCommandCenterPro
       setMusicVolume(getMusicVolumePercent());
       setMusicMutedState(isMusicMuted());
       setCombatSpeed(readCombatSpeedSetting());
+      setCombatIndicatorMode(readCombatIndicatorMode());
     }
     setActivePanel(panelId);
     if (secondaryPanelButtons.some(button => button.id === panelId)) setIsSecondaryNavOpen(true);
@@ -805,7 +816,7 @@ export default function GameCommandCenter({ onOpenAvatar }: GameCommandCenterPro
       case 'quests': return '';
       case 'social': return String(acceptedFriends.length);
       case 'settings': return musicMuted ? 'Muted' : `${musicVolume}%`;
-      case 'runs': return hudDailyStatus.completedToday ? 'Done' : 'Open';
+      case 'runs': return savedDailyRun ? 'Resume' : 'Open';
       case 'leaderboards': return '';
       case 'history': return `${activityLog.length}`;
       default: return '';
@@ -814,27 +825,40 @@ export default function GameCommandCenter({ onOpenAvatar }: GameCommandCenterPro
 
   return (
     <>
-      <header className="game-hud fixed left-0 right-0 top-0 z-30 h-16 text-zinc-100">
-        <div className="h-full px-4 flex items-center justify-between gap-3">
+      <header className="game-hud fixed left-0 right-0 top-0 z-30 min-h-[4.75rem] text-zinc-100">
+        <div className="flex h-full items-center justify-between gap-3 px-4 py-2">
           <button
             onClick={onOpenAvatar}
-            className="hud-avatar-button flex min-w-0 items-center gap-3 rounded px-2 py-2 transition"
+            className="hud-avatar-button hud-commander-chip flex min-w-0 items-center gap-3 px-1 py-1 transition"
           >
-            <span className="ui-avatar-frame relative h-10 w-10 overflow-hidden rounded border">
-              <Image
-                src={getPlayerModelPath(currentModel)}
-                alt="Player Avatar"
-                fill
-                className="player-model-art object-contain"
-                sizes="40px"
-                unoptimized
-              />
-            </span>
+            <Image
+              src={getPlayerModelPath(currentModel)}
+              alt="Player Avatar"
+              width={52}
+              height={52}
+              className="hud-commander-sprite shrink-0 object-contain"
+              style={{ imageRendering: 'pixelated' }}
+              unoptimized
+            />
             <span className="min-w-0 text-left">
-              <span className="fantasy-heading block truncate text-base">{player.username}</span>
-              <span className="arcane-label block">Level {player.stats.level}</span>
-              <span className="ui-progress-track mt-1 block h-1 w-28 overflow-hidden rounded border">
-                <span className="ui-progress-fill block h-full" style={{ width: `${expProgress}%` }} />
+              <span className="fantasy-heading block truncate text-base leading-tight">{player.username}</span>
+              <span className="arcane-label mt-0.5 block text-[0.68rem]">Level {player.stats.level}</span>
+              <span className="hud-xp-row">
+                <span className="hud-xp-icon relative block shrink-0 overflow-hidden">
+                  <Image
+                    src="/assets/icons/xp.png"
+                    alt=""
+                    width={20}
+                    height={20}
+                    className="object-contain"
+                    style={{ imageRendering: 'pixelated' }}
+                    unoptimized
+                  />
+                </span>
+                <span className="hud-xp-track block overflow-hidden rounded-full">
+                  <span className="hud-xp-fill block h-full" style={{ width: `${expProgress}%` }} />
+                </span>
+                <span className="hud-xp-value">{player.exp}/{expNeeded}</span>
               </span>
             </span>
           </button>
@@ -877,7 +901,7 @@ export default function GameCommandCenter({ onOpenAvatar }: GameCommandCenterPro
               }}
               className="first-step-row rounded px-3 py-2 text-left"
             >
-              <span className="ui-accent font-black">I.</span> Draft a Daily Run army.
+              <span className="ui-accent font-black">I.</span> Draft a random-run army.
             </button>
             <button
               type="button"
@@ -1063,23 +1087,21 @@ export default function GameCommandCenter({ onOpenAvatar }: GameCommandCenterPro
   }
 
   function renderMapActionRail() {
-    const dailyLabel = hudDailyStatus.completedToday ? 'Claimed' : savedDailyRun ? 'Resume' : 'Daily Run';
-    const dailyDetail = hudDailyStatus.completedToday
-      ? 'Reward claimed'
-      : savedDailyRun
-        ? `${savedDailyRun.phaseLabel} ${savedDailyRun.wins}/${savedDailyRun.targetBattles}`
-        : dailyChallenge.name;
+    const dailyLabel = savedDailyRun ? 'Resume Run' : 'Start Run';
+    const dailyDetail = savedDailyRun
+      ? `${savedDailyRun.phaseLabel} ${savedDailyRun.wins}/${savedDailyRun.targetBattles}`
+      : `Random road - level ${hudRunState.runLevel}`;
 
     return (
-      <nav className="map-action-rail command-panel vine-frame fixed right-4 top-20 z-40 w-[min(18.5rem,calc(100vw-2rem))] rounded border p-1.5 text-zinc-100" aria-label="World actions">
+      <nav className="map-action-rail map-action-rail-runs command-panel vine-frame fixed right-4 bottom-4 z-40 w-[min(22rem,calc(100vw-2rem))] rounded border p-1.5 text-zinc-100" aria-label="World actions">
         <button
           type="button"
           onClick={() => {
             emitFxEvent({ type: 'daily', tone: 'blue', intensity: 0.72 });
             setShowDailyRun(true);
           }}
-          className={`map-action-button map-action-button-primary ${savedDailyRun ? 'map-action-button-resume' : ''}`}
-          title={savedDailyRun ? `Resume ${savedDailyRun.title}` : `Open ${dailyChallenge.name}`}
+          className={`map-action-button map-action-button-primary map-action-button-run-primary ${savedDailyRun ? 'map-action-button-resume' : ''}`}
+          title={savedDailyRun ? `Resume ${savedDailyRun.title}` : 'Start random roguelike run'}
         >
           <span className="map-action-icon map-action-icon-daily relative overflow-hidden">
             <Image
@@ -1094,7 +1116,7 @@ export default function GameCommandCenter({ onOpenAvatar }: GameCommandCenterPro
             <span className="map-action-label">{dailyLabel}</span>
             <span className="map-action-detail">{dailyDetail}</span>
           </span>
-          <span className="map-action-badge">{hudDailyStatus.completedToday ? 'Done' : savedDailyRun ? 'Run' : 'New'}</span>
+          <span className="map-action-badge">{savedDailyRun ? 'Run' : `Lv ${hudRunState.runLevel}`}</span>
         </button>
 
         <button
@@ -1551,6 +1573,27 @@ export default function GameCommandCenter({ onOpenAvatar }: GameCommandCenterPro
             </div>
           </div>
         </section>
+
+        <section className="ui-card rounded border p-4">
+          <SectionTitle title="Combat Readability" action={combatIndicatorMode === 'colorblind' ? 'Colorblind' : 'Default'} />
+          <div className="settings-speed-grid">
+            {([
+              { id: 'default' as const, label: 'Default', detail: 'Classic red, green, and gold combat cues' },
+              { id: 'colorblind' as const, label: 'Colorblind Safe', detail: 'Patterned move, heal, damage, threat, and health indicators' },
+            ]).map(option => (
+              <button
+                key={option.id}
+                type="button"
+                onClick={() => handleCombatIndicatorModeChange(option.id)}
+                className={`settings-speed-option rounded border px-4 py-3 text-left ${combatIndicatorMode === option.id ? 'settings-speed-option-active' : ''}`}
+                aria-pressed={combatIndicatorMode === option.id}
+              >
+                <span className="block text-sm font-black text-zinc-100">{option.label}</span>
+                <span className="ui-faint mt-1 block text-xs font-bold">{option.detail}</span>
+              </button>
+            ))}
+          </div>
+        </section>
       </div>
     );
   }
@@ -1587,23 +1630,21 @@ export default function GameCommandCenter({ onOpenAvatar }: GameCommandCenterPro
 
         <section className="ui-card rounded border p-4">
           <SectionTitle
-            title="Daily Run"
-            action={hudDailyStatus.completedToday ? 'Claimed' : savedDailyRun ? 'Resume' : 'Open'}
+            title="Random Run"
+            action={savedDailyRun ? 'Resume' : 'Open'}
           />
-          <div className="fantasy-heading truncate text-lg">{dailyChallenge.name}</div>
+          <div className="fantasy-heading truncate text-lg">{savedDailyRun?.title || 'Roguelike Road'}</div>
           <p className="ui-muted mt-1 line-clamp-2 text-xs font-bold">
             {savedDailyRun
               ? `${savedDailyRun.phaseLabel}: ${savedDailyRun.wins}/${savedDailyRun.targetBattles} wins, ${savedDailyRun.unitsStanding}/${savedDailyRun.totalUnits || 7} units standing.`
-              : hudDailyStatus.completedToday
-                ? 'Daily reward is claimed for today.'
-                : 'Draft seven temporary units and push through the chain.'}
+              : `Draft seven temporary units and push through a fresh randomized road. Run level ${hudRunState.runLevel}.`}
           </p>
           <button
             type="button"
             onClick={() => setShowDailyRun(true)}
             className="ui-button-primary mt-3 w-full rounded px-3 py-2 text-sm font-black"
           >
-            {hudDailyStatus.completedToday ? 'View Lockout' : savedDailyRun ? 'Resume Run' : 'Start Daily'}
+            {savedDailyRun ? 'Resume Run' : 'Start Run'}
           </button>
         </section>
 
@@ -2079,51 +2120,52 @@ export default function GameCommandCenter({ onOpenAvatar }: GameCommandCenterPro
 
   function renderRuns() {
     const dailyStatus = getDailyRunStatus(player);
-    const dailyChallenge = getDailyRunChallenge();
+    const runState = getDailyRunState(player);
+    const runExpNeeded = getRandomRunExpNeeded(runState.runLevel);
     const leaderboard = getDailyRunLeaderboard();
     const lastRun = dailyStatus.history[0];
+    const permanent = runState.permanentStats;
 
     return (
       <div className="command-content-grid">
         <section className="ui-card rounded border p-4">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <div className="arcane-label">Daily Run</div>
-              <h3 className="fantasy-heading text-xl">{dailyChallenge.name}</h3>
+              <div className="arcane-label">Random Run</div>
+              <h3 className="fantasy-heading text-xl">Roguelike Road</h3>
             </div>
-            <span className={`rounded border px-2 py-1 text-[10px] font-black uppercase ${dailyStatus.completedToday ? 'ui-rarity-rare' : 'ui-pill'}`}>
-              {dailyStatus.completedToday ? 'Claimed' : 'Open'}
+            <span className="ui-pill rounded border px-2 py-1 text-[10px] font-black uppercase">
+              Level {runState.runLevel}
             </span>
           </div>
           <div className="mt-4 grid grid-cols-3 gap-2 text-center">
-            <StatusPill label="Streak" value={String(dailyStatus.streak)} />
-            <StatusPill label="Battles" value={String(dailyChallenge.targetBattles)} />
+            <StatusPill label="Clears" value={String(runState.completions)} />
+            <StatusPill label="Run XP" value={`${runState.runExp}/${runExpNeeded}`} />
             <StatusPill label="Best" value={`${dailyStatus.bestWins} wins`} />
           </div>
           <div className="mt-3 flex flex-wrap gap-2">
-            {dailyChallenge.modifiers.map(modifier => (
-              <span key={modifier.id} className="ui-pill rounded border px-3 py-1 text-xs font-black text-zinc-100">{modifier.name}</span>
-            ))}
-            <span className="ui-pill rounded border px-3 py-1 text-xs font-black text-zinc-100">{dailyChallenge.weeklyRewardName}</span>
+            <span className="ui-pill rounded border px-3 py-1 text-xs font-black text-zinc-100">Army +{permanent.armyPower}</span>
+            <span className="ui-pill rounded border px-3 py-1 text-xs font-black text-zinc-100">Ward +{permanent.defensivePower}</span>
+            <span className="ui-pill rounded border px-3 py-1 text-xs font-black text-zinc-100">Spell +{permanent.spellPower}</span>
+            <span className="ui-pill rounded border px-3 py-1 text-xs font-black text-zinc-100">Unit +{permanent.unitPower}/{permanent.unitWard}</span>
           </div>
           <button
             onClick={() => setShowDailyRun(true)}
-            disabled={dailyStatus.completedToday}
-            className="ui-button-primary mt-4 rounded px-4 py-3 text-sm font-black disabled:opacity-40"
+            className="ui-button-primary mt-4 rounded px-4 py-3 text-sm font-black"
           >
-            {dailyStatus.completedToday ? 'Reward Claimed Today' : 'Start Daily Run'}
+            {savedDailyRun ? 'Resume Random Run' : 'Start Random Run'}
           </button>
           {lastRun && (
             <div className="ui-pill mt-3 rounded border px-3 py-2 text-xs font-bold text-[var(--ui-muted)]">
-              Last clear: {lastRun.challengeName || 'Daily Run'} - {lastRun.wins}/{lastRun.targetBattles} wins, {lastRun.gold} gold, {lastRun.exp} XP, streak {lastRun.streakAfter}.
+              Last clear: {lastRun.challengeName || 'Random Run'} - {lastRun.wins}/{lastRun.targetBattles} wins, {lastRun.score || 0} score, {lastRun.exp} run XP.
             </div>
           )}
         </section>
 
         <section className="ui-card rounded border p-4">
-          <SectionTitle title="Daily Ledger" action={leaderboard.length > 0 ? 'Local top' : 'No clears'} />
+          <SectionTitle title="Run Ledger" action={leaderboard.length > 0 ? 'Local top' : 'No clears'} />
           {leaderboard.length === 0 ? (
-            <EmptyState text="No daily clears recorded yet." />
+            <EmptyState text="No random-run clears recorded yet." />
           ) : (
             <div className="space-y-2">
               {leaderboard.map((entry, index) => (
@@ -2132,7 +2174,7 @@ export default function GameCommandCenter({ onOpenAvatar }: GameCommandCenterPro
                     <div className="truncate text-sm font-black text-zinc-100">#{index + 1} {entry.username}</div>
                     <div className="ui-faint text-xs font-bold">{entry.completions} clears - best {entry.bestWins} wins</div>
                   </div>
-                  <span className="ui-value shrink-0 text-sm font-black">{entry.streak} streak</span>
+                  <span className="ui-value shrink-0 text-sm font-black">{entry.streak} chain</span>
                 </div>
               ))}
             </div>

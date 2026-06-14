@@ -12,6 +12,7 @@ import { getPlayerModelPath } from './assetLoader';
 import { readGameJson, removeGameStorageItem, writeGameJson } from './gameStore';
 import { MAP_CONFIG, POIType, TileType, getStaticMap, getStaticPOIs } from './mapData';
 import { BOSS_PROFILES, type BossProfile } from './bosses';
+import { COMMANDER_FORMATION_KEY } from './formation';
 
 export type BattleSide = 'player' | 'enemy';
 export type BattleStatus = 'active' | 'victory' | 'defeat' | 'recruited';
@@ -1459,7 +1460,10 @@ export function createNpcBattleState(user: User, enemy: WorldEnemy, options: Cre
   const enemyStats = makeEnemyCommanderStats(enemy.level);
   const enemyModifiers = getBattleModifiers(enemyStats);
   const recruitOffer = options.suppressRecruitOffer ? undefined : createRecruitOffer(user, enemy, enemyStats);
-  const playerCommanderSpawn = getSpawnCell(battleMap.playerSpawns, 0, { x: 0, y: 3 });
+  const commanderFormationCell = options.playerFormation?.[COMMANDER_FORMATION_KEY];
+  const playerCommanderSpawn = isValidPlayerFormationCell(battleMap, commanderFormationCell)
+    ? commanderFormationCell
+    : getSpawnCell(battleMap.playerSpawns, 0, { x: 0, y: 3 });
   const enemyCommanderSpawn = getSpawnCell(battleMap.enemySpawns, 0, { x: battleMap.boardWidth - 1, y: 3 });
   const playerStacks = options.playerStacks || getPlayerBattleStacks(user);
   const occupiedCells = new Set<string>([
@@ -1700,6 +1704,20 @@ export function getAttackDamage(attacker: BattleUnit, target: BattleUnit, state?
   return Math.max(minimumDamage, rawDamage - Math.ceil(target.defense / 3) - guardPenalty);
 }
 
+export function canRetaliateAfterAttack(state: BattleState, attacker: BattleUnit, defender: BattleUnit): boolean {
+  return (
+    attacker.currentHealth > 0 &&
+    defender.currentHealth > 0 &&
+    defender.retaliatedRound !== state.round &&
+    defender.range <= 1 &&
+    getDistance(defender, attacker) <= 1
+  );
+}
+
+export function getRetaliationDamage(state: BattleState, attacker: BattleUnit, defender: BattleUnit): number {
+  return Math.max(1, Math.floor(getAttackDamage(defender, attacker, state) * 0.45));
+}
+
 export function getHealAmount(healer: BattleUnit, target: BattleUnit, state?: BattleState): number {
   const healerTerrain = state ? getTerrainAt(state, healer.x, healer.y) : 'ground';
   const targetTerrain = state ? getTerrainAt(state, target.x, target.y) : 'ground';
@@ -1852,17 +1870,10 @@ export function attackBattleUnit(state: BattleState, attackerId: string, targetI
 
   const defenderAfterHit = resolvedState.units.find(unit => unit.id === targetId && unit.currentHealth > 0);
   const attackerAfterHit = resolvedState.units.find(unit => unit.id === attackerId && unit.currentHealth > 0);
-  const canRetaliate = Boolean(
-    defenderAfterHit &&
-    attackerAfterHit &&
-    defenderAfterHit.retaliatedRound !== resolvedState.round &&
-    attacker.range <= 1 &&
-    defenderAfterHit.range <= 1 &&
-    getDistance(defenderAfterHit, attackerAfterHit) === 1
-  );
+  const canRetaliate = Boolean(defenderAfterHit && attackerAfterHit && canRetaliateAfterAttack(resolvedState, attackerAfterHit, defenderAfterHit));
 
   if (canRetaliate && defenderAfterHit && attackerAfterHit) {
-    const retaliationDamage = Math.max(1, Math.floor(getAttackDamage(defenderAfterHit, attackerAfterHit, resolvedState) * 0.45));
+    const retaliationDamage = getRetaliationDamage(resolvedState, attackerAfterHit, defenderAfterHit);
     const retaliationHealth = Math.max(0, attackerAfterHit.currentHealth - retaliationDamage);
     resolvedState = {
       ...resolvedState,

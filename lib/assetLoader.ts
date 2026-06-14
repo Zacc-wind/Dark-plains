@@ -61,6 +61,12 @@ export const ASSET_PATHS = {
     harborviewBackground: '/assets/town-harborview-bg.png',
     riversideBackground: '/assets/town-riverside-bg.png',
   },
+  runScenes: {
+    battlefield: '/assets/battlefield-bg.png',
+    harbor: '/assets/town-harborview-bg.png',
+    riverside: '/assets/town-riverside-bg.png',
+    road: '/assets/world-map.jpg',
+  },
   icons: {
     attack: '/assets/icons/attack.png',
     defense: '/assets/icons/defense.png',

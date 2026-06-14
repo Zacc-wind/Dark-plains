@@ -1,8 +1,11 @@
 'use client';
 
 import Image from 'next/image';
-import { useEffect, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
+import { createPortal } from 'react-dom';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import BattleModal from './BattleModal';
+import FormationPanel from './FormationPanel';
 import {
   BATTLE_SPELLS,
   BoardCell,
@@ -11,6 +14,7 @@ import {
   PlayerModelNumber,
   WorldEnemy,
   getPlayerModelAsset,
+  markWorldEnemyDefeated,
 } from '@/lib/battle';
 import { emitCompletionNotice, type CompletionRewardLine } from '@/lib/completionEvents';
 import { emitFxEvent } from '@/lib/fxEvents';
@@ -27,16 +31,18 @@ import {
   MINION_TIER_LABELS,
   MinionStack,
   MinionTemplate,
+  RANDOM_RUN_BALANCE,
   User,
   addInventoryItemsWithLimit,
   generateEquipment,
   getCurrentUser,
   getDailyRunChallenge,
-  getDailyRunStatus,
-  getNextDailyRunStreak,
   getFieldedMinions,
   getMinionTemplate,
-  hasCompletedDailyRunToday,
+  getDailyRunState,
+  getRandomRunEffectiveLevel,
+  getRandomRunExpNeeded,
+  getRandomRunProgressRatio,
   levelUp,
   makeInventoryItem,
   recordDailyRunCompletionState,
@@ -44,14 +50,20 @@ import {
   updateCurrentUser,
 } from '@/lib/auth';
 import {
+  getFormationIssue,
+  makeDefaultFormation,
+  mergeFormation,
+} from '@/lib/formation';
+import { getSpellIconPath } from '@/lib/spellAssets';
+import {
   WorldDungeon,
   formatDungeonTimeRemaining,
   getRegionForTile,
 } from '@/lib/worldEvents';
 import { readGameJson, removeGameStorageItem, writeGameJson } from '@/lib/gameStore';
-import { getBossProfileById } from '@/lib/bosses';
+import { getBossProfileById, getBossProfileByIndex } from '@/lib/bosses';
 
-type RunMode = 'daily' | 'dungeon';
+type RunMode = 'daily' | 'dungeon' | 'encounter';
 export type RunPhase = 'draft' | 'map' | 'formation' | 'battle' | 'reward' | 'shop' | 'event' | 'complete';
 type RunOutcome = 'victory' | 'defeat' | 'abandoned' | null;
 type RewardDestination = 'daily-next' | 'dungeon-next' | 'complete' | null;
@@ -89,6 +101,11 @@ interface RunBattleReport {
   unitReports: RunBattleUnitReport[];
 }
 
+interface RunShopOffer {
+  choiceId: string;
+  cost: number;
+}
+
 interface DungeonNode {
   id: string;
   type: DungeonNodeType;
@@ -101,6 +118,8 @@ interface DungeonNode {
   lane?: number;
   nextIds?: string[];
   battleNumber?: number;
+  bossId?: string;
+  rewardSource?: 'hard' | 'boss';
 }
 
 interface DungeonNodeSpec {
@@ -123,6 +142,7 @@ interface RunSession {
   activeEnemy: WorldEnemy | null;
   formation: Record<string, BoardCell>;
   spellIds: string[];
+  knownSpellIds: string[];
   rewardChoices: RunRewardChoice[];
   rewardDestination: RewardDestination;
   nodes: DungeonNode[];
@@ -131,8 +151,18 @@ interface RunSession {
   outcome: RunOutcome;
   dailyChallenge?: DailyRunChallenge;
   dungeon?: WorldDungeon;
+  encounterEnemy?: WorldEnemy;
   notice?: string;
   rewardClaimed?: boolean;
+  shopOffers?: Record<string, RunShopOffer[]>;
+  shopRerollsRemaining?: number;
+  omenRerollsRemaining?: number;
+  pendingPositiveOmen?: boolean;
+  startedAt?: number;
+  bossHistory?: string[];
+  shopBuyHistory?: string[];
+  omenHistory?: string[];
+  permanentSpellUnlocks?: string[];
 }
 
 type StoredRunSession = Omit<RunSession, 'rewardChoices'> & {
@@ -149,6 +179,35 @@ const DUNGEON_NODE_ICONS: Record<DungeonNodeType, string> = {
   event: '/assets/icons/magic.png',
   boss: '/assets/icons/loot-chest.png',
 };
+
+function getDungeonNodeIconPath(type: DungeonNodeType, bossId?: string): string {
+  if (type === 'boss' && bossId) {
+    return getBossProfileById(bossId)?.assetPath ?? DUNGEON_NODE_ICONS.boss;
+  }
+
+  return DUNGEON_NODE_ICONS[type];
+}
+
+function getRunMapNodeIconPath(
+  node: DungeonNode,
+  session: Pick<RunSession, 'dailyChallenge' | 'dungeon' | 'encounterEnemy'>,
+): string {
+  if (node.type !== 'boss') {
+    return node.iconPath || DUNGEON_NODE_ICONS[node.type];
+  }
+
+  const bossId = node.bossId
+    || session.dailyChallenge?.bossId
+    || session.dungeon?.bossId
+    || session.encounterEnemy?.bossId;
+
+  return getBossProfileById(bossId)?.assetPath
+    || session.dailyChallenge?.bossArtworkPath
+    || session.dungeon?.bossArtworkPath
+    || session.encounterEnemy?.artworkPath
+    || node.iconPath
+    || DUNGEON_NODE_ICONS.boss;
+}
 
 const DUNGEON_LAYOUTS: Record<string, DungeonNodeSpec[]> = {
   'ossuary-cellar': [
@@ -232,6 +291,7 @@ interface RunRewardChoice {
 interface BattleEndResult {
   status: 'victory' | 'defeat' | 'recruited';
   battle: BattleState;
+  retreated?: boolean;
 }
 
 interface DailyRunModalProps {
@@ -246,11 +306,65 @@ interface DungeonRunModalProps {
   onClose: () => void;
 }
 
+interface EncounterRunModalProps {
+  enemy: WorldEnemy;
+  currentUser: ReturnType<typeof getCurrentUser>;
+  onClose: () => void;
+}
+
 const MINION_ICON_BASE = '/assets/minions';
-const RUN_EVENT_LABELS = ['Pool', 'Shrine', 'Cache', 'Ambush'];
+const RUN_COMPLETION_STAT_ICONS = {
+  wins: '/assets/icons/attack.png',
+  standing: '/assets/icons/health.png',
+  gold: '/assets/icons/gold.png',
+  time: '/assets/icons/speed.png',
+  damage: '/assets/icons/attack.png',
+  taken: '/assets/icons/defense.png',
+  healing: '/assets/icons/healing.png',
+  xp: '/assets/icons/xp.png',
+  magic: '/assets/icons/magic.png',
+  score: '/assets/icons/rare-gem.png',
+} as const;
+
+const LOBBY_UPGRADE_ICONS: Record<string, string> = {
+  Army: RUN_COMPLETION_STAT_ICONS.wins,
+  Ward: RUN_COMPLETION_STAT_ICONS.taken,
+  Morale: RUN_COMPLETION_STAT_ICONS.time,
+  Spell: RUN_COMPLETION_STAT_ICONS.magic,
+  Health: RUN_COMPLETION_STAT_ICONS.standing,
+  'Unit Hit': RUN_COMPLETION_STAT_ICONS.damage,
+  'Unit Ward': RUN_COMPLETION_STAT_ICONS.taken,
+};
+
+function RunLobbyBonusPill({ icon, label, value }: { icon: string; label: string; value: string }) {
+  return (
+    <span className="random-run-bonus-pill" title={label}>
+      <Image src={icon} alt="" width={18} height={18} className="random-run-bonus-pill-icon" unoptimized />
+      <span className="random-run-bonus-pill-value">{value}</span>
+    </span>
+  );
+}
+
+function getRunRosterSpriteLayout(rosterCount: number) {
+  const spriteWidth = rosterCount <= 1
+    ? 54
+    : Math.max(24, 54 - (rosterCount - 1) * 4.2);
+  const spriteStep = rosterCount <= 1
+    ? 0
+    : Math.max(5.5, 13.5 - rosterCount * 0.85);
+
+  return { spriteWidth, spriteStep };
+}
+
 const DAILY_RUN_SESSION_PREFIX = 'pirate_game_daily_run_session';
+const RANDOM_RUN_ACTIVE_SESSION_KEY = 'random-active';
+const RANDOM_RUN_LOBBY_BOSS_COUNT = 8;
+const RANDOM_RUN_LOBBY_BOSS_KEY = 'pirate_game_random_run_lobby_boss';
 const RUN_REWARD_CHOICE_COUNT = 2;
 const RUN_SHOP_CHOICE_COUNT = 4;
+const RUN_SHOP_REROLL_COUNT = 3;
+const RUN_OMEN_REROLL_COUNT = 1;
+const RUN_DEFEAT_BURST_MS = 3200;
 
 const RUN_BUFFS: RunRewardChoice[] = [
   makeStatBuff('army-drill', 'Army Drill', '+2 Army Power for this run.', { armyPower: 2 }),
@@ -322,6 +436,72 @@ const RUN_BUFFS: RunRewardChoice[] = [
   },
 ];
 
+function getInitialRunKnownSpellIds(spellIds: string[]): string[] {
+  return Array.from(new Set(spellIds.filter(spellId => BATTLE_SPELLS.some(spell => spell.id === spellId))));
+}
+
+function getRunStartingKnownSpellIds(spellIds: string[], user: User | null | undefined): string[] {
+  const known = new Set(getInitialRunKnownSpellIds(spellIds));
+  (user?.knownSpellIds || []).forEach(spellId => {
+    if (BATTLE_SPELLS.some(spell => spell.id === spellId)) known.add(spellId);
+  });
+  return Array.from(known);
+}
+
+function learnRunSpell(session: RunSession, spellId: string): RunSession {
+  if (session.knownSpellIds.includes(spellId)) {
+    const spell = BATTLE_SPELLS.find(item => item.id === spellId);
+    return { ...session, notice: `${spell?.name || 'That spell'} is already in your run spellbook.` };
+  }
+
+  const spell = BATTLE_SPELLS.find(item => item.id === spellId);
+  return {
+    ...session,
+    knownSpellIds: [...session.knownSpellIds, spellId],
+    notice: `${spell?.name || 'Spell'} added to your run spellbook.`,
+  };
+}
+
+function maybeUnlockPermanentRunSpell(session: RunSession): string | null {
+  if (session.mode !== 'daily' || Math.random() >= 0.01) return null;
+
+  const user = getCurrentUser();
+  if (!user) return null;
+
+  const known = new Set(user.knownSpellIds || []);
+  const candidates = BATTLE_SPELLS.filter(spell => !known.has(spell.id));
+  const spell = shuffle(candidates)[0];
+  if (!spell) return null;
+
+  updateCurrentUser({
+    knownSpellIds: [...known, spell.id],
+    activityLog: [{
+      id: `activity-random-spell-${spell.id}-${Date.now()}`,
+      type: 'quest' as const,
+      title: `${spell.name} Permanently Learned`,
+      source: 'Random Run',
+      completedAt: Date.now(),
+      rewards: {},
+      description: 'A rare random-run spell unlock was added to your permanent spellbook.',
+    }, ...(user.activityLog || [])].slice(0, 30),
+  });
+
+  return spell.name;
+}
+
+function makeSpellLearnReward(spell: (typeof BATTLE_SPELLS)[number]): RunRewardChoice {
+  return {
+    id: `learn-${spell.id}`,
+    name: spell.name,
+    description: `Learn ${spell.name} for this run (${spell.rarity}, mana ${spell.cost}).`,
+    isAvailable: session => !session.knownSpellIds.includes(spell.id),
+    apply: session => learnRunSpell(session, spell.id),
+  };
+}
+
+const RUN_SPELL_REWARDS: RunRewardChoice[] = BATTLE_SPELLS.map(makeSpellLearnReward);
+const RUN_REWARD_POOL: RunRewardChoice[] = [...RUN_BUFFS, ...RUN_SPELL_REWARDS];
+
 export function DailyRunModal({ isOpen, onClose }: DailyRunModalProps) {
   if (!isOpen) return null;
 
@@ -331,19 +511,17 @@ export function DailyRunModal({ isOpen, onClose }: DailyRunModalProps) {
 function DailyRunModalContent({ onClose }: { onClose: () => void }) {
   const [session, setSession] = useState<RunSession | null>(() => {
     const user = getCurrentUser();
-    if (user && getDailyRunStatus(user).completedToday) return null;
     if (!user) return null;
-
-    const challenge = getDailyRunChallenge();
-    return loadDailyRunSession(user, challenge) || createDailySession(user, challenge);
+    return loadDailyRunSession(user);
   });
+  const [showLobby, setShowLobby] = useState(true);
 
   useEffect(() => {
     const user = getCurrentUser();
     if (!user) return;
 
-    if (!session || session.rewardClaimed || getDailyRunStatus(user).completedToday) {
-      clearDailyRunSession(user.username, getDailyRunChallenge().date);
+    if (!session || session.rewardClaimed || (session.phase === 'complete' && session.outcome !== 'victory')) {
+      clearDailyRunSession(user.username);
       return;
     }
 
@@ -352,33 +530,24 @@ function DailyRunModalContent({ onClose }: { onClose: () => void }) {
     }
   }, [session]);
 
-  if (!session) {
+  const startNewRun = () => {
+    const user = getCurrentUser();
+    if (!user) return;
+    clearDailyRunSession(user.username);
+    setSession(createDailySession(user, createRandomRunChallenge(user)));
+    setShowLobby(false);
+  };
+
+  if (showLobby) {
     return (
-      <div className="run-modal-layer fixed inset-0 z-[68] flex items-center justify-center bg-black/76 p-4 text-zinc-100 backdrop-blur-sm">
-        <section className="run-modal-panel command-panel vine-frame w-full max-w-md rounded border p-5 text-center">
-          <div className="arcane-label">Daily Run</div>
-          <h2 className="fantasy-heading text-2xl">Already Claimed Today</h2>
-          <p className="ui-muted mt-2 text-sm font-bold">The daily reward is locked until tomorrow.</p>
-          <button onClick={onClose} className="ui-button-primary mt-5 rounded px-4 py-2 text-sm font-bold">
-            Close
-          </button>
-        </section>
-      </div>
+      <RandomRunLobby
+        activeSession={session}
+        onResume={() => session && setShowLobby(false)}
+        onStart={startNewRun}
+        onClose={onClose}
+      />
     );
   }
-
-  return (
-    <RunController
-      session={session}
-      setSession={setSession}
-      onClose={onClose}
-    />
-  );
-}
-
-export function DungeonRunModal({ dungeon, currentUser, now, onClose }: DungeonRunModalProps) {
-  const [session, setSession] = useState<RunSession | null>(() => currentUser ? createDungeonSession(currentUser, dungeon) : null);
-  const region = getRegionForTile(dungeon.x, dungeon.y);
 
   if (!session) return null;
 
@@ -387,7 +556,243 @@ export function DungeonRunModal({ dungeon, currentUser, now, onClose }: DungeonR
       session={session}
       setSession={setSession}
       onClose={onClose}
-      kicker={`${region.name} - expires in ${formatDungeonTimeRemaining(dungeon.expiresAt, now)}`}
+    />
+  );
+}
+
+function RandomRunLobby({
+  activeSession,
+  onResume,
+  onStart,
+  onClose,
+}: {
+  activeSession: RunSession | null;
+  onResume: () => void;
+  onStart: () => void;
+  onClose: () => void;
+}) {
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [previewBoss] = useState(() => getRandomLobbyBossPreview());
+  const user = getCurrentUser();
+  const runState = getDailyRunState(user);
+  const lastRun = runState.history[0];
+  const expNeeded = getRandomRunExpNeeded(runState.runLevel);
+  const runLevelCapped = runState.runLevel >= RANDOM_RUN_BALANCE.levelCap;
+  const expPercent = runLevelCapped ? 100 : clamp((runState.runExp / Math.max(1, expNeeded)) * 100, 0, 100);
+  const permanent = runState.permanentStats;
+  const activeRunReady = Boolean(activeSession && !activeSession.rewardClaimed && activeSession.phase !== 'complete');
+  const upgradeRows = [
+    { label: 'Army', value: `+${permanent.armyPower}` },
+    { label: 'Ward', value: `+${permanent.defensivePower}` },
+    { label: 'Morale', value: `+${permanent.morale}` },
+    { label: 'Spell', value: `+${permanent.spellPower}` },
+    { label: 'Health', value: `+${permanent.maxHealth}` },
+    { label: 'Unit Hit', value: `+${permanent.unitPower}` },
+    { label: 'Unit Ward', value: `+${permanent.unitWard}` },
+  ];
+  const lastRunCleared = Boolean(lastRun && lastRun.wins >= lastRun.targetBattles);
+
+  return (
+    <div className="run-modal-layer random-run-lobby-layer fixed inset-0 z-[68] flex items-center justify-center bg-black/76 p-1 text-zinc-100 backdrop-blur-sm">
+      <section className="run-modal-panel random-run-lobby command-panel vine-frame relative grid h-[calc(100vh-0.5rem)] max-h-[calc(100vh-0.5rem)] w-full max-w-none overflow-hidden rounded border">
+        <div className="random-run-lobby-hero relative overflow-hidden border-b p-5 sm:p-6">
+          <Image
+            src={previewBoss.assetPath}
+            alt=""
+            fill
+            sizes="720px"
+            className="random-run-lobby-boss object-contain object-right-bottom"
+            priority
+          />
+          <div className="relative z-10 max-w-2xl">
+            <div className="arcane-label">Random Roguelike Run</div>
+            <h2 className="fantasy-heading mt-1 text-3xl sm:text-5xl">Start Run</h2>
+            <p className="ui-muted mt-3 max-w-xl text-sm font-bold leading-relaxed">
+              Draft a temporary army, choose roads, buy run-only upgrades, and fight several bosses. Defeat or retreat has no main-map consequence.
+            </p>
+            <div className="mt-5 flex flex-wrap gap-3">
+              <button onClick={onStart} className="random-run-start ui-button-primary rounded px-6 py-3 text-sm font-black">
+                New Random Run
+              </button>
+              {activeRunReady && (
+                <button onClick={onResume} className="ui-button rounded px-5 py-3 text-sm font-bold">
+                  Resume {activeSession?.wins}/{activeSession?.targetBattles}
+                </button>
+              )}
+              <button onClick={onClose} className="ui-button rounded px-5 py-3 text-sm font-bold">
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="random-run-lobby-body">
+          {detailsOpen && lastRun && (
+            <div className="random-run-log-popover">
+              <div className="random-run-log-popover-head">
+                <span className="arcane-label">Run Log</span>
+                <button type="button" onClick={() => setDetailsOpen(false)} className="ui-button rounded px-2.5 py-1 text-[10px] font-black">
+                  Close
+                </button>
+              </div>
+              <div className="random-run-last-details space-y-2 text-xs font-bold">
+                <RunHistoryLine label="Bosses" items={lastRun.bossesDefeated} fallback="No bosses defeated." />
+                <RunHistoryLine label="Route" items={lastRun.routeSummary} fallback="No route history." />
+                <RunHistoryLine label="Shop" items={lastRun.shopBuys} fallback="No shop purchases." />
+                <RunHistoryLine label="Omens" items={lastRun.omens} fallback="No omens resolved." />
+                <RunHistoryLine label="Unlocks" items={lastRun.unlockedSpellNames} fallback="No permanent spell unlock." />
+              </div>
+            </div>
+          )}
+
+          <section className="random-run-progression random-run-lobby-strip">
+            <div className="random-run-strip-inner">
+              <div className="random-run-strip-head">
+                <span className="arcane-label">Run Progression</span>
+                <strong className="fantasy-heading">Lv {runState.runLevel}</strong>
+              </div>
+
+              <div className="random-run-strip-xp">
+                <div className="random-run-xp-track random-run-xp-track-compact" aria-hidden>
+                  <div className="random-run-xp-fill" style={{ width: `${expPercent}%` }} />
+                </div>
+                <span className="random-run-strip-xp-label ui-value">
+                  {runLevelCapped ? 'Max level' : `${runState.runExp} / ${expNeeded} Run XP`}
+                </span>
+              </div>
+
+              <div className="random-run-strip-row">
+                <div className="random-run-strip-meta">
+                  <span className="run-header-chip" title="Total clears">
+                    <Image src={RUN_COMPLETION_STAT_ICONS.score} alt="" width={18} height={18} className="run-header-chip-icon" unoptimized />
+                    <span className="run-header-chip-value">{runState.completions} clears</span>
+                  </span>
+                  {runState.runUpgradePoints > 0 && (
+                    <span className="run-header-chip" title="Upgrade points">
+                      <Image src={RUN_COMPLETION_STAT_ICONS.xp} alt="" width={18} height={18} className="run-header-chip-icon" unoptimized />
+                      <span className="run-header-chip-value">{runState.runUpgradePoints} pts</span>
+                    </span>
+                  )}
+                </div>
+
+                <div className="random-run-strip-bonuses">
+                  {upgradeRows.map(row => (
+                    <RunLobbyBonusPill
+                      key={row.label}
+                      icon={LOBBY_UPGRADE_ICONS[row.label] || RUN_COMPLETION_STAT_ICONS.wins}
+                      label={row.label}
+                      value={row.value}
+                    />
+                  ))}
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section className="random-run-last-run random-run-lobby-strip">
+            <div className="random-run-strip-inner">
+              <div className="random-run-strip-head">
+                <span className="arcane-label">Last Run</span>
+                <strong className="fantasy-heading truncate">
+                  {lastRun?.challengeName || 'No run yet'}
+                </strong>
+              </div>
+
+              {lastRun ? (
+                <>
+                  <div className="random-run-strip-stats">
+                    <span className={`random-run-outcome-pill ui-pill rounded border px-2.5 py-1 text-[11px] font-black uppercase${lastRunCleared ? ' random-run-outcome-pill-cleared' : ''}`}>
+                      {lastRunCleared ? 'Cleared' : 'Ended'}
+                    </span>
+                    <span className="run-header-chip" title="Battles won">
+                      <Image src={RUN_COMPLETION_STAT_ICONS.wins} alt="" width={18} height={18} className="run-header-chip-icon" unoptimized />
+                      <span className="run-header-chip-value">{lastRun.wins}/{lastRun.targetBattles}</span>
+                    </span>
+                    <span className="run-header-chip" title="Duration">
+                      <Image src={RUN_COMPLETION_STAT_ICONS.time} alt="" width={18} height={18} className="run-header-chip-icon" unoptimized />
+                      <span className="run-header-chip-value">{formatRunDuration(lastRun.durationMs || 0)}</span>
+                    </span>
+                    <span className="run-header-chip" title="Run XP earned">
+                      <Image src={RUN_COMPLETION_STAT_ICONS.xp} alt="" width={18} height={18} className="run-header-chip-icon" unoptimized />
+                      <span className="run-header-chip-value">{lastRun.exp}</span>
+                    </span>
+                    <span className="run-header-chip run-header-chip-gold" title="Score">
+                      <Image src={RUN_COMPLETION_STAT_ICONS.score} alt="" width={18} height={18} className="run-header-chip-icon" unoptimized />
+                      <span className="run-header-chip-value">{lastRun.score || 0}</span>
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setDetailsOpen(open => !open)}
+                    className={`random-run-log-btn ui-button rounded px-4 py-2 text-xs font-black${detailsOpen ? ' random-run-log-btn-open' : ''}`}
+                  >
+                    View Log
+                  </button>
+                </>
+              ) : (
+                <p className="random-run-strip-empty ui-muted font-bold">
+                  No history yet — start a run above.
+                </p>
+              )}
+            </div>
+          </section>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function getRandomLobbyBossPreview() {
+  const previousIndex = typeof window === 'undefined'
+    ? -1
+    : Number(window.sessionStorage.getItem(RANDOM_RUN_LOBBY_BOSS_KEY) || -1);
+  let nextIndex = Math.floor(Math.random() * RANDOM_RUN_LOBBY_BOSS_COUNT);
+
+  if (nextIndex === previousIndex) {
+    nextIndex = (nextIndex + 1 + Math.floor(Math.random() * (RANDOM_RUN_LOBBY_BOSS_COUNT - 1))) % RANDOM_RUN_LOBBY_BOSS_COUNT;
+  }
+
+  if (typeof window !== 'undefined') {
+    window.sessionStorage.setItem(RANDOM_RUN_LOBBY_BOSS_KEY, String(nextIndex));
+  }
+
+  return getBossProfileByIndex(nextIndex);
+}
+
+function RunHistoryLine({ label, items, fallback }: { label: string; items?: string[]; fallback: string }) {
+  return (
+    <div className="random-run-last-detail-row rounded border p-3">
+      <div className="arcane-label">{label}</div>
+      <div className="ui-muted mt-1 leading-relaxed">{items && items.length > 0 ? items.slice(0, 6).join(' → ') : fallback}</div>
+    </div>
+  );
+}
+
+export function DungeonRunModal({ dungeon, currentUser, now, onClose }: DungeonRunModalProps) {
+  void now;
+  const [session, setSession] = useState<RunSession | null>(() => currentUser ? createDungeonSession(currentUser, dungeon) : null);
+
+  if (!session) return null;
+
+  return (
+    <RunController
+      session={session}
+      setSession={setSession}
+      onClose={onClose}
+    />
+  );
+}
+
+export function EncounterRunModal({ enemy, currentUser, onClose }: EncounterRunModalProps) {
+  const [session, setSession] = useState<RunSession | null>(() => currentUser ? createEncounterSession(currentUser, enemy) : null);
+
+  if (!session) return null;
+
+  return (
+    <RunController
+      session={session}
+      setSession={setSession}
+      onClose={onClose}
     />
   );
 }
@@ -396,20 +801,20 @@ function RunController({
   session,
   setSession,
   onClose,
-  kicker,
 }: {
   session: RunSession;
   setSession: (updater: RunSession | ((current: RunSession | null) => RunSession | null)) => void;
   onClose: () => void;
-  kicker?: string;
 }) {
   const aliveStacks = getAliveRunStacks(session);
   const previousPhaseRef = useRef<RunPhase | null>(null);
   const completionIntroTimeoutRef = useRef<number | null>(null);
-  const [showCompletionIntro, setShowCompletionIntro] = useState(false);
+  const [completionView, setCompletionView] = useState<'defeat-burst' | 'report' | null>(null);
   const [runStatsOpen, setRunStatsOpen] = useState(false);
   const isFormationPhase = session.phase === 'formation';
   const isMapPhase = session.phase === 'map';
+  const isDraftPhase = session.phase === 'draft';
+  const isCompletePhase = session.phase === 'complete';
 
   useEffect(() => {
     if (previousPhaseRef.current === session.phase) return;
@@ -418,7 +823,11 @@ function RunController({
     if (session.phase === 'draft') {
       emitFxEvent({ type: 'daily', tone: 'blue', intensity: 0.58 });
     } else if (session.phase === 'map') {
-      emitFxEvent({ type: session.mode === 'dungeon' ? 'dungeon' : 'daily', tone: session.mode === 'dungeon' ? 'violet' : 'blue', intensity: 0.5 });
+      emitFxEvent({
+        type: session.mode === 'dungeon' ? 'dungeon' : session.mode === 'encounter' ? 'attack' : 'daily',
+        tone: session.mode === 'dungeon' ? 'violet' : session.mode === 'encounter' ? 'red' : 'blue',
+        intensity: 0.5,
+      });
     } else if (session.phase === 'formation') {
       emitFxEvent({ type: 'defense', tone: 'blue', intensity: 0.48 });
     } else if (session.phase === 'battle') {
@@ -438,18 +847,45 @@ function RunController({
     if (completionIntroTimeoutRef.current) window.clearTimeout(completionIntroTimeoutRef.current);
   }, []);
 
-  const triggerCompletionIntro = () => {
-    if (completionIntroTimeoutRef.current) window.clearTimeout(completionIntroTimeoutRef.current);
-    setShowCompletionIntro(true);
+  useEffect(() => {
+    if (session.phase !== 'complete') {
+      setCompletionView(null);
+      return;
+    }
+
+    if (session.outcome === 'victory') {
+      setCompletionView('report');
+      return;
+    }
+
+    setCompletionView('defeat-burst');
     completionIntroTimeoutRef.current = window.setTimeout(() => {
-      setShowCompletionIntro(false);
+      setCompletionView('report');
       completionIntroTimeoutRef.current = null;
-    }, 1600);
-  };
+    }, RUN_DEFEAT_BURST_MS);
+
+    return () => {
+      if (completionIntroTimeoutRef.current) {
+        window.clearTimeout(completionIntroTimeoutRef.current);
+        completionIntroTimeoutRef.current = null;
+      }
+    };
+  }, [session.id, session.outcome, session.phase]);
+
+  useEffect(() => {
+    if (!isCompletePhase) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      if (session.outcome === 'victory' && !session.rewardClaimed) return;
+      onClose();
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isCompletePhase, onClose, session.outcome, session.rewardClaimed]);
 
   const handleBattleEnd = (result: BattleEndResult) => {
-    if (result.status !== 'victory') triggerCompletionIntro();
-
     setSession(current => {
       if (!current || current.activeEnemy?.id !== result.battle.enemy.id) return current;
 
@@ -463,26 +899,44 @@ function RunController({
           ...withLosses,
           phase: 'complete',
           activeEnemy: null,
-          outcome: 'defeat',
+          outcome: result.retreated ? 'abandoned' : 'defeat',
           rewardChoices: [],
           rewardDestination: null,
-          notice: 'The run ended in defeat.',
+          notice: result.retreated
+            ? 'The warband withdrew. Random runs have no main-map penalty.'
+            : 'The run ended in defeat.',
         };
       }
 
       const nextWins = withLosses.wins + 1;
-      const rewardDestination = getRewardDestination(withLosses, nextWins);
-      const goldEarned = getRunGoldEarned(withLosses, result.battle);
+      const clearedNode = withLosses.nodes[withLosses.currentNodeIndex];
+      const hardRouteCleared = clearedNode?.type === 'elite';
+      const withHardRouteBonus = hardRouteCleared ? applyHardRouteVictoryBonus(withLosses) : withLosses;
+      const rewardDestination = getRewardDestination(withHardRouteBonus, nextWins);
+      const goldEarned = getRunGoldEarned(withHardRouteBonus, result.battle);
+      const permanentUnlock = maybeUnlockPermanentRunSpell(withHardRouteBonus);
+      const noticeParts = [
+        hardRouteCleared
+          ? `${result.battle.enemy.name} defeated. +${goldEarned} run gold. Hard-route boon gained; a clean omen waits after the reward.`
+          : `${result.battle.enemy.name} defeated. +${goldEarned} run gold. Choose a run reward.`,
+        permanentUnlock ? `${permanentUnlock} permanently unlocked.` : '',
+      ].filter(Boolean);
 
       return {
-        ...withLosses,
+        ...withHardRouteBonus,
         phase: 'reward',
         activeEnemy: null,
         wins: nextWins,
-        runGold: withLosses.runGold + goldEarned,
-        rewardChoices: pickRunRewardChoices(withLosses),
+        runGold: withHardRouteBonus.runGold + goldEarned,
+        rewardChoices: pickRunRewardChoices(withHardRouteBonus),
         rewardDestination,
-        notice: `${result.battle.enemy.name} defeated. +${goldEarned} run gold. Choose a run reward.`,
+        bossHistory: clearedNode?.type === 'boss'
+          ? [...(withHardRouteBonus.bossHistory || []), clearedNode.label]
+          : withHardRouteBonus.bossHistory || [],
+        permanentSpellUnlocks: permanentUnlock
+          ? [...(withHardRouteBonus.permanentSpellUnlocks || []), permanentUnlock]
+          : withHardRouteBonus.permanentSpellUnlocks || [],
+        notice: noticeParts.join(' '),
       };
     });
   };
@@ -514,6 +968,16 @@ function RunController({
       }
 
       if (applied.rewardDestination === 'dungeon-next') {
+        if (applied.pendingPositiveOmen) {
+          return {
+            ...applied,
+            phase: 'event',
+            rewardChoices: [],
+            rewardDestination: null,
+            notice: 'The hard route opens a clean omen.',
+          };
+        }
+
         return completeDungeonNode({
           ...applied,
           rewardChoices: [],
@@ -537,6 +1001,7 @@ function RunController({
     const notice = grantCompletionReward(session);
     const completedAt = Date.now();
     const isDungeon = session.mode === 'dungeon';
+    const isEncounter = session.mode === 'encounter';
     const rewards: CompletionRewardLine[] = [
       { label: 'Wins', value: `${session.wins}/${session.targetBattles}`, tone: 'blue' },
       { label: 'Standing', value: `${getAliveRunStacks(session).length}/${session.minions.length}`, tone: 'green' },
@@ -549,10 +1014,11 @@ function RunController({
       emitFxEvent({ type: 'run', tone: 'gold', intensity: 1.25 });
       emitCompletionNotice({
         id: `run-completion-${session.id}-${completedAt}`,
-        kind: 'run',
-        kicker: isDungeon ? 'Dungeon Cleared' : 'Daily Run Complete',
-        title: isDungeon ? `${session.title} Cleared` : 'Run Complete',
+        kind: isEncounter ? 'victory' : 'run',
+        kicker: isEncounter ? 'Enemy Road Cleared' : isDungeon ? 'Dungeon Cleared' : 'Random Run Complete',
+        title: isEncounter ? `${session.title} Defeated` : isDungeon ? `${session.title} Cleared` : 'Run Complete',
         description: notice,
+        artworkPath: session.encounterEnemy?.artworkPath,
         rewards,
         completedAt,
       });
@@ -564,7 +1030,7 @@ function RunController({
     setSession(current => {
       if (!current) return current;
       const aliveUnits = getAliveRunStacks(current);
-      const formation = { ...makeDefaultFormation(aliveUnits), ...current.formation };
+      const formation = mergeFormation(aliveUnits, current.formation);
       const issue = getFormationIssue(formation, aliveUnits);
 
       if (issue) {
@@ -594,36 +1060,35 @@ function RunController({
         playerFormation={session.formation}
         availableSpellIds={session.spellIds}
         persistentResults={false}
-        contextLabel={session.mode === 'daily' ? `Daily Run ${session.wins + 1}/${session.targetBattles}` : 'Dungeon Run'}
+        contextLabel={getRunBattleContextLabel(session)}
         onBattleEnd={handleBattleEnd}
-        onClose={() => setSession(current => current ? { ...current, phase: 'map', activeEnemy: null } : current)}
+        onClose={() => setSession(current => current ? abandonRunCombat(current) : current)}
       />
     );
   }
 
   return (
-    <div className={`run-modal-layer fixed inset-0 z-[68] flex items-center justify-center bg-black/76 text-zinc-100 backdrop-blur-sm ${isMapPhase ? 'p-1' : 'p-4'}`}>
-      <section className={`run-modal-panel command-panel vine-frame flex w-full flex-col overflow-hidden rounded border ${isFormationPhase ? 'run-formation-modal max-h-[94vh] max-w-5xl' : isMapPhase ? 'run-map-modal h-[calc(100vh-0.5rem)] max-h-[calc(100vh-0.5rem)] max-w-none' : 'max-h-[94vh] max-w-6xl'}`}>
-        <RunSessionHeader
-          session={session}
-          kicker={kicker}
-          isFormationPhase={isFormationPhase}
-          isMapPhase={isMapPhase}
-          onClose={onClose}
-        />
-
+    <div
+      className={`run-modal-layer fixed inset-0 z-[68] flex items-center justify-center bg-black/76 text-zinc-100 backdrop-blur-sm ${isMapPhase || isFormationPhase || isDraftPhase || isCompletePhase ? 'p-1' : 'p-4'}`}
+      onClick={(event) => {
+        if (!isCompletePhase || event.target !== event.currentTarget) return;
+        if (session.outcome === 'victory' && !session.rewardClaimed) return;
+        onClose();
+      }}
+    >
+      <section className={`run-modal-panel command-panel vine-frame flex w-full flex-col overflow-hidden rounded border ${isFormationPhase ? 'run-formation-modal h-[calc(100vh-0.5rem)] max-h-[calc(100vh-0.5rem)] max-w-none' : isMapPhase ? 'run-map-modal h-[calc(100vh-0.5rem)] max-h-[calc(100vh-0.5rem)] max-w-none' : isDraftPhase ? 'run-draft-modal h-[calc(100vh-0.5rem)] max-h-[calc(100vh-0.5rem)] max-w-none' : isCompletePhase ? 'run-completion-modal random-run-lobby h-[calc(100vh-0.5rem)] max-h-[calc(100vh-0.5rem)] max-w-none' : 'max-h-[94vh] max-w-6xl'}`}>
         {session.notice && session.phase !== 'complete' && (
           <div className={`ui-notice border-b font-bold ${isMapPhase || isFormationPhase ? 'run-map-notice px-3 py-1.5 text-[11px]' : 'px-5 py-3 text-sm'}`}>
             {session.notice}
           </div>
         )}
 
-        <div className={`grid min-h-0 flex-1 ${isFormationPhase ? 'gap-5 overflow-hidden p-3' : session.phase === 'complete' ? 'gap-5 overflow-y-auto p-5' : isMapPhase ? 'run-map-layout gap-3 overflow-hidden p-2 lg:grid-cols-[15rem_minmax(0,1fr)]' : 'gap-5 overflow-y-auto p-5 lg:grid-cols-[18rem_minmax(0,1fr)]'}`}>
-          {!isFormationPhase && session.phase !== 'complete' && (
-            <RunRoster session={session} onOpenStats={() => setRunStatsOpen(true)} />
+        <div className={`grid min-h-0 flex-1 ${isFormationPhase ? 'overflow-hidden p-2' : isCompletePhase ? 'run-completion-layout overflow-hidden' : isMapPhase ? 'run-map-layout gap-3 overflow-hidden p-2 lg:grid-cols-[18rem_minmax(0,1fr)]' : isDraftPhase ? 'run-draft-layout overflow-hidden p-2' : 'gap-5 overflow-y-auto p-5 lg:grid-cols-[18rem_minmax(0,1fr)]'}`}>
+          {!isFormationPhase && !isDraftPhase && !isCompletePhase && (
+            <RunRoster session={session} onOpenStats={() => setRunStatsOpen(true)} variant={isMapPhase ? 'map' : 'default'} />
           )}
 
-          <main className="min-h-0">
+          <main className={`min-h-0 ${isCompletePhase ? 'h-full' : ''}`}>
             {session.phase === 'draft' && (
               <DailyDraftPanel
                 session={session}
@@ -641,11 +1106,18 @@ function RunController({
 
             {session.phase === 'formation' && session.activeEnemy && (
               <FormationPanel
-                session={session}
+                enemyName={session.activeEnemy.name}
+                enemySubtitle={session.activeEnemy.subtitle}
+                commanderName={getCurrentUser()?.username || 'Commander'}
+                commanderModel={(getCurrentUser()?.selectedModel || 3) as PlayerModelNumber}
+                stacks={getAliveRunStacks(session)}
+                formation={session.formation}
+                spellIds={session.spellIds}
+                knownSpellIds={session.knownSpellIds}
                 onChangeFormation={(formation) => setSession(current => current ? { ...current, formation } : current)}
+                onChangeSpellIds={(spellIds) => setSession(current => current ? { ...current, spellIds: spellIds.slice(0, 4) } : current)}
                 onStart={handleStartFormation}
                 onBack={() => setSession(current => current ? { ...current, phase: 'map', activeEnemy: null, notice: undefined } : current)}
-                onOpenStats={() => setRunStatsOpen(true)}
               />
             )}
 
@@ -660,6 +1132,7 @@ function RunController({
               <ShopPanel
                 session={session}
                 onBuy={(choice, cost) => setSession(current => current ? buyShopReward(current, choice, cost) : current)}
+                onReroll={() => setSession(current => current ? rerollShopOffers(current) : current)}
                 onSkip={() => setSession(current => current ? completeDungeonNode({ ...current, phase: 'map', notice: 'The shop fades behind you.' }) : current)}
               />
             )}
@@ -668,20 +1141,21 @@ function RunController({
               <OmenPanel
                 key={`${session.id}:${session.currentNodeIndex}`}
                 session={session}
+                onReroll={() => setSession(current => current ? rerollOmen(current) : current)}
                 onComplete={(outcome) => setSession(current => current ? applyDungeonEventOutcome(current, outcome) : current)}
               />
             )}
 
             {session.phase === 'complete' && (
-              showCompletionIntro ? (
-                <RunOutcomeBurst session={session} />
-              ) : (
+              completionView === 'defeat-burst' ? (
+                <RunDefeatBurst session={session} />
+              ) : completionView === 'report' ? (
                 <CompletionPanel
                   session={session}
                   onClaim={handleClaimCompletion}
                   onClose={onClose}
                 />
-              )
+              ) : null
             )}
           </main>
         </div>
@@ -695,196 +1169,128 @@ function RunController({
 }
 
 function DailyDraftPanel({ session, onPick }: { session: RunSession; onPick: (template: MinionTemplate) => void }) {
+  const rosterCount = session.minions.length;
+  const remaining = Math.max(0, MAX_FIELD_MINIONS - rosterCount);
+  const { spriteWidth: rosterSpriteWidth, spriteStep: rosterSpriteStep } = getRunRosterSpriteLayout(rosterCount);
+
   return (
-    <div className="space-y-5">
-      <section className="ui-card flex flex-wrap items-center justify-between gap-3 rounded border p-4">
-        <div>
-          <div className="arcane-label">Draft</div>
-          <h3 className="fantasy-heading text-xl">Choose 7 Units</h3>
+    <div className="run-draft-stage min-h-0">
+      <section className="run-draft-hero relative min-h-0 overflow-hidden p-4 sm:p-5">
+        <div className="relative z-10 max-w-xl">
+          <div className="arcane-label">Random Run Draft</div>
+          <h3 className="fantasy-heading mt-1 text-2xl sm:text-3xl">Choose Your Warband</h3>
+          <p className="ui-muted mt-1.5 max-w-lg text-xs font-bold leading-relaxed sm:text-sm">
+            Pick seven temporary units for this road. Choices refresh after every pick.
+          </p>
+          <p className="run-draft-hero-status ui-faint mt-1.5 text-[11px] font-bold sm:text-xs">
+            {remaining > 0 ? `${remaining} pick${remaining === 1 ? '' : 's'} remaining` : 'Warband ready — the road awaits.'}
+          </p>
         </div>
-        <span className="ui-pill rounded border px-3 py-2 text-xs font-black">
-          {session.minions.length}/{MAX_FIELD_MINIONS}
-        </span>
+
+        <div className="run-draft-counter relative z-10 rounded border px-3 py-2 text-right sm:px-4 sm:py-3">
+          <div className="ui-faint text-[10px] font-black uppercase">Picked</div>
+          <div className="ui-value text-xl font-black sm:text-2xl">{rosterCount}/{MAX_FIELD_MINIONS}</div>
+        </div>
+
+        <div
+          className="run-draft-hero-roster"
+          data-count={rosterCount}
+          aria-label={`Warband ${rosterCount} of ${MAX_FIELD_MINIONS}`}
+        >
+          {session.minions.map((unit, index) => {
+            const template = getMinionTemplate(unit.stack.templateId);
+            if (!template) return null;
+
+            return (
+              <div
+                key={unit.stack.id}
+                className="run-draft-hero-sprite-wrap"
+                style={{
+                  zIndex: index + 1,
+                  right: `${index * rosterSpriteStep}%`,
+                  width: `${rosterSpriteWidth}%`,
+                }}
+                title={template.name}
+              >
+                <Image
+                  src={`${MINION_ICON_BASE}/${template.assetName}`}
+                  alt={template.name}
+                  fill
+                  sizes="512px"
+                  className="run-draft-hero-sprite object-contain object-bottom"
+                  unoptimized
+                />
+              </div>
+            );
+          })}
+        </div>
       </section>
 
-      <div className="run-draft-grid grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        {session.draftChoices.map(template => (
-          <button
-            key={template.templateId}
-            onClick={() => onPick(template)}
-            className="run-draft-card ui-card rounded border p-3 text-left transition hover:border-[rgba(232,217,184,0.42)]"
-          >
-            <MinionPortrait template={template} size="large" />
-            <div className="mt-2">
-              <div className="fantasy-heading text-base">{template.name}</div>
-              <div className="ui-muted text-xs font-bold">{MINION_CLASS_LABELS[template.class]} - {MINION_TIER_LABELS[template.tier]}</div>
-              <div className="mt-3 grid grid-cols-3 gap-1 text-center text-[10px] font-black">
-                <RunStat label="ATK" value={template.stats.attack} />
-                <RunStat label="DEF" value={template.stats.defense} />
-                <RunStat label="HP" value={template.stats.health} />
-              </div>
-            </div>
-          </button>
-        ))}
-      </div>
+      <section className="run-draft-choice-shell min-h-0 p-2.5 sm:p-3">
+        <div className="run-draft-choice-header mb-2 flex flex-wrap items-end justify-between gap-2">
+          <div>
+            <div className="arcane-label">Choose One</div>
+            <h4 className="fantasy-heading text-lg sm:text-xl">Available Recruits</h4>
+          </div>
+          <span className="ui-pill rounded border px-2.5 py-0.5 text-[10px] font-black sm:text-xs">New choices after each pick</span>
+        </div>
+
+        <div className="run-draft-grid grid min-h-0 gap-2 sm:grid-cols-2 xl:grid-cols-4">
+          {session.draftChoices.map(template => (
+            <button
+              key={template.templateId}
+              onClick={() => onPick(template)}
+              className={`run-draft-card run-draft-card-${template.tier} h-full text-left transition`}
+              aria-label={`Pick ${template.name}. ${MINION_TIER_LABELS[template.tier]} ${MINION_CLASS_LABELS[template.class]}.`}
+            >
+              <span className="run-draft-card-art relative block min-h-0 flex-1">
+                <span className="run-draft-recruit-frame">
+                  <Image
+                    src={`${MINION_ICON_BASE}/${template.assetName}`}
+                    alt=""
+                    fill
+                    sizes="512px"
+                    className="run-draft-recruit-sprite object-contain object-center"
+                    unoptimized
+                  />
+                </span>
+              </span>
+              <span className="run-draft-card-copy block shrink-0">
+                <span className="fantasy-heading block text-sm sm:text-base">{template.name}</span>
+                <span className="run-draft-card-tierline ui-muted mt-0.5 block text-[10px] font-bold sm:text-xs">
+                  {MINION_TIER_LABELS[template.tier]} {MINION_CLASS_LABELS[template.class]}
+                </span>
+              </span>
+            </button>
+          ))}
+        </div>
+      </section>
     </div>
   );
 }
 
-function FormationPanel({
-  session,
-  onChangeFormation,
-  onStart,
-  onBack,
-  onOpenStats,
-}: {
-  session: RunSession;
-  onChangeFormation: (formation: Record<string, BoardCell>) => void;
-  onStart: () => void;
-  onBack: () => void;
-  onOpenStats: () => void;
-}) {
-  const aliveUnits = getAliveRunStacks(session);
-  const [selectedStackId, setSelectedStackId] = useState(aliveUnits[0]?.id || '');
-  const formation = { ...makeDefaultFormation(aliveUnits), ...session.formation };
-  const occupiedByCell = new Map<string, MinionStack>();
-  const selectedStack = aliveUnits.find(stack => stack.id === selectedStackId);
-  const selectedTemplate = selectedStack ? getMinionTemplate(selectedStack.templateId) : undefined;
-  const selectedIndex = Math.max(0, aliveUnits.findIndex(unit => unit.id === selectedStackId));
-  const formationIssue = getFormationIssue(formation, aliveUnits);
+function getRunModeTitle(session: RunSession): string {
+  if (session.mode === 'dungeon') return 'Dungeon Run';
+  if (session.mode === 'encounter') return 'Enemy Road';
+  return 'Random Run';
+}
 
-  aliveUnits.forEach(stack => {
-    const cell = formation[stack.id];
-    if (cell) occupiedByCell.set(`${cell.x}:${cell.y}`, stack);
-  });
+function getRunReportTitle(session: RunSession): string {
+  if (session.mode === 'dungeon') return 'Dungeon Report';
+  if (session.mode === 'encounter') return 'Enemy Road Report';
+  return 'Random Run Report';
+}
 
-  const assignSelectedToCell = (cell: BoardCell) => {
-    if (!selectedStackId) return;
-    const selectedCurrentCell = formation[selectedStackId];
-    const occupyingStack = occupiedByCell.get(`${cell.x}:${cell.y}`);
-    const nextFormation = { ...formation };
-    if (occupyingStack && selectedCurrentCell) {
-      nextFormation[occupyingStack.id] = selectedCurrentCell;
-    } else if (occupyingStack) {
-      delete nextFormation[occupyingStack.id];
-    }
-    nextFormation[selectedStackId] = cell;
-    onChangeFormation(nextFormation);
-    setSelectedStackId('');
-  };
+function getRunMapLabel(session: RunSession): string {
+  if (session.mode === 'dungeon') return 'Dungeon Road';
+  if (session.mode === 'encounter') return 'Enemy Road';
+  return 'Random Road';
+}
 
-  return (
-    <div className="formation-minimal-shell">
-      <section className="formation-minimal-toolbar rounded">
-        <div>
-          <div className="arcane-label">Place Units</div>
-          <h3 className="fantasy-heading text-xl">Formation</h3>
-          <div className="formation-guide-row mt-1 flex flex-wrap gap-2">
-            <span>I. Pick a unit</span>
-            <span>II. Place or swap</span>
-            <span>C is fixed</span>
-          </div>
-        </div>
-        <div className="formation-selected-chip">
-          {selectedTemplate && <MinionPortrait template={selectedTemplate} size="tiny" />}
-          <span className="formation-tier-mark">{selectedTemplate ? getTierRoman(selectedTemplate.tier) : '-'}</span>
-          <span className="ui-faint text-[10px] font-black">{selectedIndex + 1}/{aliveUnits.length}</span>
-        </div>
-        <div className="formation-toolbar-actions">
-          <button type="button" onClick={onOpenStats} className="run-formation-stats-button ui-button rounded px-3 py-2 text-xs font-bold">
-            Status
-          </button>
-          <button type="button" onClick={onBack} className="ui-button rounded px-4 py-2 text-xs font-bold">
-            Back
-          </button>
-          <button type="button" onClick={onStart} disabled={Boolean(formationIssue)} className="ui-button-primary rounded px-4 py-2 text-xs font-black disabled:opacity-40">
-            Start
-          </button>
-        </div>
-      </section>
-
-      <div className="formation-minimal-stage">
-        <div
-          className="formation-board formation-board-minimal grid rounded"
-          style={{
-            gridTemplateColumns: 'repeat(2, var(--formation-cell-size))',
-            gridTemplateRows: 'repeat(7, var(--formation-cell-size))',
-          }}
-        >
-          {Array.from({ length: 14 }, (_, index) => {
-            const x = index % 2;
-            const y = Math.floor(index / 2);
-            const isCommanderCell = x === 0 && y === 3;
-            const stack = occupiedByCell.get(`${x}:${y}`);
-            const template = stack ? getMinionTemplate(stack.templateId) : undefined;
-
-            return (
-              <button
-                key={`${x}-${y}`}
-                type="button"
-                disabled={isCommanderCell}
-                onClick={() => {
-                  if (!stack) {
-                    assignSelectedToCell({ x, y });
-                    return;
-                  }
-                  if (!selectedStackId || stack.id === selectedStackId) {
-                    setSelectedStackId(stack.id);
-                    return;
-                  }
-                  assignSelectedToCell({ x, y });
-                }}
-                className={`formation-cell formation-cell-minimal relative rounded ${isCommanderCell ? 'formation-cell-commander' : stack?.id === selectedStackId ? 'formation-cell-selected' : stack && selectedStackId ? 'formation-cell-swappable' : ''}`}
-                aria-label={isCommanderCell ? 'Commander fixed slot' : template ? `${template.name} tier ${getTierRoman(template.tier)}` : `Open slot ${index + 1}`}
-                title={isCommanderCell ? 'Commander fixed' : template ? `${template.name}${stack?.id !== selectedStackId && selectedStackId ? ' - click to swap' : ''}` : 'Open slot'}
-              >
-                {isCommanderCell ? (
-                  <span className="formation-commander-mark">C</span>
-                ) : template ? (
-                  <>
-                    <MinionPortrait template={template} size="formation" />
-                    <span className="formation-tier-badge">{getTierRoman(template.tier)}</span>
-                  </>
-                ) : (
-                  <span className="formation-open-number">{index + 1}</span>
-                )}
-              </button>
-            );
-          })}
-        </div>
-
-        <aside className="formation-icon-dock">
-          <div className="arcane-label text-center">Units</div>
-          <div className="formation-icon-grid">
-            {aliveUnits.map(stack => {
-              const template = getMinionTemplate(stack.templateId);
-              if (!template) return null;
-
-              return (
-                <button
-                  key={stack.id}
-                  type="button"
-                  onClick={() => setSelectedStackId(stack.id)}
-                  className={`formation-unit-icon relative rounded ${selectedStackId === stack.id ? 'formation-unit-selected' : ''}`}
-                  aria-label={`Select ${template.name} tier ${getTierRoman(template.tier)}`}
-                  title={template.name}
-                >
-                  <MinionPortrait template={template} size="tiny" />
-                  <span className="formation-tier-badge">{getTierRoman(template.tier)}</span>
-                </button>
-              );
-            })}
-          </div>
-        </aside>
-      </div>
-
-      <div className="formation-footer flex flex-wrap items-center justify-between gap-3">
-        <div className={`formation-issue-line text-xs font-black ${formationIssue ? 'text-amber-100' : 'ui-faint'}`}>
-          {formationIssue || 'Formation ready.'}
-        </div>
-      </div>
-    </div>
-  );
+function getRunBattleContextLabel(session: RunSession): string {
+  if (session.mode === 'dungeon') return `Dungeon Run ${session.wins + 1}/${session.targetBattles}`;
+  if (session.mode === 'encounter') return `Enemy Road ${session.wins + 1}/${session.targetBattles}`;
+  return `Random Run ${session.wins + 1}/${session.targetBattles}`;
 }
 
 function RunMapPanel({
@@ -904,7 +1310,7 @@ function RunMapPanel({
       <div className="space-y-5">
         <section className="ui-card flex flex-wrap items-center justify-between gap-3 rounded border p-4">
           <div>
-            <div className="arcane-label">Daily Run</div>
+            <div className="arcane-label">Random Run</div>
             <h3 className="fantasy-heading text-xl">{complete ? 'Chain Complete' : `Battle ${nextBattle} of ${session.targetBattles}`}</h3>
           </div>
           <button
@@ -922,14 +1328,16 @@ function RunMapPanel({
   }
 
   const isDaily = session.mode === 'daily';
-  const branchMap = isDaily && hasBranchNodeLayout(session.nodes);
+  const branchMap = hasBranchNodeLayout(session.nodes);
   const reachableIds = getReachableNodeIds(session);
   const mapSummary = {
-    label: isDaily ? 'Daily Road' : 'Dungeon Path',
-    title: isDaily ? 'Choose the next road stop' : 'Choose the next chamber',
+    label: getRunMapLabel(session),
+    title: isDaily || session.mode === 'encounter' ? 'Choose the next road stop' : 'Choose the next chamber',
     detail: isDaily
-      ? `Battles count. Shops and omens are free stops. Boss: fight ${session.targetBattles}.`
-      : 'Battles, shops, and chance pools appear between the entrance and boss. Only the next node can be resolved for now.',
+      ? `Battles count. Shops and omens are free stops. Bosses wait along the road. Final boss: fight ${session.targetBattles}.`
+      : session.mode === 'encounter'
+        ? `${session.encounterEnemy?.name || 'The enemy commander'} waits as the boss. Lower-level roads are shorter; omens only appear on longer routes.`
+        : 'A long dungeon road with battles, shops, and omens before the final boss.',
   };
 
   return (
@@ -972,7 +1380,7 @@ function RunMapPanel({
                   <div className="flex min-w-0 items-center gap-3">
                     <span className="ui-icon-frame relative h-10 w-10 shrink-0 overflow-hidden rounded border">
                       <Image
-                        src={node.iconPath}
+                        src={getRunMapNodeIconPath(node, session)}
                         alt=""
                         fill
                         className="run-ui-art object-contain"
@@ -1036,6 +1444,7 @@ function DailyRouteMap({
                 const y = getRunMapRowTopRem(rowIndex);
                 const reachable = state === 'reachable';
                 const tooltipPosition = rowIndex < 2 ? 'below' : 'above';
+                const iconPath = getRunMapNodeIconPath(node, session);
 
                 return (
                   <button
@@ -1044,18 +1453,19 @@ function DailyRouteMap({
                     onClick={() => {
                       if (reachable) onSelectDungeonNode(node);
                     }}
-                    className={`run-route-node run-route-node-${node.type} run-route-node-${state} rounded transition ${reachable ? 'run-route-node-clickable' : ''}`}
+                    className={`run-route-node run-route-node-${node.type} run-route-node-${state} transition ${reachable ? 'run-route-node-clickable' : ''}`}
                     style={{ left: `${x}%`, top: `${y}rem` }}
                     aria-label={`${getRunNodeStateLabel(node, state)} ${battleNumber ? `fight ${battleNumber}` : node.type}: ${node.label}`}
                     title={state === 'reachable' ? `${getRunNodeActionLabel(node)}: ${node.label}` : node.label}
                   >
-                    <span className="run-route-node-icon relative overflow-hidden rounded">
+                    <span className={`run-route-node-icon run-route-node-icon-${node.type} relative`}>
                       <Image
-                        src={node.iconPath}
+                        src={iconPath}
                         alt=""
                         fill
-                        sizes="120px"
-                        className="run-ui-art object-contain"
+                        sizes="140px"
+                        className={`run-route-node-art object-contain${node.type === 'boss' ? ' run-route-node-art-boss' : ''}${node.type !== 'battle' ? ' run-route-node-art-knockout' : ''}`}
+                        unoptimized
                       />
                     </span>
                     <span className="run-route-node-title">
@@ -1168,7 +1578,7 @@ function getRunNodeActionLabel(node: DungeonNode): string {
 }
 
 const RUN_MAP_ROW_START_REM = 6.5;
-const RUN_MAP_ROW_GAP_REM = 10.25;
+const RUN_MAP_ROW_GAP_REM = 12.25;
 const RUN_MAP_BOTTOM_PAD_REM = 8.5;
 
 function getRunMapHeightRem(rowCount: number): number {
@@ -1309,6 +1719,17 @@ function getRunRewardVisual(choice: RunRewardChoice): {
   impactLabel: string;
   tone: 'attack' | 'defense' | 'magic' | 'morale' | 'health' | 'unit' | 'gold';
 } {
+  if (choice.id.startsWith('learn-')) {
+    const spellId = choice.id.replace(/^learn-/, '');
+    return {
+      iconPath: getSpellIconPath({ id: spellId }),
+      tierLabel: 'Spell',
+      kindLabel: 'Spellbook',
+      impactLabel: 'New spell',
+      tone: 'magic',
+    };
+  }
+
   const normalized = `${choice.id} ${choice.name} ${choice.description}`.toLowerCase();
   const tierLabel = normalized.includes('all') || normalized.includes('tier iii') || normalized.includes('+35') || normalized.includes('+4')
     ? 'Tier III'
@@ -1340,38 +1761,65 @@ function getRunRewardVisual(choice: RunRewardChoice): {
 function ShopPanel({
   session,
   onBuy,
+  onReroll,
   onSkip,
 }: {
   session: RunSession;
   onBuy: (choice: RunRewardChoice, cost: number) => void;
+  onReroll: () => void;
   onSkip: () => void;
 }) {
-  const choices = pickRunRewardChoices(session, RUN_SHOP_CHOICE_COUNT);
+  const node = session.nodes[session.currentNodeIndex];
+  const offers = getShopOffersForSession(session);
+  const choices = offers
+    .map(offer => ({ offer, choice: getRunRewardChoiceById(offer.choiceId) }))
+    .filter((item): item is { offer: RunShopOffer; choice: RunRewardChoice } => Boolean(item.choice));
+  const rerollsRemaining = session.shopRerollsRemaining ?? RUN_SHOP_REROLL_COUNT;
 
   return (
     <div className="space-y-5">
-      <section className="ui-card rounded border p-4">
-        <div className="arcane-label">{session.mode === 'daily' ? 'Road Shop' : 'Dungeon Shop'}</div>
-        <h3 className="fantasy-heading text-xl">{session.mode === 'daily' ? 'Roadside Quartermaster' : 'Black-Coin Merchant'}</h3>
-        <p className="ui-muted mt-1 text-sm font-bold">Spend run gold on a temporary blessing, or leave this stop.</p>
+      <section className="run-shop-hero ui-card flex flex-wrap items-start justify-between gap-3 rounded border p-4">
+        <div>
+          <div className="arcane-label">{session.mode === 'dungeon' ? 'Dungeon Shop' : 'Road Shop'}</div>
+          <h3 className="fantasy-heading text-xl">{node?.label || (session.mode === 'dungeon' ? 'Black-Coin Merchant' : 'Roadside Quartermaster')}</h3>
+          <p className="ui-muted mt-1 text-sm font-bold">Spend run gold on as many temporary blessings as you can afford.</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="ui-pill rounded border px-3 py-2 text-xs font-black">{session.runGold} run gold</span>
+          <button
+            type="button"
+            onClick={onReroll}
+            disabled={rerollsRemaining <= 0}
+            className="ui-button rounded px-3 py-2 text-xs font-black disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            Reroll Shop {rerollsRemaining}
+          </button>
+        </div>
       </section>
 
-      <div className="grid gap-3 sm:grid-cols-2">
-        {choices.map((choice, index) => {
-          const cost = 35 + index * 20;
-          const canAfford = session.runGold >= cost;
+      {choices.length > 0 ? (
+        <div className="grid gap-3 sm:grid-cols-2">
+          {choices.map(({ choice, offer }) => {
+            const canAfford = session.runGold >= offer.cost;
 
-          return (
-            <RunRewardCard
-              key={choice.id}
-              choice={choice}
-              onChoose={() => onBuy(choice, cost)}
-              disabled={!canAfford}
-              cost={cost}
-            />
-          );
-        })}
-      </div>
+            return (
+              <RunRewardCard
+                key={`${choice.id}-${offer.cost}`}
+                choice={choice}
+                onChoose={() => onBuy(choice, offer.cost)}
+                disabled={!canAfford}
+                cost={offer.cost}
+              />
+            );
+          })}
+        </div>
+      ) : (
+        <section className="ui-card rounded border p-5 text-center">
+          <div className="arcane-label">Sold Out</div>
+          <h3 className="fantasy-heading text-xl">The merchant has nothing left here.</h3>
+          <p className="ui-muted mt-1 text-sm font-bold">Leave the shop, or spend a reroll if you saved one.</p>
+        </section>
+      )}
       <button onClick={onSkip} className="ui-button rounded px-4 py-2 text-sm font-bold">
         Leave Shop
       </button>
@@ -1394,19 +1842,31 @@ const OMEN_CHANNEL_MS = 2400;
 
 function OmenPanel({
   session,
+  onReroll,
   onComplete,
 }: {
   session: RunSession;
+  onReroll: () => void;
   onComplete: (outcome: OmenOutcome) => void;
 }) {
   const node = session.nodes[session.currentNodeIndex];
   const revealKey = `${session.id}:${session.currentNodeIndex}`;
-  const [outcome] = useState(() => rollDungeonEventOutcome(session));
+  const [outcome, setOutcome] = useState(() => rollDungeonEventOutcome(session));
   const [revealState, setRevealState] = useState<{ key: string; stage: 'channeling' | 'revealed' }>({
     key: revealKey,
     stage: 'channeling',
   });
   const stage = revealState.key === revealKey ? revealState.stage : 'channeling';
+  const rerollsRemaining = session.omenRerollsRemaining ?? RUN_OMEN_REROLL_COUNT;
+
+  const handleReroll = () => {
+    if (rerollsRemaining <= 0) return;
+    onReroll();
+    setOutcome(rollDungeonEventOutcome({
+      ...session,
+      omenRerollsRemaining: Math.max(0, rerollsRemaining - 1),
+    }));
+  };
 
   useEffect(() => {
     const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -1471,31 +1931,97 @@ function OmenPanel({
         <p className="run-omen-result-detail mx-auto mt-4 max-w-md rounded border px-4 py-3 text-sm font-black leading-relaxed text-zinc-100">
           {outcome.detail}
         </p>
-        <button
-          type="button"
-          onClick={() => onComplete(outcome)}
-          className="ui-button-primary mt-6 rounded px-6 py-3 text-sm font-black"
-        >
-          Continue Road
-        </button>
+        <div className="mt-6 flex flex-wrap justify-center gap-3">
+          <button
+            type="button"
+            onClick={handleReroll}
+            disabled={rerollsRemaining <= 0}
+            className="ui-button rounded px-5 py-3 text-sm font-black disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            Reroll Omen {rerollsRemaining}
+          </button>
+          <button
+            type="button"
+            onClick={() => onComplete(outcome)}
+            className="ui-button-primary rounded px-6 py-3 text-sm font-black"
+          >
+            Continue Road
+          </button>
+        </div>
       </section>
     </div>
   );
 }
 
-function RunOutcomeBurst({ session }: { session: RunSession }) {
-  const victory = session.outcome === 'victory';
+function RunDefeatBurst({ session }: { session: RunSession }) {
+  const abandoned = session.outcome === 'abandoned';
 
   return (
-    <section className={`run-outcome-burst rounded border p-8 text-center ${victory ? 'run-outcome-victory' : 'run-outcome-defeat'}`}>
-      <div className="arcane-label">{session.mode === 'dungeon' ? 'Dungeon Run' : 'Daily Run'}</div>
-      <h3 className="fantasy-heading text-4xl">{victory ? 'Victory' : 'Defeat'}</h3>
-      <div className="mx-auto mt-5 grid max-w-xl gap-2 sm:grid-cols-3">
-        <RunResultPill label="Wins" value={`${session.wins}/${session.targetBattles}`} />
-        <RunResultPill label="Standing" value={`${getAliveRunStacks(session).length}/${session.minions.length}`} />
-        <RunResultPill label="Run Gold" value={String(session.runGold)} />
+    <div className="run-completion-defeat-burst relative flex h-full min-h-0 items-center justify-center overflow-hidden">
+      <div className="completion-burst completion-burst-defeat pointer-events-none text-center">
+        <div className="completion-avatar-wrap completion-avatar-wrap-defeat relative mx-auto mb-5 h-44 w-44 sm:h-56 sm:w-56">
+          <Image
+            src="/assets/reaper.png"
+            alt=""
+            fill
+            sizes="224px"
+            className="completion-avatar-defeat-art object-contain"
+            priority
+            unoptimized
+          />
+        </div>
+        <div className="arcane-label">{abandoned ? 'Run Withdrawn' : 'Run Fallen'}</div>
+        <div className="fantasy-heading text-5xl sm:text-7xl">{abandoned ? 'Retreat' : 'Defeat'}</div>
       </div>
-    </section>
+    </div>
+  );
+}
+
+function RunWarbandHeroSprites({
+  minions,
+  className = 'run-draft-hero-roster',
+  fallenClassName = '',
+}: {
+  minions: RunUnit[];
+  className?: string;
+  fallenClassName?: string;
+}) {
+  const rosterCount = minions.length;
+  const { spriteWidth, spriteStep } = getRunRosterSpriteLayout(rosterCount);
+
+  return (
+    <div
+      className={className}
+      data-count={rosterCount}
+      aria-label={`Warband ${rosterCount} units`}
+    >
+      {minions.map((unit, index) => {
+        const template = getMinionTemplate(unit.stack.templateId);
+        if (!template) return null;
+
+        return (
+          <div
+            key={unit.stack.id}
+            className={`run-draft-hero-sprite-wrap ${!unit.alive ? fallenClassName : ''}`}
+            style={{
+              zIndex: index + 1,
+              right: `${index * spriteStep}%`,
+              width: `${spriteWidth}%`,
+            }}
+            title={template.name}
+          >
+            <Image
+              src={`${MINION_ICON_BASE}/${template.assetName}`}
+              alt={template.name}
+              fill
+              sizes="512px"
+              className="run-draft-hero-sprite object-contain object-bottom"
+              unoptimized
+            />
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
@@ -1509,133 +2035,260 @@ function CompletionPanel({
   onClose: () => void;
 }) {
   const victory = session.outcome === 'victory';
-  const [showDetails, setShowDetails] = useState(false);
+  const abandoned = session.outcome === 'abandoned';
+  const tone = victory ? 'victory' : abandoned ? 'abandoned' : 'defeat';
+  const [statsOpen, setStatsOpen] = useState(false);
+  const headline = victory ? 'Run Cleared' : abandoned ? 'Run Retreated' : 'Run Failed';
+  const subtitle = victory
+    ? 'The road is yours. Claim your reward and return to the world map.'
+    : abandoned
+      ? 'Your warband withdrew from the field. No main-map penalty — this run ends here.'
+      : 'The warband was broken on the road. Your main roster was not changed.';
+
+  return (
+    <>
+      <div className="run-draft-stage run-completion-stage min-h-0">
+        <section className={`run-draft-hero run-completion-tone-${tone} relative min-h-0 overflow-hidden p-4 sm:p-5`}>
+          <div className="relative z-10 max-w-xl">
+            <div className="arcane-label">{getRunReportTitle(session)}</div>
+            <h3 className="fantasy-heading mt-1 text-2xl sm:text-3xl">{headline}</h3>
+            <p className="ui-muted mt-1.5 max-w-lg text-xs font-bold leading-relaxed sm:text-sm">
+              {subtitle}
+            </p>
+            <p className="run-draft-hero-status ui-faint mt-1.5 text-[11px] font-bold sm:text-xs">
+              {session.title}
+            </p>
+          </div>
+
+          <RunWarbandHeroSprites
+            minions={session.minions}
+            fallenClassName="run-completion-sprite-fallen"
+          />
+        </section>
+
+        <section className="run-draft-choice-shell run-completion-footer min-h-0 p-2.5 sm:p-3">
+          <div className="run-draft-choice-header mb-2 flex flex-wrap items-end justify-between gap-2">
+            <div>
+              <div className="arcane-label">Final Warband</div>
+              <h4 className="fantasy-heading text-lg sm:text-xl">Run Roster</h4>
+            </div>
+            <span className="ui-pill rounded border px-2.5 py-0.5 text-[10px] font-black sm:text-xs">
+              {getAliveRunStacks(session).length}/{session.minions.length} standing
+            </span>
+          </div>
+
+          <div className="run-completion-warband-grid" aria-label="Run warband roster">
+            {session.minions.map(unit => {
+              const template = getMinionTemplate(unit.stack.templateId);
+              if (!template) return null;
+
+              return (
+                <div
+                  key={unit.stack.id}
+                  className={`run-completion-roster-card run-completion-roster-card-${template.tier} ${unit.alive ? '' : 'run-completion-roster-card-fallen'}`}
+                >
+                  <span className="run-completion-roster-art relative block min-h-0 flex-1">
+                    <span className="run-draft-recruit-frame">
+                      <Image
+                        src={`${MINION_ICON_BASE}/${template.assetName}`}
+                        alt=""
+                        fill
+                        sizes="256px"
+                        className="run-draft-recruit-sprite object-contain object-center"
+                        unoptimized
+                      />
+                    </span>
+                  </span>
+                  <span className="run-draft-card-copy block shrink-0">
+                    <span className="fantasy-heading block truncate text-xs sm:text-sm">{template.name}</span>
+                    <span className="run-draft-card-tierline ui-muted mt-0.5 block truncate text-[10px] font-bold sm:text-xs">
+                      {unit.alive ? `${MINION_TIER_LABELS[template.tier]} ${MINION_CLASS_LABELS[template.class]}` : 'Fallen'}
+                    </span>
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="run-completion-action-row mt-3">
+            <button
+              type="button"
+              onClick={() => setStatsOpen(true)}
+              className="run-completion-action ui-button rounded px-5 py-3 text-sm font-bold"
+            >
+              Stats
+            </button>
+            {victory && (
+              <button
+                type="button"
+                onClick={onClaim}
+                disabled={session.rewardClaimed}
+                className="run-completion-action random-run-start ui-button-primary rounded px-5 py-3 text-sm font-black disabled:opacity-40"
+              >
+                {session.rewardClaimed ? 'Reward Claimed' : 'Claim Reward'}
+              </button>
+            )}
+            {!victory && (
+              <button
+                type="button"
+                onClick={onClose}
+                className="run-completion-action random-run-start ui-button-primary rounded px-5 py-3 text-sm font-black"
+              >
+                Continue
+              </button>
+            )}
+          </div>
+        </section>
+      </div>
+
+      {statsOpen && (
+        <RunCompletionStatsModal session={session} onClose={() => setStatsOpen(false)} />
+      )}
+    </>
+  );
+}
+
+function RunCompletionStatTile({
+  icon,
+  label,
+  value,
+  accent,
+}: {
+  icon: string;
+  label: string;
+  value: string;
+  accent?: 'gold' | 'green' | 'red';
+}) {
+  return (
+    <div className={`run-completion-stat-tile ${accent ? `run-completion-stat-tile-${accent}` : ''}`}>
+      <span className="run-completion-stat-icon relative shrink-0 overflow-hidden rounded border">
+        <Image src={icon} alt="" fill sizes="40px" className="object-contain p-1.5" unoptimized />
+      </span>
+      <div className="min-w-0">
+        <div className="ui-faint text-[10px] font-black uppercase">{label}</div>
+        <div className="ui-value text-lg font-black leading-none">{value}</div>
+      </div>
+    </div>
+  );
+}
+
+function RunCompletionStatsModal({ session, onClose }: { session: RunSession; onClose: () => void }) {
   const aliveCount = getAliveRunStacks(session).length;
   const totalDamageDealt = session.battleReports.reduce((total, report) => total + report.damageDealt, 0);
   const totalDamageTaken = session.battleReports.reduce((total, report) => total + report.damageTaken, 0);
   const totalHealing = session.battleReports.reduce((total, report) => total + report.healingDone, 0);
   const totalDurationMs = session.battleReports.reduce((total, report) => total + report.durationMs, 0);
+  const victoryReports = session.battleReports.filter(report => report.status === 'victory');
 
   return (
-    <div className="mx-auto w-full max-w-5xl space-y-4">
-      <section className={`run-completion-panel rounded border p-5 ${victory ? 'battle-result-victory' : 'battle-result-defeat'}`}>
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <div className="arcane-label">{session.mode === 'dungeon' ? 'Dungeon Report' : 'Daily Report'}</div>
-            <h3 className="fantasy-heading text-3xl">{victory ? 'Run Cleared' : 'Run Failed'}</h3>
-            <p className="ui-muted mt-1 text-sm font-bold">
-              {victory ? 'Claim the reward and return to the world map.' : 'No completion reward. Your main roster was not changed.'}
-            </p>
+    <div
+      className="run-completion-stats-layer fixed inset-0 z-[69] flex items-center justify-center bg-black/72 p-3 backdrop-blur-sm sm:p-4"
+      onClick={onClose}
+    >
+      <section
+        className="run-completion-stats-modal command-panel vine-frame flex max-h-[min(92vh,52rem)] w-full max-w-3xl flex-col overflow-hidden rounded border text-zinc-100"
+        onClick={event => event.stopPropagation()}
+      >
+        <div className="run-completion-stats-header flex shrink-0 items-start justify-between gap-3 border-b border-[rgba(232,217,184,0.12)] px-4 py-3 sm:px-5 sm:py-4">
+          <div className="min-w-0">
+            <div className="arcane-label">Run Statistics</div>
+            <h3 className="fantasy-heading truncate text-xl sm:text-2xl">{session.title}</h3>
+            <p className="ui-faint mt-1 text-[11px] font-bold">{getRunReportTitle(session)}</p>
           </div>
-          <div className={`run-result-sigil ${victory ? 'run-result-sigil-victory' : 'run-result-sigil-defeat'}`}>
-            {victory ? 'V' : 'X'}
+          <button type="button" onClick={onClose} className="ui-button shrink-0 rounded px-3 py-1.5 text-xs font-bold">
+            Close
+          </button>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-5">
+          <div className="grid gap-2 sm:grid-cols-3">
+            <RunCompletionStatTile
+              icon={RUN_COMPLETION_STAT_ICONS.wins}
+              label="Battles Won"
+              value={`${session.wins}/${session.targetBattles}`}
+            />
+            <RunCompletionStatTile
+              icon={RUN_COMPLETION_STAT_ICONS.standing}
+              label="Units Standing"
+              value={`${aliveCount}/${session.minions.length}`}
+              accent="green"
+            />
+            <RunCompletionStatTile
+              icon={RUN_COMPLETION_STAT_ICONS.gold}
+              label="Run Gold"
+              value={String(session.runGold)}
+              accent="gold"
+            />
           </div>
-        </div>
 
-        <div className="mt-5">
-          <RunProgressPips total={session.targetBattles} completed={session.wins} />
-        </div>
+          <div className="mt-4">
+            <div className="arcane-label mb-2">Road Progress</div>
+            <RunProgressPips total={session.targetBattles} completed={session.wins} />
+          </div>
 
-        <div className="mt-4 grid gap-2 sm:grid-cols-3">
-          <RunResultPill label="Wins" value={`${session.wins}/${session.targetBattles}`} />
-          <RunResultPill label="Standing" value={`${aliveCount}/${session.minions.length}`} />
-          <RunResultPill label="Run Gold" value={String(session.runGold)} />
-        </div>
+          <div className="mt-4 grid grid-cols-2 gap-2 lg:grid-cols-4">
+            <RunCompletionStatTile icon={RUN_COMPLETION_STAT_ICONS.time} label="Time Fought" value={formatRunDuration(totalDurationMs)} />
+            <RunCompletionStatTile icon={RUN_COMPLETION_STAT_ICONS.damage} label="Damage Dealt" value={String(totalDamageDealt)} />
+            <RunCompletionStatTile icon={RUN_COMPLETION_STAT_ICONS.taken} label="Damage Taken" value={String(totalDamageTaken)} accent="red" />
+            <RunCompletionStatTile icon={RUN_COMPLETION_STAT_ICONS.healing} label="Healing Done" value={String(totalHealing)} accent="green" />
+          </div>
 
-        {session.battleReports.length > 0 && (
-          <RunBattleHistoryStrip reports={session.battleReports} />
-        )}
+          <div className="mt-4 grid grid-cols-2 gap-2">
+            <RunCommanderStat label="Army" value={session.stats.armyPower} icon={COMMANDER_STAT_ICONS.Army} />
+            <RunCommanderStat label="Ward" value={session.stats.defensivePower} icon={COMMANDER_STAT_ICONS.Ward} />
+            <RunCommanderStat label="Morale" value={session.stats.morale} icon={COMMANDER_STAT_ICONS.Morale} />
+            <RunCommanderStat label="Spell" value={session.stats.spellPower} icon={COMMANDER_STAT_ICONS.Spell} />
+          </div>
 
-        <div className="mt-5 flex flex-wrap items-center gap-3">
-          {victory && (
-            <button
-              onClick={onClaim}
-              disabled={session.rewardClaimed}
-              className="ui-button-primary rounded px-5 py-3 text-sm font-black disabled:opacity-40"
-            >
-              {session.rewardClaimed ? 'Reward Claimed' : 'Claim Reward'}
-            </button>
+          {victoryReports.length > 0 && (
+            <div className="run-history-strip mt-5 rounded border p-3">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <div>
+                  <div className="arcane-label">Road History</div>
+                  <h4 className="fantasy-heading text-lg">Commanders Defeated</h4>
+                </div>
+                <span className="ui-pill rounded border px-2 py-1 text-[10px] font-black">{victoryReports.length} wins</span>
+              </div>
+              <div className="run-history-commanders">
+                {victoryReports.map((report, index) => {
+                  const boss = report.enemyPersonality === 'boss' || index === victoryReports.length - 1;
+
+                  return (
+                    <div key={report.id} className={`run-history-commander rounded border p-2 ${boss ? 'run-history-commander-boss' : ''}`}>
+                      <span className="run-history-portrait relative mx-auto block overflow-hidden rounded">
+                        <Image
+                          src={report.enemyAssetPath || '/assets/playermodel1.png'}
+                          alt={report.enemyName}
+                          fill
+                          className="object-contain"
+                          sizes="72px"
+                          unoptimized
+                        />
+                      </span>
+                      <div className="mt-2 truncate text-center text-xs font-black text-zinc-100">{report.enemyName}</div>
+                      <div className="ui-faint text-center text-[10px] font-black uppercase">
+                        {boss ? 'Boss' : `Lv ${report.enemyLevel || 1}`}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
           )}
-          <button onClick={() => setShowDetails(open => !open)} className="ui-button rounded px-5 py-3 text-sm font-bold">
-            {showDetails ? 'Hide Details' : 'Details'}
-          </button>
-          <button onClick={onClose} className="ui-button rounded px-5 py-3 text-sm font-bold">
-            Return
-          </button>
-        </div>
-      </section>
 
-      {showDetails && (
-        <section className="run-detail-drawer rounded border p-4">
-          <div className="grid gap-3 sm:grid-cols-4">
-            <RunResultPill label="Time" value={formatRunDuration(totalDurationMs)} />
-            <RunResultPill label="Damage" value={String(totalDamageDealt)} />
-            <RunResultPill label="Taken" value={String(totalDamageTaken)} />
-            <RunResultPill label="Healed" value={String(totalHealing)} />
-          </div>
-
-          <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.35fr)]">
-            <RunRoster session={session} onOpenStats={() => setShowDetails(true)} />
-            <div className="space-y-3">
-              <div className="flex items-center justify-between gap-3 border-b border-[rgba(232,217,184,0.14)] pb-2">
-                <h3 className="fantasy-heading font-black">Combat Data</h3>
+          {session.battleReports.length > 0 && (
+            <div className="mt-5 space-y-2">
+              <div className="flex items-center justify-between gap-3 border-b border-[rgba(232,217,184,0.12)] pb-2">
+                <h4 className="fantasy-heading text-lg">Combat Log</h4>
                 <span className="ui-faint text-xs font-bold">{session.battleReports.length} fights</span>
               </div>
-              {session.battleReports.length === 0 ? (
-                <div className="ui-empty rounded border border-dashed px-4 py-6 text-center text-sm font-bold">
-                  No battle data recorded.
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {session.battleReports.map(report => (
-                    <RunBattleReportCard key={report.id} report={report} />
-                  ))}
-                </div>
-              )}
+              {session.battleReports.map(report => (
+                <RunBattleReportCard key={report.id} report={report} />
+              ))}
             </div>
-          </div>
-        </section>
-      )}
-    </div>
-  );
-}
-
-function RunBattleHistoryStrip({ reports }: { reports: RunBattleReport[] }) {
-  const visibleReports = reports.slice(-8);
-
-  return (
-    <div className="run-history-strip mt-5 rounded border p-3">
-      <div className="mb-3 flex items-center justify-between gap-3">
-        <div>
-          <div className="arcane-label">Road History</div>
-          <h4 className="fantasy-heading text-lg">Enemy Commanders Defeated</h4>
+          )}
         </div>
-        <span className="ui-pill rounded border px-2 py-1 text-[10px] font-black">{reports.length} fights</span>
-      </div>
-      <div className="run-history-commanders">
-        {visibleReports.map((report, index) => {
-          const boss = report.enemyPersonality === 'boss' || index === visibleReports.length - 1;
-
-          return (
-            <div key={report.id} className={`run-history-commander rounded border p-2 ${boss ? 'run-history-commander-boss' : ''}`}>
-              <span className="run-history-portrait relative mx-auto block overflow-hidden rounded">
-                <Image
-                  src={report.enemyAssetPath || '/assets/playermodel1.png'}
-                  alt={report.enemyName}
-                  fill
-                  className="object-contain"
-                  sizes="72px"
-                  unoptimized
-                />
-              </span>
-              <div className="mt-2 truncate text-center text-xs font-black text-zinc-100">{report.enemyName}</div>
-              <div className="ui-faint text-center text-[10px] font-black uppercase">
-                {boss ? 'Boss' : `Lv ${report.enemyLevel || 1}`}
-              </div>
-            </div>
-          );
-        })}
-      </div>
+      </section>
     </div>
   );
 }
@@ -1644,9 +2297,21 @@ function RunBattleReportCard({ report }: { report: RunBattleReport }) {
   return (
     <div className="run-battle-report rounded border p-3">
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <div className="arcane-label">{report.status === 'victory' ? 'Won' : 'Lost'} - Round {report.round}</div>
-          <div className="fantasy-heading text-base">{report.enemyName}</div>
+        <div className="flex min-w-0 items-start gap-3">
+          <span className="run-history-portrait relative shrink-0 overflow-hidden rounded">
+            <Image
+              src={report.enemyAssetPath || '/assets/playermodel1.png'}
+              alt={report.enemyName}
+              fill
+              className="object-contain"
+              sizes="72px"
+              unoptimized
+            />
+          </span>
+          <div className="min-w-0">
+            <div className="arcane-label">{report.status === 'victory' ? 'Won' : 'Lost'} - Round {report.round}</div>
+            <div className="fantasy-heading text-base">{report.enemyName}</div>
+          </div>
         </div>
         <div className="flex flex-wrap gap-2">
           <span className="ui-pill rounded border px-2 py-1 text-[10px] font-black">{formatRunDuration(report.durationMs)}</span>
@@ -1681,54 +2346,158 @@ function RunBattleReportCard({ report }: { report: RunBattleReport }) {
   );
 }
 
-function RunRoster({ session, onOpenStats }: { session: RunSession; onOpenStats: () => void }) {
+function RunRoster({
+  session,
+  onOpenStats,
+  variant = 'default',
+}: {
+  session: RunSession;
+  onOpenStats: () => void;
+  variant?: 'default' | 'map';
+}) {
+  const aliveCount = getAliveRunStacks(session).length;
+
   return (
-    <aside className="run-roster-aside flex min-h-0 flex-col gap-3">
-      <section className="run-roster-list min-h-0 flex-1 overflow-y-auto">
-        <div className="mb-3 flex items-center justify-between gap-3 border-b border-[rgba(232,217,184,0.16)] pb-2">
-          <h3 className="fantasy-heading font-black">Run Roster</h3>
-          <span className="ui-faint text-xs font-bold">{getAliveRunStacks(session).length}/{session.minions.length}</span>
+    <aside className={`run-roster-aside flex min-h-0 flex-col gap-3 ${variant === 'map' ? 'run-roster-aside-map' : ''}`}>
+      <section className="run-roster-list ui-card min-h-0 flex-1 overflow-y-auto rounded border p-2.5">
+        <div className="run-roster-list-head">
+          <h3 className="fantasy-heading text-sm font-black">Run Roster</h3>
+          <span className="ui-faint text-xs font-bold">{aliveCount}/{session.minions.length}</span>
         </div>
-        <div className="space-y-2">
-          {session.minions.length === 0 ? (
-            <div className="ui-empty rounded border border-dashed px-4 py-6 text-center text-sm font-bold">
-              No units drafted.
-            </div>
-          ) : (
-            session.minions.map(unit => {
+
+        {session.minions.length === 0 ? (
+          <div className="ui-empty rounded border border-dashed px-4 py-6 text-center text-sm font-bold">
+            No units drafted.
+          </div>
+        ) : (
+          <div className="run-roster-portrait-grid">
+            {session.minions.map(unit => {
               const template = getMinionTemplate(unit.stack.templateId);
               if (!template) return null;
 
               return (
-                <div key={unit.stack.id} className={`ui-card flex items-center gap-3 rounded border p-2 ${unit.alive ? '' : 'opacity-40'}`}>
-                  <MinionPortrait template={template} />
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-black text-zinc-100">{template.name}</div>
-                    <div className="ui-muted text-xs font-bold">{unit.alive ? MINION_TIER_LABELS[template.tier] : 'Fallen'}</div>
-                  </div>
-                </div>
+                <RunRosterHoverTip
+                  key={unit.stack.id}
+                  side="right"
+                  popover={<RunRosterUnitTooltip template={template} alive={unit.alive} />}
+                >
+                  <button
+                    type="button"
+                    className={`run-roster-portrait-btn rounded border ${unit.alive ? '' : 'run-roster-portrait-fallen'}`}
+                    aria-label={`${template.name}, ${unit.alive ? MINION_TIER_LABELS[template.tier] : 'Fallen'}`}
+                  >
+                    <MinionPortrait template={template} size={variant === 'map' ? 'map' : 'roster'} />
+                  </button>
+                </RunRosterHoverTip>
               );
-            })
-          )}
-        </div>
+            })}
+          </div>
+        )}
       </section>
 
-      <RunStatsLaunch session={session} onOpen={onOpenStats} />
+      <RunStatsLaunch session={session} onOpen={onOpenStats} variant={variant} />
     </aside>
   );
 }
 
-function getTierRoman(tier: MinionTemplate['tier']): string {
-  if (tier === 'tier3') return 'III';
-  if (tier === 'tier2') return 'II';
-  return 'I';
+function RunRosterHoverTip({
+  children,
+  popover,
+  side = 'right',
+}: {
+  children: ReactNode;
+  popover: ReactNode;
+  side?: 'right' | 'left';
+}) {
+  const anchorRef = useRef<HTMLDivElement>(null);
+  const [open, setOpen] = useState(false);
+  const [coords, setCoords] = useState({ top: 0, left: 0 });
+
+  const updatePosition = useCallback(() => {
+    const anchor = anchorRef.current;
+    if (!anchor) return;
+    const rect = anchor.getBoundingClientRect();
+    const gap = 12;
+    if (side === 'left') {
+      setCoords({ top: rect.top + rect.height / 2, left: rect.left - gap });
+      return;
+    }
+    setCoords({ top: rect.top + rect.height / 2, left: rect.right + gap });
+  }, [side]);
+
+  const show = () => {
+    updatePosition();
+    setOpen(true);
+  };
+
+  const hide = () => setOpen(false);
+
+  useEffect(() => {
+    if (!open) return;
+    const handle = () => updatePosition();
+    window.addEventListener('scroll', handle, true);
+    window.addEventListener('resize', handle);
+    return () => {
+      window.removeEventListener('scroll', handle, true);
+      window.removeEventListener('resize', handle);
+    };
+  }, [open, updatePosition]);
+
+  return (
+    <div
+      ref={anchorRef}
+      className="run-roster-hover-anchor"
+      onMouseEnter={show}
+      onMouseLeave={hide}
+      onFocus={show}
+      onBlur={hide}
+    >
+      {children}
+      {open && typeof document !== 'undefined' && createPortal(
+        <div
+          className={`run-roster-hover-popover run-roster-hover-popover-${side} rounded border`}
+          role="tooltip"
+          style={{ top: coords.top, left: coords.left }}
+        >
+          {popover}
+        </div>,
+        document.body,
+      )}
+    </div>
+  );
 }
 
-function MinionPortrait({ template, size = 'small' }: { template: MinionTemplate; size?: 'tiny' | 'formation' | 'small' | 'large' }) {
+function RunRosterUnitTooltip({ template, alive }: { template: MinionTemplate; alive: boolean }) {
+  return (
+    <>
+      <div className="run-roster-tip-title">{template.name}</div>
+      <div className="run-roster-tip-meta">
+        {alive ? `${MINION_CLASS_LABELS[template.class]} · ${MINION_TIER_LABELS[template.tier]}` : 'Fallen'}
+      </div>
+      {alive && (
+        <div className="run-roster-tip-stats">
+          <span>ATK {template.stats.attack}</span>
+          <span>DEF {template.stats.defense}</span>
+          <span>HP {template.stats.health}</span>
+          <span>MOV {template.stats.movement}</span>
+          <span>MAG {template.stats.magic}</span>
+          <span>RNG {template.stats.range}</span>
+        </div>
+      )}
+      <p className="run-roster-tip-copy">{template.role}</p>
+    </>
+  );
+}
+
+function MinionPortrait({ template, size = 'small' }: { template: MinionTemplate; size?: 'tiny' | 'formation' | 'small' | 'large' | 'map' | 'roster' }) {
   const dimensions = size === 'large'
     ? 'h-28 w-28'
     : size === 'formation'
       ? 'h-full w-full'
+      : size === 'map'
+        ? 'h-[4.35rem] w-[4.35rem]'
+        : size === 'roster'
+          ? 'h-16 w-16'
       : size === 'tiny'
         ? 'h-12 w-12'
         : 'h-14 w-14';
@@ -1740,18 +2509,9 @@ function MinionPortrait({ template, size = 'small' }: { template: MinionTemplate
         alt={template.name}
         fill
         className="run-minion-portrait-image run-ui-art object-contain"
-        sizes={size === 'large' ? '112px' : size === 'formation' ? '84px' : size === 'tiny' ? '48px' : '56px'}
+        sizes={size === 'large' ? '112px' : size === 'formation' ? '84px' : size === 'map' ? '70px' : size === 'roster' ? '64px' : size === 'tiny' ? '48px' : '56px'}
         unoptimized
       />
-    </span>
-  );
-}
-
-function RunStat({ label, value }: { label: string; value: number | string }) {
-  return (
-    <span className="ui-pill rounded border px-2 py-1">
-      <span className="ui-faint block">{label}</span>
-      <span className="ui-value block">{value}</span>
     </span>
   );
 }
@@ -1839,21 +2599,68 @@ function RunStatsChipRow({ session }: { session: RunSession }) {
   );
 }
 
-function RunStatsLaunch({ session, onOpen }: { session: RunSession; onOpen: () => void }) {
+function RunMapStatTile({
+  icon,
+  label,
+  value,
+  tone,
+}: {
+  icon: string;
+  label: string;
+  value: string;
+  tone?: 'gold' | 'challenge';
+}) {
+  return (
+    <span className={`run-map-stat-tile${tone ? ` run-map-stat-tile-${tone}` : ''}`} title={label}>
+      <Image src={icon} alt="" width={22} height={22} className="run-map-stat-tile-icon" unoptimized />
+      <span className="run-map-stat-tile-copy">
+        <span className="run-map-stat-tile-label">{label}</span>
+        <span className="run-map-stat-tile-value">{value}</span>
+      </span>
+    </span>
+  );
+}
+
+function RunStatsLaunch({
+  session,
+  onOpen,
+  variant = 'default',
+}: {
+  session: RunSession;
+  onOpen: () => void;
+  variant?: 'default' | 'map';
+}) {
+  const aliveCount = getAliveRunStacks(session).length;
+  const challengeHint = session.dailyChallenge
+    ? `${session.dailyChallenge.subtitle} — ${session.dailyChallenge.weeklyRewardName}`
+    : undefined;
+
   return (
     <button
       type="button"
       onClick={onOpen}
-      className="run-roster-stats-launch ui-card w-full shrink-0 rounded border px-3 py-2.5 text-left transition"
+      className={`run-roster-stats-launch ui-card w-full shrink-0 rounded border text-left transition ${variant === 'map' ? 'run-roster-stats-launch-map' : ''}`}
       aria-label="Open run status"
     >
-      <span className="flex items-center justify-between gap-2">
-        <span className="arcane-label text-[9px]">Run Status</span>
-        <span className="ui-faint text-[10px] font-black uppercase tracking-[0.12em]">Details</span>
+      <span className="run-roster-stats-head">
+        <span className="arcane-label">Run Status</span>
+        <span className="ui-faint text-[11px] font-black uppercase tracking-[0.12em]">Details</span>
       </span>
-      <span className="run-header-stats mt-2 flex flex-wrap gap-1">
-        <RunStatsChipRow session={session} />
-      </span>
+
+      {variant === 'map' ? (
+        <span className="run-map-status-grid">
+          <RunMapStatTile icon={RUN_HEADER_ICONS.battles} label="Battles" value={`${session.wins}/${session.targetBattles}`} />
+          <RunMapStatTile icon={RUN_HEADER_ICONS.roster} label="Standing" value={`${aliveCount}/${session.minions.length}`} />
+          <RunMapStatTile icon={RUN_HEADER_ICONS.gold} label="Gold" value={String(session.runGold)} tone="gold" />
+          {challengeHint && (
+            <RunMapStatTile icon={RUN_HEADER_ICONS.challenge} label="Challenge" value="★" tone="challenge" />
+          )}
+        </span>
+      ) : (
+        <span className="run-header-stats mt-2 flex flex-wrap gap-1.5">
+          <RunStatsChipRow session={session} />
+        </span>
+      )}
     </button>
   );
 }
@@ -1925,61 +2732,6 @@ function RunStatsModal({ session, onClose }: { session: RunSession; onClose: () 
   );
 }
 
-function RunSessionHeader({
-  session,
-  kicker,
-  isFormationPhase,
-  isMapPhase,
-  onClose,
-}: {
-  session: RunSession;
-  kicker?: string;
-  isFormationPhase: boolean;
-  isMapPhase: boolean;
-  onClose: () => void;
-}) {
-  const aliveCount = getAliveRunStacks(session).length;
-  const headerLabel = isFormationPhase
-    ? 'Formation'
-    : kicker || (session.mode === 'daily' ? 'Daily run' : 'Dungeon path');
-  const useCompactHeader = isMapPhase || isFormationPhase;
-
-  if (useCompactHeader) {
-    return (
-      <header className="run-map-header panel-header flex items-center gap-2 border-b px-3 py-2 sm:gap-3">
-        <div className="flex min-w-0 flex-1 items-center gap-2">
-          <span className="run-map-header-kicker arcane-label shrink-0 text-[9px]">{headerLabel}</span>
-          <h2 className="fantasy-heading min-w-0 truncate text-base leading-none sm:text-lg">{session.title}</h2>
-        </div>
-
-        <button onClick={onClose} className="ui-button shrink-0 rounded px-2 py-1 text-[10px] font-bold sm:px-3 sm:text-xs">
-          Close
-        </button>
-      </header>
-    );
-  }
-
-  return (
-    <header className="panel-header flex items-start justify-between gap-4 border-b px-5 py-4">
-      <div>
-        <div className="arcane-label">{headerLabel}</div>
-        <h2 className="fantasy-heading text-2xl">{session.title}</h2>
-        <p className="ui-muted mt-1 text-xs font-bold">
-          {`${session.wins}/${session.targetBattles} battles won · ${aliveCount}/${session.minions.length} units · ${session.runGold} run gold`}
-        </p>
-        {session.dailyChallenge && (
-          <p className="ui-faint mt-1 text-xs font-bold">
-            {session.dailyChallenge.subtitle} — {session.dailyChallenge.weeklyRewardName}
-          </p>
-        )}
-      </div>
-      <button onClick={onClose} className="ui-button rounded px-3 py-2 text-xs font-bold">
-        Close
-      </button>
-    </header>
-  );
-}
-
 function RunProgressPips({ total, completed }: { total: number; completed: number }) {
   return (
     <div className="ui-card rounded border p-4">
@@ -2008,6 +2760,10 @@ function getDailyRunSessionKey(username: string, dateKey: string): string {
   return `${DAILY_RUN_SESSION_PREFIX}_${username}_${dateKey}`;
 }
 
+function getRandomRunSessionKey(username: string): string {
+  return getDailyRunSessionKey(username, RANDOM_RUN_ACTIVE_SESSION_KEY);
+}
+
 function serializeRunSession(username: string, session: RunSession): StoredRunSession {
   const { rewardChoices, ...storedSession } = session;
   return {
@@ -2015,44 +2771,65 @@ function serializeRunSession(username: string, session: RunSession): StoredRunSe
     rewardChoiceIds: rewardChoices.map(choice => choice.id),
     savedAt: Date.now(),
     ownerUsername: username,
-    dateKey: session.dailyChallenge?.date || getDailyRunChallenge().date,
+    dateKey: session.dailyChallenge?.date || RANDOM_RUN_ACTIVE_SESSION_KEY,
   };
 }
 
-function hydrateRunSession(storedSession: StoredRunSession | null, challenge: DailyRunChallenge): RunSession | null {
+function hydrateRunSession(storedSession: StoredRunSession | null, challenge?: DailyRunChallenge): RunSession | null {
   if (!storedSession || storedSession.mode !== 'daily') return null;
-  if (storedSession.dateKey !== challenge.date) return null;
+  if (storedSession.phase === 'complete' || storedSession.rewardClaimed) return null;
+  const resolvedChallenge = storedSession.dailyChallenge || challenge || createRandomRunChallenge();
   const { rewardChoiceIds, savedAt, ownerUsername, dateKey, ...session } = storedSession;
   void savedAt;
   void ownerUsername;
   void dateKey;
 
-  const freshNodes = createDailyRunNodes(challenge, storedSession.stats?.level || 1);
+  const freshNodes = createDailyRunNodes(resolvedChallenge, storedSession.stats?.level || 1);
   const storedNodes = storedSession.nodes?.length ? normalizeDailyRunNodes(storedSession.nodes) : [];
   const refreshStoredRoad = storedSession.wins === 0 && (
     !storedNodes.length ||
     !hasBranchNodeLayout(storedNodes) ||
-    storedSession.targetBattles < challenge.targetBattles
+    storedSession.targetBattles < resolvedChallenge.targetBattles
   );
   const nodes = refreshStoredRoad ? freshNodes : storedNodes.length ? storedNodes : freshNodes;
 
+  const spellIds = storedSession.spellIds?.length ? storedSession.spellIds.slice(0, 4) : pickRunSpellLoadout(resolvedChallenge.date);
+  const knownSpellIds = storedSession.knownSpellIds?.length
+    ? storedSession.knownSpellIds
+    : getInitialRunKnownSpellIds(spellIds);
+
   return {
     ...session,
-    targetBattles: refreshStoredRoad ? challenge.targetBattles : session.targetBattles,
-    dailyChallenge: challenge,
+    targetBattles: refreshStoredRoad
+      ? normalizeRandomRunBattleCount(resolvedChallenge.targetBattles)
+      : normalizeRandomRunBattleCount(session.targetBattles),
+    dailyChallenge: resolvedChallenge,
     formation: storedSession.formation || makeDefaultFormation(storedSession.minions.filter(unit => unit.alive).map(unit => unit.stack)),
-    spellIds: storedSession.spellIds?.length ? storedSession.spellIds.slice(0, 4) : pickRunSpellLoadout(challenge.date),
+    spellIds,
+    knownSpellIds,
     nodes,
     battleReports: storedSession.battleReports || [],
     rewardChoices: rewardChoiceIds
-      .map(choiceId => RUN_BUFFS.find(choice => choice.id === choiceId))
+      .map(choiceId => RUN_REWARD_POOL.find(choice => choice.id === choiceId))
       .filter((choice): choice is RunRewardChoice => Boolean(choice)),
+    shopOffers: storedSession.shopOffers || {},
+    shopRerollsRemaining: typeof storedSession.shopRerollsRemaining === 'number'
+      ? storedSession.shopRerollsRemaining
+      : RUN_SHOP_REROLL_COUNT,
+    omenRerollsRemaining: typeof storedSession.omenRerollsRemaining === 'number'
+      ? storedSession.omenRerollsRemaining
+      : RUN_OMEN_REROLL_COUNT,
+    pendingPositiveOmen: Boolean(storedSession.pendingPositiveOmen),
+    startedAt: storedSession.startedAt || Date.now(),
+    bossHistory: storedSession.bossHistory || [],
+    shopBuyHistory: storedSession.shopBuyHistory || [],
+    omenHistory: storedSession.omenHistory || [],
+    permanentSpellUnlocks: storedSession.permanentSpellUnlocks || [],
   };
 }
 
-function loadDailyRunSession(user: User, challenge: DailyRunChallenge): RunSession | null {
-  const key = getDailyRunSessionKey(user.username, challenge.date);
-  return hydrateRunSession(readGameJson<StoredRunSession | null>(key, null), challenge);
+function loadDailyRunSession(user: User, challenge?: DailyRunChallenge): RunSession | null {
+  return hydrateRunSession(readGameJson<StoredRunSession | null>(getRandomRunSessionKey(user.username), null), challenge);
 }
 
 export interface SavedDailyRunSummary {
@@ -2081,12 +2858,11 @@ function getRunPhaseLabel(phase: RunPhase): string {
 }
 
 export function getSavedDailyRunSummary(
-  user: User | null | undefined,
-  challenge: DailyRunChallenge = getDailyRunChallenge()
+  user: User | null | undefined
 ): SavedDailyRunSummary | null {
-  if (!user || getDailyRunStatus(user).completedToday) return null;
+  if (!user) return null;
 
-  const session = loadDailyRunSession(user, challenge);
+  const session = loadDailyRunSession(user);
   if (!session || session.rewardClaimed) return null;
 
   return {
@@ -2102,31 +2878,110 @@ export function getSavedDailyRunSummary(
 }
 
 function saveDailyRunSession(username: string, session: RunSession): void {
-  const dateKey = session.dailyChallenge?.date || getDailyRunChallenge().date;
-  writeGameJson(getDailyRunSessionKey(username, dateKey), serializeRunSession(username, session));
+  writeGameJson(getRandomRunSessionKey(username), serializeRunSession(username, session));
 }
 
-function clearDailyRunSession(username: string, dateKey: string): void {
-  removeGameStorageItem(getDailyRunSessionKey(username, dateKey));
+function clearDailyRunSession(username: string): void {
+  removeGameStorageItem(getRandomRunSessionKey(username));
 }
 
-function createDailySession(user: User, dailyChallenge = getDailyRunChallenge()): RunSession {
-  const nodes = createDailyRunNodes(dailyChallenge, user.stats.level || 1);
+function getRandomRunTargetBattleCount(runLevel: number): number {
+  const progress = getRandomRunProgressRatio(runLevel);
+  const min = RANDOM_RUN_BALANCE.routeBattleMin;
+  const max = RANDOM_RUN_BALANCE.routeBattleMax;
+  const span = Math.max(0, max - min);
+  const baseline = min + Math.floor(progress * span);
+  const roll = span > 0 ? Math.floor(Math.random() * Math.min(2, span + 1)) : 0;
+
+  return clamp(baseline + roll, min, max);
+}
+
+function normalizeRandomRunBattleCount(value: number): number {
+  return clamp(
+    Math.round(value),
+    RANDOM_RUN_BALANCE.routeBattleMin,
+    RANDOM_RUN_BALANCE.routeBattleMax
+  );
+}
+
+function getRandomRunScaledBattleLevel(playerLevel: number, battleNumber: number, battleCount: number, extra = 0): number {
+  const effectiveLevel = getRandomRunEffectiveLevel(playerLevel);
+  const progress = battleCount <= 1 ? 1 : (battleNumber - 1) / Math.max(1, battleCount - 1);
+  const level = 1
+    + Math.round((effectiveLevel - 1) * 0.55)
+    + Math.round((RANDOM_RUN_BALANCE.enemyLevelCap - 1) * progress * 0.35)
+    + extra;
+
+  return clamp(level, 1, RANDOM_RUN_BALANCE.enemyLevelCap);
+}
+
+function createRandomRunChallenge(user?: User): DailyRunChallenge {
+  const now = Date.now();
+  const randomOffset = Math.floor(Math.random() * 4200) * 86_400_000 + Math.floor(Math.random() * 86_400_000);
+  const base = getDailyRunChallenge(now + randomOffset);
+  const runState = getDailyRunState(user);
+  const runIndex = runState.completions + 1;
+  const targetBattleBonus = base.modifiers.reduce((total, modifier) => total + (modifier.targetBattleBonus || 0), 0);
+  const targetBattles = normalizeRandomRunBattleCount(getRandomRunTargetBattleCount(runState.runLevel) + targetBattleBonus);
+  const finalBoss = getBossProfileByIndex(runIndex + Math.floor(Math.random() * 8));
 
   return {
-    id: `daily-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    ...base,
+    date: `random-${now}-${Math.random().toString(16).slice(2)}`,
+    name: `${base.name}`,
+    subtitle: 'Random roguelike road',
+    targetBattles,
+    bossId: finalBoss.id,
+    bossName: finalBoss.name,
+    bossSubtitle: finalBoss.subtitle,
+    bossStory: finalBoss.story,
+    bossIntro: finalBoss.intro,
+    bossArtworkPath: finalBoss.assetPath,
+    bossModelNumber: finalBoss.modelNumber,
+    weeklyRewardName: 'Run Progression',
+    weeklyRewardDescription: 'Permanent random-run XP and rare spell unlock chances.',
+    weeklyRewardItemId: undefined,
+  };
+}
+
+function getRandomRunBaseStats(user: User): CharacterStats {
+  const runState = getDailyRunState(user);
+  const permanent = runState.permanentStats;
+  const effectiveLevel = getRandomRunEffectiveLevel(runState.runLevel);
+  const maxHealth = 96 + permanent.maxHealth + (effectiveLevel - 1) * 4;
+
+  return {
+    armyPower: 5 + permanent.armyPower + Math.floor(permanent.unitPower / 2),
+    defensivePower: 5 + permanent.defensivePower + Math.floor(permanent.unitWard / 2),
+    morale: 5 + permanent.morale,
+    spellPower: 3 + permanent.spellPower,
+    health: maxHealth,
+    maxHealth,
+    level: effectiveLevel,
+    unallocatedPoints: 0,
+  };
+}
+
+function createDailySession(user: User, dailyChallenge = createRandomRunChallenge(user)): RunSession {
+  const runStats = getRandomRunBaseStats(user);
+  const nodes = createDailyRunNodes(dailyChallenge, runStats.level || 1);
+  const spellIds = pickRunSpellLoadout(dailyChallenge.date);
+
+  return {
+    id: `random-run-${Date.now()}-${Math.random().toString(16).slice(2)}`,
     mode: 'daily',
     title: dailyChallenge.name,
     phase: 'draft',
-    stats: applyDailyChallengeStats(cloneRunStats(user.stats), dailyChallenge),
+    stats: applyDailyChallengeStats(cloneRunStats(runStats), dailyChallenge),
     minions: [],
     draftChoices: getDraftChoices(0),
     wins: 0,
-    targetBattles: clamp(dailyChallenge.targetBattles, 12, 18),
+    targetBattles: normalizeRandomRunBattleCount(dailyChallenge.targetBattles),
     runGold: 0,
     activeEnemy: null,
     formation: {},
-    spellIds: pickRunSpellLoadout(dailyChallenge.date),
+    spellIds,
+    knownSpellIds: getRunStartingKnownSpellIds(spellIds, user),
     rewardChoices: [],
     rewardDestination: null,
     nodes,
@@ -2134,6 +2989,15 @@ function createDailySession(user: User, dailyChallenge = getDailyRunChallenge())
     battleReports: [],
     outcome: null,
     dailyChallenge,
+    shopOffers: {},
+    shopRerollsRemaining: RUN_SHOP_REROLL_COUNT,
+    omenRerollsRemaining: RUN_OMEN_REROLL_COUNT,
+    pendingPositiveOmen: false,
+    startedAt: Date.now(),
+    bossHistory: [],
+    shopBuyHistory: [],
+    omenHistory: [],
+    permanentSpellUnlocks: [],
   };
 }
 
@@ -2152,6 +3016,7 @@ function createDungeonSession(user: User, dungeon: WorldDungeon): RunSession {
     }));
 
   const nodes = createDungeonNodes(dungeon);
+  const spellIds = (user.equippedSpellIds || ['arcane-bolt', 'sanctified-mend', 'ember-dart', 'warding-prayer']).slice(0, 4);
 
   return {
     id: `dungeon-run-${dungeon.id}-${Date.now()}`,
@@ -2166,7 +3031,8 @@ function createDungeonSession(user: User, dungeon: WorldDungeon): RunSession {
     runGold: 40,
     activeEnemy: null,
     formation: makeDefaultFormation(startingStacks.map(unit => unit.stack)),
-    spellIds: (user.equippedSpellIds || ['arcane-bolt', 'sanctified-mend', 'ember-dart', 'warding-prayer']).slice(0, 4),
+    spellIds,
+    knownSpellIds: getRunStartingKnownSpellIds(spellIds, user),
     rewardChoices: [],
     rewardDestination: null,
     nodes,
@@ -2174,6 +3040,50 @@ function createDungeonSession(user: User, dungeon: WorldDungeon): RunSession {
     battleReports: [],
     outcome: null,
     dungeon,
+    shopOffers: {},
+    shopRerollsRemaining: RUN_SHOP_REROLL_COUNT,
+    omenRerollsRemaining: RUN_OMEN_REROLL_COUNT,
+    pendingPositiveOmen: false,
+  };
+}
+
+function createEncounterSession(user: User, enemy: WorldEnemy): RunSession {
+  const rosterMinions = getFieldedMinions(user).slice(0, MAX_FIELD_MINIONS);
+  const startingStacks = rosterMinions.map((stack, index) => ({
+    stack: cloneRunStack(stack.templateId, `loaned-encounter-${enemy.id}-${index}`),
+    alive: true,
+    origin: 'roster' as const,
+  }));
+  const nodes = createEncounterRunNodes(enemy);
+  const spellIds = (user.equippedSpellIds || ['arcane-bolt', 'sanctified-mend', 'ember-dart', 'warding-prayer']).slice(0, 4);
+
+  return {
+    id: `encounter-run-${enemy.id}-${Date.now()}`,
+    mode: 'encounter',
+    title: enemy.name,
+    phase: 'map',
+    stats: cloneRunStats(user.stats),
+    minions: startingStacks,
+    draftChoices: [],
+    wins: 0,
+    targetBattles: nodes.filter(node => ['battle', 'elite', 'boss'].includes(node.type)).length,
+    runGold: enemy.level <= 3 ? 15 : 25,
+    activeEnemy: null,
+    formation: makeDefaultFormation(startingStacks.map(unit => unit.stack)),
+    spellIds,
+    knownSpellIds: getRunStartingKnownSpellIds(spellIds, user),
+    rewardChoices: [],
+    rewardDestination: null,
+    nodes,
+    currentNodeIndex: 0,
+    battleReports: [],
+    outcome: null,
+    encounterEnemy: enemy,
+    shopOffers: {},
+    shopRerollsRemaining: RUN_SHOP_REROLL_COUNT,
+    omenRerollsRemaining: RUN_OMEN_REROLL_COUNT,
+    pendingPositiveOmen: false,
+    notice: `${enemy.name} waits at the end of this road.`,
   };
 }
 
@@ -2240,49 +3150,6 @@ function addDraftMinion(session: RunSession, template: MinionTemplate): RunSessi
   };
 }
 
-function makeDefaultFormation(stacks: MinionStack[]): Record<string, BoardCell> {
-  const cells: BoardCell[] = [
-    { x: 1, y: 3 },
-    { x: 1, y: 2 },
-    { x: 1, y: 4 },
-    { x: 0, y: 2 },
-    { x: 0, y: 4 },
-    { x: 1, y: 1 },
-    { x: 1, y: 5 },
-  ];
-
-  return stacks.reduce<Record<string, BoardCell>>((formation, stack, index) => {
-    formation[stack.id] = cells[index] || { x: 1, y: Math.min(6, index) };
-    return formation;
-  }, {});
-}
-
-function isFormationCellAllowed(cell?: BoardCell): cell is BoardCell {
-  if (!cell) return false;
-  return Number.isInteger(cell.x)
-    && Number.isInteger(cell.y)
-    && cell.x >= 0
-    && cell.x <= 1
-    && cell.y >= 0
-    && cell.y <= 6
-    && !(cell.x === 0 && cell.y === 3);
-}
-
-function getFormationIssue(formation: Record<string, BoardCell>, stacks: MinionStack[]): string | null {
-  const occupied = new Set<string>();
-
-  for (const stack of stacks) {
-    const cell = formation[stack.id];
-    if (!isFormationCellAllowed(cell)) return 'Place every unit in an open left-side slot.';
-
-    const cellKey = `${cell.x}:${cell.y}`;
-    if (occupied.has(cellKey)) return 'Two units are using the same slot.';
-    occupied.add(cellKey);
-  }
-
-  return null;
-}
-
 function pickRunSpellLoadout(seedLabel: string): string[] {
   const common = BATTLE_SPELLS.filter(spell => spell.rarity === 'common');
   const rare = BATTLE_SPELLS.filter(spell => spell.rarity === 'rare');
@@ -2299,13 +3166,12 @@ function pickRunSpellLoadout(seedLabel: string): string[] {
 
 function startDailyBattle(session: RunSession): RunSession {
   const nextBattle = session.wins + 1;
-  const user = getCurrentUser();
-  const userLevel = user?.stats.level || session.stats.level || 1;
+  const userLevel = session.stats.level || 1;
   const enemyLevelOffset = session.dailyChallenge?.enemyLevelOffset || 0;
   const enemy = makeRunEnemy({
     session,
     index: nextBattle,
-    level: clamp(userLevel + nextBattle - 2 + enemyLevelOffset, 1, 15),
+    level: getRandomRunScaledBattleLevel(userLevel, nextBattle, session.targetBattles, enemyLevelOffset),
     boss: nextBattle >= session.targetBattles,
   });
 
@@ -2332,12 +3198,28 @@ function startDungeonNode(session: RunSession, node: DungeonNode): RunSession {
   if (nodeIndex < 0 || !canResolveNode || node.completed) return session;
 
   if (node.type === 'shop') {
-    return { ...session, currentNodeIndex: nodeIndex, phase: 'shop', notice: 'A merchant waits behind a black curtain.' };
+    return ensureShopOffers({
+      ...session,
+      currentNodeIndex: nodeIndex,
+      phase: 'shop',
+      notice: 'A merchant waits behind a black curtain.',
+    });
   }
 
   if (node.type === 'event') {
     return { ...session, currentNodeIndex: nodeIndex, phase: 'event', notice: undefined };
   }
+
+  const battleNumber = node.battleNumber || getRunBattleNodeNumber(session, nodeIndex);
+  const activeEnemy = session.mode === 'encounter' && node.type === 'boss' && session.encounterEnemy
+    ? makeEncounterBossEnemy(session, node)
+    : makeRunEnemy({
+      session,
+      index: battleNumber,
+      level: node.level,
+      boss: node.type === 'boss',
+      elite: node.type === 'elite',
+    });
 
   return {
     ...session,
@@ -2346,14 +3228,20 @@ function startDungeonNode(session: RunSession, node: DungeonNode): RunSession {
     formation: Object.keys(session.formation).length > 0
       ? session.formation
       : makeDefaultFormation(getAliveRunStacks(session)),
-    activeEnemy: makeRunEnemy({
-      session,
-      index: node.battleNumber || getRunBattleNodeNumber(session, nodeIndex),
-      level: node.level,
-      boss: node.type === 'boss',
-      elite: node.type === 'elite',
-    }),
+    activeEnemy,
     notice: undefined,
+  };
+}
+
+function makeEncounterBossEnemy(session: RunSession, node: DungeonNode): WorldEnemy {
+  const enemy = session.encounterEnemy as WorldEnemy;
+  const isWorldBoss = enemy.spawnKind === 'world-boss' || enemy.personality === 'boss';
+
+  return {
+    ...enemy,
+    level: node.level,
+    personality: isWorldBoss ? 'boss' : enemy.personality,
+    lootMultiplier: Math.max(enemy.lootMultiplier || 1, isWorldBoss ? 2.15 : 1.35),
   };
 }
 
@@ -2373,11 +3261,14 @@ function makeRunEnemy({
   const modelNumbers: PlayerModelNumber[] = [1, 2, 4, 5, 6];
   const personalities: EnemyAiPersonality[] = ['balanced', 'aggressive', 'defensive', 'arcane'];
   const dailyBossSolo = session.mode === 'daily' && boss;
-  const effectiveLevel = dailyBossSolo ? level + 3 : level;
+  const effectiveLevel = session.mode === 'daily'
+    ? clamp(level + (dailyBossSolo ? 2 : 0), 1, RANDOM_RUN_BALANCE.enemyLevelCap)
+    : level;
   const minionCount = dailyBossSolo
     ? 0
-    : clamp(2 + Math.floor(level / 4) + (boss ? 2 : elite ? 1 : 0), 2, boss ? 7 : 6);
-  const bossProfile = boss ? getBossProfileById(session.dailyChallenge?.bossId || session.dungeon?.bossId) : undefined;
+    : clamp(2 + Math.floor(effectiveLevel / 4) + (boss ? 2 : elite ? 1 : 0), 2, boss ? 7 : 6);
+  const activeNode = session.nodes[session.currentNodeIndex];
+  const bossProfile = boss ? getBossProfileById(activeNode?.bossId || session.dailyChallenge?.bossId || session.dungeon?.bossId) : undefined;
   const runBoss = boss
     ? {
       id: bossProfile?.id || session.dailyChallenge?.bossId || session.dungeon?.bossId,
@@ -2393,7 +3284,7 @@ function makeRunEnemy({
   const minions = Array.from({ length: minionCount }, (_, slot) => {
     const templateId = boss && runBoss?.minionTemplates.length
       ? runBoss.minionTemplates[slot % runBoss.minionTemplates.length]
-      : pickEnemyTemplate(level, slot, boss || elite).templateId;
+      : pickEnemyTemplate(effectiveLevel, slot, boss || elite).templateId;
     return cloneRunStack(templateId, `enemy-${session.id}-${index}-${slot}`);
   });
 
@@ -2435,15 +3326,47 @@ function pickEnemyTemplate(level: number, slot: number, elite: boolean): MinionT
   return candidates[(level + slot) % candidates.length] || MINION_TEMPLATES[0];
 }
 
+function getRandomRunBossBattleNumbers(battleCount: number): number[] {
+  const safeCount = Math.max(2, Math.round(battleCount));
+  const contentBossCap = Math.max(
+    RANDOM_RUN_BALANCE.currentContentBosses,
+    Math.ceil(safeCount / (RANDOM_RUN_BALANCE.bossSpacing + 2))
+  );
+  const bossCount = clamp(
+    Math.round(safeCount / RANDOM_RUN_BALANCE.bossSpacing),
+    RANDOM_RUN_BALANCE.minBosses,
+    contentBossCap
+  );
+  const bossNumbers: number[] = [];
+
+  for (let index = 1; index <= bossCount; index += 1) {
+    const rawNumber = index === bossCount
+      ? safeCount
+      : Math.round((safeCount * index) / bossCount);
+    const previous = bossNumbers[bossNumbers.length - 1] || 1;
+    const number = index === bossCount
+      ? safeCount
+      : clamp(rawNumber, previous + 3, safeCount - (bossCount - index) * 3);
+    bossNumbers.push(number);
+  }
+
+  return Array.from(new Set(bossNumbers))
+    .filter(number => number >= 2 && number <= safeCount)
+    .sort((a, b) => a - b);
+}
+
 function createDailyRunNodes(challenge: DailyRunChallenge, playerLevel: number): DungeonNode[] {
-  const battleCount = clamp(challenge.targetBattles, 12, 18);
+  const battleCount = normalizeRandomRunBattleCount(challenge.targetBattles);
   const roadLabels = ['Road Watch', 'Bell Patrol', 'Ash Crossing', 'Moonlit Ambush', 'Candle Guard', 'Iron Vow', 'Root Camp', 'Saint Gate', 'Black Causeway', 'Pilgrim Cut'];
   const alternateLabels = ['Mire Flank', 'Ruined Toll', 'Old Causeway', 'Cinder Turn', 'Moon Ditch', 'Broken Mile'];
   const eliteLabels = ['Oath Captain', 'Relic Duelist', 'Black Banner Guard', 'Moonwell Marshal'];
   const shopLabels = ['Roadside Peddler', 'Black-Coin Cart', 'Pilgrim Quartermaster'];
   const eventLabels = ['Broken Shrine', 'Candle Pool', 'Ash Cache', 'Moon Omen'];
   const nodes: DungeonNode[] = [];
+  const bossBattleNumbers = getRandomRunBossBattleNumbers(battleCount);
+  const intermediateBossNumbers = bossBattleNumbers.filter(number => number < battleCount);
   let row = 0;
+  let bonusStopIndex = 0;
 
   const addRow = (specs: Array<{
     type: DungeonNodeType;
@@ -2451,19 +3374,23 @@ function createDailyRunNodes(challenge: DailyRunChallenge, playerLevel: number):
     description: string;
     level: number;
     battleNumber?: number;
+    bossId?: string;
+    rewardSource?: 'hard' | 'boss';
   }>) => {
     const rowNodes = specs.map((spec, lane) => ({
       id: `daily-${challenge.date}-r${row}-l${lane}-${spec.type}-${spec.battleNumber || 'stop'}`,
       type: spec.type,
       label: spec.label,
       description: spec.description,
-      iconPath: DUNGEON_NODE_ICONS[spec.type],
+      iconPath: getDungeonNodeIconPath(spec.type, spec.bossId),
       level: spec.level,
       completed: false,
       row,
       lane,
       nextIds: [],
       battleNumber: spec.battleNumber,
+      bossId: spec.bossId,
+      rewardSource: spec.rewardSource,
     }));
     const previousRow = Math.max(-1, row - 1);
     const previousRowNodes = nodes.filter(node => node.row === previousRow);
@@ -2477,12 +3404,44 @@ function createDailyRunNodes(challenge: DailyRunChallenge, playerLevel: number):
     row += 1;
   };
 
+  const addRewardStopRow = (baseLevel: number, reason: 'boss' | 'hard') => {
+    const useShop = Math.random() < 0.5;
+    const stopIndex = bonusStopIndex;
+    bonusStopIndex += 1;
+    addRow([{
+      type: useShop ? 'shop' : 'event',
+      label: useShop
+        ? shopLabels[stopIndex % shopLabels.length]
+        : eventLabels[stopIndex % eventLabels.length],
+      description: useShop
+        ? `${reason === 'boss' ? 'Boss' : 'Hard-route'} spoils. Spend run gold before the road twists again.`
+        : `${reason === 'boss' ? 'Boss' : 'Hard-route'} omen. A risky blessing waits after the dangerous fight.`,
+      level: baseLevel,
+      rewardSource: reason,
+    }]);
+  };
+
   for (let battleNumber = 1; battleNumber < battleCount; battleNumber += 1) {
     const battleIndex = battleNumber - 1;
-    const baseLevel = clamp(playerLevel + battleIndex + (challenge.enemyLevelOffset || 0), 1, 24);
+    const baseLevel = getRandomRunScaledBattleLevel(playerLevel, battleNumber, battleCount, challenge.enemyLevelOffset || 0);
     const roadLabel = roadLabels[battleIndex % roadLabels.length];
     const alternateLabel = alternateLabels[battleIndex % alternateLabels.length];
     const eliteLabel = eliteLabels[battleIndex % eliteLabels.length];
+    const bossIndex = intermediateBossNumbers.indexOf(battleNumber);
+
+    if (bossIndex >= 0) {
+      const boss = getBossProfileByIndex(battleIndex + bossIndex);
+      addRow([{
+        type: 'boss',
+        label: boss.name,
+        description: `${boss.subtitle}. ${boss.intro}`,
+        level: getRandomRunScaledBattleLevel(playerLevel, battleNumber, battleCount, 2 + bossIndex + (challenge.enemyLevelOffset || 0)),
+        battleNumber,
+        bossId: boss.id,
+      }]);
+      if (battleNumber < battleCount - 1) addRewardStopRow(baseLevel, 'boss');
+      continue;
+    }
 
     if (battleNumber === 1) {
       addRow([{
@@ -2505,14 +3464,14 @@ function createDailyRunNodes(challenge: DailyRunChallenge, playerLevel: number):
           type: 'elite',
           label: eliteLabel,
           description: 'Elite fight. Harder enemy, better run-gold pressure.',
-          level: clamp(baseLevel + 2, 1, 24),
+          level: getRandomRunScaledBattleLevel(playerLevel, battleNumber, battleCount, 1 + (challenge.enemyLevelOffset || 0)),
           battleNumber,
         },
         {
           type: 'battle',
           label: alternateLabel,
           description: 'Alternate route. Similar danger with different enemy tempo.',
-          level: clamp(baseLevel + 1, 1, 24),
+          level: getRandomRunScaledBattleLevel(playerLevel, battleNumber, battleCount, challenge.enemyLevelOffset || 0),
           battleNumber,
         },
       ]);
@@ -2529,7 +3488,7 @@ function createDailyRunNodes(challenge: DailyRunChallenge, playerLevel: number):
           type: 'elite',
           label: eliteLabel,
           description: 'Hard route. More danger now, more gold for shops.',
-          level: clamp(baseLevel + 2, 1, 24),
+          level: getRandomRunScaledBattleLevel(playerLevel, battleNumber, battleCount, 1 + (challenge.enemyLevelOffset || 0)),
           battleNumber,
         },
       ]);
@@ -2543,7 +3502,10 @@ function createDailyRunNodes(challenge: DailyRunChallenge, playerLevel: number):
       }]);
     }
 
-    if (battleNumber < battleCount - 1 && battleNumber % 2 === 0) {
+    const hardRouteRow = battleNumber % 3 === 0 || battleNumber % 4 === 0;
+    const routineStopRow = battleNumber < battleCount - 1 && battleNumber % 2 === 0;
+
+    if (routineStopRow) {
       const shopIndex = Math.floor(battleNumber / 2) - 1;
       const eventIndex = Math.floor(battleNumber / 2) - 1;
 
@@ -2561,6 +3523,8 @@ function createDailyRunNodes(challenge: DailyRunChallenge, playerLevel: number):
           level: baseLevel,
         },
       ]);
+    } else if (hardRouteRow && battleNumber < battleCount) {
+      addRewardStopRow(baseLevel, 'hard');
     }
   }
 
@@ -2568,11 +3532,279 @@ function createDailyRunNodes(challenge: DailyRunChallenge, playerLevel: number):
     type: 'boss',
     label: challenge.bossName,
     description: `${challenge.bossSubtitle}. A stronger lone commander ends the road.`,
-    level: clamp(playerLevel + battleCount + 4 + (challenge.enemyLevelOffset || 0), 1, 24),
+    level: getRandomRunScaledBattleLevel(playerLevel, battleCount, battleCount, 2 + (challenge.enemyLevelOffset || 0)),
     battleNumber: battleCount,
+    bossId: challenge.bossId,
   }]);
 
   return normalizeDailyRunNodes(nodes);
+}
+
+export function getEncounterRunBattleCount(enemyLevel: number): number {
+  if (enemyLevel <= 1) return 2;
+  if (enemyLevel <= 3) return 3;
+  return clamp(3 + Math.ceil((enemyLevel - 3) / 2), 3, 10);
+}
+
+interface ScaledRunNodeOptions {
+  idPrefix: string;
+  battleCount: number;
+  startLevel: number;
+  bossLevel: number;
+  bossName: string;
+  bossSubtitle: string;
+  bossId?: string;
+  theme: 'road' | 'dungeon';
+  labelOffset?: number;
+  includeShops?: boolean;
+  includeEvents?: boolean;
+}
+
+function createScaledRunNodes({
+  idPrefix,
+  battleCount,
+  startLevel,
+  bossLevel,
+  bossName,
+  bossSubtitle,
+  bossId,
+  theme,
+  labelOffset = 0,
+  includeShops = true,
+  includeEvents = true,
+}: ScaledRunNodeOptions): DungeonNode[] {
+  const roadLabels = theme === 'dungeon'
+    ? ['Outer Guard', 'Candle Hall', 'Broken Nave', 'Ossuary Steps', 'Black Reliquary', 'Ash Gallery', 'Moon Vault', 'Iron Choir']
+    : ['Road Watch', 'Bell Patrol', 'Ash Crossing', 'Moonlit Ambush', 'Candle Guard', 'Iron Vow', 'Root Camp', 'Saint Gate', 'Black Causeway', 'Pilgrim Cut'];
+  const alternateLabels = theme === 'dungeon'
+    ? ['Crypt Flank', 'Ruined Vestry', 'Old Stair', 'Cinder Door', 'Moon Cell', 'Broken Span']
+    : ['Mire Flank', 'Ruined Toll', 'Old Causeway', 'Cinder Turn', 'Moon Ditch', 'Broken Mile'];
+  const eliteLabels = theme === 'dungeon'
+    ? ['Vow Captain', 'Reliquary Watch', 'Iron Door Warden', 'Saint Mask Guard', 'Crypt Marshal']
+    : ['Oath Captain', 'Relic Duelist', 'Black Banner Guard', 'Moonwell Marshal'];
+  const shopLabels = theme === 'dungeon'
+    ? ['Black-Coin Merchant', 'Bone Market', 'Hidden Peddler', 'Candle Quartermaster']
+    : ['Roadside Peddler', 'Black-Coin Cart', 'Pilgrim Quartermaster'];
+  const eventLabels = theme === 'dungeon'
+    ? ['Ash Font', 'Bell Roots', 'Coin Water', 'Empty Jury']
+    : ['Broken Shrine', 'Candle Pool', 'Ash Cache', 'Moon Omen'];
+  const nodes: DungeonNode[] = [];
+  let row = 0;
+  let bonusStopIndex = 0;
+
+  const getBattleLevel = (battleNumber: number, extra = 0) => {
+    const progress = battleCount <= 1 ? 1 : (battleNumber - 1) / Math.max(1, battleCount - 1);
+    return clamp(Math.round(startLevel + (bossLevel - startLevel) * progress) + extra, 1, 24);
+  };
+
+  const pickLabel = (labels: string[], index: number) => labels[(index + labelOffset) % labels.length];
+
+  const addRow = (specs: Array<{
+    type: DungeonNodeType;
+    label: string;
+    description: string;
+    level: number;
+    battleNumber?: number;
+    bossId?: string;
+    rewardSource?: 'hard' | 'boss';
+  }>) => {
+    const rowNodes = specs.map((spec, lane) => ({
+      id: `${idPrefix}-r${row}-l${lane}-${spec.type}-${spec.battleNumber || 'stop'}`,
+      type: spec.type,
+      label: spec.label,
+      description: spec.description,
+      iconPath: getDungeonNodeIconPath(spec.type, spec.bossId),
+      level: spec.level,
+      completed: false,
+      row,
+      lane,
+      nextIds: [],
+      battleNumber: spec.battleNumber,
+      bossId: spec.bossId,
+      rewardSource: spec.rewardSource,
+    }));
+    const previousRowNodes = nodes.filter(node => node.row === row - 1);
+
+    previousRowNodes.forEach(node => {
+      node.nextIds = getAdjacentBranchNodeIds(node, previousRowNodes.length, rowNodes);
+    });
+
+    nodes.push(...rowNodes);
+    row += 1;
+  };
+
+  const addRewardStopRow = (baseLevel: number, reason: 'hard') => {
+    const useShop = includeShops && Math.random() < 0.5;
+    const stopIndex = bonusStopIndex;
+    bonusStopIndex += 1;
+    addRow([{
+      type: useShop ? 'shop' : 'event',
+      label: useShop
+        ? pickLabel(shopLabels, stopIndex)
+        : pickLabel(eventLabels, stopIndex),
+      description: useShop
+        ? 'Hard-route spoils. Spend run gold before the road twists again.'
+        : 'Hard-route omen. A risky blessing waits after the dangerous fight.',
+      level: baseLevel,
+      rewardSource: reason,
+    }]);
+  };
+
+  for (let battleNumber = 1; battleNumber < battleCount; battleNumber += 1) {
+    const battleIndex = battleNumber - 1;
+    const baseLevel = getBattleLevel(battleNumber);
+    const roadLabel = pickLabel(roadLabels, battleIndex);
+    const alternateLabel = pickLabel(alternateLabels, battleIndex);
+    const eliteLabel = pickLabel(eliteLabels, battleIndex);
+
+    if (battleNumber === 1 || battleCount <= 3) {
+      addRow([{
+        type: 'battle',
+        label: roadLabel,
+        description: battleNumber === 1
+          ? 'Opening fight. Clear it to reveal the road ahead.'
+          : 'A short road fight before the commander.',
+        level: baseLevel,
+        battleNumber,
+      }]);
+    } else if (battleNumber % 3 === 0) {
+      addRow([
+        {
+          type: 'battle',
+          label: roadLabel,
+          description: 'Safer fight. Lower pressure, lower payout.',
+          level: baseLevel,
+          battleNumber,
+        },
+        {
+          type: 'elite',
+          label: eliteLabel,
+          description: 'Hard route. More danger now, better temporary payoff.',
+          level: getBattleLevel(battleNumber, 2),
+          battleNumber,
+        },
+        {
+          type: 'battle',
+          label: alternateLabel,
+          description: 'Alternate route. Similar danger with different enemy tempo.',
+          level: getBattleLevel(battleNumber, 1),
+          battleNumber,
+        },
+      ]);
+    } else if (battleNumber % 4 === 0) {
+      addRow([
+        {
+          type: 'battle',
+          label: roadLabel,
+          description: 'Standard fight toward the boss road.',
+          level: baseLevel,
+          battleNumber,
+        },
+        {
+          type: 'elite',
+          label: eliteLabel,
+          description: 'Hard route. More danger now, more run gold for shops.',
+          level: getBattleLevel(battleNumber, 2),
+          battleNumber,
+        },
+      ]);
+    } else {
+      addRow([{
+        type: 'battle',
+        label: roadLabel,
+        description: 'A tactical road fight. Defeated enemies pay run gold.',
+        level: baseLevel,
+        battleNumber,
+      }]);
+    }
+
+    const hardRouteRow = battleNumber % 3 === 0 || battleNumber % 4 === 0;
+    const routineStopRow = includeEvents && battleCount >= 4 && battleNumber < battleCount - 1 && battleNumber % 2 === 0;
+
+    if (routineStopRow) {
+      const shopIndex = Math.floor(battleNumber / 2) - 1;
+      const eventIndex = Math.floor(battleNumber / 2) - 1;
+      const stopSpecs: Array<{
+        type: DungeonNodeType;
+        label: string;
+        description: string;
+        level: number;
+      }> = [];
+
+      if (includeShops) {
+        stopSpecs.push({
+          type: 'shop',
+          label: pickLabel(shopLabels, shopIndex),
+          description: 'Spend only run gold on temporary upgrades. This stop does not count as a fight.',
+          level: baseLevel,
+        });
+      }
+
+      stopSpecs.push({
+        type: 'event',
+        label: pickLabel(eventLabels, eventIndex),
+        description: includeShops
+          ? 'Risk a blessing, recruit, revive, wound, or coin payout. This stop does not count as a fight.'
+          : 'A roadside omen may bless or wound the warband before the enemy commander.',
+        level: baseLevel,
+      });
+
+      addRow(stopSpecs);
+    } else if (hardRouteRow && includeEvents && battleNumber < battleCount - 1) {
+      addRewardStopRow(baseLevel, 'hard');
+    }
+  }
+
+  addRow([{
+    type: 'boss',
+    label: bossName,
+    description: `${bossSubtitle}. Win here to claim the road reward.`,
+    level: bossLevel,
+    battleNumber: battleCount,
+    bossId,
+  }]);
+
+  return normalizeDailyRunNodes(nodes);
+}
+
+function createEncounterRunNodes(enemy: WorldEnemy): DungeonNode[] {
+  const battleCount = getEncounterRunBattleCount(enemy.level);
+  const startLevel = clamp(enemy.level - Math.ceil(battleCount / 2), 1, enemy.level);
+
+  return createScaledRunNodes({
+    idPrefix: `encounter-${enemy.id}`,
+    battleCount,
+    startLevel,
+    bossLevel: clamp(enemy.level, 1, 24),
+    bossName: enemy.name,
+    bossSubtitle: enemy.subtitle,
+    bossId: enemy.bossId,
+    theme: 'road',
+    labelOffset: enemy.level,
+    includeShops: false,
+    includeEvents: battleCount > 3,
+  });
+}
+
+function getFightRowTargets(nodes: DungeonNode[]): DungeonNode[] {
+  const fights = nodes.filter(node => node.type === 'battle' || node.type === 'elite' || node.type === 'boss');
+  return fights.length > 0 ? fights : nodes;
+}
+
+function isExclusiveRewardRow(
+  row: { nodes: DungeonNode[] },
+  prevRow?: { nodes: DungeonNode[] },
+): boolean {
+  if (row.nodes.length !== 1) return false;
+
+  const node = row.nodes[0];
+  if (node.type !== 'shop' && node.type !== 'event') return false;
+  if (node.rewardSource === 'hard' || node.rewardSource === 'boss') return true;
+  if (!prevRow) return false;
+  if (prevRow.nodes.some(prevNode => prevNode.type === 'elite')) return true;
+  if (prevRow.nodes.length === 1 && prevRow.nodes[0].type === 'boss') return true;
+
+  return false;
 }
 
 function normalizeDailyRunNodes(nodes: DungeonNode[]): DungeonNode[] {
@@ -2582,14 +3814,37 @@ function normalizeDailyRunNodes(nodes: DungeonNode[]): DungeonNode[] {
   const nextIdsByNodeId = new Map<string, string[]>();
 
   rows.forEach((row, rowIndex) => {
+    const prevRow = rowIndex > 0 ? rows[rowIndex - 1] : undefined;
     const nextRow = rows[rowIndex + 1];
-    if (!nextRow) {
-      row.nodes.forEach(node => nextIdsByNodeId.set(node.id, []));
-      return;
-    }
 
-    row.nodes.forEach(node => {
-      nextIdsByNodeId.set(node.id, getAdjacentBranchNodeIds(node, row.nodes.length, nextRow.nodes));
+    row.nodes.forEach(source => {
+      if (!nextRow) {
+        nextIdsByNodeId.set(source.id, []);
+        return;
+      }
+
+      let targetIds: string[];
+
+      if (isExclusiveRewardRow(row, prevRow)) {
+        targetIds = getAdjacentBranchNodeIds(source, row.nodes.length, getFightRowTargets(nextRow.nodes));
+      } else if (isExclusiveRewardRow(nextRow, row)) {
+        const rewardNode = nextRow.nodes[0];
+        if (source.type === 'elite' || source.type === 'boss') {
+          targetIds = [rewardNode.id];
+        } else if (source.type === 'battle') {
+          const skipRow = rows[rowIndex + 2];
+          targetIds = skipRow
+            ? getAdjacentBranchNodeIds(source, row.nodes.length, getFightRowTargets(skipRow.nodes))
+            : [];
+        } else {
+          targetIds = getAdjacentBranchNodeIds(source, row.nodes.length, nextRow.nodes);
+        }
+      } else {
+        const balancedConnections = getBalancedBranchConnections(row.nodes, nextRow.nodes);
+        targetIds = balancedConnections.get(source.id) || [];
+      }
+
+      nextIdsByNodeId.set(source.id, targetIds);
     });
   });
 
@@ -2600,91 +3855,87 @@ function normalizeDailyRunNodes(nodes: DungeonNode[]): DungeonNode[] {
 }
 
 function getAdjacentBranchNodeIds(sourceNode: DungeonNode, sourceRowSize: number, nextRowNodes: DungeonNode[]): string[] {
-  if (nextRowNodes.length <= 1 || sourceRowSize <= 1) return nextRowNodes.map(node => node.id);
+  const sourceNodes = Array.from({ length: Math.max(1, sourceRowSize) }, (_item, index) => ({
+    ...sourceNode,
+    id: index === (sourceNode.lane ?? 0) ? sourceNode.id : `${sourceNode.id}-virtual-${index}`,
+    lane: index,
+  }));
+  return getBalancedBranchConnections(sourceNodes, nextRowNodes).get(sourceNode.id) || [];
+}
 
-  const sourceLane = sourceNode.lane ?? 0;
-  if (sourceRowSize === nextRowNodes.length) {
-    return nextRowNodes
-      .filter(node => (node.lane ?? 0) === sourceLane)
-      .map(node => node.id);
-  }
+function getBalancedBranchConnections(sourceNodes: DungeonNode[], nextRowNodes: DungeonNode[]): Map<string, string[]> {
+  const sortedSources = [...sourceNodes].sort((a, b) => (a.lane ?? 0) - (b.lane ?? 0));
+  const sortedTargets = [...nextRowNodes].sort((a, b) => (a.lane ?? 0) - (b.lane ?? 0));
+  const connections = new Map(sortedSources.map(node => [node.id, [] as string[]]));
+  if (sortedSources.length === 0 || sortedTargets.length === 0) return connections;
 
-  if (sourceRowSize === 2 && nextRowNodes.length === 3) {
-    const targetLane = sourceLane === 0 ? 0 : 2;
-    return nextRowNodes
-      .filter(node => (node.lane ?? 0) === targetLane)
-      .map(node => node.id);
-  }
+  const laneCenter = (node: DungeonNode, rowSize: number) => rowSize <= 1 ? 0.5 : (node.lane ?? 0) / Math.max(1, rowSize - 1);
+  const nearestSource = (target: DungeonNode) => sortedSources
+    .map(source => ({
+      source,
+      distance: Math.abs(laneCenter(source, sortedSources.length) - laneCenter(target, sortedTargets.length)),
+    }))
+    .sort((a, b) => a.distance - b.distance || (a.source.lane ?? 0) - (b.source.lane ?? 0))[0]?.source;
+  const nearestTargets = (source: DungeonNode, count: number) => sortedTargets
+    .map(target => ({
+      target,
+      distance: Math.abs(laneCenter(source, sortedSources.length) - laneCenter(target, sortedTargets.length)),
+    }))
+    .sort((a, b) => a.distance - b.distance || (a.target.lane ?? 0) - (b.target.lane ?? 0))
+    .slice(0, count)
+    .map(item => item.target);
+  const addConnection = (sourceId: string, targetId: string) => {
+    const current = connections.get(sourceId) || [];
+    if (!current.includes(targetId)) connections.set(sourceId, [...current, targetId]);
+  };
 
-  if (sourceRowSize === 3 && nextRowNodes.length === 2) {
-    const targetLanes = sourceLane === 0 ? [0] : sourceLane === 2 ? [1] : [0, 1];
-    return nextRowNodes
-      .filter(node => targetLanes.includes(node.lane ?? 0))
-      .map(node => node.id);
-  }
+  sortedSources.forEach(source => {
+    const connectionCount = sortedTargets.length > sortedSources.length ? 2 : 1;
+    nearestTargets(source, connectionCount).forEach(target => addConnection(source.id, target.id));
+  });
 
-  const sourceCenter = sourceLane / Math.max(1, sourceRowSize - 1);
-  return [
-    nextRowNodes
-      .map(node => ({
-        node,
-        distance: Math.abs((node.lane ?? 0) / Math.max(1, nextRowNodes.length - 1) - sourceCenter),
-      }))
-      .sort((a, b) => a.distance - b.distance)[0]?.node,
-  ].filter((node): node is DungeonNode => Boolean(node)).map(node => node.id);
+  sortedTargets.forEach(target => {
+    const hasIncoming = Array.from(connections.values()).some(nextIds => nextIds.includes(target.id));
+    if (hasIncoming) return;
+
+    const source = nearestSource(target);
+    if (source) addConnection(source.id, target.id);
+  });
+
+  return connections;
 }
 
 function createDungeonNodes(dungeon: WorldDungeon): DungeonNode[] {
-  const labels: Record<DungeonNodeType, string[]> = {
-    battle: ['Outer Guard', 'Candle Hall', 'Broken Nave'],
-    elite: ['Iron Door', 'Vow Captain', 'Reliquary Watch'],
-    shop: ['Black-Coin Merchant', 'Bone Market', 'Hidden Peddler'],
-    event: RUN_EVENT_LABELS,
-    boss: [dungeon.bossName],
-  };
-  const defaultTypes: DungeonNodeType[] = dungeon.level >= 10
-    ? ['battle', 'event', 'elite', 'shop', 'battle', 'event', 'boss']
-    : ['battle', 'event', 'shop', 'battle', 'elite', 'boss'];
-  const authoredLayout = DUNGEON_LAYOUTS[dungeon.templateId];
-  const nodeSpecs = authoredLayout || defaultTypes.map((type, index) => ({
-    type,
-    label: labels[type][index % labels[type].length],
-  }));
+  const authoredFlavor = DUNGEON_LAYOUTS[dungeon.templateId] || [];
 
-  return nodeSpecs.map((spec, index) => ({
-    id: `${dungeon.id}-node-${index}`,
-    type: spec.type,
-    label: spec.type === 'boss' ? dungeon.bossName : spec.label,
-    description: spec.description || getNodeDescription(spec.type, dungeon),
-    iconPath: DUNGEON_NODE_ICONS[spec.type],
-    level: clamp(dungeon.level + (spec.type === 'boss' ? 2 : spec.type === 'elite' ? 1 : 0), 1, 20),
-    completed: false,
-  }));
+  return createScaledRunNodes({
+    idPrefix: `dungeon-${dungeon.id}`,
+    battleCount: 15,
+    startLevel: clamp(dungeon.level - 2, 1, 24),
+    bossLevel: clamp(dungeon.level + 5, 1, 24),
+    bossName: dungeon.bossName,
+    bossSubtitle: dungeon.bossSubtitle,
+    bossId: dungeon.bossId,
+    theme: 'dungeon',
+    labelOffset: dungeon.level + authoredFlavor.length,
+  });
 }
 
-function getNodeDescription(type: DungeonNodeType, dungeon: WorldDungeon): string {
-  switch (type) {
-    case 'shop':
-      return 'Spend run gold on temporary blessings before the next chamber.';
-    case 'event':
-      return 'A chance pool can wound, bless, revive, or reward the warband.';
-    case 'elite':
-      return 'A stronger guard blocks a better reward choice.';
-    case 'boss':
-      return `${dungeon.bossSubtitle}. Win here to claim the dungeon reward.`;
-    default:
-      return 'A tactical fight against dungeon defenders.';
-  }
+function isFinalRunNode(session: RunSession, node?: DungeonNode): boolean {
+  if (!node || node.type !== 'boss') return false;
+  return !node.nextIds?.length || (node.battleNumber || 0) >= session.targetBattles;
 }
 
 function getRewardDestination(session: RunSession, nextWins: number): RewardDestination {
+  if (session.nodes.length > 0) {
+    const node = session.nodes[session.currentNodeIndex];
+    return isFinalRunNode(session, node) || nextWins >= session.targetBattles ? 'complete' : 'dungeon-next';
+  }
+
   if (session.mode === 'daily') {
-    if (session.nodes.length > 0) {
-      const node = session.nodes[session.currentNodeIndex];
-      return node?.type === 'boss' || nextWins >= session.targetBattles ? 'complete' : 'dungeon-next';
-    }
     return nextWins >= session.targetBattles ? 'complete' : 'daily-next';
   }
+
   return session.currentNodeIndex >= session.nodes.length - 1 ? 'complete' : 'dungeon-next';
 }
 
@@ -2698,14 +3949,18 @@ function completeDungeonNode(session: RunSession): RunSession {
     ? nodes.findIndex(node => currentNode.nextIds?.includes(node.id) && !node.completed)
     : session.currentNodeIndex + 1;
 
-  if (currentNode?.type === 'boss' || nextIndex < 0 || nextIndex >= nodes.length) {
+  if (isFinalRunNode(session, currentNode) || nextIndex < 0 || nextIndex >= nodes.length) {
     return {
       ...session,
       nodes,
       currentNodeIndex: nextIndex,
       phase: 'complete',
       outcome: 'victory',
-      notice: session.mode === 'daily' ? 'The daily road is complete.' : 'The dungeon path is complete.',
+      notice: session.mode === 'daily'
+        ? 'The random road is complete.'
+        : session.mode === 'encounter'
+          ? 'The enemy road is complete.'
+          : 'The dungeon path is complete.',
     };
   }
 
@@ -2717,13 +3972,34 @@ function completeDungeonNode(session: RunSession): RunSession {
   };
 }
 
+function abandonRunCombat(session: RunSession): RunSession {
+  return {
+    ...session,
+    phase: 'complete',
+    activeEnemy: null,
+    outcome: 'abandoned',
+    rewardChoices: [],
+    rewardDestination: null,
+    notice: 'The warband withdrew. Random runs have no main-map penalty.',
+  };
+}
+
 function getRunGoldEarned(session: RunSession, battle: BattleState): number {
   const defeatedEnemies = battle.units.filter(unit => unit.side === 'enemy' && unit.currentHealth <= 0);
   const commanderDefeated = defeatedEnemies.some(unit => unit.kind === 'commander');
   const node = session.nodes[session.currentNodeIndex];
-  const nodeBonus = node?.type === 'boss' ? 75 : node?.type === 'elite' ? 24 : 0;
-  const perUnit = 8 + Math.floor(battle.enemy.level / 4);
-  const base = defeatedEnemies.length * perUnit + (commanderDefeated ? 20 : 0) + nodeBonus;
+  const routeProgress = session.targetBattles > 0 ? clamp(session.wins / session.targetBattles, 0, 1) : 0;
+  const enemyLevel = session.mode === 'daily'
+    ? getRandomRunEffectiveLevel(battle.enemy.level)
+    : battle.enemy.level;
+  const nodeBonus = node?.type === 'boss'
+    ? 60 + Math.round(routeProgress * 45)
+    : node?.type === 'elite'
+      ? 22 + Math.round(routeProgress * 18)
+      : 0;
+  const perUnit = 7 + Math.floor(enemyLevel / 5) + Math.round(routeProgress * 3);
+  const commanderBonus = commanderDefeated ? 18 + Math.round(routeProgress * 12) : 0;
+  const base = defeatedEnemies.length * perUnit + commanderBonus + nodeBonus;
 
   return Math.max(12, Math.round(base * (battle.enemy.lootMultiplier || 1)));
 }
@@ -2832,22 +4108,252 @@ function formatRunDuration(durationMs: number): string {
   return minutes > 0 ? `${minutes}m ${remainingSeconds}s` : `${remainingSeconds}s`;
 }
 
+function getRunRewardChoiceById(choiceId: string): RunRewardChoice | undefined {
+  return RUN_REWARD_POOL.find(choice => choice.id === choiceId);
+}
+
+function getRunRewardCategory(choice: RunRewardChoice): string {
+  const id = choice.id;
+  if (id.startsWith('learn-')) return 'learn-spell';
+  if (id.includes('army') || id.includes('weapon')) return 'army';
+  if (id.includes('ward') || id.includes('armor') || id.includes('defensive')) return 'defense';
+  if (id.includes('spell') || id.includes('focus') || id.includes('liturgy')) return 'spell';
+  if (id.includes('banner') || id.includes('chorus') || id.includes('morale')) return 'morale';
+  if (id.includes('constitution') || id.includes('vigor') || id.includes('health')) return 'health';
+  if (id.includes('balanced') || id.includes('oath-captain')) return 'balanced';
+  if (id.includes('resurrect') || id.includes('mercy') || id.includes('reprieve')) return 'revive';
+  if (id.includes('recruit')) return 'recruit';
+  if (id.includes('upgrade') || id.includes('promotion')) return 'upgrade';
+  if (id.includes('gold') || id.includes('coin')) return 'gold';
+  return id;
+}
+
 function pickRunRewardChoices(session: RunSession, count = RUN_REWARD_CHOICE_COUNT): RunRewardChoice[] {
-  const available = RUN_BUFFS.filter(choice => !choice.isAvailable || choice.isAvailable(session));
-  const pool = available.length >= count ? available : RUN_BUFFS.filter(choice => !choice.isAvailable);
-  return shuffle(pool).slice(0, count);
+  const available = RUN_REWARD_POOL.filter(choice => !choice.isAvailable || choice.isAvailable(session));
+  const pool = available.length >= count ? available : RUN_REWARD_POOL.filter(choice => !choice.isAvailable);
+  const shuffled = shuffle(pool);
+  const selected: RunRewardChoice[] = [];
+  const usedCategories = new Set<string>();
+
+  shuffled.forEach(choice => {
+    if (selected.length >= count) return;
+    const category = getRunRewardCategory(choice);
+    if (usedCategories.has(category)) return;
+    selected.push(choice);
+    usedCategories.add(category);
+  });
+
+  shuffled.forEach(choice => {
+    if (selected.length >= count || selected.some(item => item.id === choice.id)) return;
+    selected.push(choice);
+  });
+
+  return selected.slice(0, count);
+}
+
+function makeShopOffers(session: RunSession, count = RUN_SHOP_CHOICE_COUNT): RunShopOffer[] {
+  return pickRunRewardChoices(session, count).map((choice, index) => ({
+    choiceId: choice.id,
+    cost: getRunShopOfferCost(session, index, choice),
+  }));
+}
+
+function getRunShopOfferCost(session: RunSession, index: number, choice: RunRewardChoice): number {
+  const node = session.nodes[session.currentNodeIndex];
+  const routeProgress = session.targetBattles > 0 ? clamp(session.wins / session.targetBattles, 0, 1) : 0;
+  const level = session.mode === 'daily'
+    ? getRandomRunEffectiveLevel(session.stats.level || 1)
+    : clamp(node?.level || session.stats.level || 1, 1, 24);
+  const category = getRunRewardCategory(choice);
+  const categoryMultiplier = category === 'revive'
+    ? 1.25
+    : category === 'upgrade' || category === 'learn-spell'
+      ? 1.18
+      : category === 'recruit'
+        ? 1.1
+        : category === 'gold'
+          ? 0.72
+          : 1;
+  const base = session.mode === 'daily'
+    ? 32 + index * 22 + Math.round(routeProgress * 30) + Math.floor((level - 1) * 2.5)
+    : 35 + index * 20 + Math.floor(level * 1.5);
+
+  return Math.max(20, Math.round((base * categoryMultiplier) / 5) * 5);
+}
+
+function getShopNodeOfferKey(session: RunSession): string {
+  return session.nodes[session.currentNodeIndex]?.id || `node-${session.currentNodeIndex}`;
+}
+
+function getShopOffersForSession(session: RunSession): RunShopOffer[] {
+  const key = getShopNodeOfferKey(session);
+  return (session.shopOffers?.[key] || []).filter(offer => Boolean(getRunRewardChoiceById(offer.choiceId)));
+}
+
+function ensureShopOffers(session: RunSession): RunSession {
+  const key = getShopNodeOfferKey(session);
+  if (Object.prototype.hasOwnProperty.call(session.shopOffers || {}, key)) return session;
+
+  return {
+    ...session,
+    shopOffers: {
+      ...(session.shopOffers || {}),
+      [key]: makeShopOffers(session),
+    },
+  };
+}
+
+function rerollShopOffers(session: RunSession): RunSession {
+  const remaining = session.shopRerollsRemaining ?? RUN_SHOP_REROLL_COUNT;
+  if (remaining <= 0) return { ...session, notice: 'No shop rerolls remain for this run.' };
+  const key = getShopNodeOfferKey(session);
+
+  return {
+    ...session,
+    shopOffers: {
+      ...(session.shopOffers || {}),
+      [key]: makeShopOffers(session),
+    },
+    shopRerollsRemaining: remaining - 1,
+    notice: `Shop restocked. ${remaining - 1} reroll${remaining - 1 === 1 ? '' : 's'} remain.`,
+  };
 }
 
 function buyShopReward(session: RunSession, choice: RunRewardChoice, cost: number): RunSession {
-  if (session.runGold < cost) return session;
-  return completeDungeonNode({
-    ...choice.apply({ ...session, runGold: session.runGold - cost }),
+  if (session.runGold < cost) return { ...session, notice: 'Not enough run gold.' };
+  const key = getShopNodeOfferKey(session);
+  const offers = getShopOffersForSession(session);
+  const paidSession = { ...session, runGold: session.runGold - cost };
+  const applied = choice.apply(paidSession);
+
+  return {
+    ...applied,
+    phase: 'shop',
+    rewardChoices: [],
+    rewardDestination: null,
+    shopOffers: {
+      ...(applied.shopOffers || session.shopOffers || {}),
+      [key]: offers.filter(offer => offer.choiceId !== choice.id),
+    },
+    shopBuyHistory: [...(applied.shopBuyHistory || session.shopBuyHistory || []), `${choice.name} (${cost}g)`],
     notice: `${choice.name} purchased for ${cost} run gold.`,
-  });
+  };
+}
+
+function rerollOmen(session: RunSession): RunSession {
+  const remaining = session.omenRerollsRemaining ?? RUN_OMEN_REROLL_COUNT;
+  if (remaining <= 0) return { ...session, notice: 'No omen rerolls remain for this run.' };
+
+  return {
+    ...session,
+    omenRerollsRemaining: remaining - 1,
+    notice: `The omen twists. ${remaining - 1} reroll${remaining - 1 === 1 ? '' : 's'} remain.`,
+  };
+}
+
+function applyHardRouteVictoryBonus(session: RunSession): RunSession {
+  const routeProgress = session.targetBattles > 0 ? clamp(session.wins / session.targetBattles, 0, 1) : 0;
+  const goldBonus = 25 + Math.round(routeProgress * 25);
+  const bonuses: Array<{
+    stats: Partial<Pick<CharacterStats, 'armyPower' | 'defensivePower' | 'morale' | 'spellPower' | 'maxHealth' | 'health'>>;
+    detail: string;
+  }> = [
+    { stats: { armyPower: 1, morale: 1 }, detail: '+1 Army and +1 Morale' },
+    { stats: { defensivePower: 1, maxHealth: 8, health: 8 }, detail: '+1 Ward and +8 commander health' },
+    { stats: { spellPower: 1, morale: 1 }, detail: '+1 Spell and +1 Morale' },
+  ];
+  const bonus = shuffle(bonuses)[0] || bonuses[0];
+  const stats = {
+    ...session.stats,
+    armyPower: session.stats.armyPower + (bonus.stats.armyPower || 0),
+    defensivePower: session.stats.defensivePower + (bonus.stats.defensivePower || 0),
+    morale: session.stats.morale + (bonus.stats.morale || 0),
+    spellPower: session.stats.spellPower + (bonus.stats.spellPower || 0),
+    maxHealth: session.stats.maxHealth + (bonus.stats.maxHealth || 0),
+    health: Math.min(
+      session.stats.maxHealth + (bonus.stats.maxHealth || 0),
+      session.stats.health + (bonus.stats.health || 0)
+    ),
+  };
+
+  return {
+    ...session,
+    stats,
+    runGold: session.runGold + goldBonus,
+    pendingPositiveOmen: true,
+    notice: `Hard route bonus claimed: ${bonus.detail}, +${goldBonus} run gold.`,
+  };
+}
+
+function getScaledRunOmenGold(session: RunSession, base: number): number {
+  const routeProgress = session.targetBattles > 0 ? clamp(session.wins / session.targetBattles, 0, 1) : 0;
+  const level = session.mode === 'daily'
+    ? getRandomRunEffectiveLevel(session.stats.level || 1)
+    : clamp(session.stats.level || 1, 1, 24);
+
+  return Math.max(10, Math.round((base + routeProgress * 24 + (level - 1) * 1.8) / 5) * 5);
+}
+
+function rollPositiveDungeonEventOutcome(session: RunSession): OmenOutcome {
+  const goldReward = getScaledRunOmenGold(session, 70);
+  const outcomes: OmenOutcome[] = [
+    {
+      id: 'hard-route-ward',
+      title: 'Clear Ward',
+      flavor: 'The hard road answers with a clean bell tone and settles over your armor.',
+      detail: '+2 Defensive Power for the rest of this run.',
+      tone: 'ward',
+      apply: current => makeStatBuff('hard-route-ward', 'Clear Ward', '+2 Defensive Power from the hard road.', { defensivePower: 2 }).apply(current),
+    },
+    {
+      id: 'hard-route-gold',
+      title: 'Unburned Tithe',
+      flavor: 'A sealed purse rolls out from under the road stones.',
+      detail: `You gain ${goldReward} run gold.`,
+      tone: 'gold',
+      apply: current => ({ ...current, runGold: current.runGold + goldReward }),
+    },
+    {
+      id: 'hard-route-training',
+      title: 'Road Tempering',
+      flavor: 'The warband breathes together and the hard route feels earned.',
+      detail: '+1 Army, +1 Morale, and +1 Spell Power for this run.',
+      tone: 'blessing',
+      apply: current => makeStatBuff('hard-route-training', 'Road Tempering', '+1 Army, Morale, and Spell Power.', { armyPower: 1, morale: 1, spellPower: 1 }).apply(current),
+    },
+  ];
+
+  if (hasFallenMinions(session)) {
+    outcomes.push({
+      id: 'hard-route-revive',
+      title: 'Mercy After Iron',
+      flavor: 'The omen refuses to take more from a warband that already paid blood.',
+      detail: 'One fallen minion returns to the run.',
+      tone: 'blessing',
+      apply: current => resurrectMinions(current, 1),
+    });
+  } else if (canAddRunMinion(session)) {
+    const template = shuffle(MINION_TEMPLATES.filter(item => item.tier === 'tier2'))[0] || MINION_TEMPLATES[0];
+    outcomes.push({
+      id: 'hard-route-recruit',
+      title: 'Oathbound Straggler',
+      flavor: 'A battered fighter leaves the enemy road and joins your banner.',
+      detail: `${template.name} joins the run.`,
+      tone: 'recruit',
+      apply: current => addRunMinionFromTemplate(current, template, `${template.name} joins the run.`),
+    });
+  }
+
+  return shuffle(outcomes)[0] || outcomes[0];
 }
 
 function rollDungeonEventOutcome(session: RunSession): OmenOutcome {
+  if (session.pendingPositiveOmen) return rollPositiveDungeonEventOutcome(session);
+
   const roll = Math.random();
+  const quietGold = getScaledRunOmenGold(session, 35);
+  const highGold = getScaledRunOmenGold(session, 60);
+  const curseGold = getScaledRunOmenGold(session, 25);
 
   if (roll < 0.2) {
     const alive = session.minions
@@ -2860,9 +4366,9 @@ function rollDungeonEventOutcome(session: RunSession): OmenOutcome {
         id: 'curse-gold',
         title: 'Hollow Tithe',
         flavor: 'The omen finds no living target and takes coin instead.',
-        detail: '30 run gold is pulled from your purse.',
+        detail: `${curseGold} run gold is pulled from your purse.`,
         tone: 'curse',
-        apply: current => ({ ...current, runGold: Math.max(0, current.runGold - 30) }),
+        apply: current => ({ ...current, runGold: Math.max(0, current.runGold - curseGold) }),
       };
     }
 
@@ -2900,15 +4406,30 @@ function rollDungeonEventOutcome(session: RunSession): OmenOutcome {
     };
   }
 
+  if (roll < 0.72) {
+    const learnable = BATTLE_SPELLS.filter(spell => !session.knownSpellIds.includes(spell.id));
+    if (learnable.length > 0) {
+      const spell = shuffle(learnable)[0];
+      return {
+        id: `omen-learn-${spell.id}`,
+        title: 'Rune Imprint',
+        flavor: 'A spell sigil brands itself into the warband memory.',
+        detail: `${spell.name} joins your run spellbook.`,
+        tone: 'blessing',
+        apply: current => learnRunSpell(current, spell.id),
+      };
+    }
+  }
+
   if (roll < 0.8) {
     if (!hasFallenMinions(session)) {
       return {
         id: 'gold-fallback',
         title: 'Quiet Echo',
         flavor: 'No fallen soul answers the bell, so the omen leaves coin instead.',
-        detail: 'You gain 40 run gold.',
+        detail: `You gain ${quietGold} run gold.`,
         tone: 'gold',
-        apply: current => ({ ...current, runGold: current.runGold + 40 }),
+        apply: current => ({ ...current, runGold: current.runGold + quietGold }),
       };
     }
 
@@ -2926,14 +4447,19 @@ function rollDungeonEventOutcome(session: RunSession): OmenOutcome {
     id: 'gold',
     title: 'Black Coin Spill',
     flavor: 'The pool coughs up treasure before sinking back into silence.',
-    detail: 'You gain 70 run gold.',
+    detail: `You gain ${highGold} run gold.`,
     tone: 'gold',
-    apply: current => ({ ...current, runGold: current.runGold + 70 }),
+    apply: current => ({ ...current, runGold: current.runGold + highGold }),
   };
 }
 
 function applyDungeonEventOutcome(session: RunSession, outcome: OmenOutcome): RunSession {
-  return completeDungeonNode({ ...outcome.apply(session), notice: outcome.detail });
+  return completeDungeonNode({
+    ...outcome.apply(session),
+    pendingPositiveOmen: false,
+    omenHistory: [...(session.omenHistory || []), `${outcome.title}: ${outcome.detail}`],
+    notice: outcome.detail,
+  });
 }
 
 function grantCompletionReward(session: RunSession): string {
@@ -2941,33 +4467,26 @@ function grantCompletionReward(session: RunSession): string {
   if (!user || session.outcome !== 'victory') return 'No reward was claimed.';
 
   const completedAt = Date.now();
-  const isDungeon = session.mode === 'dungeon';
-  if (!isDungeon && hasCompletedDailyRunToday(user)) {
-    return 'Daily run reward already claimed today.';
+  if (session.mode === 'encounter') {
+    return grantEncounterCompletionReward(session, user, completedAt);
   }
 
-  const nextDailyStreak = isDungeon ? 0 : getNextDailyRunStreak(user, completedAt);
-  const streakGoldBonus = isDungeon ? 0 : Math.min(nextDailyStreak, 7) * 15;
-  const streakExpBonus = isDungeon ? 0 : Math.min(nextDailyStreak, 7) * 2;
-  const challenge = isDungeon ? undefined : session.dailyChallenge || getDailyRunChallenge(completedAt);
-  const runGoldConversion = isDungeon ? Math.floor(session.runGold * 0.35) : session.runGold;
-  const baseGold = (isDungeon ? 110 : 80) + session.wins * (isDungeon ? 45 : 32) + runGoldConversion + streakGoldBonus;
-  const baseExp = (isDungeon ? 45 : 25) + session.wins * (isDungeon ? 12 : 7) + streakExpBonus;
-  const gold = Math.round(baseGold * (challenge?.rewardGoldMultiplier || 1));
-  const exp = Math.round(baseExp * (challenge?.rewardExpMultiplier || 1));
-  const rareGems = isDungeon ? Math.max(1, Math.floor(session.wins / 2)) : 1;
-  const rarity: EquipmentRarity = isDungeon
-    ? session.wins >= 5 ? 'epic' : 'rare'
-    : session.wins >= 6 ? 'rare' : 'decent';
+  if (session.mode === 'daily') {
+    return grantRandomRunCompletionReward(session, user, completedAt);
+  }
+
+  const runGoldConversion = Math.floor(session.runGold * 0.35);
+  const baseGold = 110 + session.wins * 45 + runGoldConversion;
+  const baseExp = 45 + session.wins * 12;
+  const gold = Math.round(baseGold);
+  const exp = Math.round(baseExp);
+  const rareGems = Math.max(1, Math.floor(session.wins / 2));
+  const rarity: EquipmentRarity = session.wins >= 5 ? 'epic' : 'rare';
   const equipment = [generateEquipment(0, rarity)].filter(Boolean) as Equipment[];
   const slots = user.inventorySlots || 20;
-  const weeklyRewardItems = !isDungeon && challenge?.weeklyRewardItemId
-    ? [makeInventoryItem(challenge.weeklyRewardItemId)]
-    : [];
   const rewardItems: InventoryItem[] = [
     makeInventoryItem('rare-gem', rareGems),
-    ...weeklyRewardItems,
-    ...rollInventoryBonusDrops(user.stats.level || 1, isDungeon ? 'dungeonRun' : 'dailyRun'),
+    ...rollInventoryBonusDrops(user.stats.level || 1, 'dungeonRun'),
   ];
   const itemResult = addInventoryItemsWithLimit(user.inventory || [], rewardItems, slots);
   const acceptedGems = itemResult.acceptedItems
@@ -2988,9 +4507,9 @@ function grantCompletionReward(session: RunSession): string {
 
   const activity: ActivityEntry = {
     id: `activity-run-${session.id}-${completedAt}`,
-    type: isDungeon ? 'battle' : 'quest',
-    title: isDungeon ? `${session.title} Cleared` : `${challenge?.name || 'Daily Run'} Cleared`,
-    source: isDungeon ? 'Dungeon Run' : 'Daily Run',
+    type: 'battle',
+    title: `${session.title} Cleared`,
+    source: 'Dungeon Run',
     completedAt,
     rewards: {
       gold,
@@ -2999,39 +4518,161 @@ function grantCompletionReward(session: RunSession): string {
       items: itemResult.acceptedItems.length > 0 ? itemResult.acceptedItems : undefined,
       equipment: equipment.length > 0 ? equipment : undefined,
     },
-    description: isDungeon
-      ? `${session.wins} battles won with ${getAliveRunStacks(session).length} units standing. Route: ${clearedNodes.join(' -> ')}. Rewards: ${rewardSummary.join(', ')}.`
-      : `${session.wins} battles won with ${getAliveRunStacks(session).length} units standing${challenge ? ` during ${challenge.weeklyRewardName}.` : '.'}`,
+    description: `${session.wins} battles won with ${getAliveRunStacks(session).length} units standing. Route: ${clearedNodes.join(' -> ')}. Rewards: ${rewardSummary.join(', ')}.`,
   };
-  const dailyRun = isDungeon
-    ? user.dailyRun
-    : recordDailyRunCompletionState(user, {
-      completedAt,
-      wins: session.wins,
-      targetBattles: session.targetBattles,
-      unitsStanding: getAliveRunStacks(session).length,
-      gold,
-      exp,
-      rareGems: acceptedGems || undefined,
-      itemNames: itemResult.acceptedItems.map(item => item.quantity > 1 ? `${item.quantity} ${item.name}` : item.name),
-      equipmentNames: equipment.map(item => item.name),
-      challengeName: challenge?.name,
-      weeklyRewardName: challenge?.weeklyRewardName,
-    });
 
   updateCurrentUser({
     gold: user.gold + gold,
     exp: user.exp + exp,
     inventory: itemResult.inventory,
     equipment: [...(user.equipment || []), ...equipment],
-    dailyRun,
     activityLog: [activity, ...(user.activityLog || [])].slice(0, 30),
   });
   levelUp();
 
   return itemResult.rejectedItems.length > 0
     ? `Claimed ${gold} gold and ${exp} XP. Satchel was full for some items.`
-    : `Claimed ${gold} gold, ${exp} XP, ${acceptedGems} gem, bonus items, and ${rarity} gear${isDungeon ? '' : ` (streak ${nextDailyStreak}, ${challenge?.weeklyRewardName})`}.`;
+    : `Claimed ${gold} gold, ${exp} XP, ${acceptedGems} gem, bonus items, and ${rarity} gear.`;
+}
+
+function grantRandomRunCompletionReward(session: RunSession, user: User, completedAt: number): string {
+  const aliveCount = getAliveRunStacks(session).length;
+  const durationMs = session.battleReports.reduce((total, report) => total + report.durationMs, 0);
+  const bossesDefeated = session.bossHistory || [];
+  const routeSummary = session.nodes
+    .filter(node => node.completed || (node.type === 'boss' && bossesDefeated.includes(node.label)))
+    .map(node => node.type === 'boss' ? `Boss: ${node.label}` : node.label);
+  const clearRatio = session.targetBattles > 0 ? clamp(session.wins / session.targetBattles, 0, 1) : 0;
+  const expectedBosses = getRandomRunBossBattleNumbers(session.targetBattles).length;
+  const fullClear = session.wins >= session.targetBattles;
+  const score = Math.round(
+    session.wins * 120
+    + aliveCount * 35
+    + session.runGold * 0.6
+    + bossesDefeated.length * 260
+    + (fullClear ? 500 : 0)
+  );
+  const runExpMultiplier = session.dailyChallenge?.rewardExpMultiplier || 1;
+  const runExp = Math.max(35, Math.round((
+    30
+    + session.wins * 12
+    + bossesDefeated.length * 45
+    + aliveCount * 5
+    + (fullClear ? 120 + expectedBosses * 15 : Math.round(clearRatio * 40))
+    + getRandomRunEffectiveLevel(session.stats.level || 1) * 5
+  ) * runExpMultiplier));
+  const previousRunState = getDailyRunState(user);
+  const dailyRun = recordDailyRunCompletionState(user, {
+    completedAt,
+    wins: session.wins,
+    targetBattles: session.targetBattles,
+    unitsStanding: aliveCount,
+    gold: session.runGold,
+    exp: runExp,
+    rareGems: undefined,
+    itemNames: [],
+    equipmentNames: [],
+    challengeName: session.title,
+    weeklyRewardName: 'Random Run',
+    score,
+    durationMs,
+    bossesDefeated,
+    routeSummary,
+    shopBuys: session.shopBuyHistory || [],
+    omens: session.omenHistory || [],
+    unlockedSpellNames: session.permanentSpellUnlocks || [],
+  });
+  const levelUps = Math.max(0, dailyRun.runLevel - previousRunState.runLevel);
+  const activity: ActivityEntry = {
+    id: `activity-random-run-${session.id}-${completedAt}`,
+    type: 'quest',
+    title: `${session.title} Cleared`,
+    source: 'Random Run',
+    completedAt,
+    rewards: { exp: runExp },
+    description: `${session.wins}/${session.targetBattles} fights cleared, ${bossesDefeated.length} bosses defeated, score ${score}. Random-run progression only.`,
+  };
+
+  updateCurrentUser({
+    dailyRun,
+    activityLog: [activity, ...(user.activityLog || [])].slice(0, 30),
+  });
+
+  return levelUps > 0
+    ? `Random run cleared: ${score} score, +${runExp} run XP, ${levelUps} new run upgrade${levelUps === 1 ? '' : 's'}.`
+    : `Random run cleared: ${score} score and +${runExp} run XP.`;
+}
+
+function grantEncounterCompletionReward(session: RunSession, user: User, completedAt: number): string {
+  const enemy = session.encounterEnemy;
+  if (!enemy) return 'No enemy reward was found.';
+
+  const lootMultiplier = enemy.lootMultiplier || 1;
+  const runGoldConversion = Math.floor(session.runGold * 0.5);
+  const gold = Math.round(((enemy.spawnKind === 'nearby' ? 48 : 36) + enemy.level * 7 + session.wins * 18 + runGoldConversion) * lootMultiplier);
+  const exp = Math.round(((enemy.spawnKind === 'nearby' ? 12 : 8) + enemy.level * 2.2 + session.wins * 4) * lootMultiplier);
+  const rareGems = enemy.spawnKind === 'world-boss'
+    ? Math.max(2, Math.floor(enemy.level / 5))
+    : enemy.level >= 3
+      ? 1
+      : 0;
+  const rarity: EquipmentRarity | undefined = enemy.spawnKind === 'world-boss'
+    ? enemy.level >= 14 ? 'legendary' : 'epic'
+    : enemy.level >= 10
+      ? 'rare'
+      : enemy.level >= 4
+        ? 'decent'
+        : undefined;
+  const equipment = rarity ? [generateEquipment(0, rarity)].filter(Boolean) as Equipment[] : [];
+  const rewardItems: InventoryItem[] = [
+    ...(rareGems > 0 ? [makeInventoryItem('rare-gem', rareGems)] : []),
+    ...rollInventoryBonusDrops(enemy.level, enemy.spawnKind === 'nearby' ? 'nearbyBattle' : 'battle'),
+  ];
+  const itemResult = addInventoryItemsWithLimit(user.inventory || [], rewardItems, user.inventorySlots || 20);
+  const acceptedGems = itemResult.acceptedItems
+    .filter(item => item.id === 'rare-gem')
+    .reduce((total, item) => total + item.quantity, 0);
+  const rewardSummary = [
+    `${gold} gold`,
+    `${exp} XP`,
+    acceptedGems > 0 ? `${acceptedGems} gem${acceptedGems === 1 ? '' : 's'}` : '',
+    ...itemResult.acceptedItems
+      .filter(item => item.id !== 'rare-gem')
+      .map(item => item.quantity > 1 ? `${item.quantity} ${item.name}` : item.name),
+    ...equipment.map(item => item.name),
+  ].filter(Boolean);
+  const clearedNodes = session.nodes
+    .filter(node => node.completed)
+    .map(node => node.label);
+  const activity: ActivityEntry = {
+    id: `activity-encounter-run-${enemy.id}-${completedAt}`,
+    type: 'battle',
+    title: itemResult.rejectedItems.length > 0 ? `Defeated ${enemy.name} (satchel full)` : `Defeated ${enemy.name}`,
+    source: enemy.spawnKind === 'world-boss' ? 'World Boss Road' : 'Enemy Road',
+    completedAt,
+    rewards: {
+      gold,
+      exp,
+      rareGems: acceptedGems || undefined,
+      items: itemResult.acceptedItems.length > 0 ? itemResult.acceptedItems : undefined,
+      equipment: equipment.length > 0 ? equipment : undefined,
+    },
+    description: `${session.wins} fights won before defeating ${enemy.name}${enemy.bossId ? ` (${enemy.bossId})` : ''}. Route: ${clearedNodes.join(' -> ')}. Rewards: ${rewardSummary.join(', ')}.`,
+  };
+
+  markWorldEnemyDefeated(enemy, completedAt);
+  updateCurrentUser({
+    gold: user.gold + gold,
+    exp: user.exp + exp,
+    inventory: itemResult.inventory,
+    equipment: [...(user.equipment || []), ...equipment],
+    activityLog: [activity, ...(user.activityLog || [])].slice(0, 30),
+  });
+  levelUp();
+
+  return itemResult.rejectedItems.length > 0
+    ? `Claimed ${gold} gold and ${exp} XP from ${enemy.name}. Satchel was full for some items.`
+    : `Claimed ${gold} gold, ${exp} XP${acceptedGems > 0 ? `, ${acceptedGems} gem${acceptedGems === 1 ? '' : 's'}` : ''}${rarity ? `, and ${rarity} gear` : ''} from ${enemy.name}.`;
 }
 
 function makeStatBuff(

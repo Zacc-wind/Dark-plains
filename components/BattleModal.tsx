@@ -18,13 +18,16 @@ import {
   canAttack,
   canHeal,
   canMoveTo,
+  canRetaliateAfterAttack,
   castBattleSpell,
   createNpcBattleState,
   focusCommanderMana,
   getActiveUnit,
   getAttackDamage,
   getBattleMana,
+  getDistance,
   getHealAmount,
+  getRetaliationDamage,
   getTerrainAt,
   getTerrainMoveCost,
   getTurnTimeRemaining,
@@ -56,6 +59,8 @@ import {
   getMinionTemplate,
   getStoryQuestStatus,
   makeInventoryItem,
+  MINION_CLASS_LABELS,
+  MINION_TIER_LABELS,
   recruitMinionsFromOffer,
   rollInventoryBonusDrops,
   STORY_CHAPTERS,
@@ -65,6 +70,7 @@ import { emitCompletionNotice, type CompletionRewardLine } from '@/lib/completio
 import {
   COMBAT_SPEED_OPTIONS,
   CombatSpeed,
+  readCombatIndicatorMode,
   readCombatSpeedSetting,
   writeCombatSpeedSetting,
 } from '@/lib/combatSettings';
@@ -82,7 +88,7 @@ interface BattleModalProps {
   playerFormation?: Record<string, { x: number; y: number }>;
   availableSpellIds?: string[];
   persistentResults?: boolean;
-  onBattleEnd?: (result: { status: BattleResultReportData['status']; battle: BattleState; reward?: VictoryRewardReport; healthLost?: number }) => void;
+  onBattleEnd?: (result: { status: BattleResultReportData['status']; battle: BattleState; reward?: VictoryRewardReport; healthLost?: number; retreated?: boolean }) => void;
   contextLabel?: string;
 }
 
@@ -104,6 +110,10 @@ interface BattleHoverForecastData {
   unit: BattleUnit;
   actionLabel?: string;
   amount?: number;
+  retaliationDamage?: number;
+  retaliationCurrentHealth?: number;
+  retaliationProjectedHealth?: number;
+  retaliationMaxHealth?: number;
   tone: 'neutral' | 'good' | 'danger';
   currentHealth: number;
   projectedHealth: number;
@@ -127,8 +137,33 @@ type BattlePieceAnimation =
 interface BattleSpeedConfig {
   label: string;
   playerDelayMs: number;
-  enemyDelayMs: number;
 }
+
+/** Shared spell icon / unit presentation window for every spell cast. */
+const SPELL_PRESENTATION_MS = 2300;
+const SPELL_NOTICE_MS = 1450;
+
+/** Enemy turns always use this pacing, regardless of the combat speed setting. */
+const ENEMY_BATTLE_PACE = {
+  delayBeforeMs: 1250,
+  actionHoldMs: 850,
+  commanderDelayBonusMs: 400,
+  commanderHoldBonusMs: 550,
+  presentationMs: 1850,
+  spellPresentationMs: SPELL_PRESENTATION_MS,
+  spellNoticeMs: 1750,
+} as const;
+
+interface PresentationPin {
+  entry: BattleLogEntry;
+  expiresAt: number;
+}
+
+const BATTLE_SPEEDS: Record<CombatSpeed, BattleSpeedConfig> = {
+  normal: { label: 'Normal', playerDelayMs: 950 },
+  fast: { label: 'Fast', playerDelayMs: 760 },
+  instant: { label: 'Instant', playerDelayMs: 420 },
+};
 
 interface VictoryRewardReport {
   gold: number;
@@ -169,12 +204,6 @@ interface BattleSpellImpactData {
   iconPath: string;
   tone: 'damage' | 'support';
 }
-
-const BATTLE_SPEEDS: Record<CombatSpeed, BattleSpeedConfig> = {
-  normal: { label: 'Normal', playerDelayMs: 950, enemyDelayMs: 1550 },
-  fast: { label: 'Fast', playerDelayMs: 760, enemyDelayMs: 1050 },
-  instant: { label: 'Instant', playerDelayMs: 420, enemyDelayMs: 620 },
-};
 
 const BATTLE_PRELOAD_SOUND_IDS: GameSoundId[] = [
   'combat.weaponDraw',
@@ -232,6 +261,7 @@ export default function BattleModal({
   const [isSpellMenuOpen, setIsSpellMenuOpen] = useState(false);
   const [battleSpeed, setBattleSpeed] = useState<CombatSpeed>(() => readCombatSpeedSetting());
   const [spellCastNotice, setSpellCastNotice] = useState<BattleSpellCastNoticeData | null>(null);
+  const [presentationPin, setPresentationPin] = useState<PresentationPin | null>(null);
   const [resultReport, setResultReport] = useState<BattleResultReportData | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [isResolvingAction, setIsResolvingAction] = useState(false);
@@ -240,7 +270,9 @@ export default function BattleModal({
   const [hoverCursor, setHoverCursor] = useState<{ x: number; y: number } | null>(null);
   const [pendingMoveUndo, setPendingMoveUndo] = useState<BattleState | null>(null);
   const [confirmMoveEnabled, setConfirmMoveEnabled] = useState(() => readGameJson(CONFIRM_MOVE_SETTING_KEY, false));
+  const [indicatorMode] = useState(() => readCombatIndicatorMode());
   const enemyTimer = useRef<number | null>(null);
+  const enemyActionHoldTimer = useRef<number | null>(null);
   const playerActionTimer = useRef<number | null>(null);
   const defeatExitTimer = useRef<number | null>(null);
   const battleSoundTimers = useRef<number[]>([]);
@@ -260,12 +292,14 @@ export default function BattleModal({
   }, []);
 
   useEffect(() => {
-    const interval = window.setInterval(() => setNow(Date.now()), 1000);
+    const tickMs = battle?.status === 'active' ? 50 : 1000;
+    const interval = window.setInterval(() => setNow(Date.now()), tickMs);
     return () => window.clearInterval(interval);
-  }, []);
+  }, [battle?.status]);
 
   useEffect(() => () => {
     if (enemyTimer.current) window.clearTimeout(enemyTimer.current);
+    if (enemyActionHoldTimer.current) window.clearTimeout(enemyActionHoldTimer.current);
     if (playerActionTimer.current) window.clearTimeout(playerActionTimer.current);
     if (defeatExitTimer.current) window.clearTimeout(defeatExitTimer.current);
     if (spellNoticeTimer.current) window.clearTimeout(spellNoticeTimer.current);
@@ -300,28 +334,71 @@ export default function BattleModal({
         const notice = { id: entry.id, spell, side: entry.side };
         spellNoticeTimer.current = window.setTimeout(() => {
           setSpellCastNotice(notice);
-          spellNoticeTimer.current = window.setTimeout(() => setSpellCastNotice(null), 1450);
-        }, 0);
+          const noticeDuration = entry.side === 'enemy' ? ENEMY_BATTLE_PACE.spellNoticeMs : SPELL_NOTICE_MS;
+          spellNoticeTimer.current = window.setTimeout(() => setSpellCastNotice(null), noticeDuration);
+        }, entry.side === 'enemy' ? 180 : 0);
       }
     }
   }, [battle, battleSpeed]);
 
   useEffect(() => {
+    const entry = battle?.log[0];
+    if (!entry || entry.action !== 'spell') return;
+
+    const expiresAt = entry.createdAt + SPELL_PRESENTATION_MS;
+    setPresentationPin({ entry, expiresAt });
+
+    const remaining = Math.max(0, expiresAt - Date.now());
+    const timer = window.setTimeout(() => {
+      setPresentationPin(current => (current?.entry.id === entry.id ? null : current));
+    }, remaining);
+
+    return () => window.clearTimeout(timer);
+  }, [battle?.log[0]?.id]);
+
+  useEffect(() => {
     if (!battle || battle.status !== 'active') return;
+    if (isResolvingAction) return;
     if (battle.recruitOffer && !battle.recruitOffer.declined && !battle.recruitOffer.accepted) return;
 
     const activeUnit = getActiveUnit(battle);
     if (!activeUnit || activeUnit.side !== 'enemy') return;
 
+    const isEnemyCommander = activeUnit.kind === 'commander';
+    const enemyDelayMs = ENEMY_BATTLE_PACE.delayBeforeMs + (isEnemyCommander ? ENEMY_BATTLE_PACE.commanderDelayBonusMs : 0);
+    const enemyHoldMs = ENEMY_BATTLE_PACE.actionHoldMs + (isEnemyCommander ? ENEMY_BATTLE_PACE.commanderHoldBonusMs : 0);
+
     enemyTimer.current = window.setTimeout(() => {
       emitFxEvent({ type: activeUnit.healing > 0 ? 'status' : 'attack', tone: 'red', intensity: 0.55 });
-      setBattle(current => current ? runEnemyBattleTurn(current) : current);
-    }, speedConfig.enemyDelayMs);
+      setIsResolvingAction(true);
+      setBattleCue({
+        headline: isEnemyCommander ? 'Enemy Spell' : 'Enemy Action',
+        detail: '',
+        tone: 'enemy',
+      });
+      setBattle(current => {
+        if (!current) return current;
+
+        const next = runEnemyBattleTurn(current);
+        const holdMs = next.log[0]?.action === 'spell'
+          ? ENEMY_BATTLE_PACE.spellPresentationMs
+          : enemyHoldMs;
+
+        if (enemyActionHoldTimer.current) window.clearTimeout(enemyActionHoldTimer.current);
+        enemyActionHoldTimer.current = window.setTimeout(() => {
+          enemyActionHoldTimer.current = null;
+          setIsResolvingAction(false);
+          setBattleCue(null);
+        }, holdMs);
+
+        return next;
+      });
+    }, enemyDelayMs);
 
     return () => {
       if (enemyTimer.current) window.clearTimeout(enemyTimer.current);
     };
-  }, [battle, speedConfig.enemyDelayMs]);
+  }, [battle, isResolvingAction]);
 
   useEffect(() => {
     if (!battle || battle.status !== 'active') return;
@@ -380,6 +457,7 @@ export default function BattleModal({
       }
       const casualtyReport = persistentResults ? applyBattleCasualties(battle) : undefined;
       const healthLost = persistentResults ? applyDefeatPenalty(battle.enemy) : 0;
+      const retreated = battle.log.some(entry => entry.id.startsWith('log-retreat-') || entry.message.toLowerCase().includes('retreat'));
       const defeatReport: BattleResultReportData = {
         status: 'defeat',
         healthLost,
@@ -390,7 +468,7 @@ export default function BattleModal({
         setResultReport(defeatReport);
       }, 0);
       if (!battleEndNotified.current) {
-        onBattleEnd?.({ status: 'defeat', battle, healthLost });
+        onBattleEnd?.({ status: 'defeat', battle, healthLost, retreated });
         battleEndNotified.current = true;
       }
       if (!onBattleEnd) {
@@ -468,6 +546,8 @@ export default function BattleModal({
 
   if (!battle) return null;
 
+  const presentationEntry = getPresentationEntry(battle, presentationPin, now);
+
   const queuePlayerAction = (nextBattle: BattleState, cue: BattleCue) => {
     if (playerActionTimer.current) window.clearTimeout(playerActionTimer.current);
     setPendingMoveUndo(null);
@@ -480,7 +560,22 @@ export default function BattleModal({
       intensity: cue.tone === 'danger' ? 0.76 : 0.62,
     });
 
-    if (speedConfig.playerDelayMs <= 0) {
+    const isSpellAction = nextBattle.log[0]?.action === 'spell';
+    const applyDelayMs = speedConfig.playerDelayMs;
+
+    if (isSpellAction) {
+      const spellApplyDelayMs = applyDelayMs <= 0 ? 0 : Math.min(applyDelayMs, 320);
+      playerActionTimer.current = window.setTimeout(() => {
+        setBattle(nextBattle);
+        playerActionTimer.current = window.setTimeout(() => {
+          setIsResolvingAction(false);
+          setBattleCue(null);
+        }, SPELL_PRESENTATION_MS);
+      }, spellApplyDelayMs);
+      return;
+    }
+
+    if (applyDelayMs <= 0) {
       setBattle(nextBattle);
       setIsResolvingAction(false);
       setBattleCue(null);
@@ -491,7 +586,7 @@ export default function BattleModal({
       setBattle(nextBattle);
       setIsResolvingAction(false);
       setBattleCue(null);
-    }, speedConfig.playerDelayMs);
+    }, applyDelayMs);
   };
 
   const handleCellClick = (x: number, y: number) => {
@@ -510,7 +605,7 @@ export default function BattleModal({
         setSelectedSpellId(null);
         queuePlayerAction(castBattleSpell(battle, selectedSpell.id, unitAtCell.id), {
           headline: selectedSpell.name,
-          detail: `${activeUnit.name} casts on ${unitAtCell.name}.`,
+          detail: '',
           tone: selectedSpell.target === 'ally' ? 'player' : 'danger',
         });
       }
@@ -528,7 +623,7 @@ export default function BattleModal({
     if (unitAtCell && canHeal(activeUnit, unitAtCell)) {
       queuePlayerAction(advanceBattleTurn(healBattleUnit(battle, activeUnit.id, unitAtCell.id)), {
         headline: 'Healing',
-        detail: `${activeUnit.name} tends to ${unitAtCell.name}.`,
+        detail: '',
         tone: 'player',
       });
       return;
@@ -537,7 +632,7 @@ export default function BattleModal({
     if (unitAtCell && canAttack(activeUnit, unitAtCell)) {
       queuePlayerAction(advanceBattleTurn(attackBattleUnit(battle, activeUnit.id, unitAtCell.id)), {
         headline: 'Strike',
-        detail: `${activeUnit.name} attacks ${unitAtCell.name}.`,
+        detail: '',
         tone: 'danger',
       });
       return;
@@ -548,7 +643,7 @@ export default function BattleModal({
       if (!confirmMoveEnabled) {
         queuePlayerAction(advanceBattleTurn(movedBattle), {
           headline: 'Move',
-          detail: `${activeUnit.name} advances to ${x}:${y}.`,
+          detail: '',
           tone: 'player',
         });
         return;
@@ -558,7 +653,7 @@ export default function BattleModal({
       setBattle(movedBattle);
       setBattleCue({
         headline: 'Move',
-        detail: `${activeUnit.name} moved. Strike, heal, cast, wait, or undo.`,
+        detail: '',
         tone: 'player',
       });
       emitFxEvent({ type: 'status', tone: 'blue', intensity: 0.45 });
@@ -582,7 +677,7 @@ export default function BattleModal({
     setPendingMoveUndo(null);
     setBattleCue({
       headline: 'Move Undone',
-      detail: 'Choose a different tile or action.',
+      detail: '',
       tone: 'neutral',
     });
     emitFxEvent({ type: 'status', tone: 'bone', intensity: 0.36 });
@@ -593,7 +688,7 @@ export default function BattleModal({
     setSelectedSpellId(null);
     queuePlayerAction(waitBattleUnit(battle, activeUnit.id, `${activeUnit.name} holds position.`), {
       headline: 'Hold',
-      detail: `${activeUnit.name} holds after moving.`,
+      detail: '',
       tone: 'neutral',
     });
   };
@@ -604,9 +699,7 @@ export default function BattleModal({
     const priestCharge = Boolean(activeUnit && activeUnit.kind === 'minion' && activeUnit.healing > 0);
     queuePlayerAction(waitBattleUnit(battle, activeUnit?.id || ''), {
       headline: priestCharge ? 'Blessing Charged' : 'Hold',
-      detail: priestCharge
-        ? `${activeUnit?.name || 'Priest'} prepares a stronger next heal.`
-        : `${activeUnit?.name || 'Unit'} waits for a better opening.`,
+      detail: '',
       tone: priestCharge ? 'player' : 'neutral',
     });
   };
@@ -616,7 +709,7 @@ export default function BattleModal({
     setSelectedSpellId(null);
     queuePlayerAction(focusCommanderMana(battle, activeUnit.id), {
       headline: 'Focus Mana',
-      detail: `${activeUnit.name} gathers power for a later spell.`,
+      detail: '',
       tone: 'player',
     });
   };
@@ -637,7 +730,7 @@ export default function BattleModal({
       setIsSpellMenuOpen(false);
       queuePlayerAction(castBattleSpell(battle, spell.id), {
         headline: spell.name,
-        detail: 'The commander bends the whole field with a strategic spell.',
+        detail: '',
         tone: 'player',
       });
       return;
@@ -783,12 +876,14 @@ export default function BattleModal({
     isResolvingAction,
     movementLocked: canUndoMove,
   });
+  const hoveredThreatUnit = hoveredCell ? getUnitAt(battle, hoveredCell.x, hoveredCell.y) : undefined;
+  const hoveredEnemyUnit = hoveredThreatUnit?.side === 'enemy' && hoveredThreatUnit.currentHealth > 0 ? hoveredThreatUnit : undefined;
   const hoverOverlayStyle = getHoverOverlayStyle(hoverCursor);
   const showCenterCue = isResolvingAction || battle.status !== 'active' || (battle.status === 'active' && now - battle.turnStartedAt < 950);
 
   return (
     <div className="fixed inset-0 z-[70] overflow-hidden bg-black/78 p-1 backdrop-blur-sm">
-      <div className="battle-modal-frame command-panel vine-frame mx-auto flex h-[calc(100vh-0.5rem)] max-w-none flex-col overflow-hidden rounded border text-zinc-100">
+      <div className={`battle-modal-frame command-panel vine-frame mx-auto flex h-[calc(100vh-0.5rem)] max-w-none flex-col overflow-hidden rounded border text-zinc-100 ${indicatorMode === 'colorblind' ? 'battle-indicator-colorblind' : ''}`}>
         <div className="battle-layout grid min-h-0 flex-1 grid-cols-1 gap-2 p-2">
           {recruitOfferPending ? (
             <section className="ui-card col-span-full m-auto w-full max-w-3xl rounded border p-6 text-center">
@@ -900,7 +995,7 @@ export default function BattleModal({
                 const x = index % battle.boardWidth;
                 const y = Math.floor(index / battle.boardWidth);
                 const unit = getUnitAt(battle, x, y);
-                const defeatedUnit = unit ? undefined : getRecentlyDefeatedUnitAt(battle, x, y, now);
+                const defeatedUnit = unit ? undefined : getRecentlyDefeatedUnitAt(battle, x, y, presentationEntry, now);
                 const obstacle = isObstacle(battle, x, y);
                 const terrain = getTerrainAt(battle, x, y);
                 const terrainLabel = BATTLE_TERRAIN_LABELS[terrain];
@@ -927,9 +1022,21 @@ export default function BattleModal({
                 );
                 const canDamageSpellTarget = Boolean(canSpellTarget && selectedSpell?.target === 'enemy');
                 const canSupportSpellTarget = Boolean(canSpellTarget && selectedSpell?.target === 'ally');
+                const enemyMovePreview = Boolean(
+                  hoveredEnemyUnit &&
+                  !unit &&
+                  !obstacle &&
+                  canMoveTo(battle, hoveredEnemyUnit, x, y)
+                );
+                const enemyAttackPreview = Boolean(
+                  hoveredEnemyUnit &&
+                  !obstacle &&
+                  getDistance(hoveredEnemyUnit, { x, y }) <= hoveredEnemyUnit.range &&
+                  !(hoveredEnemyUnit.x === x && hoveredEnemyUnit.y === y)
+                );
                 const actionable = canMove || canStrike || canMend || canSpellTarget;
-                const floatingText = getFloatingBattleText(battle, unit || defeatedUnit, now);
-                const spellImpact = getBattleSpellImpact(battle, unit || defeatedUnit, now);
+                const floatingText = getFloatingBattleText(battle, unit || defeatedUnit, presentationEntry, now);
+                const spellImpact = getBattleSpellImpact(battle, unit || defeatedUnit, presentationEntry, now);
 
                 return (
                   <div
@@ -968,13 +1075,13 @@ export default function BattleModal({
                           : canMove
                             ? 'battle-cell-move'
                             : ''
-                    } ${isActiveCell ? (unit?.side === 'player' ? 'battle-cell-active battle-cell-active-player' : 'battle-cell-active battle-cell-active-enemy') : ''} ${isPlayerTurn && activeUnit && !actionable && !unit && !obstacle ? 'battle-cell-muted' : ''}`}
+                    } ${enemyMovePreview ? 'battle-cell-enemy-move-preview' : ''} ${enemyAttackPreview ? 'battle-cell-enemy-attack-preview' : ''} ${isActiveCell ? (unit?.side === 'player' ? 'battle-cell-active battle-cell-active-player' : 'battle-cell-active battle-cell-active-enemy') : ''} ${isPlayerTurn && activeUnit && !actionable && !unit && !obstacle ? 'battle-cell-muted' : ''}`}
                   >
                     {terrain !== 'ground' && !unit && !obstacle && (
                       <span className="battle-terrain-chip">{terrainLabel}</span>
                     )}
                     {obstacle && <span className="battle-obstacle-shape" />}
-                    {unit && <BattlePiece unit={unit} active={isActiveCell} animation={getBattlePieceAnimation(battle, unit, now)} />}
+                    {unit && <BattlePiece unit={unit} active={isActiveCell} animation={getBattlePieceAnimation(battle, unit, presentationEntry, now)} />}
                     {isActiveCell && isCommanderTurn && !selectedSpell && !canUndoMove && (
                       <BattleUnitActionOrbs
                         mode="commander"
@@ -995,13 +1102,29 @@ export default function BattleModal({
                       />
                     )}
                     {defeatedUnit && <BattleDeathMarker unit={defeatedUnit} />}
-                    {spellImpact && <BattleSpellIconImpact impact={spellImpact} />}
+                    {spellImpact && (
+                      <BattleSpellIconImpact
+                        impact={spellImpact}
+                        delayMs={Math.max(0, (presentationEntry?.targetIds?.indexOf((unit || defeatedUnit)?.id || '') ?? 0) * 90)}
+                      />
+                    )}
                     {floatingText && <BattleFloatingText text={floatingText.text} tone={floatingText.tone} />}
                   </div>
                 );
               })}
               <CombatThreeFxLayer battle={battle} />
               </div>
+              {isPlayerTurn && battle.status === 'active' && !selectedSpell && (
+                <button
+                  type="button"
+                  onClick={canUndoMove ? handleCommitMove : handleEndTurn}
+                  disabled={isResolvingAction}
+                  className={`battle-board-wait-button ${canUndoMove ? 'battle-board-wait-button-done' : ''}`}
+                >
+                  <span className="arcane-label">{canUndoMove ? 'Commit Move' : 'Pass Turn'}</span>
+                  <span className="fantasy-heading">{canUndoMove ? 'Done' : 'Wait'}</span>
+                </button>
+              )}
             </div>
               <aside className="battle-side-panel battle-side-panel-right">
                 <BattleSpeedControl
@@ -1132,7 +1255,9 @@ function BattleHeaderStatus({
           <span className="fantasy-heading truncate text-base">{turnLabel}</span>
           <span className="ui-faint truncate text-[10px] font-black uppercase">{activeUnit?.name || visibleCue.headline}</span>
         </div>
-        <div className="ui-muted truncate text-[11px] font-bold">{visibleCue.detail}</div>
+        {visibleCue.detail ? (
+          <div className="ui-muted truncate text-[11px] font-bold">{visibleCue.detail}</div>
+        ) : null}
       </div>
       <div className="flex shrink-0 items-center gap-2">
         <span className="ui-pill rounded border px-2 py-1 text-[10px] font-black">{secondsRemaining}s</span>
@@ -1369,6 +1494,19 @@ function getHoverOverlayStyle(cursor: { x: number; y: number } | null): CSSPrope
   };
 }
 
+function getBattleUnitSubtitle(unit: BattleUnit): string {
+  if (unit.kind === 'commander') {
+    return unit.side === 'player' ? 'Commander' : 'Enemy Commander';
+  }
+
+  const template = unit.templateId ? getMinionTemplate(unit.templateId) : undefined;
+  if (template) {
+    return `${MINION_TIER_LABELS[template.tier]} ${MINION_CLASS_LABELS[template.class]}`;
+  }
+
+  return 'Minion';
+}
+
 function BattleHoverOverlay({
   preview,
   forecast,
@@ -1386,6 +1524,11 @@ function BattleHoverOverlay({
     const currentPct = getHealthPercent(forecast.currentHealth, forecast.maxHealth);
     const projectedPct = getHealthPercent(forecast.projectedHealth, forecast.maxHealth);
     const delta = forecast.projectedHealth - forecast.currentHealth;
+    const retaliationDelta = typeof forecast.retaliationDamage === 'number' && typeof forecast.retaliationCurrentHealth === 'number' && typeof forecast.retaliationProjectedHealth === 'number'
+      ? forecast.retaliationProjectedHealth - forecast.retaliationCurrentHealth
+      : 0;
+    const retaliationCurrentPct = getHealthPercent(forecast.retaliationCurrentHealth || 0, forecast.retaliationMaxHealth || 0);
+    const retaliationProjectedPct = getHealthPercent(forecast.retaliationProjectedHealth || 0, forecast.retaliationMaxHealth || 0);
     const toneClass = forecast.tone === 'danger'
       ? 'battle-forecast-danger'
       : forecast.tone === 'good'
@@ -1408,7 +1551,7 @@ function BattleHoverOverlay({
           <span className="min-w-0 flex-1">
             <span className="block truncate text-xs font-black text-zinc-100">{forecast.unit.name}</span>
             <span className="ui-faint block text-[10px] font-black uppercase">
-              {forecast.unit.kind} - {forecast.unit.side}
+              {getBattleUnitSubtitle(forecast.unit)}
             </span>
             {forecast.actionLabel && (
               <span className={`battle-forecast-action mt-1 inline-flex rounded border px-2 py-0.5 text-[10px] font-black uppercase ${toneClass}`}>
@@ -1442,6 +1585,27 @@ function BattleHoverOverlay({
           )}
         </div>
 
+        {typeof forecast.retaliationDamage === 'number' && forecast.retaliationDamage > 0 && typeof forecast.retaliationCurrentHealth === 'number' && typeof forecast.retaliationProjectedHealth === 'number' && (
+          <div className="battle-forecast-retaliation mt-3 rounded border px-2.5 py-2">
+            <div className="mb-1 flex justify-between gap-2 text-[10px] font-black uppercase">
+              <span>Retaliation</span>
+              <span>You take -{forecast.retaliationDamage}</span>
+            </div>
+            <div className="battle-forecast-health-track">
+              <span className="battle-forecast-health-current battle-forecast-health-self" style={{ width: `${retaliationCurrentPct}%` }} />
+              <span
+                className="battle-forecast-health-projected battle-forecast-health-retaliation"
+                style={{ width: `${retaliationProjectedPct}%` }}
+              />
+            </div>
+            {retaliationDelta !== 0 && (
+              <div className="mt-1 text-[10px] font-black text-[var(--ui-muted)]">
+                Your unit after counter: {forecast.retaliationProjectedHealth} / {forecast.retaliationMaxHealth}
+              </div>
+            )}
+          </div>
+        )}
+
         <div className="battle-forecast-stats mt-3 grid grid-cols-5 gap-1 text-center">
           <span><b>{forecast.unit.attack}</b><em>Atk</em></span>
           <span><b>{forecast.unit.defense}</b><em>Def</em></span>
@@ -1456,7 +1620,9 @@ function BattleHoverOverlay({
   return (
     <div className={`battle-hover-overlay rounded border px-3 py-2 ${preview.tone === 'danger' ? 'battle-hover-danger' : preview.tone === 'good' ? 'battle-hover-good' : ''}`} style={style}>
       <div className="truncate text-xs font-black text-zinc-100">{preview.title}</div>
-      <div className="ui-muted truncate text-[10px] font-bold">{preview.detail}</div>
+      {preview.detail ? (
+        <div className="ui-muted truncate text-[10px] font-bold">{preview.detail}</div>
+      ) : null}
     </div>
   );
 }
@@ -1544,8 +1710,11 @@ function BattleDeathMarker({ unit }: { unit: BattleUnit }) {
   );
 }
 
-function BattleSpellIconImpact({ impact }: { impact: BattleSpellImpactData }) {
-  const style = { '--spell-icon': `url("${impact.iconPath}")` } as CSSProperties;
+function BattleSpellIconImpact({ impact, delayMs = 0 }: { impact: BattleSpellImpactData; delayMs?: number }) {
+  const style = {
+    '--spell-icon': `url("${impact.iconPath}")`,
+    animationDelay: delayMs > 0 ? `${delayMs}ms` : undefined,
+  } as CSSProperties;
 
   return (
     <span className={`battle-spell-impact battle-spell-impact-${impact.tone}`} style={style} aria-hidden="true">
@@ -1568,6 +1737,22 @@ function BattleSpellIconImpact({ impact }: { impact: BattleSpellImpactData }) {
   );
 }
 
+function getPresentationEntry(
+  battle: BattleState,
+  pin: PresentationPin | null,
+  now: number,
+): BattleLogEntry | undefined {
+  if (pin && now < pin.expiresAt) return pin.entry;
+  return battle.log[0];
+}
+
+function getBattleActionPresentationMs(entry: BattleLogEntry | undefined): number {
+  if (!entry) return 1500;
+  if (entry.action === 'spell') return SPELL_PRESENTATION_MS;
+  if (entry.side === 'enemy') return ENEMY_BATTLE_PACE.presentationMs;
+  return 1500;
+}
+
 function getBattleSpellFromLogEntry(entry: BattleLogEntry): BattleSpell | undefined {
   if (entry.spellId) return BATTLE_SPELLS.find(spell => spell.id === entry.spellId);
   return BATTLE_SPELLS.find(spell => entry.message.toLowerCase().includes(spell.name.toLowerCase()));
@@ -1576,11 +1761,11 @@ function getBattleSpellFromLogEntry(entry: BattleLogEntry): BattleSpell | undefi
 function getBattleSpellImpact(
   battle: BattleState,
   unit: BattleUnit | undefined,
+  entry: BattleLogEntry | undefined,
   now: number
 ): BattleSpellImpactData | null {
-  if (!unit) return null;
-  const entry = battle.log[0];
-  if (!entry || entry.action !== 'spell' || now - entry.createdAt > 1700) return null;
+  if (!unit || !entry) return null;
+  if (entry.action !== 'spell' || now - entry.createdAt > getBattleActionPresentationMs(entry)) return null;
   if (!entry.targetIds?.includes(unit.id)) return null;
 
   const spell = getBattleSpellFromLogEntry(entry);
@@ -1603,11 +1788,11 @@ function getBattleSpellImpact(
 function getFloatingBattleText(
   battle: BattleState,
   unit: BattleUnit | undefined,
+  entry: BattleLogEntry | undefined,
   now: number
 ): { text: string; tone: 'damage' | 'heal' | 'mana' | 'neutral' } | null {
-  if (!unit) return null;
-  const entry = battle.log[0];
-  if (!entry || now - entry.createdAt > 1500) return null;
+  if (!unit || !entry) return null;
+  if (now - entry.createdAt > getBattleActionPresentationMs(entry)) return null;
 
   const isTarget = Boolean(entry.targetIds?.includes(unit.id));
   const isActor = entry.actorId === unit.id;
@@ -1633,9 +1818,13 @@ function getFloatingBattleText(
   return null;
 }
 
-function getBattlePieceAnimation(battle: BattleState, unit: BattleUnit, now: number): BattlePieceAnimation {
-  const entry = battle.log[0];
-  if (!entry || now - entry.createdAt > 1500) return null;
+function getBattlePieceAnimation(
+  battle: BattleState,
+  unit: BattleUnit,
+  entry: BattleLogEntry | undefined,
+  now: number,
+): BattlePieceAnimation {
+  if (!entry || now - entry.createdAt > getBattleActionPresentationMs(entry)) return null;
 
   const isActor = entry.actorId === unit.id;
   const isTarget = Boolean(entry.targetIds?.includes(unit.id));
@@ -1667,9 +1856,14 @@ function getBattlePieceAnimation(battle: BattleState, unit: BattleUnit, now: num
   return null;
 }
 
-function getRecentlyDefeatedUnitAt(battle: BattleState, x: number, y: number, now: number): BattleUnit | undefined {
-  const entry = battle.log[0];
-  if (!entry || now - entry.createdAt > 1500) return undefined;
+function getRecentlyDefeatedUnitAt(
+  battle: BattleState,
+  x: number,
+  y: number,
+  entry: BattleLogEntry | undefined,
+  now: number,
+): BattleUnit | undefined {
+  if (!entry || now - entry.createdAt > getBattleActionPresentationMs(entry)) return undefined;
   if (entry.action !== 'attack' && entry.action !== 'spell') return undefined;
 
   return battle.units.find(unit => (
@@ -1909,7 +2103,6 @@ function BattleCenterBanner({ cue, active }: { cue: BattleCue; active: boolean }
     <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center p-6">
       <div className={`battle-center-banner max-w-sm rounded border px-5 py-3 text-center ${cueToneClasses(cue.tone)}`}>
         <div className="fantasy-heading text-2xl">{cue.headline}</div>
-        <p className="mt-1 text-xs font-bold text-[var(--ui-muted)]">{cue.detail}</p>
       </div>
     </div>
   );
@@ -1951,6 +2144,12 @@ type BattleLogSoundPlan = Array<{
   throttleMs?: number;
   volumeScale?: number;
 }>;
+
+function getEnemyBattleSoundDelay(phase: 'start' | 'impact' | 'death'): number {
+  if (phase === 'start') return 80;
+  if (phase === 'impact') return 300;
+  return 580;
+}
 
 function getBattleSoundDelay(speed: CombatSpeed, phase: 'start' | 'impact' | 'death'): number {
   if (speed === 'instant') {
@@ -2058,9 +2257,10 @@ function getSpellImpactSound(entry: BattleLogEntry): GameSoundId {
 }
 
 function getBattleLogSoundPlan(battle: BattleState, entry: BattleLogEntry, speed: CombatSpeed): BattleLogSoundPlan {
-  const startDelay = getBattleSoundDelay(speed, 'start');
-  const impactDelay = getBattleSoundDelay(speed, 'impact');
-  const deathDelay = getBattleSoundDelay(speed, 'death');
+  const enemyAction = entry.side === 'enemy';
+  const startDelay = enemyAction ? getEnemyBattleSoundDelay('start') : getBattleSoundDelay(speed, 'start');
+  const impactDelay = enemyAction ? getEnemyBattleSoundDelay('impact') : getBattleSoundDelay(speed, 'impact');
+  const deathDelay = enemyAction ? getEnemyBattleSoundDelay('death') : getBattleSoundDelay(speed, 'death');
   const plan: BattleLogSoundPlan = [];
 
   if (entry.action === 'move') {
@@ -2162,11 +2362,20 @@ function getBattleHoverForecast({
 
   if (!movementLocked && canAttack(activeUnit, unitAtCell)) {
     const damage = getAttackDamage(activeUnit, unitAtCell, battle);
+    const projectedHealth = Math.max(0, unitAtCell.currentHealth - damage);
+    const defenderAfterHit = { ...unitAtCell, currentHealth: projectedHealth };
+    const retaliationDamage = canRetaliateAfterAttack(battle, activeUnit, defenderAfterHit)
+      ? getRetaliationDamage(battle, activeUnit, defenderAfterHit)
+      : 0;
     return {
       ...baseForecast,
       actionLabel: activeUnit.range > 1 ? 'Ranged damage' : 'Melee damage',
       amount: Math.min(unitAtCell.currentHealth, damage),
-      projectedHealth: Math.max(0, unitAtCell.currentHealth - damage),
+      projectedHealth,
+      retaliationDamage: retaliationDamage || undefined,
+      retaliationCurrentHealth: retaliationDamage ? activeUnit.currentHealth : undefined,
+      retaliationProjectedHealth: retaliationDamage ? Math.max(0, activeUnit.currentHealth - retaliationDamage) : undefined,
+      retaliationMaxHealth: retaliationDamage ? activeUnit.maxHealth : undefined,
       tone: 'danger',
     };
   }
@@ -2251,35 +2460,30 @@ function getBattleHoverPreview({
   movementLocked?: boolean;
 }): BattleHoverPreviewData {
   if (battle.status !== 'active') {
-    return { title: 'Battle Ended', detail: 'Leave the field when you are ready.', tone: 'neutral' };
+    return { title: 'Battle Ended', detail: '', tone: 'neutral' };
   }
 
   if (isResolvingAction) {
-    return { title: 'Resolving', detail: 'The current action is playing out.', tone: 'neutral' };
+    return { title: 'Resolving', detail: '', tone: 'neutral' };
   }
 
   if (!activeUnit) {
-    return { title: 'No Active Unit', detail: 'Waiting for the next unit in the turn order.', tone: 'neutral' };
+    return { title: 'No Active Unit', detail: '', tone: 'neutral' };
   }
 
   if (!hoveredCell) {
-    const terrain = getTerrainAt(battle, activeUnit.x, activeUnit.y);
     return {
       title: activeUnit.name,
-      detail: activeUnit.chargedHeal
-        ? `Blessing charged. Next heal is stronger. ${BATTLE_TERRAIN_LABELS[terrain]}: ${BATTLE_TERRAIN_DESCRIPTIONS[terrain]}`
-        : `${BATTLE_TERRAIN_LABELS[terrain]}: ${BATTLE_TERRAIN_DESCRIPTIONS[terrain]}`,
+      detail: '',
       tone: activeUnit.side === 'player' ? 'good' : 'danger',
     };
   }
 
   const terrain = getTerrainAt(battle, hoveredCell.x, hoveredCell.y);
   const terrainLabel = BATTLE_TERRAIN_LABELS[terrain];
-  const terrainDescription = BATTLE_TERRAIN_DESCRIPTIONS[terrain];
-  const terrainCost = getTerrainMoveCost(terrain);
 
   if (isObstacle(battle, hoveredCell.x, hoveredCell.y)) {
-    return { title: 'Blocked', detail: `${terrainLabel}. This cell is blocked by terrain.`, tone: 'neutral' };
+    return { title: 'Blocked', detail: '', tone: 'neutral' };
   }
 
   const unitAtCell = getUnitAt(battle, hoveredCell.x, hoveredCell.y);
@@ -2290,9 +2494,7 @@ function getBattleHoverPreview({
         (selectedSpell.target === 'ally' && unitAtCell.side === activeUnit.side);
       return {
         title: validTarget ? selectedSpell.name : 'Wrong Target',
-        detail: validTarget
-          ? `Cast on ${unitAtCell.name}. Mana cost ${selectedSpell.cost}.`
-          : `${selectedSpell.name} cannot target ${unitAtCell.name}.`,
+        detail: '',
         tone: validTarget && selectedSpell.target === 'ally' ? 'good' : validTarget ? 'danger' : 'neutral',
       };
     }
@@ -2300,59 +2502,53 @@ function getBattleHoverPreview({
     if (isPlayerTurn && activeUnit.kind === 'commander' && unitAtCell.id === activeUnit.id) {
       return {
         title: 'King Spells',
-        detail: 'Click your commander or use the Spells button to open the spell book.',
+        detail: '',
         tone: 'good',
       };
     }
 
     if (isPlayerTurn && canHeal(activeUnit, unitAtCell)) {
       return {
-        title: `Heal ${unitAtCell.name}`,
-        detail: activeUnit.chargedHeal
-          ? `Blessed heal restores about ${getHealAmount(activeUnit, unitAtCell, battle)} health.`
-          : `Restores about ${getHealAmount(activeUnit, unitAtCell, battle)} health.`,
+        title: 'Healing',
+        detail: '',
         tone: 'good',
       };
     }
 
     if (isPlayerTurn && canAttack(activeUnit, unitAtCell)) {
-      const damage = getAttackDamage(activeUnit, unitAtCell, battle);
-      const defeatText = damage >= unitAtCell.currentHealth ? ' Likely defeat.' : '';
       return {
-        title: `Strike ${unitAtCell.name}`,
-        detail: `Deals about ${damage} damage.${defeatText}`,
+        title: 'Strike',
+        detail: '',
         tone: 'danger',
       };
     }
 
     return {
       title: unitAtCell.name,
-      detail: `${unitAtCell.currentHealth}/${unitAtCell.maxHealth} HP on ${terrainLabel}.`,
+      detail: '',
       tone: unitAtCell.side === 'player' ? 'good' : 'danger',
     };
   }
 
   if (isPlayerTurn && !movementLocked && canMoveTo(battle, activeUnit, hoveredCell.x, hoveredCell.y)) {
     return {
-      title: `Move to ${hoveredCell.x}:${hoveredCell.y}`,
-      detail: `${terrainLabel}. Movement cost ${terrainCost}. ${terrainDescription}`,
+      title: 'Move',
+      detail: '',
       tone: 'good',
     };
   }
 
   if (isPlayerTurn && movementLocked && !unitAtCell) {
     return {
-      title: terrainLabel,
-      detail: `Movement is pending. Attack, heal, cast, wait, or undo before moving again. ${terrainDescription}`,
+      title: 'Move Pending',
+      detail: '',
       tone: 'neutral',
     };
   }
 
   return {
     title: terrainLabel,
-    detail: isPlayerTurn
-      ? `Out of range for ${activeUnit.name}. ${terrainDescription}`
-      : terrainDescription,
+    detail: '',
     tone: 'neutral',
   };
 }
@@ -2375,37 +2571,35 @@ function getDefaultBattleCue({
   if (recruitOfferPending) {
     return {
       headline: 'Surrender Offer',
-      detail: 'This enemy is afraid enough to offer service instead of battle rewards.',
+      detail: '',
       tone: 'victory',
     };
   }
 
   if (battle.status === 'victory') {
-    return { headline: 'Victory', detail: 'The field is yours. Claim the spoils and leave the battle.', tone: 'victory' };
+    return { headline: 'Victory', detail: '', tone: 'victory' };
   }
 
   if (battle.status === 'defeat') {
-    return { headline: 'Defeat', detail: 'Protect the commander. If the king falls, the battle is lost.', tone: 'danger' };
+    return { headline: 'Defeat', detail: '', tone: 'danger' };
   }
 
   if (battle.status === 'recruited') {
-    return { headline: 'Recruited', detail: 'The enemy warband has joined you. No battle reward was taken.', tone: 'victory' };
+    return { headline: 'Recruited', detail: '', tone: 'victory' };
   }
 
   if (!activeUnit) {
-    return { headline: 'Resolving', detail: 'The field is settling.', tone: 'neutral' };
+    return { headline: 'Resolving', detail: '', tone: 'neutral' };
   }
 
   if (!isPlayerTurn) {
-    return { headline: 'Enemy Turn', detail: `${activeUnit.name} is preparing an action.`, tone: 'enemy' };
+    return { headline: 'Enemy Turn', detail: '', tone: 'enemy' };
   }
 
   if (selectedSpell) {
     return {
       headline: 'Choose Target',
-      detail: selectedSpell.target === 'enemy'
-        ? `Pick a highlighted enemy for ${selectedSpell.name}.`
-        : `Pick a highlighted ally for ${selectedSpell.name}.`,
+      detail: '',
       tone: selectedSpell.target === 'ally' ? 'player' : 'danger',
     };
   }
@@ -2413,7 +2607,7 @@ function getDefaultBattleCue({
   if (isCommanderTurn) {
     return {
       headline: 'Your Commander',
-      detail: 'Cast a spell, move, strike, or Focus Mana to save power for later.',
+      detail: '',
       tone: 'player',
     };
   }
@@ -2421,16 +2615,14 @@ function getDefaultBattleCue({
   if (activeUnit.healing > 0) {
     return {
       headline: 'Your Turn',
-      detail: activeUnit.chargedHeal
-        ? `${activeUnit.name}'s blessing is ready. Heal a wounded ally for a stronger restore.`
-        : `${activeUnit.name} can move, strike, heal a wounded ally, or wait to charge a stronger heal.`,
+      detail: '',
       tone: 'player',
     };
   }
 
   return {
     headline: 'Your Turn',
-    detail: `${activeUnit.name} can move to gold-lit tiles or strike red-lit enemies.`,
+    detail: '',
     tone: 'player',
   };
 }

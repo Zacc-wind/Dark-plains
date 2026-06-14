@@ -1,9 +1,11 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { getCurrentUser, getJobRewardPreview, getJobTravelDurationMs, startJob } from '@/lib/auth';
+import { getCurrentUser, getJobRewardPreview, getJobTravelDurationMs, JOB_DURATION_LABELS, startJob } from '@/lib/auth';
 import { emitFxEvent } from '@/lib/fxEvents';
 import { POI } from '@/lib/mapData';
+import { buildJobRewardChips } from '@/lib/rewardDisplay';
+import RewardIconStrip from '@/components/RewardIconStrip';
 
 interface POIModalProps {
   poi: POI | null;
@@ -28,7 +30,7 @@ export default function POIModal({ poi, onClose, onSelectJob, onTravel }: POIMod
 
   if (!poi) return null;
 
-  const jobDurations = ['5 min', '15 min', '30 min', '1 hour'];
+  const jobDurations = JOB_DURATION_LABELS;
   const isCampfire = poi.type === 'campfire';
   const poiWidth = isCampfire ? 2 : 4;
   const poiHeight = isCampfire ? 2 : 4;
@@ -69,7 +71,7 @@ export default function POIModal({ poi, onClose, onSelectJob, onTravel }: POIMod
   return (
     <div className="world-popup-layer poi-modal-layer pointer-events-none fixed inset-0 flex items-center justify-center px-4">
       <div
-        className="world-popup-panel poi-job-panel command-panel vine-frame pointer-events-auto relative w-full max-w-xl overflow-hidden rounded border text-zinc-100"
+        className="world-popup-panel poi-job-panel command-panel vine-frame pointer-events-auto relative w-full max-w-xl overflow-visible rounded border text-zinc-100"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="panel-header flex items-start justify-between gap-4 border-b px-5 py-4">
@@ -124,7 +126,9 @@ export default function POIModal({ poi, onClose, onSelectJob, onTravel }: POIMod
             {poi.jobs.map((job, index) => {
               const reward = getJobRewardPreview(index, poi.type);
               const levelLocked = Boolean(user && (user.stats.level || 1) < (reward.levelRequirement || 1));
-              const rewardLines = formatJobRewardLines(reward);
+              const rewardChips = buildJobRewardChips(reward, {
+                travelLabel: atLocation ? undefined : travelEtaLabel,
+              });
 
               return (
                 <div
@@ -138,12 +142,9 @@ export default function POIModal({ poi, onClose, onSelectJob, onTravel }: POIMod
                         <span className="ui-pill shrink-0 rounded border px-2 py-1 text-[10px] font-black">Lv {reward.levelRequirement}</span>
                       )}
                     </div>
-                    <div className="poi-job-rewards mt-2 grid grid-cols-2 gap-x-3 gap-y-1.5 text-xs font-bold">
-                      <span className="text-zinc-400">{jobDurations[index]}</span>
-                      {rewardLines.map(line => (
-                        <span key={line} className={getJobRewardLineClass(line)}>{line}</span>
-                      ))}
-                      {!atLocation && <span className="ui-accent">route +{travelEtaLabel}</span>}
+                    <div className="poi-job-rewards mt-2">
+                      <div className="poi-job-duration ui-faint text-[10px] font-black uppercase">{jobDurations[index]}</div>
+                      <RewardIconStrip chips={rewardChips} className="mt-1.5" />
                     </div>
                     {reward.rewardNote && <p className="ui-faint mt-2 text-[10px] font-bold">{reward.rewardNote}</p>}
                   </div>
@@ -172,32 +173,6 @@ function formatPoiTravelEta(ms: number): string {
   const seconds = Math.max(0, Math.ceil(ms / 1000));
   if (seconds < 60) return `${seconds}s`;
   return `${Math.ceil(seconds / 60)}m`;
-}
-
-function formatJobRewardLines(reward: ReturnType<typeof getJobRewardPreview>): string[] {
-  const lines: string[] = [];
-  if (reward.gold > 0) lines.push(`+${reward.gold} gold`);
-  if (reward.healthRestore) lines.push(`+${reward.healthRestore} HP`);
-  lines.push(`+${reward.exp} XP`);
-  if (reward.rareGems) lines.push(`+${reward.rareGems} gems`);
-  reward.items?.forEach(item => lines.push(item.quantity > 1 ? `${item.quantity} ${item.name}` : item.name));
-  if (reward.equipmentRarity) lines.push(`${reward.equipmentRarity} gear`);
-  if (reward.minionTier) {
-    const tierName = reward.minionTier === 'tier3' ? 'Tier III' : reward.minionTier === 'tier2' ? 'Tier II' : 'Tier I';
-    lines.push(`${tierName} recruit`);
-  }
-  if (lines.length === 0) lines.push('No reward');
-  return lines;
-}
-
-function getJobRewardLineClass(line: string): string {
-  const normalized = line.toLowerCase();
-  if (normalized.includes('gold')) return 'ui-gold';
-  if (normalized.includes('xp')) return 'text-sky-300';
-  if (normalized.includes('hp')) return 'text-emerald-300';
-  if (normalized.includes('gem') || normalized.includes('cache') || normalized.includes('spell')) return 'text-fuchsia-300';
-  if (normalized.includes('gear') || normalized.includes('unit') || normalized.includes('recruit')) return 'ui-accent';
-  return 'ui-muted';
 }
 
 function InfoPill({ label, value }: { label: string; value: string }) {

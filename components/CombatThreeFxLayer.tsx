@@ -26,8 +26,6 @@ interface ParticleRuntime {
   velocity: Float32Array;
 }
 
-type AreaSpellTone = 'damage' | 'support' | 'buff' | 'control';
-
 const COLORS = {
   dust: new THREE.Color(0xd9c7a0),
   melee: new THREE.Color(0xffd9a8),
@@ -39,17 +37,6 @@ const COLORS = {
   gold: new THREE.Color(0xffcc45),
   debuff: new THREE.Color(0x9b5cff),
 };
-
-const AREA_SPELL_NAMES = [
-  'Rallying Hymn',
-  'Chain Spark',
-  'Royal Command',
-  'Moonlit Veil',
-  'Iron Benediction',
-  'Eclipse Nova',
-  'Saint-King Aegis',
-  'Time-Crown Edict',
-];
 
 function disposeObject(object: THREE.Object3D): void {
   object.traverse(child => {
@@ -180,10 +167,6 @@ function getBattleLogStyle(entry: BattleLogEntry, actor?: BattleUnit): BattleLog
   if (entry.action === 'attack') return actor?.range && actor.range > 1 ? 'ranged' : 'melee';
   if (entry.action === 'spell') return 'spell-damage';
   return undefined;
-}
-
-function isAreaSpellEntry(entry: BattleLogEntry): boolean {
-  return entry.action === 'spell' && AREA_SPELL_NAMES.some(name => entry.message.includes(name));
 }
 
 function easeOut(progress: number): number {
@@ -437,72 +420,6 @@ function createManaFocus(origin: THREE.Vector3): RuntimeCombatEffect {
   };
 }
 
-function getAveragePoint(points: THREE.Vector3[]): THREE.Vector3 {
-  if (points.length === 0) return new THREE.Vector3(0, 0, 0);
-
-  return points
-    .reduce((total, point) => total.add(point), new THREE.Vector3(0, 0, 0))
-    .multiplyScalar(1 / points.length);
-}
-
-function createAreaSpellWave(origins: THREE.Vector3[], tone: AreaSpellTone): RuntimeCombatEffect {
-  const root = new THREE.Group();
-  const center = getAveragePoint(origins);
-  const color = tone === 'damage'
-    ? COLORS.spell
-    : tone === 'control'
-      ? COLORS.debuff
-      : tone === 'buff'
-        ? COLORS.shield
-        : COLORS.heal;
-  const accent = tone === 'damage'
-    ? COLORS.damage
-    : tone === 'control'
-      ? COLORS.spell
-      : tone === 'buff'
-        ? COLORS.gold
-        : COLORS.shield;
-  const gravity = tone === 'support' ? -12 : tone === 'buff' ? -5 : 8;
-  root.position.copy(center);
-
-  const centerParticles = addParticles(root, new THREE.Vector3(0, 0, 0), accent, 42, 22, 74, 2.1);
-
-  const targetBursts = origins.map((origin, index) => {
-    const group = new THREE.Group();
-    group.position.copy(new THREE.Vector3().subVectors(origin, center));
-
-    const particles = addParticles(
-      group,
-      new THREE.Vector3(0, 0, 0),
-      color,
-      tone === 'damage' ? 34 : 28,
-      tone === 'damage' ? 10 : 13,
-      tone === 'damage' ? 58 : 38,
-      tone === 'damage' ? 2.6 : 2.2
-    );
-
-    root.add(group);
-    return { group, particles, index };
-  });
-
-  return {
-    root,
-    life: 0,
-    maxLife: tone === 'damage' ? 2.15 : 2.45,
-    update: (delta, progress) => {
-      root.rotation.z += delta * (tone === 'control' ? -0.38 : 0.22);
-      updateParticles(centerParticles, delta, progress, gravity * 0.25);
-
-      targetBursts.forEach(({ group, particles, index }) => {
-        const delay = index * 0.045;
-        const localProgress = Math.max(0, Math.min(1, (progress - delay) / Math.max(0.1, 1 - delay)));
-        group.rotation.z += delta * (tone === 'control' ? -0.9 : 0.55);
-        if (localProgress > 0) updateParticles(particles, delta, localProgress, gravity);
-      });
-    },
-  };
-}
-
 function createRuntime(mount: HTMLDivElement): RuntimeContext {
   let width = Math.max(1, mount.clientWidth);
   let height = Math.max(1, mount.clientHeight);
@@ -571,28 +488,6 @@ function createRuntime(mount: HTMLDivElement): RuntimeContext {
     }
 
     const resolvedTargets = targets.length > 0 ? targets : actor ? [actor] : [];
-    if (isAreaSpellEntry(entry) && resolvedTargets.length > 1) {
-      const origins = resolvedTargets.map(target => getUnitCenter(target, width, height, battle.boardWidth, battle.boardHeight));
-      if (style === 'spell-damage') {
-        addEffect(createAreaSpellWave(origins, 'damage'));
-        return;
-      }
-
-      if (style === 'spell-control' || style === 'debuff') {
-        addEffect(createAreaSpellWave(origins, 'control'));
-        return;
-      }
-
-      if (style === 'buff') {
-        addEffect(createAreaSpellWave(origins, 'buff'));
-        return;
-      }
-
-      if (style === 'spell-support' || style === 'heal') {
-        addEffect(createAreaSpellWave(origins, 'support'));
-        return;
-      }
-    }
 
     if (style === 'melee') {
       spawnAtTargets(targets, battle, origin => {
