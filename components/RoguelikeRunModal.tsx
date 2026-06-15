@@ -214,6 +214,15 @@ function getDungeonNodeIconPath(type: DungeonNodeType, bossId?: string): string 
   return DUNGEON_NODE_ICONS[type];
 }
 
+function getRunMapNodeArtClass(node: Pick<DungeonNode, 'type'>): string {
+  const classes = ['run-route-node-art', 'object-contain'];
+  if (node.type === 'boss') classes.push('run-route-node-art-boss');
+  else if (node.type === 'shop') classes.push('run-route-node-art-shop');
+  else if (node.type === 'event') classes.push('run-route-node-art-event');
+  else if (node.type !== 'battle') classes.push('run-route-node-art-knockout');
+  return classes.join(' ');
+}
+
 function getRunMapNodeIconPath(
   node: DungeonNode,
   session: Pick<RunSession, 'dailyChallenge' | 'dungeon' | 'encounterEnemy'>,
@@ -1488,21 +1497,26 @@ function DailyRouteMap({
   onSelectDungeonNode: (node: DungeonNode) => void;
 }) {
   const rows = getDailyNodeRows(session.nodes);
-  const mapHeightRem = getRunMapHeightRem(rows.length);
+  const mapHeightRem = getRunMapHeightRem(rows);
   const connections = getDailyMapConnections(rows, mapHeightRem);
 
   return (
     <div className="run-route-shell run-route-shell-full">
       <div className="run-route-map-frame run-route-map-frame-full">
-        <div className="run-route-map" style={{ minHeight: `${mapHeightRem}rem` }}>
-          <img
-            src="/assets/roguelike-background.png"
-            alt=""
-            className="run-route-map-bg"
-            aria-hidden="true"
-            decoding="async"
-            draggable={false}
-          />
+        <div
+          className="run-route-map"
+          style={{ height: `${mapHeightRem}rem`, minHeight: `${mapHeightRem}rem` }}
+        >
+          <div className="run-route-map-bg-wrap" aria-hidden>
+            <img
+              src="/assets/roguelike-background.png"
+              alt=""
+              className="run-route-map-bg"
+              decoding="async"
+              draggable={false}
+            />
+            <div className="run-route-map-bg-veil" />
+          </div>
           <svg className="run-route-lines" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
             {connections.map(connection => {
               const state = getRunConnectionState(connection.from, connection.to, reachableIds);
@@ -1544,8 +1558,9 @@ function DailyRouteMap({
                         src={iconPath}
                         alt=""
                         fill
-                        sizes="140px"
-                        className={`run-route-node-art object-contain${node.type === 'boss' ? ' run-route-node-art-boss' : ''}${node.type !== 'battle' ? ' run-route-node-art-knockout' : ''}`}
+                        sizes="220px"
+                        className={getRunMapNodeArtClass(node)}
+                        style={{ imageRendering: 'auto' }}
                         unoptimized
                       />
                     </span>
@@ -1660,12 +1675,19 @@ function getRunNodeActionLabel(node: DungeonNode): string {
 
 const RUN_MAP_ROW_START_REM = 6.5;
 const RUN_MAP_ROW_GAP_REM = 12.25;
-const RUN_MAP_BOTTOM_PAD_REM = 8.5;
+const RUN_MAP_NODE_TAIL_REM = 5.1;
+const RUN_MAP_BOSS_TAIL_REM = 5.75;
 
-function getRunMapHeightRem(rowCount: number): number {
-  if (rowCount <= 0) return 56;
-  if (rowCount === 1) return RUN_MAP_ROW_START_REM + RUN_MAP_BOTTOM_PAD_REM;
-  return RUN_MAP_ROW_START_REM + (rowCount - 1) * RUN_MAP_ROW_GAP_REM + RUN_MAP_BOTTOM_PAD_REM;
+function getRunMapTailPadRem(rows: Array<{ nodes: DungeonNode[] }>): number {
+  const lastRow = rows[rows.length - 1];
+  if (!lastRow) return RUN_MAP_NODE_TAIL_REM;
+  return lastRow.nodes.some(node => node.type === 'boss') ? RUN_MAP_BOSS_TAIL_REM : RUN_MAP_NODE_TAIL_REM;
+}
+
+function getRunMapHeightRem(rows: Array<{ nodes: DungeonNode[] }>): number {
+  if (rows.length <= 0) return 56;
+  const lastRowTop = getRunMapRowTopRem(rows.length - 1);
+  return lastRowTop + getRunMapTailPadRem(rows);
 }
 
 function getRunMapRowTopRem(rowIndex: number): number {
