@@ -220,12 +220,14 @@ function Save-CroppedEquipmentIcon(
 
 $largeAssets = @(
   'world-map.png',
+  'rougealike-backgorund.png',
   'town-harborview-bg.png',
   'town-riverside-bg.png'
 )
 
 foreach ($asset in $largeAssets) {
-  Copy-Asset $asset (Join-Path $publicAssets $asset)
+  $targetName = if ($asset -eq 'rougealike-backgorund.png') { 'roguelike-background.png' } else { $asset }
+  Copy-Asset $asset (Join-Path $publicAssets $targetName)
 }
 
 $poiSprites = @(

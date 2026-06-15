@@ -21,6 +21,9 @@ import {
   canRetaliateAfterAttack,
   castBattleSpell,
   createNpcBattleState,
+  getBattleSpellLogStyle,
+  getRecentPresentationLogEntry,
+  pickFreshPresentationLogEntry,
   focusCommanderMana,
   getActiveUnit,
   getAttackDamage,
@@ -204,8 +207,17 @@ interface BattleSpellCastNoticeData {
 interface BattleSpellImpactData {
   spell: BattleSpell;
   iconPath: string;
-  tone: 'damage' | 'support';
+  tone: 'damage' | 'support' | 'field';
 }
+
+interface BattleStanceIconImpactData {
+  iconPath: string;
+  tone: 'support' | 'field';
+  sizeClass: 'wait' | 'mana-focus';
+}
+
+const BATTLE_WAIT_SHIELD_ICON = '/assets/icons/defense.png';
+const BATTLE_MANA_FOCUS_ICON = '/assets/icons/xp.png';
 
 const BATTLE_PRELOAD_SOUND_IDS: GameSoundId[] = [
   'combat.weaponDraw',
@@ -280,6 +292,7 @@ export default function BattleModal({
   const battleSoundTimers = useRef<number[]>([]);
   const spellNoticeTimer = useRef<number | null>(null);
   const lastSoundLogEntryId = useRef<string | null>(null);
+  const processedBattleLogIds = useRef<Set<string>>(new Set());
   const rewardClaimed = useRef(false);
   const battleEndNotified = useRef(false);
   const completionNoticeEmitted = useRef(false);
@@ -311,15 +324,17 @@ export default function BattleModal({
 
   useEffect(() => {
     if (!battle) return;
-    const entry = battle.log[0];
-    if (!entry) return;
 
     if (lastSoundLogEntryId.current === null) {
-      lastSoundLogEntryId.current = entry.id;
+      battle.log.forEach(entry => processedBattleLogIds.current.add(entry.id));
+      lastSoundLogEntryId.current = battle.log[0]?.id ?? null;
       return;
     }
 
-    if (lastSoundLogEntryId.current === entry.id) return;
+    const freshEntries = battle.log.filter(entry => !processedBattleLogIds.current.has(entry.id));
+    freshEntries.forEach(entry => processedBattleLogIds.current.add(entry.id));
+    const entry = pickFreshPresentationLogEntry(freshEntries);
+    if (!entry || lastSoundLogEntryId.current === entry.id) return;
     lastSoundLogEntryId.current = entry.id;
 
     battleSoundTimers.current.forEach(timer => window.clearTimeout(timer));
@@ -344,10 +359,10 @@ export default function BattleModal({
   }, [battle, battleSpeed]);
 
   useEffect(() => {
-    const entry = battle?.log[0];
-    if (!entry || entry.action !== 'spell') return;
+    const entry = battle ? getRecentPresentationLogEntry(battle, Date.now()) : undefined;
+    if (!entry) return;
 
-    const expiresAt = entry.createdAt + SPELL_PRESENTATION_MS;
+    const expiresAt = entry.createdAt + getBattleActionPresentationMs(entry);
     const pinTimer = window.setTimeout(() => {
       setPresentationPin({ entry, expiresAt });
     }, 0);
@@ -361,7 +376,7 @@ export default function BattleModal({
       window.clearTimeout(pinTimer);
       window.clearTimeout(timer);
     };
-  }, [battle?.log[0]?.id]);
+  }, [battle?.log]);
 
   useEffect(() => {
     if (!battle || battle.status !== 'active') return;
@@ -387,7 +402,7 @@ export default function BattleModal({
         if (!current) return current;
 
         const next = runEnemyBattleTurn(current);
-        const holdMs = next.log[0]?.action === 'spell'
+        const holdMs = getRecentPresentationLogEntry(next, Date.now())?.action === 'spell'
           ? ENEMY_BATTLE_PACE.spellPresentationMs
           : enemyHoldMs;
 
@@ -569,7 +584,7 @@ export default function BattleModal({
       intensity: cue.tone === 'danger' ? 0.76 : 0.62,
     });
 
-    const isSpellAction = nextBattle.log[0]?.action === 'spell';
+    const isSpellAction = Boolean(getRecentPresentationLogEntry(nextBattle, Date.now())?.action === 'spell');
     const applyDelayMs = speedConfig.playerDelayMs;
 
     if (isSpellAction) {
@@ -1038,6 +1053,7 @@ export default function BattleModal({
                 const actionable = canMove || canStrike || canMend || canSpellTarget;
                 const floatingText = getFloatingBattleText(battle, unit || defeatedUnit, presentationEntry, now);
                 const spellImpact = getBattleSpellImpact(battle, unit || defeatedUnit, presentationEntry, now);
+                const stanceImpact = getBattleStanceIconImpact(unit || defeatedUnit, presentationEntry, now);
 
                 return (
                   <div
@@ -1111,12 +1127,14 @@ export default function BattleModal({
                       />
                     )}
                     {defeatedUnit && <BattleDeathMarker unit={defeatedUnit} />}
-                    {spellImpact && (
+                    {stanceImpact ? (
+                      <BattleStanceIconImpact impact={stanceImpact} />
+                    ) : spellImpact ? (
                       <BattleSpellIconImpact
                         impact={spellImpact}
                         delayMs={Math.max(0, (presentationEntry?.targetIds?.indexOf((unit || defeatedUnit)?.id || '') ?? 0) * 90)}
                       />
-                    )}
+                    ) : null}
                     {floatingText && <BattleFloatingText text={floatingText.text} tone={floatingText.tone} />}
                   </div>
                 );
@@ -1427,6 +1445,18 @@ function BattleSpellMenu({
   );
 }
 
+const ARMY_BUFF_SPELL_IDS = new Set(['royal-command', 'moonlit-veil', 'iron-benediction']);
+
+function getSpellPresentationTone(spell: BattleSpell): 'damage' | 'support' | 'field' {
+  const style = getBattleSpellLogStyle(spell.id);
+  if (style === 'spell-damage' || style === 'spell-drain') return 'damage';
+  if (style === 'spell-control' || style === 'debuff') return spell.target === 'enemy' ? 'damage' : 'field';
+  if (style === 'spell-support' || style === 'heal' || style === 'buff' || style === 'morale') return 'support';
+  if (spell.target === 'enemy') return 'damage';
+  if (spell.target === 'ally') return 'support';
+  return 'field';
+}
+
 function getSpellTargetLabel(target: BattleSpell['target']): string {
   if (target === 'enemy') return 'Damage';
   if (target === 'ally') return 'Support';
@@ -1461,7 +1491,7 @@ function getSpellVisual(spell: BattleSpell): { iconPath: string; tierLabel: stri
 }
 
 function BattleSpellCastNotice({ notice }: { notice: BattleSpellCastNoticeData }) {
-  const tone = notice.spell.target === 'enemy' ? 'damage' : notice.spell.target === 'ally' ? 'support' : 'field';
+  const tone = getSpellPresentationTone(notice.spell);
 
   return (
     <div className={`battle-spell-cast-notice battle-spell-cast-notice-${tone}`} aria-hidden="true">
@@ -1788,6 +1818,25 @@ function getUnitMoveTransit(
   };
 }
 
+function BattleStanceIconImpact({ impact }: { impact: BattleStanceIconImpactData }) {
+  return (
+    <span
+      className={`battle-spell-impact battle-spell-impact-${impact.tone} battle-stance-icon-impact battle-stance-icon-impact-${impact.sizeClass}`}
+      style={{ '--stance-icon': `url("${impact.iconPath}")` } as CSSProperties}
+      aria-hidden="true"
+    >
+      <Image
+        src={impact.iconPath}
+        alt=""
+        fill
+        sizes="96px"
+        className="battle-spell-impact-image object-contain"
+        unoptimized
+      />
+    </span>
+  );
+}
+
 function BattleSpellIconImpact({ impact, delayMs = 0 }: { impact: BattleSpellImpactData; delayMs?: number }) {
   const style = {
     '--spell-icon': `url("${impact.iconPath}")`,
@@ -1821,7 +1870,7 @@ function getPresentationEntry(
   now: number,
 ): BattleLogEntry | undefined {
   if (pin && now < pin.expiresAt) return pin.entry;
-  return battle.log[0];
+  return getRecentPresentationLogEntry(battle, now) ?? battle.log[0];
 }
 
 function getBattleActionPresentationMs(entry: BattleLogEntry | undefined): number {
@@ -1844,23 +1893,46 @@ function getBattleSpellImpact(
 ): BattleSpellImpactData | null {
   if (!unit || !entry) return null;
   if (entry.action !== 'spell' || now - entry.createdAt > getBattleActionPresentationMs(entry)) return null;
-  if (!entry.targetIds?.includes(unit.id)) return null;
 
   const spell = getBattleSpellFromLogEntry(entry);
   if (!spell) return null;
 
-  const isSupportTone =
-    entry.style === 'spell-support' ||
-    entry.style === 'heal' ||
-    entry.style === 'buff' ||
-    entry.style === 'morale' ||
-    (entry.style === 'spell-control' && entry.side === unit.side);
+  const isTarget = Boolean(entry.targetIds?.includes(unit.id));
+  const isActor = entry.actorId === unit.id;
+  if (!isTarget && !(isActor && spell.target === 'none')) return null;
 
   return {
     spell,
     iconPath: getSpellIconPath(spell),
-    tone: isSupportTone ? 'support' : 'damage',
+    tone: getSpellPresentationTone(spell),
   };
+}
+
+function getBattleStanceIconImpact(
+  unit: BattleUnit | undefined,
+  entry: BattleLogEntry | undefined,
+  now: number,
+): BattleStanceIconImpactData | null {
+  if (!unit || !entry || entry.actorId !== unit.id) return null;
+  if (now - entry.createdAt > getBattleActionPresentationMs(entry)) return null;
+
+  if (entry.action === 'wait') {
+    return {
+      iconPath: BATTLE_WAIT_SHIELD_ICON,
+      tone: 'support',
+      sizeClass: 'wait',
+    };
+  }
+
+  if (entry.action === 'mana') {
+    return {
+      iconPath: BATTLE_MANA_FOCUS_ICON,
+      tone: 'field',
+      sizeClass: 'mana-focus',
+    };
+  }
+
+  return null;
 }
 
 function getFloatingBattleText(
@@ -1914,16 +1986,17 @@ function getBattlePieceAnimation(
     if (entry.action === 'attack') return style === 'ranged' ? 'ranged' : 'melee';
     if (entry.action === 'heal') return 'heal';
     if (entry.action === 'spell') return 'commander-spell';
-    if (entry.action === 'wait' && style === 'buff') return 'buff';
-    if (entry.action === 'wait') return 'defend';
-    if (entry.action === 'morale' || entry.action === 'mana') return 'morale';
+    if (entry.action === 'wait' || entry.action === 'mana') return null;
+    if (entry.action === 'morale') return 'morale';
   }
 
   if (isTarget) {
     if (entry.action === 'attack') return style === 'ranged' ? 'hit-ranged' : 'hit-melee';
     if (entry.action === 'spell') {
       if (style === 'spell-support' || style === 'heal') return 'heal';
-      if (style === 'buff') return 'buff';
+      if (style === 'buff') {
+        return entry.spellId && ARMY_BUFF_SPELL_IDS.has(entry.spellId) ? 'morale' : 'buff';
+      }
       if (style === 'debuff' || style === 'spell-control') return 'debuff';
       if (style === 'morale') return 'morale';
       return 'spell-hit';

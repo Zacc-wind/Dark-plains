@@ -2013,7 +2013,7 @@ function mutateUnits(state: BattleState, side: BattleSide, update: (unit: Battle
   };
 }
 
-function getBattleSpellLogStyle(spellId: string): BattleLogStyle {
+export function getBattleSpellLogStyle(spellId: string): BattleLogStyle {
   if (['sanctified-mend', 'rallying-hymn', 'soul-tether', 'saint-king-aegis'].includes(spellId)) {
     return 'spell-support';
   }
@@ -2029,6 +2029,35 @@ function getBattleSpellLogStyle(spellId: string): BattleLogStyle {
   if (spellId === 'blood-star') return 'spell-drain';
 
   return 'spell-damage';
+}
+
+export const BATTLE_SPELL_PRESENTATION_MS = 2300;
+export const BATTLE_ENEMY_PRESENTATION_MS = 1850;
+export const BATTLE_DEFAULT_PRESENTATION_MS = 1500;
+
+export function isPresentationBattleLogAction(action: BattleLogAction): boolean {
+  return action !== 'round' && action !== 'system';
+}
+
+export function getBattleLogPresentationMs(entry: BattleLogEntry): number {
+  if (entry.action === 'spell') return BATTLE_SPELL_PRESENTATION_MS;
+  if (entry.side === 'enemy') return BATTLE_ENEMY_PRESENTATION_MS;
+  return BATTLE_DEFAULT_PRESENTATION_MS;
+}
+
+export function getRecentPresentationLogEntry(battle: BattleState, now = Date.now()): BattleLogEntry | undefined {
+  const candidates = battle.log.filter(entry => (
+    isPresentationBattleLogAction(entry.action)
+    && now - entry.createdAt < getBattleLogPresentationMs(entry)
+  ));
+
+  return candidates.find(entry => entry.action === 'spell') ?? candidates[0];
+}
+
+export function pickFreshPresentationLogEntry(entries: BattleLogEntry[]): BattleLogEntry | undefined {
+  if (entries.length === 0) return undefined;
+  return entries.find(entry => entry.action === 'spell')
+    ?? entries.find(entry => isPresentationBattleLogAction(entry.action));
 }
 
 export function castBattleSpell(state: BattleState, spellId: string, targetId?: string): BattleState {

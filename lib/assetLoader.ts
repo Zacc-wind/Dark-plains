@@ -65,7 +65,7 @@ export const ASSET_PATHS = {
     battlefield: '/assets/battlefield-bg.png',
     harbor: '/assets/town-harborview-bg.png',
     riverside: '/assets/town-riverside-bg.png',
-    road: '/assets/world-map.jpg',
+    road: '/assets/roguelike-background.png',
   },
   icons: {
     attack: '/assets/icons/attack.png',

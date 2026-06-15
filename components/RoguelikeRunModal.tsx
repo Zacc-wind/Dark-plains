@@ -19,11 +19,27 @@ import {
 import { emitCompletionNotice, type CompletionRewardLine } from '@/lib/completionEvents';
 import { emitFxEvent } from '@/lib/fxEvents';
 import {
+  addRunEquipment,
+  createEmptyRunEquipmentState,
+  equipRunItem,
+  formatRunEquipmentSummary,
+  generateRunLootEquipment,
+  getEquippedRunItem,
+  getRunEquipmentIconPath,
+  getUnequippedRunEquipment,
+  RUN_EQUIPMENT_LAYOUT,
+  RUN_EQUIPMENT_SLOT_LABELS,
+  RUN_EQUIPMENT_SLOTS,
+  RUN_MAX_EQUIPMENT_BAG,
+  unequipRunItem,
+} from '@/lib/runEquipment';
+import {
   ActivityEntry,
   CharacterStats,
   type DailyRunChallenge,
   Equipment,
   EquipmentRarity,
+  EquipmentSlot,
   InventoryItem,
   MAX_FIELD_MINIONS,
   MINION_CLASS_LABELS,
@@ -105,6 +121,7 @@ interface RunBattleReport {
 interface RunShopOffer {
   choiceId: string;
   cost: number;
+  equipmentOffer?: Equipment;
 }
 
 interface DungeonNode {
@@ -164,10 +181,18 @@ interface RunSession {
   shopBuyHistory?: string[];
   omenHistory?: string[];
   permanentSpellUnlocks?: string[];
+  runEquipment: Equipment[];
+  runEquippedSlots: Partial<Record<EquipmentSlot, string>>;
 }
+
+type StoredRunRewardEquipment = {
+  choiceId: string;
+  equipment: Equipment;
+};
 
 type StoredRunSession = Omit<RunSession, 'rewardChoices'> & {
   rewardChoiceIds: string[];
+  rewardEquipmentOffers?: StoredRunRewardEquipment[];
   savedAt: number;
   ownerUsername: string;
   dateKey: string;
@@ -287,6 +312,7 @@ interface RunRewardChoice {
   description: string;
   apply: (session: RunSession) => RunSession;
   isAvailable?: (session: RunSession) => boolean;
+  equipmentOffer?: Equipment;
 }
 
 interface BattleEndResult {
@@ -362,8 +388,10 @@ const RANDOM_RUN_ACTIVE_SESSION_KEY = 'random-active';
 const RANDOM_RUN_LOBBY_BOSS_COUNT = 8;
 const RANDOM_RUN_LOBBY_BOSS_KEY = 'pirate_game_random_run_lobby_boss';
 const RUN_REWARD_CHOICE_COUNT = 3;
-const RUN_BLESSING_SPELL_OFFER_CHANCE = 0.26;
-const RUN_SHOP_SPELL_OFFER_CHANCE = 0.42;
+const RUN_BLESSING_SPELL_OFFER_CHANCE = 0.05;
+const RUN_BLESSING_EQUIPMENT_OFFER_CHANCE = 0.12;
+const RUN_SHOP_SPELL_OFFER_CHANCE = 0.16;
+const RUN_SHOP_EQUIPMENT_OFFER_CHANCE = 0.22;
 const RUN_SHOP_CHOICE_COUNT = 4;
 const RUN_SHOP_REROLL_COUNT = 3;
 const RUN_OMEN_REROLL_COUNT = 1;
@@ -501,6 +529,26 @@ function makeSpellLearnReward(spell: (typeof BATTLE_SPELLS)[number]): RunRewardC
     isAvailable: session => !session.knownSpellIds.includes(spell.id),
     apply: session => learnRunSpell(session, spell.id),
   };
+}
+
+function restoreRunEquipmentReward(choiceId: string, item: Equipment): RunRewardChoice {
+  return {
+    id: choiceId,
+    name: item.name,
+    description: `${formatRunEquipmentSummary(item)} (${item.rarity}).`,
+    equipmentOffer: item,
+    apply: session => addRunEquipment(session, item),
+  };
+}
+
+function makeRunEquipmentReward(session: RunSession, forcedRarity?: EquipmentRarity): RunRewardChoice {
+  const item = generateRunLootEquipment(session.wins, session.targetBattles, forcedRarity);
+  return restoreRunEquipmentReward(`gear-offer-${item.id}`, item);
+}
+
+function pickRunEquipmentReward(session: RunSession): RunRewardChoice | null {
+  if (session.runEquipment.length >= RUN_MAX_EQUIPMENT_BAG) return null;
+  return makeRunEquipmentReward(session);
 }
 
 const RUN_SPELL_REWARDS: RunRewardChoice[] = BATTLE_SPELLS.map(makeSpellLearnReward);
@@ -814,7 +862,6 @@ function RunController({
   const previousPhaseRef = useRef<RunPhase | null>(null);
   const completionIntroTimeoutRef = useRef<number | null>(null);
   const [completionView, setCompletionView] = useState<'defeat-burst' | 'report' | null>(null);
-  const [runStatsOpen, setRunStatsOpen] = useState(false);
   const isFormationPhase = session.phase === 'formation';
   const isMapPhase = session.phase === 'map';
   const isDraftPhase = session.phase === 'draft';
@@ -1053,7 +1100,7 @@ function RunController({
     setSession(current => {
       if (!current) return current;
       const aliveUnits = getAliveRunRoster(current);
-      const formation = mergeFormation(aliveUnits.slice(0, MAX_FIELD_MINIONS), current.formation);
+      const formation = mergeFormation(aliveUnits, current.formation, MAX_FIELD_MINIONS);
       const issue = getRunFormationIssue(current, formation);
 
       if (issue) {
@@ -1100,15 +1147,20 @@ function RunController({
       }}
     >
       <section className={`run-modal-panel command-panel vine-frame flex w-full flex-col overflow-hidden rounded border ${isFormationPhase ? 'run-formation-modal h-[calc(100vh-0.5rem)] max-h-[calc(100vh-0.5rem)] max-w-none' : isMapPhase ? 'run-map-modal h-[calc(100vh-0.5rem)] max-h-[calc(100vh-0.5rem)] max-w-none' : isDraftPhase ? 'run-draft-modal h-[calc(100vh-0.5rem)] max-h-[calc(100vh-0.5rem)] max-w-none' : isCompletePhase ? 'run-completion-modal random-run-lobby h-[calc(100vh-0.5rem)] max-h-[calc(100vh-0.5rem)] max-w-none' : isRunIntermissionPhase ? 'run-reward-modal random-run-lobby h-[calc(100vh-0.5rem)] max-h-[calc(100vh-0.5rem)] max-w-none' : 'max-h-[94vh] max-w-6xl'}`}>
-        {session.notice && session.phase !== 'complete' && (
+        {session.notice && session.phase !== 'complete' && session.mode !== 'daily' && (
           <div className={`ui-notice border-b font-bold ${isMapPhase || isFormationPhase ? 'run-map-notice px-3 py-1.5 text-[11px]' : 'px-5 py-3 text-sm'}`}>
             {session.notice}
           </div>
         )}
 
-        <div className={`grid min-h-0 flex-1 ${isFormationPhase ? 'overflow-hidden p-2' : isCompletePhase ? 'run-completion-layout overflow-hidden' : isRunIntermissionPhase ? 'run-reward-layout overflow-hidden' : isMapPhase ? 'run-map-layout gap-3 overflow-hidden p-2 lg:grid-cols-[18rem_minmax(0,1fr)]' : isDraftPhase ? 'run-draft-layout overflow-hidden p-2' : 'gap-5 overflow-y-auto p-5 lg:grid-cols-[18rem_minmax(0,1fr)]'}`}>
+        <div className={`grid min-h-0 flex-1 ${isFormationPhase ? 'overflow-hidden p-2' : isCompletePhase ? 'run-completion-layout overflow-hidden' : isRunIntermissionPhase ? 'run-reward-layout overflow-hidden' : isMapPhase ? 'run-map-layout gap-3 overflow-hidden p-2 lg:grid-cols-[20rem_minmax(0,1fr)]' : isDraftPhase ? 'run-draft-layout overflow-hidden p-2' : 'gap-5 overflow-y-auto p-5 lg:grid-cols-[20rem_minmax(0,1fr)]'}`}>
           {!isFormationPhase && !isDraftPhase && !isCompletePhase && !isRunIntermissionPhase && (
-            <RunRoster session={session} onOpenStats={() => setRunStatsOpen(true)} variant={isMapPhase ? 'map' : 'default'} />
+            <RunRoster
+              session={session}
+              variant={isMapPhase ? 'map' : 'default'}
+              onEquipGear={(equipmentId) => setSession(current => current ? equipRunItem(current, equipmentId) : current)}
+              onUnequipGear={(slot) => setSession(current => current ? unequipRunItem(current, slot) : current)}
+            />
           )}
 
           <main className={`min-h-0 ${isCompletePhase || isRunIntermissionPhase ? 'h-full' : ''}`}>
@@ -1184,10 +1236,6 @@ function RunController({
             )}
           </main>
         </div>
-
-        {runStatsOpen && (
-          <RunStatsModal session={session} onClose={() => setRunStatsOpen(false)} />
-        )}
       </section>
     </div>
   );
@@ -1447,6 +1495,14 @@ function DailyRouteMap({
     <div className="run-route-shell run-route-shell-full">
       <div className="run-route-map-frame run-route-map-frame-full">
         <div className="run-route-map" style={{ minHeight: `${mapHeightRem}rem` }}>
+          <img
+            src="/assets/roguelike-background.png"
+            alt=""
+            className="run-route-map-bg"
+            aria-hidden="true"
+            decoding="async"
+            draggable={false}
+          />
           <svg className="run-route-lines" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
             {connections.map(connection => {
               const state = getRunConnectionState(connection.from, connection.to, reachableIds);
@@ -1703,44 +1759,24 @@ function RewardPanel({
 
       <section className="run-draft-choice-shell run-reward-body min-h-0 p-2.5 sm:p-3">
         <div className="run-reward-roster-scene rounded border">
-          <div className="run-draft-choice-header mb-2 flex flex-wrap items-end justify-between gap-2">
-            <div>
-              <div className="arcane-label">Run Roster</div>
-              <h4 className="fantasy-heading text-lg sm:text-xl">Survivors</h4>
+          <div className="run-roster-list-head">
+            <h3 className="fantasy-heading text-sm font-black">Run Roster</h3>
+            <span className="ui-faint text-xs font-bold">{standingCount}/{session.minions.length}</span>
+          </div>
+
+          {session.minions.length === 0 ? (
+            <div className="ui-empty rounded border border-dashed px-3 py-4 text-center text-xs font-bold">
+              No units drafted.
             </div>
-            <span className="ui-pill rounded border px-2.5 py-0.5 text-[10px] font-black sm:text-xs">
-              {standingCount}/{RUN_MAX_ROSTER}
-            </span>
-          </div>
-
-          <div className="run-reward-roster-grid" aria-label="Run roster">
-            {session.minions.map(unit => {
-              const template = getMinionTemplate(unit.stack.templateId);
-              if (!template) return null;
-
-              return (
-                <div
-                  key={unit.stack.id}
-                  className={`run-reward-roster-card ${unit.alive ? '' : 'run-reward-roster-card-fallen'}`}
-                  title={template.name}
-                >
-                  <span className="run-reward-roster-art relative">
-                    <Image
-                      src={`${MINION_ICON_BASE}/${template.assetName}`}
-                      alt=""
-                      fill
-                      sizes="112px"
-                      className="run-draft-recruit-sprite object-contain object-center"
-                      unoptimized
-                    />
-                  </span>
-                  <span className="run-reward-roster-name fantasy-heading truncate text-xs">
-                    {unit.alive ? template.name : 'Fallen'}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
+          ) : (
+            <div className="run-reward-roster-list run-roster-rows" role="list" aria-label="Run roster">
+              {session.minions.map(unit => {
+                const template = getMinionTemplate(unit.stack.templateId);
+                if (!template) return null;
+                return <RunRosterListItem key={unit.stack.id} unit={unit} template={template} />;
+              })}
+            </div>
+          )}
         </div>
 
         <div className="run-blessing-offer-stage min-h-0">
@@ -1824,8 +1860,26 @@ function getRunRewardVisual(choice: RunRewardChoice): {
   tierLabel: string;
   kindLabel: string;
   impactLabel: string;
-  tone: 'attack' | 'defense' | 'magic' | 'morale' | 'health' | 'unit' | 'gold';
+  tone: 'attack' | 'defense' | 'magic' | 'morale' | 'health' | 'unit' | 'gold' | 'gear';
 } {
+  if (choice.equipmentOffer) {
+    const item = choice.equipmentOffer;
+    const tierLabel = item.rarity === 'legendary'
+      ? 'Legendary'
+      : item.rarity === 'epic'
+        ? 'Epic'
+        : item.rarity === 'rare'
+          ? 'Rare'
+          : 'Gear';
+    return {
+      iconPath: getRunEquipmentIconPath(item),
+      tierLabel,
+      kindLabel: RUN_EQUIPMENT_SLOT_LABELS[item.slot] || 'Gear',
+      impactLabel: 'Commander gear',
+      tone: 'gear',
+    };
+  }
+
   if (choice.id.startsWith('learn-')) {
     const spellId = choice.id.replace(/^learn-/, '');
     return {
@@ -1879,7 +1933,7 @@ function ShopPanel({
   const node = session.nodes[session.currentNodeIndex];
   const offers = getShopOffersForSession(session);
   const choices = offers
-    .map(offer => ({ offer, choice: getRunRewardChoiceById(offer.choiceId) }))
+    .map(offer => ({ offer, choice: getRunRewardChoiceById(offer.choiceId, offer.equipmentOffer) }))
     .filter((item): item is { offer: RunShopOffer; choice: RunRewardChoice } => Boolean(item.choice));
   const rerollsRemaining = session.shopRerollsRemaining ?? RUN_SHOP_REROLL_COUNT;
 
@@ -2453,57 +2507,257 @@ function RunBattleReportCard({ report }: { report: RunBattleReport }) {
   );
 }
 
+function formatRunTierShort(tier: MinionTemplate['tier']): string {
+  if (tier === 'tier3') return 'T3';
+  if (tier === 'tier2') return 'T2';
+  return 'T1';
+}
+
+function formatRunClassShort(minionClass: MinionTemplate['class']): string {
+  if (minionClass === 'wizard') return 'Wiz';
+  if (minionClass === 'knight') return 'Kni';
+  if (minionClass === 'templar') return 'Tmp';
+  return 'Prs';
+}
+
+function getRunUnitDisplayHealth(unit: RunUnit, template: MinionTemplate): { current: number; max: number } {
+  const max = template.stats.health;
+  if (!unit.alive) return { current: 0, max };
+  if (typeof unit.stack.runCurrentHealth === 'number') {
+    return {
+      current: Math.max(0, Math.min(max, Math.round(unit.stack.runCurrentHealth))),
+      max,
+    };
+  }
+  return { current: max, max };
+}
+
+function RunRosterListItem({ unit, template }: { unit: RunUnit; template: MinionTemplate }) {
+  const health = getRunUnitDisplayHealth(unit, template);
+  const hpRatio = health.max > 0 ? health.current / health.max : 0;
+  const wounded = unit.alive && health.current < health.max;
+
+  return (
+    <RunRosterHoverTip
+      side="right"
+      popover={<RunRosterUnitTooltip template={template} alive={unit.alive} health={health} />}
+    >
+      <div
+        className={`run-roster-row run-roster-row-${template.tier} ${unit.alive ? '' : 'run-roster-row-fallen'} ${wounded ? 'run-roster-row-wounded' : ''}`}
+        role="listitem"
+        tabIndex={0}
+      >
+        <div className="run-roster-row-top">
+          <span className="run-roster-row-tags">
+            {formatRunTierShort(template.tier)} · {formatRunClassShort(template.class)}
+          </span>
+          <span className="run-roster-row-name">{template.name}</span>
+          <span className="run-roster-row-hp">
+            {unit.alive ? `${health.current}/${health.max}` : 'Fallen'}
+          </span>
+        </div>
+        {unit.alive && (
+          <div className="run-roster-row-hpbar" aria-hidden="true">
+            <span className="run-roster-row-hpfill" style={{ width: `${Math.round(hpRatio * 100)}%` }} />
+          </div>
+        )}
+      </div>
+    </RunRosterHoverTip>
+  );
+}
+
 function RunRoster({
   session,
-  onOpenStats,
   variant = 'default',
+  onEquipGear,
+  onUnequipGear,
 }: {
   session: RunSession;
-  onOpenStats: () => void;
   variant?: 'default' | 'map';
+  onEquipGear?: (equipmentId: string) => void;
+  onUnequipGear?: (slot: EquipmentSlot) => void;
 }) {
   const aliveCount = getAliveRunRoster(session).length;
+  const showGearPanel = session.mode === 'daily' && Boolean(onEquipGear && onUnequipGear);
 
   return (
     <aside className={`run-roster-aside flex min-h-0 flex-col gap-3 ${variant === 'map' ? 'run-roster-aside-map' : ''}`}>
-      <section className="run-roster-list ui-card min-h-0 flex-1 overflow-y-auto rounded border p-2.5">
+      <section className={`run-roster-list ui-card min-h-0 overflow-y-auto rounded border p-2 ${showGearPanel && variant === 'map' ? 'run-roster-list-with-gear' : 'flex-1'}`}>
         <div className="run-roster-list-head">
           <h3 className="fantasy-heading text-sm font-black">Run Roster</h3>
           <span className="ui-faint text-xs font-bold">{aliveCount}/{session.minions.length}</span>
         </div>
 
         {session.minions.length === 0 ? (
-          <div className="ui-empty rounded border border-dashed px-4 py-6 text-center text-sm font-bold">
+          <div className="ui-empty rounded border border-dashed px-3 py-4 text-center text-xs font-bold">
             No units drafted.
           </div>
         ) : (
-          <div className="run-roster-portrait-grid">
+          <div className="run-roster-rows" role="list">
             {session.minions.map(unit => {
               const template = getMinionTemplate(unit.stack.templateId);
               if (!template) return null;
-
-              return (
-                <RunRosterHoverTip
-                  key={unit.stack.id}
-                  side="right"
-                  popover={<RunRosterUnitTooltip template={template} alive={unit.alive} />}
-                >
-                  <button
-                    type="button"
-                    className={`run-roster-portrait-btn rounded border ${unit.alive ? '' : 'run-roster-portrait-fallen'}`}
-                    aria-label={`${template.name}, ${unit.alive ? MINION_TIER_LABELS[template.tier] : 'Fallen'}`}
-                  >
-                    <MinionPortrait template={template} size={variant === 'map' ? 'map' : 'roster'} />
-                  </button>
-                </RunRosterHoverTip>
-              );
+              return <RunRosterListItem key={unit.stack.id} unit={unit} template={template} />;
             })}
           </div>
         )}
       </section>
 
-      <RunStatsLaunch session={session} onOpen={onOpenStats} variant={variant} />
+      {showGearPanel && (
+        <RunGearPanel
+          session={session}
+          variant={variant}
+          commanderModel={(getCurrentUser()?.selectedModel || 3) as PlayerModelNumber}
+          onEquip={onEquipGear!}
+          onUnequip={onUnequipGear!}
+        />
+      )}
+
+      <RunGoldStrip session={session} variant={variant} />
     </aside>
+  );
+}
+
+function runEquipmentRarityClass(rarity: EquipmentRarity): string {
+  if (rarity === 'legendary') return 'ui-rarity-legendary';
+  if (rarity === 'epic') return 'ui-rarity-epic';
+  if (rarity === 'rare') return 'ui-rarity-rare';
+  return 'ui-rarity-decent';
+}
+
+const RUN_GEAR_SLOT_ABBR: Record<EquipmentSlot, string> = {
+  sword: 'S',
+  shield: 'Sh',
+  helmet: 'H',
+  armor: 'C',
+  'armor-pants': 'L',
+  gloves: 'G',
+  boots: 'B',
+};
+
+function RunGearPanel({
+  session,
+  variant,
+  commanderModel,
+  onEquip,
+  onUnequip,
+}: {
+  session: RunSession;
+  variant: 'default' | 'map';
+  commanderModel: PlayerModelNumber;
+  onEquip: (equipmentId: string) => void;
+  onUnequip: (slot: EquipmentSlot) => void;
+}) {
+  const unequipped = getUnequippedRunEquipment(session);
+  const equippedCount = Object.keys(session.runEquippedSlots).length;
+  const commanderAsset = getPlayerModelAsset(commanderModel);
+
+  return (
+    <section className={`run-gear-panel ui-card min-h-0 rounded border p-2 ${variant === 'map' ? 'run-gear-panel-map' : ''}`}>
+      <div className="run-gear-panel-head">
+        <h3 className="fantasy-heading text-sm font-black">Commander Gear</h3>
+        <span className="ui-faint text-[10px] font-bold">{equippedCount}/{RUN_EQUIPMENT_SLOTS.length}</span>
+      </div>
+
+      <div className="run-gear-stage">
+        <div className="run-gear-stage-backdrop" aria-hidden="true">
+          <Image
+            src={commanderAsset}
+            alt=""
+            fill
+            sizes="220px"
+            className="run-gear-commander-sprite object-contain"
+            unoptimized
+          />
+          <span className="run-gear-stage-vignette" />
+        </div>
+
+        <div className="run-gear-doll">
+          {RUN_EQUIPMENT_LAYOUT.map((row, rowIndex) => (
+            <div key={rowIndex} className="run-gear-doll-row">
+              {row.map(slot => {
+                const item = getEquippedRunItem(session, slot);
+                return (
+                  <button
+                    key={slot}
+                    type="button"
+                    className={`run-gear-square rounded border ${item ? runEquipmentRarityClass(item.rarity) : 'run-gear-square-empty'}`}
+                    onClick={() => item && onUnequip(slot)}
+                    disabled={!item}
+                    aria-label={item ? `Unequip ${item.name}` : `${RUN_EQUIPMENT_SLOT_LABELS[slot]} slot empty`}
+                    title={item ? `${item.name} — click to unequip` : RUN_EQUIPMENT_SLOT_LABELS[slot]}
+                  >
+                    {item ? (
+                      <span className="run-gear-square-icon relative overflow-hidden">
+                        <Image
+                          src={getRunEquipmentIconPath(item)}
+                          alt=""
+                          fill
+                          sizes="56px"
+                          className="object-contain p-1"
+                          style={{ imageRendering: 'pixelated' }}
+                        />
+                      </span>
+                    ) : (
+                      <span className="run-gear-square-placeholder">
+                        <span className="run-gear-square-abbr">{RUN_GEAR_SLOT_ABBR[slot]}</span>
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="run-gear-satchel-head">
+        <span className="arcane-label">Run Satchel</span>
+        <span className="ui-faint text-[10px] font-bold">{unequipped.length}/{RUN_MAX_EQUIPMENT_BAG}</span>
+      </div>
+
+      {unequipped.length === 0 ? (
+        <div className="run-gear-satchel-empty ui-faint rounded border border-dashed px-2 text-center text-[10px] font-bold uppercase">
+          Win battles for gear drops
+        </div>
+      ) : (
+        <div className={`run-gear-satchel-grid ${unequipped.length > 8 ? 'run-gear-satchel-grid-scroll' : ''}`}>
+          {unequipped.map(item => (
+            <RunRosterHoverTip
+              key={item.id}
+              side="right"
+              popover={(
+                <div>
+                  <div className={`run-roster-tip-title ${runEquipmentRarityClass(item.rarity)}`}>{item.name}</div>
+                  <div className="run-roster-tip-meta">{RUN_EQUIPMENT_SLOT_LABELS[item.slot]}</div>
+                  <div className="run-roster-tip-copy">{formatRunEquipmentSummary(item)}</div>
+                  <div className="run-roster-tip-copy ui-faint">Click to equip</div>
+                </div>
+              )}
+            >
+              <button
+                type="button"
+                className={`run-gear-square run-gear-satchel-item rounded border ${runEquipmentRarityClass(item.rarity)}`}
+                style={{ width: 'var(--run-gear-satchel-cell)', height: 'var(--run-gear-satchel-cell)' }}
+                onClick={() => onEquip(item.id)}
+                aria-label={`Equip ${item.name}`}
+              >
+                <span className="run-gear-square-icon relative overflow-hidden">
+                  <Image
+                    src={getRunEquipmentIconPath(item)}
+                    alt=""
+                    fill
+                    sizes="48px"
+                    className="object-contain p-1"
+                    style={{ imageRendering: 'pixelated' }}
+                  />
+                </span>
+              </button>
+            </RunRosterHoverTip>
+          ))}
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -2574,12 +2828,24 @@ function RunRosterHoverTip({
   );
 }
 
-function RunRosterUnitTooltip({ template, alive }: { template: MinionTemplate; alive: boolean }) {
+function RunRosterUnitTooltip({
+  template,
+  alive,
+  health,
+}: {
+  template: MinionTemplate;
+  alive: boolean;
+  health?: { current: number; max: number };
+}) {
+  const resolvedHealth = health || { current: template.stats.health, max: template.stats.health };
+
   return (
     <>
       <div className="run-roster-tip-title">{template.name}</div>
       <div className="run-roster-tip-meta">
-        {alive ? `${MINION_CLASS_LABELS[template.class]} · ${MINION_TIER_LABELS[template.tier]}` : 'Fallen'}
+        {alive
+          ? `${MINION_CLASS_LABELS[template.class]} · ${MINION_TIER_LABELS[template.tier]} · ${resolvedHealth.current}/${resolvedHealth.max} HP`
+          : 'Fallen'}
       </div>
       {alive && (
         <div className="run-roster-tip-stats">
@@ -2623,12 +2889,7 @@ function MinionPortrait({ template, size = 'small' }: { template: MinionTemplate
   );
 }
 
-const RUN_HEADER_ICONS = {
-  battles: '/assets/icons/attack.png',
-  roster: '/assets/icons/health.png',
-  gold: '/assets/icons/gold.png',
-  challenge: '/assets/icons/rare-gem.png',
-} as const;
+const RUN_GOLD_ICON = '/assets/icons/gold.png';
 
 const COMMANDER_STAT_ICONS = {
   Army: '/assets/icons/attack.png',
@@ -2636,75 +2897,6 @@ const COMMANDER_STAT_ICONS = {
   Morale: '/assets/icons/speed.png',
   Spell: '/assets/icons/magic.png',
 } as const;
-
-function RunHeaderChip({
-  icon,
-  value,
-  title,
-  tone,
-}: {
-  icon: string;
-  value: string;
-  title: string;
-  tone?: 'gold';
-}) {
-  return (
-    <span
-      className={`run-header-chip ${tone === 'gold' ? 'run-header-chip-gold' : ''}`}
-      title={title}
-    >
-      <Image
-        src={icon}
-        alt=""
-        width={16}
-        height={16}
-        className="run-header-chip-icon"
-        unoptimized
-      />
-      <span className="run-header-chip-value">{value}</span>
-    </span>
-  );
-}
-
-function RunStatsChipRow({ session }: { session: RunSession }) {
-  const aliveCount = getAliveRunRoster(session).length;
-  const challengeHint = session.dailyChallenge
-    ? `${session.dailyChallenge.subtitle} — ${session.dailyChallenge.weeklyRewardName}`
-    : undefined;
-
-  return (
-    <>
-      <RunHeaderChip
-        icon={RUN_HEADER_ICONS.battles}
-        value={`${session.wins}/${session.targetBattles}`}
-        title="Battles won"
-      />
-      <RunHeaderChip
-        icon={RUN_HEADER_ICONS.roster}
-        value={`${aliveCount}/${session.minions.length}`}
-        title="Units standing"
-      />
-      <RunHeaderChip
-        icon={RUN_HEADER_ICONS.gold}
-        value={String(session.runGold)}
-        title="Run gold"
-        tone="gold"
-      />
-      {challengeHint && (
-        <span className="run-header-chip run-header-chip-challenge" title={challengeHint}>
-          <Image
-            src={RUN_HEADER_ICONS.challenge}
-            alt=""
-            width={16}
-            height={16}
-            className="run-header-chip-icon"
-            unoptimized
-          />
-        </span>
-      )}
-    </>
-  );
-}
 
 function RunMapStatTile({
   icon,
@@ -2715,7 +2907,7 @@ function RunMapStatTile({
   icon: string;
   label: string;
   value: string;
-  tone?: 'gold' | 'challenge';
+  tone?: 'gold';
 }) {
   return (
     <span className={`run-map-stat-tile${tone ? ` run-map-stat-tile-${tone}` : ''}`} title={label}>
@@ -2728,47 +2920,17 @@ function RunMapStatTile({
   );
 }
 
-function RunStatsLaunch({
+function RunGoldStrip({
   session,
-  onOpen,
   variant = 'default',
 }: {
   session: RunSession;
-  onOpen: () => void;
   variant?: 'default' | 'map';
 }) {
-  const aliveCount = getAliveRunRoster(session).length;
-  const challengeHint = session.dailyChallenge
-    ? `${session.dailyChallenge.subtitle} — ${session.dailyChallenge.weeklyRewardName}`
-    : undefined;
-
   return (
-    <button
-      type="button"
-      onClick={onOpen}
-      className={`run-roster-stats-launch ui-card w-full shrink-0 rounded border text-left transition ${variant === 'map' ? 'run-roster-stats-launch-map' : ''}`}
-      aria-label="Open run status"
-    >
-      <span className="run-roster-stats-head">
-        <span className="arcane-label">Run Status</span>
-        <span className="ui-faint text-[11px] font-black uppercase tracking-[0.12em]">Details</span>
-      </span>
-
-      {variant === 'map' ? (
-        <span className="run-map-status-grid">
-          <RunMapStatTile icon={RUN_HEADER_ICONS.battles} label="Battles" value={`${session.wins}/${session.targetBattles}`} />
-          <RunMapStatTile icon={RUN_HEADER_ICONS.roster} label="Standing" value={`${aliveCount}/${session.minions.length}`} />
-          <RunMapStatTile icon={RUN_HEADER_ICONS.gold} label="Gold" value={String(session.runGold)} tone="gold" />
-          {challengeHint && (
-            <RunMapStatTile icon={RUN_HEADER_ICONS.challenge} label="Challenge" value="★" tone="challenge" />
-          )}
-        </span>
-      ) : (
-        <span className="run-header-stats mt-2 flex flex-wrap gap-1.5">
-          <RunStatsChipRow session={session} />
-        </span>
-      )}
-    </button>
+    <div className={`run-roster-gold-strip ui-card w-full shrink-0 rounded border ${variant === 'map' ? 'run-roster-gold-strip-map' : ''}`}>
+      <RunMapStatTile icon={RUN_GOLD_ICON} label="Run Gold" value={String(session.runGold)} tone="gold" />
+    </div>
   );
 }
 
@@ -2790,51 +2952,6 @@ function RunCommanderStat({
         <div className="ui-faint text-[10px] font-black uppercase">{label}</div>
         <div className="ui-value text-xl font-black leading-none">{value}</div>
       </div>
-    </div>
-  );
-}
-
-function RunStatsModal({ session, onClose }: { session: RunSession; onClose: () => void }) {
-  const challenge = session.dailyChallenge;
-
-  return (
-    <div
-      className="run-stats-modal-layer fixed inset-0 z-[69] flex items-center justify-center bg-black/65 p-4 backdrop-blur-sm"
-      onClick={onClose}
-    >
-      <section
-        className="run-stats-modal command-panel vine-frame w-full max-w-md rounded border p-4 text-zinc-100"
-        onClick={event => event.stopPropagation()}
-      >
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <div className="arcane-label">Run Status</div>
-            <h3 className="fantasy-heading truncate text-xl">{session.title}</h3>
-          </div>
-          <button type="button" onClick={onClose} className="ui-button shrink-0 rounded px-2 py-1 text-[10px] font-bold">
-            Close
-          </button>
-        </div>
-
-        <div className="run-header-stats mt-4 flex flex-wrap gap-1.5">
-          <RunStatsChipRow session={session} />
-        </div>
-
-        <div className="mt-4 grid grid-cols-2 gap-2">
-          <RunCommanderStat label="Army" value={session.stats.armyPower} icon={COMMANDER_STAT_ICONS.Army} />
-          <RunCommanderStat label="Ward" value={session.stats.defensivePower} icon={COMMANDER_STAT_ICONS.Ward} />
-          <RunCommanderStat label="Morale" value={session.stats.morale} icon={COMMANDER_STAT_ICONS.Morale} />
-          <RunCommanderStat label="Spell" value={session.stats.spellPower} icon={COMMANDER_STAT_ICONS.Spell} />
-        </div>
-
-        {challenge && (
-          <div className="ui-card mt-4 rounded border p-3">
-            <div className="arcane-label">Weekly Challenge</div>
-            <p className="ui-muted mt-1 text-xs font-bold">{challenge.subtitle}</p>
-            <p className="ui-faint mt-1 text-[11px] font-bold">{challenge.weeklyRewardName}</p>
-          </div>
-        )}
-      </section>
     </div>
   );
 }
@@ -2876,6 +2993,9 @@ function serializeRunSession(username: string, session: RunSession): StoredRunSe
   return {
     ...storedSession,
     rewardChoiceIds: rewardChoices.map(choice => choice.id),
+    rewardEquipmentOffers: rewardChoices
+      .filter(choice => choice.equipmentOffer)
+      .map(choice => ({ choiceId: choice.id, equipment: choice.equipmentOffer! })),
     savedAt: Date.now(),
     ownerUsername: username,
     dateKey: session.dailyChallenge?.date || RANDOM_RUN_ACTIVE_SESSION_KEY,
@@ -2886,10 +3006,23 @@ function hydrateRunSession(storedSession: StoredRunSession | null, challenge?: D
   if (!storedSession || storedSession.mode !== 'daily') return null;
   if (storedSession.phase === 'complete' || storedSession.rewardClaimed) return null;
   const resolvedChallenge = storedSession.dailyChallenge || challenge || createRandomRunChallenge();
-  const { rewardChoiceIds, savedAt, ownerUsername, dateKey, ...session } = storedSession;
+  const { rewardChoiceIds, rewardEquipmentOffers, savedAt, ownerUsername, dateKey, ...session } = storedSession;
   void savedAt;
   void ownerUsername;
   void dateKey;
+
+  const restoreRewardChoice = (choiceId: string): RunRewardChoice | undefined => {
+    const staticChoice = RUN_REWARD_POOL.find(choice => choice.id === choiceId);
+    if (staticChoice) return staticChoice;
+    const storedEquipment = rewardEquipmentOffers?.find(offer => offer.choiceId === choiceId);
+    if (storedEquipment) return restoreRunEquipmentReward(storedEquipment.choiceId, storedEquipment.equipment);
+    return undefined;
+  };
+
+  const equipmentState = {
+    runEquipment: storedSession.runEquipment || [],
+    runEquippedSlots: storedSession.runEquippedSlots || {},
+  };
 
   const freshNodes = createDailyRunNodes(resolvedChallenge, storedSession.stats?.level || 1);
   const storedNodes = storedSession.nodes?.length ? normalizeDailyRunNodes(storedSession.nodes) : [];
@@ -2907,6 +3040,7 @@ function hydrateRunSession(storedSession: StoredRunSession | null, challenge?: D
 
   return {
     ...session,
+    ...equipmentState,
     targetBattles: refreshStoredRoad
       ? normalizeRandomRunBattleCount(resolvedChallenge.targetBattles)
       : normalizeRandomRunBattleCount(session.targetBattles),
@@ -2917,7 +3051,7 @@ function hydrateRunSession(storedSession: StoredRunSession | null, challenge?: D
     nodes,
     battleReports: storedSession.battleReports || [],
     rewardChoices: rewardChoiceIds
-      .map(choiceId => RUN_REWARD_POOL.find(choice => choice.id === choiceId))
+      .map(restoreRewardChoice)
       .filter((choice): choice is RunRewardChoice => Boolean(choice)),
     shopOffers: storedSession.shopOffers || {},
     shopRerollsRemaining: typeof storedSession.shopRerollsRemaining === 'number'
@@ -3105,6 +3239,7 @@ function createDailySession(user: User, dailyChallenge = createRandomRunChalleng
     shopBuyHistory: [],
     omenHistory: [],
     permanentSpellUnlocks: [],
+    ...createEmptyRunEquipmentState(),
   };
 }
 
@@ -3151,6 +3286,7 @@ function createDungeonSession(user: User, dungeon: WorldDungeon): RunSession {
     shopRerollsRemaining: RUN_SHOP_REROLL_COUNT,
     omenRerollsRemaining: RUN_OMEN_REROLL_COUNT,
     pendingPositiveOmen: false,
+    ...createEmptyRunEquipmentState(),
   };
 }
 
@@ -3191,6 +3327,7 @@ function createEncounterSession(user: User, enemy: WorldEnemy): RunSession {
     omenRerollsRemaining: RUN_OMEN_REROLL_COUNT,
     pendingPositiveOmen: false,
     notice: `${enemy.name} waits at the end of this road.`,
+    ...createEmptyRunEquipmentState(),
   };
 }
 
@@ -4215,13 +4352,19 @@ function formatRunDuration(durationMs: number): string {
   return minutes > 0 ? `${minutes}m ${remainingSeconds}s` : `${remainingSeconds}s`;
 }
 
-function getRunRewardChoiceById(choiceId: string): RunRewardChoice | undefined {
-  return RUN_REWARD_POOL.find(choice => choice.id === choiceId);
+function getRunRewardChoiceById(choiceId: string, equipmentOffer?: Equipment): RunRewardChoice | undefined {
+  const staticChoice = RUN_REWARD_POOL.find(choice => choice.id === choiceId);
+  if (staticChoice) return staticChoice;
+  if (choiceId.startsWith('gear-offer-') && equipmentOffer) {
+    return restoreRunEquipmentReward(choiceId, equipmentOffer);
+  }
+  return undefined;
 }
 
 function getRunRewardCategory(choice: RunRewardChoice): string {
   const id = choice.id;
   if (id.startsWith('learn-')) return 'learn-spell';
+  if (id.startsWith('gear-offer-') || choice.equipmentOffer) return 'equipment';
   if (id.includes('army') || id.includes('weapon')) return 'army';
   if (id.includes('ward') || id.includes('armor') || id.includes('defensive')) return 'defense';
   if (id.includes('spell') || id.includes('focus') || id.includes('liturgy')) return 'spell';
@@ -4238,9 +4381,10 @@ function getRunRewardCategory(choice: RunRewardChoice): string {
 function pickRunRewardChoices(
   session: RunSession,
   count = RUN_REWARD_CHOICE_COUNT,
-  options?: { spellChance?: number },
+  options?: { spellChance?: number; equipmentChance?: number },
 ): RunRewardChoice[] {
   const spellChance = options?.spellChance ?? RUN_BLESSING_SPELL_OFFER_CHANCE;
+  const equipmentChance = options?.equipmentChance ?? RUN_BLESSING_EQUIPMENT_OFFER_CHANCE;
   const buffPool = RUN_BUFFS.filter(choice => !choice.isAvailable || choice.isAvailable(session));
   const spellPool = RUN_SPELL_REWARDS.filter(choice => !choice.isAvailable || choice.isAvailable(session));
   const buffFallback = RUN_BUFFS.filter(choice => !choice.isAvailable);
@@ -4259,6 +4403,11 @@ function pickRunRewardChoices(
     return true;
   };
 
+  if (Math.random() < equipmentChance) {
+    const equipmentReward = pickRunEquipmentReward(session);
+    if (equipmentReward) tryAdd(equipmentReward);
+  }
+
   if (spellPool.length > 0 && Math.random() < spellChance) {
     tryAdd(shuffle(spellPool)[0]);
   }
@@ -4268,7 +4417,7 @@ function pickRunRewardChoices(
     tryAdd(choice);
   });
 
-  shuffle([...workingBuffPool, ...spellPool]).forEach(choice => {
+  shuffle(workingBuffPool).forEach(choice => {
     if (selected.length >= count) return;
     tryAdd(choice);
   });
@@ -4277,9 +4426,13 @@ function pickRunRewardChoices(
 }
 
 function makeShopOffers(session: RunSession, count = RUN_SHOP_CHOICE_COUNT): RunShopOffer[] {
-  return pickRunRewardChoices(session, count, { spellChance: RUN_SHOP_SPELL_OFFER_CHANCE }).map((choice, index) => ({
+  return pickRunRewardChoices(session, count, {
+    spellChance: RUN_SHOP_SPELL_OFFER_CHANCE,
+    equipmentChance: RUN_SHOP_EQUIPMENT_OFFER_CHANCE,
+  }).map((choice, index) => ({
     choiceId: choice.id,
     cost: getRunShopOfferCost(session, index, choice),
+    equipmentOffer: choice.equipmentOffer,
   }));
 }
 
@@ -4294,6 +4447,8 @@ function getRunShopOfferCost(session: RunSession, index: number, choice: RunRewa
     ? 1.25
     : category === 'upgrade' || category === 'learn-spell'
       ? 1.18
+      : category === 'equipment'
+        ? 1.14
       : category === 'recruit'
         ? 1.1
         : category === 'gold'
@@ -4312,7 +4467,7 @@ function getShopNodeOfferKey(session: RunSession): string {
 
 function getShopOffersForSession(session: RunSession): RunShopOffer[] {
   const key = getShopNodeOfferKey(session);
-  return (session.shopOffers?.[key] || []).filter(offer => Boolean(getRunRewardChoiceById(offer.choiceId)));
+  return (session.shopOffers?.[key] || []).filter(offer => Boolean(getRunRewardChoiceById(offer.choiceId, offer.equipmentOffer)));
 }
 
 function ensureShopOffers(session: RunSession): RunSession {
@@ -4966,10 +5121,6 @@ function addRunMinionFromTemplate(session: RunSession, template: MinionTemplate,
   };
 }
 
-function getAliveRunStacks(session: RunSession): MinionStack[] {
-  return session.minions.filter(unit => unit.alive).map(unit => unit.stack).slice(0, MAX_FIELD_MINIONS);
-}
-
 function getAliveRunRoster(session: RunSession): MinionStack[] {
   return session.minions.filter(unit => unit.alive).map(unit => unit.stack).slice(0, RUN_MAX_ROSTER);
 }
@@ -4979,18 +5130,11 @@ function getRunPlacedStacks(session: RunSession, formation: Record<string, Board
 }
 
 function getRunFieldedStacks(session: RunSession, formation: Record<string, BoardCell> = session.formation): MinionStack[] {
-  const placedStacks = getRunPlacedStacks(session, formation).slice(0, MAX_FIELD_MINIONS);
-  return placedStacks.length > 0 ? placedStacks : getAliveRunStacks(session);
+  return getRunPlacedStacks(session, formation).slice(0, MAX_FIELD_MINIONS);
 }
 
 function getRunFormationIssue(session: RunSession, formation: Record<string, BoardCell> = session.formation): string | null {
-  const aliveRoster = getAliveRunRoster(session);
   const placedStacks = getRunPlacedStacks(session, formation);
-  const requiredFielded = Math.min(MAX_FIELD_MINIONS, aliveRoster.length);
-
-  if (placedStacks.length < requiredFielded) {
-    return `Place ${requiredFielded} units before starting battle.`;
-  }
 
   if (placedStacks.length > MAX_FIELD_MINIONS) {
     return `Field only ${MAX_FIELD_MINIONS} units. Keep extras on the bench.`;

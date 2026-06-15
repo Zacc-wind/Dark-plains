@@ -3,6 +3,7 @@
 import { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import type { BattleLogEntry, BattleLogStyle, BattleState, BattleUnit } from '@/lib/battle';
+import { pickFreshPresentationLogEntry } from '@/lib/battle';
 
 interface CombatThreeFxLayerProps {
   battle: BattleState;
@@ -156,6 +157,8 @@ function getUnitCenter(unit: BattleUnit, width: number, height: number, boardWid
     0
   );
 }
+
+const ARMY_BUFF_SPELL_IDS = new Set(['royal-command', 'moonlit-veil', 'iron-benediction']);
 
 function getBattleLogStyle(entry: BattleLogEntry, actor?: BattleUnit): BattleLogStyle | undefined {
   if (entry.style) return entry.style;
@@ -389,37 +392,6 @@ function createMoralePulse(origin: THREE.Vector3): RuntimeCombatEffect {
   };
 }
 
-function createManaFocus(origin: THREE.Vector3): RuntimeCombatEffect {
-  const root = new THREE.Group();
-  root.position.copy(origin);
-  const outerRing = makeRing(COLORS.spell, 12, 16, 0.34);
-  const innerRing = makeRing(COLORS.ranged, 5, 7, 0.24);
-  const core = new THREE.Mesh(
-    new THREE.CircleGeometry(10, 32),
-    makeMaterial(COLORS.spell, 0.14)
-  );
-  core.scale.y = 0.72;
-  root.add(core, outerRing, innerRing);
-  const particles = addParticles(root, new THREE.Vector3(0, 0, 0), COLORS.spell, 30, 11, 34, 2.2);
-
-  return {
-    root,
-    life: 0,
-    maxLife: 1.55,
-    update: (delta, progress) => {
-      const pulse = Math.sin(progress * Math.PI);
-      root.rotation.z += delta * 1.4;
-      outerRing.scale.set(0.64 + progress * 1.25, 0.4 + progress * 0.72, 1);
-      innerRing.scale.setScalar(0.7 + pulse * 0.7);
-      core.scale.set(0.78 + pulse * 0.34, 0.54 + pulse * 0.22, 1);
-      outerRing.material.opacity = (1 - progress) * 0.34;
-      innerRing.material.opacity = (1 - progress) * 0.26;
-      core.material.opacity = pulse * 0.15;
-      updateParticles(particles, delta, progress, -9);
-    },
-  };
-}
-
 function createRuntime(mount: HTMLDivElement): RuntimeContext {
   let width = Math.max(1, mount.clientWidth);
   let height = Math.max(1, mount.clientHeight);
@@ -515,7 +487,12 @@ function createRuntime(mount: HTMLDivElement): RuntimeContext {
     }
 
     if (entry.action === 'spell' && style === 'buff') {
-      spawnAtTargets(targets.length > 0 ? targets : actor ? [actor] : [], battle, origin => createSpellParticleBurst(origin, COLORS.shield, COLORS.gold, -5));
+      const resolvedBuffTargets = targets.length > 0 ? targets : actor ? [actor] : [];
+      if (entry.spellId && ARMY_BUFF_SPELL_IDS.has(entry.spellId)) {
+        spawnAtTargets(resolvedBuffTargets, battle, origin => createMoralePulse(origin));
+        return;
+      }
+      spawnAtTargets(resolvedBuffTargets, battle, origin => createSpellParticleBurst(origin, COLORS.shield, COLORS.gold, -5));
       return;
     }
 
@@ -544,18 +521,13 @@ function createRuntime(mount: HTMLDivElement): RuntimeContext {
       return;
     }
 
-    if (style === 'mana-focus') {
-      spawnAtTargets(targets.length > 0 ? targets : actor ? [actor] : [], battle, origin => createManaFocus(origin));
-      return;
-    }
-
-    if (style === 'guard') {
-      spawnAtTargets(targets.length > 0 ? targets : actor ? [actor] : [], battle, origin => createShieldPulse(origin, COLORS.gold));
+    if (style === 'mana-focus' || style === 'guard') {
       return;
     }
 
     if (style === 'spell-damage') {
-      spawnAtTargets(targets, battle, origin => createSpellParticleBurst(origin, COLORS.spell, COLORS.damage, 7));
+      const damageTargets = targets.length > 0 ? targets : actor ? [actor] : [];
+      spawnAtTargets(damageTargets, battle, origin => createSpellParticleBurst(origin, COLORS.spell, COLORS.damage, 7));
     }
   };
 
@@ -600,7 +572,8 @@ function createRuntime(mount: HTMLDivElement): RuntimeContext {
 export default function CombatThreeFxLayer({ battle }: CombatThreeFxLayerProps) {
   const mountRef = useRef<HTMLDivElement | null>(null);
   const runtimeRef = useRef<RuntimeContext | null>(null);
-  const lastLogIdRef = useRef<string | null>(null);
+  const processedLogIdsRef = useRef<Set<string>>(new Set());
+  const initializedLogIdsRef = useRef(false);
 
   useEffect(() => {
     const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -617,10 +590,20 @@ export default function CombatThreeFxLayer({ battle }: CombatThreeFxLayerProps) 
   }, []);
 
   useEffect(() => {
-    const entry = battle.log[0];
     const runtime = runtimeRef.current;
-    if (!entry || !runtime || entry.id === lastLogIdRef.current) return;
-    lastLogIdRef.current = entry.id;
+    if (!runtime) return;
+
+    if (!initializedLogIdsRef.current) {
+      battle.log.forEach(entry => processedLogIdsRef.current.add(entry.id));
+      initializedLogIdsRef.current = true;
+      return;
+    }
+
+    const freshEntries = battle.log.filter(entry => !processedLogIdsRef.current.has(entry.id));
+    freshEntries.forEach(entry => processedLogIdsRef.current.add(entry.id));
+    const entry = pickFreshPresentationLogEntry(freshEntries);
+    if (!entry) return;
+
     runtime.spawnBattleLog(battle, entry);
   }, [battle]);
 

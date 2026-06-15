@@ -11,8 +11,10 @@ import {
   equipSpellLoadout,
   getFormationCells,
   getFormationIssue,
+  getPlacedFormationStacks,
   isFormationCellAllowed,
   mergeFormation,
+  removeStackFromFormation,
 } from '@/lib/formation';
 import {
   getMinionTemplate,
@@ -47,20 +49,11 @@ function getTierRoman(tier: string): string {
   return 'I';
 }
 
-function getPlacedFormationStacks(stacks: MinionStack[], formation: Record<string, BoardCell>): MinionStack[] {
-  return stacks.filter(stack => isFormationCellAllowed(formation[stack.id]));
-}
-
 function getFormationSelectionIssue(
   formation: Record<string, BoardCell>,
   placedStacks: MinionStack[],
-  requiredFielded: number,
   maxFielded: number,
 ): string | null {
-  if (placedStacks.length < requiredFielded) {
-    return `Place ${requiredFielded} units before starting battle.`;
-  }
-
   if (placedStacks.length > maxFielded) {
     return `Field only ${maxFielded} units. Keep extras on the bench.`;
   }
@@ -83,13 +76,16 @@ export default function FormationPanel({
   onStart,
   onBack,
 }: FormationPanelProps) {
-  const defaultFieldedStacks = useMemo(() => stacks.slice(0, maxFielded), [maxFielded, stacks]);
-  const formation = useMemo(() => mergeFormation(defaultFieldedStacks, formationInput), [defaultFieldedStacks, formationInput]);
+  const formation = useMemo(() => mergeFormation(stacks, formationInput, maxFielded), [stacks, formationInput, maxFielded]);
   const [selectedToken, setSelectedToken] = useState<SelectedToken>(stacks[0]?.id || COMMANDER_FORMATION_KEY);
   const [selectedSpellSlot, setSelectedSpellSlot] = useState(0);
+  const [benchDragActive, setBenchDragActive] = useState(false);
   const placedStacks = useMemo(() => getPlacedFormationStacks(stacks, formation), [formation, stacks]);
-  const requiredFielded = Math.min(maxFielded, stacks.length);
-  const formationIssue = getFormationSelectionIssue(formation, placedStacks, requiredFielded, maxFielded);
+  const benchedStacks = useMemo(
+    () => stacks.filter(stack => !isFormationCellAllowed(formation[stack.id])),
+    [formation, stacks],
+  );
+  const formationIssue = getFormationSelectionIssue(formation, placedStacks, maxFielded);
   const equippedSpellIds = spellIds.length === 4 ? spellIds : [...spellIds, 'arcane-bolt', 'sanctified-mend', 'ember-dart'].slice(0, 4);
 
   const occupiedByCell = useMemo(() => {
@@ -144,6 +140,26 @@ export default function FormationPanel({
     setSelectedToken('');
   };
 
+  const benchStack = (stackId: string) => {
+    if (stackId === COMMANDER_FORMATION_KEY) return;
+    onChangeFormation(removeStackFromFormation(formation, stackId));
+    if (selectedToken === stackId) setSelectedToken('');
+  };
+
+  const handleBenchDrop = (stackId: string) => {
+    if (!stackId || stackId === COMMANDER_FORMATION_KEY) return;
+    benchStack(stackId);
+    setBenchDragActive(false);
+  };
+
+  const handleWarbandStackClick = (stackId: string) => {
+    if (selectedToken === stackId && isFormationCellAllowed(formation[stackId])) {
+      benchStack(stackId);
+      return;
+    }
+    setSelectedToken(stackId);
+  };
+
   const knownSpells = knownSpellIds
     .map(spellId => BATTLE_SPELLS.find(spell => spell.id === spellId))
     .filter((spell): spell is BattleSpell => Boolean(spell));
@@ -160,7 +176,7 @@ export default function FormationPanel({
             <div>
               <div className="arcane-label">Warband</div>
               <div className="formation-warband-subcopy ui-faint text-[10px] font-bold">
-                Field {placedStacks.length}/{maxFielded}
+                Field {placedStacks.length}/{maxFielded} · Bench {benchedStacks.length}
               </div>
             </div>
             <span className="ui-pill rounded border px-2 py-0.5 text-[10px] font-black">
@@ -172,7 +188,7 @@ export default function FormationPanel({
               <button
                 type="button"
                 onClick={() => setSelectedToken(COMMANDER_FORMATION_KEY)}
-                className={`formation-warband-card rounded border ${selectedToken === COMMANDER_FORMATION_KEY ? 'formation-unit-selected' : ''}`}
+                className={`formation-warband-card formation-warband-card-fielded rounded border ${selectedToken === COMMANDER_FORMATION_KEY ? 'formation-unit-selected' : ''}`}
               >
                 <FormationUnitPortrait
                   imageSrc={getPlayerModelPath(commanderModel)}
@@ -181,37 +197,46 @@ export default function FormationPanel({
                 />
                 <span className="formation-warband-copy">
                   <span className="formation-warband-label">{shortWarbandLabel(commanderName, 18)}</span>
-                  <span className="formation-warband-role ui-faint">Commander</span>
+                  <span className="formation-warband-meta">
+                    <span className="formation-warband-role ui-faint">Commander</span>
+                    <span className="formation-warband-status formation-warband-status-field">On field</span>
+                  </span>
                 </span>
                 <span className="formation-tier-badge formation-tier-badge-commander">C</span>
               </button>
             </FormationHoverTip>
-            {stacks.map(stack => {
-              const template = getMinionTemplate(stack.templateId);
-              if (!template) return null;
-              return (
-                <FormationHoverTip key={stack.id} side="right" popover={<MinionTooltipContent template={template} />}>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedToken(stack.id)}
-                    className={`formation-warband-card rounded border ${selectedToken === stack.id ? 'formation-unit-selected' : ''} ${isFormationCellAllowed(formation[stack.id]) ? '' : 'formation-warband-card-reserve'}`}
-                  >
-                    <FormationUnitPortrait
-                      imageSrc={`/assets/minions/${template.templateId}.png`}
-                      variant="minion"
-                      size="dock"
-                    />
-                    <span className="formation-warband-copy">
-                      <span className="formation-warband-label">{shortWarbandLabel(template.name, 18)}</span>
-                      <span className="formation-warband-role ui-faint">
-                        {MINION_CLASS_LABELS[template.class]} - Tier {getTierRoman(template.tier)}
-                      </span>
-                    </span>
-                    <span className="formation-tier-badge">{getTierRoman(template.tier)}</span>
-                  </button>
-                </FormationHoverTip>
-              );
-            })}
+
+            {placedStacks.length > 0 && (
+              <div className="formation-warband-section">
+                <div className="formation-warband-section-label">On field</div>
+                {placedStacks.map(stack => (
+                  <WarbandStackCard
+                    key={stack.id}
+                    stack={stack}
+                    selected={selectedToken === stack.id}
+                    fielded
+                    onClick={() => handleWarbandStackClick(stack.id)}
+                    onBench={() => benchStack(stack.id)}
+                  />
+                ))}
+              </div>
+            )}
+
+            {benchedStacks.length > 0 && (
+              <div className="formation-warband-section">
+                <div className="formation-warband-section-label">Bench</div>
+                {benchedStacks.map(stack => (
+                  <WarbandStackCard
+                    key={stack.id}
+                    stack={stack}
+                    selected={selectedToken === stack.id}
+                    fielded={false}
+                    onClick={() => handleWarbandStackClick(stack.id)}
+                    onBench={() => benchStack(stack.id)}
+                  />
+                ))}
+              </div>
+            )}
           </div>
         </aside>
 
@@ -223,11 +248,37 @@ export default function FormationPanel({
             </h3>
             {enemySubtitle ? <p className="formation-board-subtitle ui-faint text-[11px] font-bold">{enemySubtitle}</p> : null}
             <p className="formation-board-hint ui-faint text-[10px] font-bold">
-              Select a unit, then tap a slot to place or swap.
+              Select a unit, tap a slot to place, or drag back to bench.
             </p>
           </div>
-          <div className="formation-battle-board-shell">
+          <div className="formation-battle-board-shell formation-battle-board-shell-with-bench">
             <div className="formation-deploy-backdrop" aria-hidden="true" />
+            <button
+              type="button"
+              className={`formation-bench-zone rounded border ${benchDragActive ? 'formation-bench-zone-active' : ''}`}
+              onClick={() => {
+                if (selectedToken && selectedToken !== COMMANDER_FORMATION_KEY) {
+                  benchStack(selectedToken);
+                }
+              }}
+              onDragOver={(event) => {
+                event.preventDefault();
+                setBenchDragActive(true);
+              }}
+              onDragLeave={() => setBenchDragActive(false)}
+              onDrop={(event) => {
+                event.preventDefault();
+                handleBenchDrop(event.dataTransfer.getData('text/formation-stack'));
+              }}
+              aria-label="Send selected unit back to bench"
+            >
+              <span className="formation-bench-zone-arrow" aria-hidden="true">←</span>
+              <span className="formation-bench-zone-copy">
+                <span className="formation-bench-zone-title">Bench</span>
+                <span className="formation-bench-zone-hint ui-faint">Drag or drop unit here</span>
+              </span>
+            </button>
+            <div className="formation-deploy-stage">
             <div className="formation-deploy-frame">
               <div className="formation-lane-labels" aria-hidden="true">
                 <span>Front</span>
@@ -263,7 +314,9 @@ export default function FormationPanel({
                           return;
                         }
                         if (occupant?.token === selectedToken) {
-                          setSelectedToken(occupant.token);
+                          if (selectedToken !== COMMANDER_FORMATION_KEY) {
+                            benchStack(selectedToken);
+                          }
                           return;
                         }
                         assignSelectedToCell(cell);
@@ -286,8 +339,17 @@ export default function FormationPanel({
                           />
                           <span className="formation-tier-badge formation-tier-badge-commander">C</span>
                         </span>
-                      ) : template ? (
-                        <span className={`formation-unit-piece ${tokenHighlightClass}`}>
+                      ) : template && stack ? (
+                        <span
+                          className={`formation-unit-piece ${tokenHighlightClass}`}
+                          draggable
+                          onDragStart={(event) => {
+                            event.dataTransfer.setData('text/formation-stack', stack.id);
+                            event.dataTransfer.effectAllowed = 'move';
+                            setBenchDragActive(true);
+                          }}
+                          onDragEnd={() => setBenchDragActive(false)}
+                        >
                           <FormationUnitPortrait
                             imageSrc={`/assets/minions/${template.templateId}.png`}
                             variant="minion"
@@ -305,6 +367,7 @@ export default function FormationPanel({
                 );
               })}
               </div>
+            </div>
             </div>
           </div>
         </section>
@@ -356,7 +419,7 @@ export default function FormationPanel({
                 })}
               </div>
 
-              <p className="formation-spell-hint ui-faint text-[10px] font-bold">
+              <p className="formation-spell-hint ui-faint font-bold">
                 Tap a slot, then pick a spell below to swap.
               </p>
 
@@ -394,9 +457,9 @@ export default function FormationPanel({
 
           <div className="formation-spells-actions">
             {formationIssue ? (
-              <p className="formation-spells-issue text-[10px] font-bold text-amber-100">{formationIssue}</p>
+              <p className="formation-spells-issue font-bold text-amber-100">{formationIssue}</p>
             ) : (
-              <p className="formation-spells-issue ui-faint text-[10px] font-black">Formation ready</p>
+              <p className="formation-spells-issue ui-faint font-black">Formation ready</p>
             )}
             <div className="formation-spells-action-buttons">
               <button type="button" onClick={onBack} className="ui-button rounded px-4 py-2.5 text-xs font-bold">
@@ -415,6 +478,61 @@ export default function FormationPanel({
         </aside>
       </div>
     </div>
+  );
+}
+
+function WarbandStackCard({
+  stack,
+  selected,
+  fielded,
+  onClick,
+  onBench,
+}: {
+  stack: MinionStack;
+  selected: boolean;
+  fielded: boolean;
+  onClick: () => void;
+  onBench: () => void;
+}) {
+  const template = getMinionTemplate(stack.templateId);
+  if (!template) return null;
+
+  return (
+    <FormationHoverTip side="right" popover={<MinionTooltipContent template={template} />}>
+      <button
+        type="button"
+        draggable={fielded}
+        onClick={onClick}
+        onDragStart={(event) => {
+          if (!fielded) return;
+          event.dataTransfer.setData('text/formation-stack', stack.id);
+          event.dataTransfer.effectAllowed = 'move';
+        }}
+        onDoubleClick={(event) => {
+          event.preventDefault();
+          if (fielded) onBench();
+        }}
+        className={`formation-warband-card rounded border ${selected ? 'formation-unit-selected' : ''} ${fielded ? 'formation-warband-card-fielded' : 'formation-warband-card-bench'}`}
+      >
+        <FormationUnitPortrait
+          imageSrc={`/assets/minions/${template.templateId}.png`}
+          variant="minion"
+          size="dock"
+        />
+        <span className="formation-warband-copy">
+          <span className="formation-warband-label">{shortWarbandLabel(template.name, 18)}</span>
+          <span className="formation-warband-meta">
+            <span className="formation-warband-role ui-faint">
+              {MINION_CLASS_LABELS[template.class]} · Tier {getTierRoman(template.tier)}
+            </span>
+            <span className={`formation-warband-status ${fielded ? 'formation-warband-status-field' : 'formation-warband-status-bench'}`}>
+              {fielded ? 'On field' : 'Bench'}
+            </span>
+          </span>
+        </span>
+        <span className="formation-tier-badge">{getTierRoman(template.tier)}</span>
+      </button>
+    </FormationHoverTip>
   );
 }
 
@@ -518,6 +636,7 @@ function MinionTooltipContent({ template }: { template: MinionTemplate }) {
         <span>RNG {template.stats.range}</span>
       </div>
       <p className="formation-tip-copy">{template.role}</p>
+      <p className="formation-tip-copy ui-faint">Double-click or drag to the bench to remove from field.</p>
     </>
   );
 }
@@ -575,7 +694,7 @@ function EmptySlotTooltipContent({ slotNumber }: { slotNumber: number }) {
     <>
       <div className="formation-tip-title">Slot {slotNumber}</div>
       <div className="formation-tip-meta">Open deployment cell</div>
-      <p className="formation-tip-copy">Select a unit, then click here to place or swap.</p>
+      <p className="formation-tip-copy">Select a unit, then click here to place or swap. Drag a fielded unit to the bench to remove it.</p>
     </>
   );
 }
@@ -593,7 +712,7 @@ function FormationUnitPortrait({
   variant?: 'minion' | 'commander';
   size?: 'dock' | 'formation';
 }) {
-  const dimension = size === 'formation' ? 80 : 72;
+  const dimension = size === 'formation' ? 80 : 44;
   const boxClass = size === 'formation' ? 'formation-portrait-formation' : 'formation-portrait-dock';
 
   return (
