@@ -140,6 +140,10 @@ export interface BattleLogEntry {
   action: BattleLogAction;
   style?: BattleLogStyle;
   spellId?: string;
+  fromX?: number;
+  fromY?: number;
+  toX?: number;
+  toY?: number;
   message: string;
   createdAt: number;
 }
@@ -1128,7 +1132,7 @@ function grantCommanderMana(state: BattleState, unit: BattleUnit | undefined): B
 function createBattleLogEntry(
   state: Pick<BattleState, 'round'>,
   message: string,
-  options: Partial<Pick<BattleLogEntry, 'side' | 'actor' | 'actorId' | 'targetIds' | 'action' | 'style' | 'spellId'>> = {}
+  options: Partial<Pick<BattleLogEntry, 'side' | 'actor' | 'actorId' | 'targetIds' | 'action' | 'style' | 'spellId' | 'fromX' | 'fromY' | 'toX' | 'toY'>> = {}
 ): BattleLogEntry {
   return {
     id: `log-${Date.now()}-${Math.random().toString(16).slice(2)}`,
@@ -1140,6 +1144,10 @@ function createBattleLogEntry(
     targetIds: options.targetIds,
     style: options.style,
     spellId: options.spellId,
+    fromX: options.fromX,
+    fromY: options.fromY,
+    toX: options.toX,
+    toY: options.toY,
     message,
     createdAt: Date.now(),
   };
@@ -1148,7 +1156,7 @@ function createBattleLogEntry(
 function withBattleLog(
   state: BattleState,
   message: string,
-  options: Partial<Pick<BattleLogEntry, 'side' | 'actor' | 'actorId' | 'targetIds' | 'action' | 'style' | 'spellId'>> = {}
+  options: Partial<Pick<BattleLogEntry, 'side' | 'actor' | 'actorId' | 'targetIds' | 'action' | 'style' | 'spellId' | 'fromX' | 'fromY' | 'toX' | 'toY'>> = {}
 ): BattleState {
   return {
     ...state,
@@ -1614,13 +1622,66 @@ export function isInsideBoard(state: BattleState, x: number, y: number): boolean
   return x >= 0 && x < state.boardWidth && y >= 0 && y < state.boardHeight;
 }
 
+const ORTHOGONAL_MOVE_DIRS: Array<{ dx: number; dy: number }> = [
+  { dx: 0, dy: 1 },
+  { dx: 0, dy: -1 },
+  { dx: 1, dy: 0 },
+  { dx: -1, dy: 0 },
+];
+
+function getStepMoveCost(state: BattleState, x: number, y: number): number {
+  return getTerrainMoveCost(getTerrainAt(state, x, y));
+}
+
+function getReachableMoveCosts(state: BattleState, unit: BattleUnit): Map<string, number> {
+  const costs = new Map<string, number>();
+  const maxRange = getMoveRange(unit);
+  const queue: Array<{ x: number; y: number; cost: number }> = [{ x: unit.x, y: unit.y, cost: 0 }];
+  costs.set(`${unit.x}:${unit.y}`, 0);
+
+  for (let index = 0; index < queue.length; index += 1) {
+    const current = queue[index];
+    for (const { dx, dy } of ORTHOGONAL_MOVE_DIRS) {
+      const nx = current.x + dx;
+      const ny = current.y + dy;
+      if (!isInsideBoard(state, nx, ny) || isObstacle(state, nx, ny)) continue;
+      if (getUnitAt(state, nx, ny)) continue;
+
+      const nextCost = current.cost + getStepMoveCost(state, nx, ny);
+      if (nextCost > maxRange) continue;
+
+      const key = `${nx}:${ny}`;
+      const existing = costs.get(key);
+      if (existing !== undefined && existing <= nextCost) continue;
+
+      costs.set(key, nextCost);
+      queue.push({ x: nx, y: ny, cost: nextCost });
+    }
+  }
+
+  return costs;
+}
+
+export function getReachableMoveCells(state: BattleState, unit: BattleUnit): BoardCell[] {
+  const costs = getReachableMoveCosts(state, unit);
+  const cells: BoardCell[] = [];
+
+  costs.forEach((cost, key) => {
+    if (cost <= 0) return;
+    const [x, y] = key.split(':').map(Number);
+    cells.push({ x, y });
+  });
+
+  return cells;
+}
+
 export function canMoveTo(state: BattleState, unit: BattleUnit, x: number, y: number): boolean {
-  return (
-    isInsideBoard(state, x, y) &&
-    !isObstacle(state, x, y) &&
-    !getUnitAt(state, x, y) &&
-    getDistance(unit, { x, y }) + Math.max(0, getTerrainMoveCost(getTerrainAt(state, x, y)) - 1) <= getMoveRange(unit)
-  );
+  if (!isInsideBoard(state, x, y) || isObstacle(state, x, y) || getUnitAt(state, x, y)) {
+    return false;
+  }
+
+  const cost = getReachableMoveCosts(state, unit).get(`${x}:${y}`);
+  return cost !== undefined && cost > 0 && cost <= getMoveRange(unit);
 }
 
 export function canAttack(attacker: BattleUnit, target: BattleUnit): boolean {
@@ -1842,6 +1903,10 @@ export function moveBattleUnit(state: BattleState, unitId: string, x: number, y:
     targetIds: [unit.id],
     action: 'move',
     style: 'move',
+    fromX: unit.x,
+    fromY: unit.y,
+    toX: x,
+    toY: y,
   });
 }
 
@@ -2217,13 +2282,7 @@ function getHealTargets(state: BattleState, healer: BattleUnit): BattleUnit[] {
 }
 
 function getMoveCells(state: BattleState, unit: BattleUnit): BoardCell[] {
-  const moveCells: BoardCell[] = [];
-  for (let y = 0; y < state.boardHeight; y++) {
-    for (let x = 0; x < state.boardWidth; x++) {
-      if (canMoveTo(state, unit, x, y)) moveCells.push({ x, y });
-    }
-  }
-  return moveCells;
+  return getReachableMoveCells(state, unit);
 }
 
 function runEnemyCommanderSpell(state: BattleState, commander: BattleUnit, personality: EnemyAiPersonality): BattleState | null {

@@ -128,6 +128,7 @@ type BattlePieceAnimation =
   | 'hit-ranged'
   | 'heal'
   | 'buff'
+  | 'defend'
   | 'debuff'
   | 'morale'
   | 'commander-spell'
@@ -142,6 +143,7 @@ interface BattleSpeedConfig {
 /** Shared spell icon / unit presentation window for every spell cast. */
 const SPELL_PRESENTATION_MS = 2300;
 const SPELL_NOTICE_MS = 1450;
+const BATTLE_MOVE_TRANSIT_MS = 1100;
 
 /** Enemy turns always use this pacing, regardless of the combat speed setting. */
 const ENEMY_BATTLE_PACE = {
@@ -346,14 +348,19 @@ export default function BattleModal({
     if (!entry || entry.action !== 'spell') return;
 
     const expiresAt = entry.createdAt + SPELL_PRESENTATION_MS;
-    setPresentationPin({ entry, expiresAt });
+    const pinTimer = window.setTimeout(() => {
+      setPresentationPin({ entry, expiresAt });
+    }, 0);
 
     const remaining = Math.max(0, expiresAt - Date.now());
     const timer = window.setTimeout(() => {
       setPresentationPin(current => (current?.entry.id === entry.id ? null : current));
     }, remaining);
 
-    return () => window.clearTimeout(timer);
+    return () => {
+      window.clearTimeout(pinTimer);
+      window.clearTimeout(timer);
+    };
   }, [battle?.log[0]?.id]);
 
   useEffect(() => {
@@ -547,6 +554,8 @@ export default function BattleModal({
   if (!battle) return null;
 
   const presentationEntry = getPresentationEntry(battle, presentationPin, now);
+  const unitMoveTransit = getUnitMoveTransit(battle, presentationEntry, now);
+  const isMoveAnimating = Boolean(unitMoveTransit);
 
   const queuePlayerAction = (nextBattle: BattleState, cue: BattleCue) => {
     if (playerActionTimer.current) window.clearTimeout(playerActionTimer.current);
@@ -641,6 +650,7 @@ export default function BattleModal({
     if (!unitAtCell && !canUndoMove && canMoveTo(battle, activeUnit, x, y)) {
       const movedBattle = moveBattleUnit(battle, activeUnit.id, x, y);
       if (!confirmMoveEnabled) {
+        setBattle(movedBattle);
         queuePlayerAction(advanceBattleTurn(movedBattle), {
           headline: 'Move',
           detail: '',
@@ -658,15 +668,6 @@ export default function BattleModal({
       });
       emitFxEvent({ type: 'status', tone: 'blue', intensity: 0.45 });
     }
-  };
-
-  const handleToggleConfirmMove = () => {
-    if (canUndoMove) return;
-    setConfirmMoveEnabled(current => {
-      const next = !current;
-      writeGameJson(CONFIRM_MOVE_SETTING_KEY, next);
-      return next;
-    });
   };
 
   const handleUndoMove = () => {
@@ -866,6 +867,7 @@ export default function BattleModal({
     selectedSpell,
     isResolvingAction,
     movementLocked: canUndoMove,
+    movementAnimating: isMoveAnimating,
   });
   const hoverForecast = getBattleHoverForecast({
     battle,
@@ -875,6 +877,7 @@ export default function BattleModal({
     selectedSpell,
     isResolvingAction,
     movementLocked: canUndoMove,
+    movementAnimating: isMoveAnimating,
   });
   const hoveredThreatUnit = hoveredCell ? getUnitAt(battle, hoveredCell.x, hoveredCell.y) : undefined;
   const hoveredEnemyUnit = hoveredThreatUnit?.side === 'enemy' && hoveredThreatUnit.currentHealth > 0 ? hoveredThreatUnit : undefined;
@@ -948,11 +951,6 @@ export default function BattleModal({
                   isPlayerTurn={isPlayerTurn}
                   isResolvingAction={isResolvingAction}
                   selectedSpell={selectedSpell}
-                  canUndoMove={canUndoMove}
-                  confirmMoveEnabled={confirmMoveEnabled}
-                  onEndTurn={handleEndTurn}
-                  onCommitMove={handleCommitMove}
-                  onToggleConfirmMove={handleToggleConfirmMove}
                   onCancelSpell={handleCancelSpell}
                 />
                 <div className="battle-side-block battle-order-card rounded border p-2">
@@ -987,6 +985,7 @@ export default function BattleModal({
                   '--battle-cols': battle.boardWidth,
                   '--battle-rows': battle.boardHeight,
                   '--battle-ratio': battle.boardWidth / battle.boardHeight,
+                  '--battle-move-transit-ms': `${BATTLE_MOVE_TRANSIT_MS}ms`,
                   gridTemplateColumns: `repeat(${battle.boardWidth}, minmax(0, 1fr))`,
                   gridTemplateRows: `repeat(${battle.boardHeight}, minmax(0, 1fr))`,
                 } as CSSProperties}
@@ -995,7 +994,8 @@ export default function BattleModal({
                 const x = index % battle.boardWidth;
                 const y = Math.floor(index / battle.boardWidth);
                 const unit = getUnitAt(battle, x, y);
-                const defeatedUnit = unit ? undefined : getRecentlyDefeatedUnitAt(battle, x, y, presentationEntry, now);
+                const displayUnit = unit && unit.id === unitMoveTransit?.unit.id ? undefined : unit;
+                const defeatedUnit = displayUnit ? undefined : getRecentlyDefeatedUnitAt(battle, x, y, presentationEntry, now);
                 const obstacle = isObstacle(battle, x, y);
                 const terrain = getTerrainAt(battle, x, y);
                 const terrainLabel = BATTLE_TERRAIN_LABELS[terrain];
@@ -1007,9 +1007,10 @@ export default function BattleModal({
                   selectedSpell,
                   isResolvingAction,
                   movementLocked: canUndoMove,
+                  movementAnimating: isMoveAnimating,
                 });
                 const isActiveCell = unit?.id === battle.activeUnitId;
-                const canMove = Boolean(isPlayerTurn && activeUnit && !canUndoMove && !unit && canMoveTo(battle, activeUnit, x, y));
+                const canMove = Boolean(isPlayerTurn && activeUnit && !canUndoMove && !isMoveAnimating && !unit && canMoveTo(battle, activeUnit, x, y));
                 const canStrike = Boolean(isPlayerTurn && activeUnit && unit && canAttack(activeUnit, unit));
                 const canMend = Boolean(isPlayerTurn && activeUnit && unit && canHeal(activeUnit, unit));
                 const canSpellTarget = Boolean(
@@ -1081,8 +1082,8 @@ export default function BattleModal({
                       <span className="battle-terrain-chip">{terrainLabel}</span>
                     )}
                     {obstacle && <span className="battle-obstacle-shape" />}
-                    {unit && <BattlePiece unit={unit} active={isActiveCell} animation={getBattlePieceAnimation(battle, unit, presentationEntry, now)} />}
-                    {isActiveCell && isCommanderTurn && !selectedSpell && !canUndoMove && (
+                    {displayUnit && <BattlePiece unit={displayUnit} active={isActiveCell} animation={getBattlePieceAnimation(battle, displayUnit, presentationEntry, now)} />}
+                    {isActiveCell && isCommanderTurn && !selectedSpell && !canUndoMove && !isMoveAnimating && (
                       <BattleUnitActionOrbs
                         mode="commander"
                         isResolvingAction={isResolvingAction}
@@ -1091,14 +1092,22 @@ export default function BattleModal({
                           playGameSound('ui.modalOpen', { throttleMs: 140 });
                           setIsSpellMenuOpen(open => !open);
                         }}
+                        onWait={handleEndTurn}
                       />
                     )}
-                    {isActiveCell && canUndoMove && (
+                    {isActiveCell && canUndoMove && !isMoveAnimating && (
                       <BattleUnitActionOrbs
                         mode="move"
                         isResolvingAction={isResolvingAction}
                         onUndoMove={handleUndoMove}
                         onCommitMove={handleCommitMove}
+                      />
+                    )}
+                    {isActiveCell && isPlayerTurn && !isCommanderTurn && !selectedSpell && !canUndoMove && !isMoveAnimating && (
+                      <BattleUnitActionOrbs
+                        mode="wait"
+                        isResolvingAction={isResolvingAction}
+                        onWait={handleEndTurn}
                       />
                     )}
                     {defeatedUnit && <BattleDeathMarker unit={defeatedUnit} />}
@@ -1112,19 +1121,17 @@ export default function BattleModal({
                   </div>
                 );
               })}
+              {unitMoveTransit && (
+                <BattleUnitTransit
+                  key={`${unitMoveTransit.unit.id}-${unitMoveTransit.startedAt}`}
+                  unit={unitMoveTransit.unit}
+                  from={unitMoveTransit.from}
+                  to={unitMoveTransit.to}
+                  active={unitMoveTransit.unit.id === battle.activeUnitId}
+                />
+              )}
               <CombatThreeFxLayer battle={battle} />
               </div>
-              {isPlayerTurn && battle.status === 'active' && !selectedSpell && (
-                <button
-                  type="button"
-                  onClick={canUndoMove ? handleCommitMove : handleEndTurn}
-                  disabled={isResolvingAction}
-                  className={`battle-board-wait-button ${canUndoMove ? 'battle-board-wait-button-done' : ''}`}
-                >
-                  <span className="arcane-label">{canUndoMove ? 'Commit Move' : 'Pass Turn'}</span>
-                  <span className="fantasy-heading">{canUndoMove ? 'Done' : 'Wait'}</span>
-                </button>
-              )}
             </div>
               <aside className="battle-side-panel battle-side-panel-right">
                 <BattleSpeedControl
@@ -1165,13 +1172,15 @@ function BattleUnitActionOrbs({
   onToggleSpellMenu,
   onUndoMove,
   onCommitMove,
+  onWait,
 }: {
-  mode: 'commander' | 'move';
+  mode: 'commander' | 'move' | 'wait';
   isResolvingAction: boolean;
   onFocusMana?: () => void;
   onToggleSpellMenu?: () => void;
   onUndoMove?: () => void;
   onCommitMove?: () => void;
+  onWait?: () => void;
 }) {
   const stopCellAction = (event: MouseEvent<HTMLButtonElement>, action?: () => void) => {
     event.preventDefault();
@@ -1204,6 +1213,22 @@ function BattleUnitActionOrbs({
     );
   }
 
+  if (mode === 'wait') {
+    return (
+      <div className="battle-unit-orbs battle-unit-orbs-wait">
+        <button
+          type="button"
+          disabled={isResolvingAction}
+          onClick={(event) => stopCellAction(event, onWait)}
+          className="battle-unit-orb battle-unit-orb-wait"
+          title="Pass turn"
+        >
+          W
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div className="battle-unit-orbs battle-unit-orbs-commander">
       <button
@@ -1223,6 +1248,15 @@ function BattleUnitActionOrbs({
         title="Focus mana"
       >
         M
+      </button>
+      <button
+        type="button"
+        disabled={isResolvingAction}
+        onClick={(event) => stopCellAction(event, onWait)}
+        className="battle-unit-orb battle-unit-orb-wait"
+        title="Pass turn"
+      >
+        W
       </button>
     </div>
   );
@@ -1274,57 +1308,27 @@ function BattleHeaderActions({
   isPlayerTurn,
   isResolvingAction,
   selectedSpell,
-  canUndoMove,
-  confirmMoveEnabled,
-  onEndTurn,
-  onCommitMove,
-  onToggleConfirmMove,
   onCancelSpell,
 }: {
   isPlayerTurn: boolean;
   isResolvingAction: boolean;
   selectedSpell?: BattleSpell;
-  canUndoMove: boolean;
-  confirmMoveEnabled: boolean;
-  onEndTurn: () => void;
-  onCommitMove: () => void;
-  onToggleConfirmMove: () => void;
   onCancelSpell: () => void;
 }) {
-  if (!isPlayerTurn) {
-    return <div className="battle-header-actions" aria-hidden="true" />;
+  if (!isPlayerTurn || !selectedSpell) {
+    return null;
   }
 
   return (
     <div className="battle-header-actions">
       <button
         type="button"
-        onClick={onToggleConfirmMove}
-        disabled={isResolvingAction || canUndoMove}
-        className={`battle-header-action battle-header-action-toggle ${confirmMoveEnabled ? 'battle-header-action-toggle-on' : ''}`}
-        title="Toggle movement confirmation. Off means moves commit immediately."
-      >
-        {confirmMoveEnabled ? 'Move Check' : 'Move Auto'}
-      </button>
-      {selectedSpell && (
-        <button
-          type="button"
-          onClick={onCancelSpell}
-          disabled={isResolvingAction}
-          className="battle-header-action battle-header-action-cancel"
-          title="Cancel spell target mode"
-        >
-          Cancel
-        </button>
-      )}
-      <button
-        type="button"
-        onClick={canUndoMove ? onCommitMove : onEndTurn}
+        onClick={onCancelSpell}
         disabled={isResolvingAction}
-        className={`battle-header-action ${canUndoMove ? 'battle-header-action-done' : 'battle-header-action-wait'}`}
-        title={canUndoMove ? 'Commit movement and pass turn' : 'Pass turn'}
+        className="battle-header-action battle-header-action-cancel"
+        title="Cancel spell target mode"
       >
-        {canUndoMove ? 'Done' : 'Wait'}
+        Cancel
       </button>
     </div>
   );
@@ -1529,6 +1533,11 @@ function BattleHoverOverlay({
       : 0;
     const retaliationCurrentPct = getHealthPercent(forecast.retaliationCurrentHealth || 0, forecast.retaliationMaxHealth || 0);
     const retaliationProjectedPct = getHealthPercent(forecast.retaliationProjectedHealth || 0, forecast.retaliationMaxHealth || 0);
+    const damagePct = delta < 0 ? Math.max(0, currentPct - projectedPct) : 0;
+    const healPct = delta > 0 ? Math.max(0, projectedPct - currentPct) : 0;
+    const retaliationDamagePct = retaliationDelta < 0
+      ? Math.max(0, retaliationCurrentPct - retaliationProjectedPct)
+      : 0;
     const toneClass = forecast.tone === 'danger'
       ? 'battle-forecast-danger'
       : forecast.tone === 'good'
@@ -1573,10 +1582,18 @@ function BattleHoverOverlay({
           </div>
           <div className="battle-forecast-health-track">
             <span className="battle-forecast-health-current" style={{ width: `${currentPct}%` }} />
-            <span
-              className={`battle-forecast-health-projected ${delta < 0 ? 'battle-forecast-health-damage' : delta > 0 ? 'battle-forecast-health-heal' : ''}`}
-              style={{ width: `${projectedPct}%` }}
-            />
+            {damagePct > 0 && (
+              <span
+                className="battle-forecast-health-delta battle-forecast-health-damage"
+                style={{ left: `${projectedPct}%`, width: `${damagePct}%` }}
+              />
+            )}
+            {healPct > 0 && (
+              <span
+                className="battle-forecast-health-delta battle-forecast-health-heal"
+                style={{ left: `${currentPct}%`, width: `${healPct}%` }}
+              />
+            )}
           </div>
           {delta !== 0 && (
             <div className="mt-1 text-[10px] font-black text-[var(--ui-muted)]">
@@ -1593,10 +1610,12 @@ function BattleHoverOverlay({
             </div>
             <div className="battle-forecast-health-track">
               <span className="battle-forecast-health-current battle-forecast-health-self" style={{ width: `${retaliationCurrentPct}%` }} />
-              <span
-                className="battle-forecast-health-projected battle-forecast-health-retaliation"
-                style={{ width: `${retaliationProjectedPct}%` }}
-              />
+              {retaliationDamagePct > 0 && (
+                <span
+                  className="battle-forecast-health-delta battle-forecast-health-retaliation"
+                  style={{ left: `${retaliationProjectedPct}%`, width: `${retaliationDamagePct}%` }}
+                />
+              )}
             </div>
             {retaliationDelta !== 0 && (
               <div className="mt-1 text-[10px] font-black text-[var(--ui-muted)]">
@@ -1663,6 +1682,7 @@ function BattlePiece({ unit, active, animation }: { unit: BattleUnit; active: bo
   const healthPercent = Math.max(0, Math.min(100, (unit.currentHealth / unit.maxHealth) * 100));
   const animationClass = animation ? `battle-piece-anim-${animation}` : '';
   const isCommander = unit.kind === 'commander';
+  const idleClass = animation ? '' : active ? 'battle-piece-body-idle battle-piece-body-idle-alert' : 'battle-piece-body-idle';
 
   return (
     <span className={`battle-piece-wrap battle-piece-wrap-${unit.side} ${active ? 'battle-piece-wrap-active' : ''}`}>
@@ -1674,7 +1694,7 @@ function BattlePiece({ unit, active, animation }: { unit: BattleUnit; active: bo
           +
         </span>
       )}
-      <span className={`battle-piece-body ${isCommander ? 'battle-piece-body-commander' : 'battle-piece-body-minion'} ${animationClass}`}>
+      <span className={`battle-piece-body ${isCommander ? 'battle-piece-body-commander' : 'battle-piece-body-minion'} ${idleClass} ${animationClass}`}>
         <span className={`battle-piece-base ${unit.side === 'player' ? 'battle-piece-base-player' : 'battle-piece-base-enemy'} ${isCommander ? 'battle-piece-base-commander' : ''}`} />
         <Image
           src={unit.assetPath}
@@ -1696,18 +1716,76 @@ function BattleDeathMarker({ unit }: { unit: BattleUnit }) {
 
   return (
     <span className="battle-death-marker">
-      <span className={`battle-piece-body battle-death-body ${isCommander ? 'battle-piece-body-commander' : 'battle-piece-body-minion'}`}>
+      <span className={`battle-piece-body battle-death-body battle-piece-anim-death ${isCommander ? 'battle-piece-body-commander' : 'battle-piece-body-minion'}`}>
         <Image
           src={unit.assetPath}
           alt=""
           fill
           sizes="(max-width: 768px) 12vw, 8vw"
-          className="battle-piece-image object-contain object-center opacity-45 grayscale"
+          className="battle-piece-image object-contain object-center"
         />
       </span>
       <span className="battle-death-ash" />
     </span>
   );
+}
+
+function BattleUnitTransit({
+  unit,
+  from,
+  to,
+  active,
+}: {
+  unit: BattleUnit;
+  from: { x: number; y: number };
+  to: { x: number; y: number };
+  active: boolean;
+}) {
+  const isCommander = unit.kind === 'commander';
+
+  return (
+    <span
+      className={`battle-unit-transit battle-unit-transit-${unit.side}`}
+      style={{
+        '--transit-from-x': from.x,
+        '--transit-from-y': from.y,
+        '--transit-to-x': to.x,
+        '--transit-to-y': to.y,
+      } as CSSProperties}
+    >
+      <span className={`battle-piece-wrap battle-piece-wrap-${unit.side} ${active ? 'battle-piece-wrap-active' : ''}`}>
+        <span className={`battle-piece-body ${isCommander ? 'battle-piece-body-commander' : 'battle-piece-body-minion'} battle-piece-anim-move`}>
+          <Image
+            src={unit.assetPath}
+            alt={unit.name}
+            fill
+            sizes="(max-width: 768px) 12vw, 8vw"
+            className="battle-piece-image object-contain object-center"
+          />
+        </span>
+      </span>
+    </span>
+  );
+}
+
+function getUnitMoveTransit(
+  battle: BattleState,
+  entry: BattleLogEntry | undefined,
+  now: number,
+): { unit: BattleUnit; from: { x: number; y: number }; to: { x: number; y: number }; startedAt: number } | null {
+  if (!entry || entry.action !== 'move') return null;
+  if (entry.fromX === undefined || entry.fromY === undefined || entry.toX === undefined || entry.toY === undefined) return null;
+  if (now - entry.createdAt > BATTLE_MOVE_TRANSIT_MS) return null;
+
+  const unit = battle.units.find(item => item.id === entry.actorId && item.currentHealth > 0);
+  if (!unit) return null;
+
+  return {
+    unit,
+    from: { x: entry.fromX, y: entry.fromY },
+    to: { x: entry.toX, y: entry.toY },
+    startedAt: entry.createdAt,
+  };
 }
 
 function BattleSpellIconImpact({ impact, delayMs = 0 }: { impact: BattleSpellImpactData; delayMs?: number }) {
@@ -1837,6 +1915,7 @@ function getBattlePieceAnimation(
     if (entry.action === 'heal') return 'heal';
     if (entry.action === 'spell') return 'commander-spell';
     if (entry.action === 'wait' && style === 'buff') return 'buff';
+    if (entry.action === 'wait') return 'defend';
     if (entry.action === 'morale' || entry.action === 'mana') return 'morale';
   }
 
@@ -2319,6 +2398,7 @@ function getBattleHoverForecast({
   selectedSpell,
   isResolvingAction,
   movementLocked = false,
+  movementAnimating = false,
 }: {
   battle: BattleState;
   activeUnit?: BattleUnit;
@@ -2327,6 +2407,7 @@ function getBattleHoverForecast({
   selectedSpell?: BattleSpell;
   isResolvingAction: boolean;
   movementLocked?: boolean;
+  movementAnimating?: boolean;
 }): BattleHoverForecastData | null {
   if (!hoveredCell) return null;
 
@@ -2341,7 +2422,7 @@ function getBattleHoverForecast({
     maxHealth: unitAtCell.maxHealth,
   };
 
-  if (battle.status !== 'active' || isResolvingAction || !isPlayerTurn || !activeUnit) {
+  if (battle.status !== 'active' || isResolvingAction || movementAnimating || !isPlayerTurn || !activeUnit) {
     return baseForecast;
   }
 
@@ -2450,6 +2531,7 @@ function getBattleHoverPreview({
   selectedSpell,
   isResolvingAction,
   movementLocked = false,
+  movementAnimating = false,
 }: {
   battle: BattleState;
   activeUnit?: BattleUnit;
@@ -2458,12 +2540,13 @@ function getBattleHoverPreview({
   selectedSpell?: BattleSpell;
   isResolvingAction: boolean;
   movementLocked?: boolean;
+  movementAnimating?: boolean;
 }): BattleHoverPreviewData {
   if (battle.status !== 'active') {
     return { title: 'Battle Ended', detail: '', tone: 'neutral' };
   }
 
-  if (isResolvingAction) {
+  if (isResolvingAction || movementAnimating) {
     return { title: 'Resolving', detail: '', tone: 'neutral' };
   }
 
@@ -2530,7 +2613,7 @@ function getBattleHoverPreview({
     };
   }
 
-  if (isPlayerTurn && !movementLocked && canMoveTo(battle, activeUnit, hoveredCell.x, hoveredCell.y)) {
+  if (isPlayerTurn && !movementLocked && !movementAnimating && canMoveTo(battle, activeUnit, hoveredCell.x, hoveredCell.y)) {
     return {
       title: 'Move',
       detail: '',

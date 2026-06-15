@@ -51,6 +51,7 @@ import {
 } from '@/lib/auth';
 import {
   getFormationIssue,
+  isFormationCellAllowed,
   makeDefaultFormation,
   mergeFormation,
 } from '@/lib/formation';
@@ -360,11 +361,14 @@ const DAILY_RUN_SESSION_PREFIX = 'pirate_game_daily_run_session';
 const RANDOM_RUN_ACTIVE_SESSION_KEY = 'random-active';
 const RANDOM_RUN_LOBBY_BOSS_COUNT = 8;
 const RANDOM_RUN_LOBBY_BOSS_KEY = 'pirate_game_random_run_lobby_boss';
-const RUN_REWARD_CHOICE_COUNT = 2;
+const RUN_REWARD_CHOICE_COUNT = 3;
+const RUN_BLESSING_SPELL_OFFER_CHANCE = 0.26;
+const RUN_SHOP_SPELL_OFFER_CHANCE = 0.42;
 const RUN_SHOP_CHOICE_COUNT = 4;
 const RUN_SHOP_REROLL_COUNT = 3;
 const RUN_OMEN_REROLL_COUNT = 1;
 const RUN_DEFEAT_BURST_MS = 3200;
+const RUN_MAX_ROSTER = 10;
 
 const RUN_BUFFS: RunRewardChoice[] = [
   makeStatBuff('army-drill', 'Army Drill', '+2 Army Power for this run.', { armyPower: 2 }),
@@ -806,7 +810,7 @@ function RunController({
   setSession: (updater: RunSession | ((current: RunSession | null) => RunSession | null)) => void;
   onClose: () => void;
 }) {
-  const aliveStacks = getAliveRunStacks(session);
+  const aliveStacks = getRunFieldedStacks(session);
   const previousPhaseRef = useRef<RunPhase | null>(null);
   const completionIntroTimeoutRef = useRef<number | null>(null);
   const [completionView, setCompletionView] = useState<'defeat-burst' | 'report' | null>(null);
@@ -815,6 +819,7 @@ function RunController({
   const isMapPhase = session.phase === 'map';
   const isDraftPhase = session.phase === 'draft';
   const isCompletePhase = session.phase === 'complete';
+  const isRunIntermissionPhase = session.phase === 'reward' || session.phase === 'shop' || session.phase === 'event';
 
   useEffect(() => {
     if (previousPhaseRef.current === session.phase) return;
@@ -848,29 +853,47 @@ function RunController({
   }, []);
 
   useEffect(() => {
+    let immediateTimer: number | null = null;
+    const scheduleView = (view: typeof completionView) => {
+      immediateTimer = window.setTimeout(() => setCompletionView(view), 0);
+    };
+
     if (session.phase !== 'complete') {
-      setCompletionView(null);
-      return;
+      scheduleView(null);
+      return () => {
+        if (immediateTimer) window.clearTimeout(immediateTimer);
+      };
     }
 
     if (session.outcome === 'victory') {
-      setCompletionView('report');
-      return;
+      scheduleView('report');
+      return () => {
+        if (immediateTimer) window.clearTimeout(immediateTimer);
+      };
     }
 
-    setCompletionView('defeat-burst');
+    scheduleView('defeat-burst');
     completionIntroTimeoutRef.current = window.setTimeout(() => {
       setCompletionView('report');
       completionIntroTimeoutRef.current = null;
     }, RUN_DEFEAT_BURST_MS);
 
     return () => {
+      if (immediateTimer) window.clearTimeout(immediateTimer);
       if (completionIntroTimeoutRef.current) {
         window.clearTimeout(completionIntroTimeoutRef.current);
         completionIntroTimeoutRef.current = null;
       }
     };
   }, [session.id, session.outcome, session.phase]);
+
+  const triggerCompletionIntro = () => {
+    if (completionIntroTimeoutRef.current) {
+      window.clearTimeout(completionIntroTimeoutRef.current);
+      completionIntroTimeoutRef.current = null;
+    }
+    setCompletionView('report');
+  };
 
   useEffect(() => {
     if (!isCompletePhase) return;
@@ -1004,7 +1027,7 @@ function RunController({
     const isEncounter = session.mode === 'encounter';
     const rewards: CompletionRewardLine[] = [
       { label: 'Wins', value: `${session.wins}/${session.targetBattles}`, tone: 'blue' },
-      { label: 'Standing', value: `${getAliveRunStacks(session).length}/${session.minions.length}`, tone: 'green' },
+      { label: 'Standing', value: `${getAliveRunRoster(session).length}/${session.minions.length}`, tone: 'green' },
       { label: 'Run Gold', value: String(session.runGold), tone: 'gold' },
     ];
 
@@ -1029,9 +1052,9 @@ function RunController({
   const handleStartFormation = () => {
     setSession(current => {
       if (!current) return current;
-      const aliveUnits = getAliveRunStacks(current);
-      const formation = mergeFormation(aliveUnits, current.formation);
-      const issue = getFormationIssue(formation, aliveUnits);
+      const aliveUnits = getAliveRunRoster(current);
+      const formation = mergeFormation(aliveUnits.slice(0, MAX_FIELD_MINIONS), current.formation);
+      const issue = getRunFormationIssue(current, formation);
 
       if (issue) {
         return {
@@ -1069,26 +1092,26 @@ function RunController({
 
   return (
     <div
-      className={`run-modal-layer fixed inset-0 z-[68] flex items-center justify-center bg-black/76 text-zinc-100 backdrop-blur-sm ${isMapPhase || isFormationPhase || isDraftPhase || isCompletePhase ? 'p-1' : 'p-4'}`}
+      className={`run-modal-layer fixed inset-0 z-[68] flex items-center justify-center bg-black/76 text-zinc-100 backdrop-blur-sm ${isMapPhase || isFormationPhase || isDraftPhase || isCompletePhase || isRunIntermissionPhase ? 'p-1' : 'p-4'}`}
       onClick={(event) => {
         if (!isCompletePhase || event.target !== event.currentTarget) return;
         if (session.outcome === 'victory' && !session.rewardClaimed) return;
         onClose();
       }}
     >
-      <section className={`run-modal-panel command-panel vine-frame flex w-full flex-col overflow-hidden rounded border ${isFormationPhase ? 'run-formation-modal h-[calc(100vh-0.5rem)] max-h-[calc(100vh-0.5rem)] max-w-none' : isMapPhase ? 'run-map-modal h-[calc(100vh-0.5rem)] max-h-[calc(100vh-0.5rem)] max-w-none' : isDraftPhase ? 'run-draft-modal h-[calc(100vh-0.5rem)] max-h-[calc(100vh-0.5rem)] max-w-none' : isCompletePhase ? 'run-completion-modal random-run-lobby h-[calc(100vh-0.5rem)] max-h-[calc(100vh-0.5rem)] max-w-none' : 'max-h-[94vh] max-w-6xl'}`}>
+      <section className={`run-modal-panel command-panel vine-frame flex w-full flex-col overflow-hidden rounded border ${isFormationPhase ? 'run-formation-modal h-[calc(100vh-0.5rem)] max-h-[calc(100vh-0.5rem)] max-w-none' : isMapPhase ? 'run-map-modal h-[calc(100vh-0.5rem)] max-h-[calc(100vh-0.5rem)] max-w-none' : isDraftPhase ? 'run-draft-modal h-[calc(100vh-0.5rem)] max-h-[calc(100vh-0.5rem)] max-w-none' : isCompletePhase ? 'run-completion-modal random-run-lobby h-[calc(100vh-0.5rem)] max-h-[calc(100vh-0.5rem)] max-w-none' : isRunIntermissionPhase ? 'run-reward-modal random-run-lobby h-[calc(100vh-0.5rem)] max-h-[calc(100vh-0.5rem)] max-w-none' : 'max-h-[94vh] max-w-6xl'}`}>
         {session.notice && session.phase !== 'complete' && (
           <div className={`ui-notice border-b font-bold ${isMapPhase || isFormationPhase ? 'run-map-notice px-3 py-1.5 text-[11px]' : 'px-5 py-3 text-sm'}`}>
             {session.notice}
           </div>
         )}
 
-        <div className={`grid min-h-0 flex-1 ${isFormationPhase ? 'overflow-hidden p-2' : isCompletePhase ? 'run-completion-layout overflow-hidden' : isMapPhase ? 'run-map-layout gap-3 overflow-hidden p-2 lg:grid-cols-[18rem_minmax(0,1fr)]' : isDraftPhase ? 'run-draft-layout overflow-hidden p-2' : 'gap-5 overflow-y-auto p-5 lg:grid-cols-[18rem_minmax(0,1fr)]'}`}>
-          {!isFormationPhase && !isDraftPhase && !isCompletePhase && (
+        <div className={`grid min-h-0 flex-1 ${isFormationPhase ? 'overflow-hidden p-2' : isCompletePhase ? 'run-completion-layout overflow-hidden' : isRunIntermissionPhase ? 'run-reward-layout overflow-hidden' : isMapPhase ? 'run-map-layout gap-3 overflow-hidden p-2 lg:grid-cols-[18rem_minmax(0,1fr)]' : isDraftPhase ? 'run-draft-layout overflow-hidden p-2' : 'gap-5 overflow-y-auto p-5 lg:grid-cols-[18rem_minmax(0,1fr)]'}`}>
+          {!isFormationPhase && !isDraftPhase && !isCompletePhase && !isRunIntermissionPhase && (
             <RunRoster session={session} onOpenStats={() => setRunStatsOpen(true)} variant={isMapPhase ? 'map' : 'default'} />
           )}
 
-          <main className={`min-h-0 ${isCompletePhase ? 'h-full' : ''}`}>
+          <main className={`min-h-0 ${isCompletePhase || isRunIntermissionPhase ? 'h-full' : ''}`}>
             {session.phase === 'draft' && (
               <DailyDraftPanel
                 session={session}
@@ -1110,7 +1133,8 @@ function RunController({
                 enemySubtitle={session.activeEnemy.subtitle}
                 commanderName={getCurrentUser()?.username || 'Commander'}
                 commanderModel={(getCurrentUser()?.selectedModel || 3) as PlayerModelNumber}
-                stacks={getAliveRunStacks(session)}
+                stacks={getAliveRunRoster(session)}
+                maxFielded={MAX_FIELD_MINIONS}
                 formation={session.formation}
                 spellIds={session.spellIds}
                 knownSpellIds={session.knownSpellIds}
@@ -1123,6 +1147,7 @@ function RunController({
 
             {session.phase === 'reward' && (
               <RewardPanel
+                session={session}
                 choices={session.rewardChoices}
                 onChoose={handleRewardChoice}
               />
@@ -1645,20 +1670,100 @@ function getRunConnectionState(from: DungeonNode, to: DungeonNode, reachableIds:
   return 'locked';
 }
 
-function RewardPanel({ choices, onChoose }: { choices: RunRewardChoice[]; onChoose: (choice: RunRewardChoice) => void }) {
+function RewardPanel({
+  session,
+  choices,
+  onChoose,
+}: {
+  session: RunSession;
+  choices: RunRewardChoice[];
+  onChoose: (choice: RunRewardChoice) => void;
+}) {
+  const standingCount = getAliveRunRoster(session).length;
+
   return (
-    <div className="space-y-5">
-      <section className="run-reward-hero rounded border p-4">
-        <div className="arcane-label">Run Reward</div>
-        <h3 className="fantasy-heading text-2xl">Choose a Blessing</h3>
-        <p className="ui-muted mt-1 text-sm font-bold">Pick one upgrade for this run. Higher tiers hit harder, but the best choice depends on your surviving army.</p>
+    <div className="run-draft-stage run-reward-stage min-h-0">
+      <section className="run-draft-hero run-reward-hero-full relative min-h-0 overflow-hidden p-4 sm:p-5">
+        <div className="relative z-10 max-w-xl">
+          <div className="arcane-label">Run Reward</div>
+          <h3 className="fantasy-heading mt-1 text-2xl sm:text-3xl">Choose a Blessing</h3>
+          <p className="ui-muted mt-1.5 max-w-lg text-xs font-bold leading-relaxed sm:text-sm">
+            Pick one upgrade for this road. The best blessing depends on the warband still standing.
+          </p>
+          <p className="run-draft-hero-status ui-faint mt-1.5 text-[11px] font-bold sm:text-xs">
+            {session.title} - {standingCount}/{session.minions.length} standing - {session.runGold} run gold
+          </p>
+        </div>
+
+        <RunWarbandHeroSprites
+          minions={session.minions}
+          fallenClassName="run-completion-sprite-fallen"
+        />
       </section>
 
-      <div className="run-reward-grid">
-        {choices.map(choice => (
-          <RunRewardCard key={choice.id} choice={choice} onChoose={() => onChoose(choice)} />
-        ))}
-      </div>
+      <section className="run-draft-choice-shell run-reward-body min-h-0 p-2.5 sm:p-3">
+        <div className="run-reward-roster-scene rounded border">
+          <div className="run-draft-choice-header mb-2 flex flex-wrap items-end justify-between gap-2">
+            <div>
+              <div className="arcane-label">Run Roster</div>
+              <h4 className="fantasy-heading text-lg sm:text-xl">Survivors</h4>
+            </div>
+            <span className="ui-pill rounded border px-2.5 py-0.5 text-[10px] font-black sm:text-xs">
+              {standingCount}/{RUN_MAX_ROSTER}
+            </span>
+          </div>
+
+          <div className="run-reward-roster-grid" aria-label="Run roster">
+            {session.minions.map(unit => {
+              const template = getMinionTemplate(unit.stack.templateId);
+              if (!template) return null;
+
+              return (
+                <div
+                  key={unit.stack.id}
+                  className={`run-reward-roster-card ${unit.alive ? '' : 'run-reward-roster-card-fallen'}`}
+                  title={template.name}
+                >
+                  <span className="run-reward-roster-art relative">
+                    <Image
+                      src={`${MINION_ICON_BASE}/${template.assetName}`}
+                      alt=""
+                      fill
+                      sizes="112px"
+                      className="run-draft-recruit-sprite object-contain object-center"
+                      unoptimized
+                    />
+                  </span>
+                  <span className="run-reward-roster-name fantasy-heading truncate text-xs">
+                    {unit.alive ? template.name : 'Fallen'}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="run-blessing-offer-stage min-h-0">
+          <div className="run-blessing-backdrop" aria-hidden="true" />
+          <div className="run-blessing-frame">
+            <div className="run-draft-choice-header mb-2 flex flex-wrap items-end justify-between gap-2">
+              <div>
+                <div className="arcane-label">Choose One</div>
+                <h4 className="fantasy-heading text-lg sm:text-xl">Blessings Offered</h4>
+              </div>
+              <span className="run-blessing-count ui-pill rounded border px-2.5 py-0.5 text-[10px] font-black sm:text-xs">
+                {choices.length} paths
+              </span>
+            </div>
+
+            <div className="run-blessing-grid">
+              {choices.map(choice => (
+                <RunRewardCard key={choice.id} choice={choice} onChoose={() => onChoose(choice)} />
+              ))}
+            </div>
+          </div>
+        </div>
+      </section>
     </div>
   );
 }
@@ -1675,38 +1780,40 @@ function RunRewardCard({
   cost?: number;
 }) {
   const visual = getRunRewardVisual(choice);
+  const [claiming, setClaiming] = useState(false);
+
+  const handleChoose = () => {
+    if (disabled || claiming) return;
+    setClaiming(true);
+    window.setTimeout(onChoose, 420);
+  };
 
   return (
     <button
-      onClick={onChoose}
-      disabled={disabled}
-      className={`run-reward-card run-reward-card-${visual.tone} rounded border p-4 text-left transition disabled:opacity-40`}
+      onClick={handleChoose}
+      disabled={disabled || claiming}
+      className={`run-blessing-card run-blessing-card-${visual.tone} run-reward-card run-reward-card-${visual.tone} ${claiming ? 'run-reward-card-claiming' : ''} rounded border text-left transition disabled:opacity-40`}
     >
-      <span className="flex items-start gap-3">
-        <span className={`run-reward-icon run-reward-icon-${visual.tone} relative shrink-0 overflow-hidden rounded border`}>
+      <span className="run-reward-card-burst" aria-hidden="true" />
+      <span className="run-blessing-tier rounded border px-2 py-0.5 text-[10px] font-black uppercase">
+        {cost ? `${cost}g` : visual.tierLabel}
+      </span>
+      <span className="run-blessing-card-top">
+        <span className={`run-blessing-art run-reward-icon run-reward-icon-${visual.tone} relative overflow-hidden rounded border`}>
           <Image
             src={visual.iconPath}
             alt=""
             fill
-            sizes="48px"
+            sizes="80px"
             className="run-ui-art object-contain p-2"
           />
         </span>
-        <span className="min-w-0 flex-1">
-          <span className="flex items-start justify-between gap-3">
-            <span className="min-w-0">
-              <span className="fantasy-heading block truncate text-lg">{choice.name}</span>
-              <span className="ui-faint mt-1 block text-[10px] font-black uppercase">{visual.kindLabel}</span>
-            </span>
-            <span className="run-reward-tier rounded border px-2 py-1 text-[10px] font-black uppercase">
-              {cost ? `${cost}g` : visual.tierLabel}
-            </span>
-          </span>
-          <span className="ui-muted mt-3 block text-sm font-bold">{choice.description}</span>
-          <span className="run-reward-impact mt-3 inline-flex rounded border px-2 py-1 text-[10px] font-black uppercase">
-            {visual.impactLabel}
-          </span>
-        </span>
+      </span>
+      <span className="run-blessing-kind ui-faint text-[10px] font-black uppercase">{visual.kindLabel}</span>
+      <span className="run-blessing-name fantasy-heading">{choice.name}</span>
+      <span className="run-blessing-desc ui-muted">{choice.description}</span>
+      <span className="run-blessing-impact run-reward-impact rounded border px-2 py-1 text-[10px] font-black uppercase">
+        {visual.impactLabel}
       </span>
     </button>
   );
@@ -1777,7 +1884,7 @@ function ShopPanel({
   const rerollsRemaining = session.shopRerollsRemaining ?? RUN_SHOP_REROLL_COUNT;
 
   return (
-    <div className="space-y-5">
+    <div className="run-shop-screen run-draft-stage run-reward-stage min-h-0">
       <section className="run-shop-hero ui-card flex flex-wrap items-start justify-between gap-3 rounded border p-4">
         <div>
           <div className="arcane-label">{session.mode === 'dungeon' ? 'Dungeon Shop' : 'Road Shop'}</div>
@@ -1798,7 +1905,7 @@ function ShopPanel({
       </section>
 
       {choices.length > 0 ? (
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className="run-reward-grid">
           {choices.map(({ choice, offer }) => {
             const canAfford = session.runGold >= offer.cost;
 
@@ -2073,7 +2180,7 @@ function CompletionPanel({
               <h4 className="fantasy-heading text-lg sm:text-xl">Run Roster</h4>
             </div>
             <span className="ui-pill rounded border px-2.5 py-0.5 text-[10px] font-black sm:text-xs">
-              {getAliveRunStacks(session).length}/{session.minions.length} standing
+              {getAliveRunRoster(session).length}/{session.minions.length} standing
             </span>
           </div>
 
@@ -2173,7 +2280,7 @@ function RunCompletionStatTile({
 }
 
 function RunCompletionStatsModal({ session, onClose }: { session: RunSession; onClose: () => void }) {
-  const aliveCount = getAliveRunStacks(session).length;
+  const aliveCount = getAliveRunRoster(session).length;
   const totalDamageDealt = session.battleReports.reduce((total, report) => total + report.damageDealt, 0);
   const totalDamageTaken = session.battleReports.reduce((total, report) => total + report.damageTaken, 0);
   const totalHealing = session.battleReports.reduce((total, report) => total + report.healingDone, 0);
@@ -2355,7 +2462,7 @@ function RunRoster({
   onOpenStats: () => void;
   variant?: 'default' | 'map';
 }) {
-  const aliveCount = getAliveRunStacks(session).length;
+  const aliveCount = getAliveRunRoster(session).length;
 
   return (
     <aside className={`run-roster-aside flex min-h-0 flex-col gap-3 ${variant === 'map' ? 'run-roster-aside-map' : ''}`}>
@@ -2560,7 +2667,7 @@ function RunHeaderChip({
 }
 
 function RunStatsChipRow({ session }: { session: RunSession }) {
-  const aliveCount = getAliveRunStacks(session).length;
+  const aliveCount = getAliveRunRoster(session).length;
   const challengeHint = session.dailyChallenge
     ? `${session.dailyChallenge.subtitle} — ${session.dailyChallenge.weeklyRewardName}`
     : undefined;
@@ -2630,7 +2737,7 @@ function RunStatsLaunch({
   onOpen: () => void;
   variant?: 'default' | 'map';
 }) {
-  const aliveCount = getAliveRunStacks(session).length;
+  const aliveCount = getAliveRunRoster(session).length;
   const challengeHint = session.dailyChallenge
     ? `${session.dailyChallenge.subtitle} — ${session.dailyChallenge.weeklyRewardName}`
     : undefined;
@@ -2871,7 +2978,7 @@ export function getSavedDailyRunSummary(
     phaseLabel: getRunPhaseLabel(session.phase),
     wins: session.wins,
     targetBattles: session.targetBattles,
-    unitsStanding: getAliveRunStacks(session).length,
+    unitsStanding: getAliveRunRoster(session).length,
     totalUnits: session.minions.length,
     runGold: session.runGold,
   };
@@ -3180,7 +3287,7 @@ function startDailyBattle(session: RunSession): RunSession {
     phase: 'formation',
     formation: Object.keys(session.formation).length > 0
       ? session.formation
-      : makeDefaultFormation(getAliveRunStacks(session)),
+      : makeDefaultFormation(getAliveRunRoster(session).slice(0, MAX_FIELD_MINIONS)),
     activeEnemy: enemy,
     notice: undefined,
   };
@@ -3227,7 +3334,7 @@ function startDungeonNode(session: RunSession, node: DungeonNode): RunSession {
     phase: 'formation',
     formation: Object.keys(session.formation).length > 0
       ? session.formation
-      : makeDefaultFormation(getAliveRunStacks(session)),
+      : makeDefaultFormation(getAliveRunRoster(session).slice(0, MAX_FIELD_MINIONS)),
     activeEnemy,
     notice: undefined,
   };
@@ -4128,31 +4235,49 @@ function getRunRewardCategory(choice: RunRewardChoice): string {
   return id;
 }
 
-function pickRunRewardChoices(session: RunSession, count = RUN_REWARD_CHOICE_COUNT): RunRewardChoice[] {
-  const available = RUN_REWARD_POOL.filter(choice => !choice.isAvailable || choice.isAvailable(session));
-  const pool = available.length >= count ? available : RUN_REWARD_POOL.filter(choice => !choice.isAvailable);
-  const shuffled = shuffle(pool);
+function pickRunRewardChoices(
+  session: RunSession,
+  count = RUN_REWARD_CHOICE_COUNT,
+  options?: { spellChance?: number },
+): RunRewardChoice[] {
+  const spellChance = options?.spellChance ?? RUN_BLESSING_SPELL_OFFER_CHANCE;
+  const buffPool = RUN_BUFFS.filter(choice => !choice.isAvailable || choice.isAvailable(session));
+  const spellPool = RUN_SPELL_REWARDS.filter(choice => !choice.isAvailable || choice.isAvailable(session));
+  const buffFallback = RUN_BUFFS.filter(choice => !choice.isAvailable);
+  const workingBuffPool = buffPool.length >= count ? buffPool : buffFallback;
+
   const selected: RunRewardChoice[] = [];
   const usedCategories = new Set<string>();
 
-  shuffled.forEach(choice => {
-    if (selected.length >= count) return;
+  const tryAdd = (choice: RunRewardChoice): boolean => {
+    if (selected.length >= count) return false;
+    if (selected.some(item => item.id === choice.id)) return false;
     const category = getRunRewardCategory(choice);
-    if (usedCategories.has(category)) return;
+    if (usedCategories.has(category)) return false;
     selected.push(choice);
     usedCategories.add(category);
+    return true;
+  };
+
+  if (spellPool.length > 0 && Math.random() < spellChance) {
+    tryAdd(shuffle(spellPool)[0]);
+  }
+
+  shuffle(workingBuffPool).forEach(choice => {
+    if (selected.length >= count) return;
+    tryAdd(choice);
   });
 
-  shuffled.forEach(choice => {
-    if (selected.length >= count || selected.some(item => item.id === choice.id)) return;
-    selected.push(choice);
+  shuffle([...workingBuffPool, ...spellPool]).forEach(choice => {
+    if (selected.length >= count) return;
+    tryAdd(choice);
   });
 
-  return selected.slice(0, count);
+  return shuffle(selected).slice(0, count);
 }
 
 function makeShopOffers(session: RunSession, count = RUN_SHOP_CHOICE_COUNT): RunShopOffer[] {
-  return pickRunRewardChoices(session, count).map((choice, index) => ({
+  return pickRunRewardChoices(session, count, { spellChance: RUN_SHOP_SPELL_OFFER_CHANCE }).map((choice, index) => ({
     choiceId: choice.id,
     cost: getRunShopOfferCost(session, index, choice),
   }));
@@ -4384,6 +4509,17 @@ function rollDungeonEventOutcome(session: RunSession): OmenOutcome {
   }
 
   if (roll < 0.4) {
+    if (!canAddRunMinion(session)) {
+      return {
+        id: 'full-roster-gold',
+        title: 'Crowded Road',
+        flavor: 'A lone recruit sees a full banner and leaves a purse in salute.',
+        detail: `You gain ${quietGold} run gold.`,
+        tone: 'gold',
+        apply: current => ({ ...current, runGold: current.runGold + quietGold }),
+      };
+    }
+
     const template = shuffle(MINION_TEMPLATES.filter(item => item.tier === 'tier1'))[0] || MINION_TEMPLATES[0];
     return {
       id: 'recruit',
@@ -4518,7 +4654,7 @@ function grantCompletionReward(session: RunSession): string {
       items: itemResult.acceptedItems.length > 0 ? itemResult.acceptedItems : undefined,
       equipment: equipment.length > 0 ? equipment : undefined,
     },
-    description: `${session.wins} battles won with ${getAliveRunStacks(session).length} units standing. Route: ${clearedNodes.join(' -> ')}. Rewards: ${rewardSummary.join(', ')}.`,
+    description: `${session.wins} battles won with ${getAliveRunRoster(session).length} units standing. Route: ${clearedNodes.join(' -> ')}. Rewards: ${rewardSummary.join(', ')}.`,
   };
 
   updateCurrentUser({
@@ -4536,7 +4672,7 @@ function grantCompletionReward(session: RunSession): string {
 }
 
 function grantRandomRunCompletionReward(session: RunSession, user: User, completedAt: number): string {
-  const aliveCount = getAliveRunStacks(session).length;
+  const aliveCount = getAliveRunRoster(session).length;
   const durationMs = session.battleReports.reduce((total, report) => total + report.durationMs, 0);
   const bossesDefeated = session.bossHistory || [];
   const routeSummary = session.nodes
@@ -4709,7 +4845,7 @@ function hasFallenMinions(session: RunSession): boolean {
 }
 
 function canAddRunMinion(session: RunSession): boolean {
-  return session.minions.length < MAX_FIELD_MINIONS || hasFallenMinions(session);
+  return session.minions.length < RUN_MAX_ROSTER || hasFallenMinions(session);
 }
 
 function hasUpgradeableMinion(session: RunSession): boolean {
@@ -4755,7 +4891,7 @@ function addRandomRunMinion(session: RunSession, tier: MinionTemplate['tier'], n
     };
   }
 
-  if (session.minions.length >= MAX_FIELD_MINIONS) return session;
+  if (session.minions.length >= RUN_MAX_ROSTER) return session;
 
   return {
     ...session,
@@ -4821,7 +4957,7 @@ function addRunMinionFromTemplate(session: RunSession, template: MinionTemplate,
     };
   }
 
-  if (session.minions.length >= MAX_FIELD_MINIONS) return { ...session, notice };
+  if (session.minions.length >= RUN_MAX_ROSTER) return { ...session, notice };
 
   return {
     ...session,
@@ -4832,6 +4968,35 @@ function addRunMinionFromTemplate(session: RunSession, template: MinionTemplate,
 
 function getAliveRunStacks(session: RunSession): MinionStack[] {
   return session.minions.filter(unit => unit.alive).map(unit => unit.stack).slice(0, MAX_FIELD_MINIONS);
+}
+
+function getAliveRunRoster(session: RunSession): MinionStack[] {
+  return session.minions.filter(unit => unit.alive).map(unit => unit.stack).slice(0, RUN_MAX_ROSTER);
+}
+
+function getRunPlacedStacks(session: RunSession, formation: Record<string, BoardCell> = session.formation): MinionStack[] {
+  return getAliveRunRoster(session).filter(stack => isFormationCellAllowed(formation[stack.id]));
+}
+
+function getRunFieldedStacks(session: RunSession, formation: Record<string, BoardCell> = session.formation): MinionStack[] {
+  const placedStacks = getRunPlacedStacks(session, formation).slice(0, MAX_FIELD_MINIONS);
+  return placedStacks.length > 0 ? placedStacks : getAliveRunStacks(session);
+}
+
+function getRunFormationIssue(session: RunSession, formation: Record<string, BoardCell> = session.formation): string | null {
+  const aliveRoster = getAliveRunRoster(session);
+  const placedStacks = getRunPlacedStacks(session, formation);
+  const requiredFielded = Math.min(MAX_FIELD_MINIONS, aliveRoster.length);
+
+  if (placedStacks.length < requiredFielded) {
+    return `Place ${requiredFielded} units before starting battle.`;
+  }
+
+  if (placedStacks.length > MAX_FIELD_MINIONS) {
+    return `Field only ${MAX_FIELD_MINIONS} units. Keep extras on the bench.`;
+  }
+
+  return getFormationIssue(formation, placedStacks);
 }
 
 function cloneRunStack(templateId: string, prefix: string): MinionStack {

@@ -43,7 +43,7 @@ export interface POI {
 
 // Map configuration
 export const MAP_CONFIG = {
-  width: 84,
+  width: 86,
   height: 48,
   tileSize: 32,
 };
@@ -60,18 +60,24 @@ export function generateStaticMap(): Tile[][] {
     }
   }
   
-  // Add rough collision water around the painted coast and dark pools.
-  addCircularArea(map, 1, 10, 9, TileType.WATER);
+  // Add rough collision water around the painted coast and moon pools.
+  addCircularArea(map, 2, 10, 9, TileType.WATER);
+  addCircularArea(map, 36, 22, 3, TileType.WATER);
+  addCircularArea(map, 34, 27, 3, TileType.WATER);
+  addCircularArea(map, 41, 34, 3, TileType.WATER);
+  addCircularArea(map, 47, 18, 3, TileType.WATER);
+  addCircularArea(map, 52, 31, 3, TileType.WATER);
   addCircularArea(map, 8, 42, 5, TileType.WATER);
-  addCircularArea(map, 79, 43, 5, TileType.WATER);
+  addCircularArea(map, 81, 43, 5, TileType.WATER);
   
   // Organic collision roads following the painted road network.
-  addCurvedRoad(map, 4, 3, 43, 25, 1);
-  addCurvedRoad(map, 2, 27, 43, 25, 1);
-  addCurvedRoad(map, 43, 25, 83, 25, 1);
-  addCurvedRoad(map, 43, 25, 68, 4, 1);
-  addCurvedRoad(map, 43, 25, 77, 45, 1);
-  addCurvedRoad(map, 43, 25, 8, 46, 1);
+  addCurvedRoad(map, 5, 4, 43, 25, 1);
+  addCurvedRoad(map, 2, 26, 43, 25, 1);
+  addCurvedRoad(map, 43, 25, 85, 25, 1);
+  addCurvedRoad(map, 43, 25, 64, 10, 1);
+  addCurvedRoad(map, 43, 25, 77, 43, 1);
+  addCurvedRoad(map, 43, 25, 43, 47, 1);
+  addCurvedRoad(map, 43, 25, 9, 46, 1);
   
   return map;
 }
@@ -156,9 +162,9 @@ export function generatePOIs(): POI[] {
   
   // Forest POIs - reduced to 4 for better distribution (4x4 tiles)
   const forestLocations = [
-    { x: 17, y: 15, name: "Darkwood Forest" },
-    { x: 33, y: 8, name: "Lanternless Grove" },
-    { x: 52, y: 10, name: "Mourning Thicket" },
+    { x: 18, y: 15, name: "Darkwood Forest" },
+    { x: 32, y: 9, name: "Lanternless Grove" },
+    { x: 53, y: 11, name: "Mourning Thicket" },
     { x: 72, y: 30, name: "Shadowgrove" },
   ];
   
@@ -176,8 +182,8 @@ export function generatePOIs(): POI[] {
   // Mountain POIs - reduced to 3 (4x4 tiles)
   const mountainLocations = [
     { x: 5, y: 19, name: "Ironcrag Gate" },
-    { x: 74, y: 5, name: "Stormcrest Peak" },
-    { x: 78, y: 30, name: "Thunder Ridge" },
+    { x: 76, y: 5, name: "Stormcrest Peak" },
+    { x: 80, y: 30, name: "Thunder Ridge" },
   ];
   
   mountainLocations.forEach(loc => {
@@ -194,8 +200,8 @@ export function generatePOIs(): POI[] {
   // Farm POIs - keep at 3 (4x4 tiles)
   const farmLocations = [
     { x: 30, y: 22, name: "Witherfield Farm" },
-    { x: 42, y: 34, name: "Gallowsmere Fields" },
-    { x: 60, y: 29, name: "Harvest Moon Grange" },
+    { x: 42, y: 36, name: "Gallowsmere Fields" },
+    { x: 61, y: 29, name: "Harvest Moon Grange" },
   ];
   
   farmLocations.forEach(loc => {
@@ -227,7 +233,7 @@ export function generatePOIs(): POI[] {
   
   // Windmill POIs - only 2 (4x4 tiles)
   const windmillLocations = [
-    { x: 38, y: 22, name: "Old Windmill" },
+    { x: 38, y: 23, name: "Old Windmill" },
     { x: 14, y: 29, name: "Hilltop Windmill" },
   ];
   
@@ -246,18 +252,18 @@ export function generatePOIs(): POI[] {
   const campfireLocations = [
     {
       x: 36,
-      y: 24,
+      y: 25,
       name: "Crossroads Camp",
       description: "A dry roadside fire ring where guards trade rumors, bread, and a little warmth before the next march.",
     },
     {
       x: 55,
-      y: 24,
+      y: 25,
       name: "Pilgrim Fire",
       description: "A hidden clearing under dead branches, marked by ash stones and old pilgrim cloth.",
     },
     {
-      x: 69,
+      x: 70,
       y: 24,
       name: "East Road Camp",
       description: "A lantern-lit camp beside hard road dirt, watched by tired scouts and relic carriers.",
@@ -295,8 +301,8 @@ export function generatePOIs(): POI[] {
   // Fishing Dock POIs - keep at 3 (CAN be in/near water, 4x4 tiles)
   const fishingDockLocations = [
     { x: 5, y: 3, name: "Fisher's Wharf" },
-    { x: 31, y: 18, name: "Moonwell Pier" },
-    { x: 41, y: 27, name: "Quiet Waters Pier" },
+    { x: 31, y: 19, name: "Moonwell Pier" },
+    { x: 40, y: 28, name: "Quiet Waters Pier" },
   ];
   
   fishingDockLocations.forEach(loc => {
@@ -312,7 +318,7 @@ export function generatePOIs(): POI[] {
   
   // Granite Quarry POIs - only 1 unique (4x4 tiles)
   const graniteQuarryLocations = [
-    { x: 79, y: 10, name: "Granite Heights Quarry" },
+    { x: 80, y: 10, name: "Granite Heights Quarry" },
   ];
   
   graniteQuarryLocations.forEach(loc => {
@@ -329,7 +335,7 @@ export function generatePOIs(): POI[] {
   // Coffee Plantation POIs - only 2 (4x4 tiles)
   const coffeePlantationLocations = [
     { x: 25, y: 11, name: "Vigil Coffee Estate" },
-    { x: 63, y: 36, name: "Black Dawn Plantation" },
+    { x: 64, y: 36, name: "Black Dawn Plantation" },
   ];
   
   coffeePlantationLocations.forEach(loc => {
@@ -345,12 +351,12 @@ export function generatePOIs(): POI[] {
   
   // Towns - 8x8 tiles
   const townLocations = [
-    { x: 12, y: 2, name: "Harborview", description: "A fortified harbor town where mist ships, dock guilds, and candle courts sell road contracts." },
-    { x: 3, y: 34, name: "Riverside", description: "A river-wall market town with bridge tolls, relic traders, and safer beds for low-level commanders." },
-    { x: 47, y: 18, name: "Blackwater Gate", description: "An eastern checkpoint town reusing the Harborview harbor-law style until it receives unique gate art." },
-    { x: 34, y: 31, name: "Moonbridge", description: "A central bridge town reusing Riverside's market-square background for quests, shops, and patrol rumors." },
-    { x: 21, y: 23, name: "Ashford", description: "A western ash-road town for mid-game contracts, pilgrim healing, and cheap reserve recruits." },
-    { x: 68, y: 35, name: "Eclipse Hold", description: "A hard southeast fortress town for boss-country shops, elite rumors, and late-game dungeon reports." },
+    { x: 9, y: 2, name: "Harborview", description: "A fortified harbor town where mist ships, dock guilds, and candle courts sell road contracts." },
+    { x: 4, y: 34, name: "Riverside", description: "A river-wall market town with bridge tolls, relic traders, and safer beds for low-level commanders." },
+    { x: 50, y: 17, name: "Blackwater Gate", description: "An eastern checkpoint town reusing the Harborview harbor-law style until it receives unique gate art." },
+    { x: 36, y: 28, name: "Moonbridge", description: "A central bridge town reusing Riverside's market-square background for quests, shops, and patrol rumors." },
+    { x: 20, y: 24, name: "Ashford", description: "A western ash-road town for mid-game contracts, pilgrim healing, and cheap reserve recruits." },
+    { x: 69, y: 35, name: "Eclipse Hold", description: "A hard southeast fortress town for boss-country shops, elite rumors, and late-game dungeon reports." },
   ];
   
   townLocations.forEach(loc => {

@@ -11,6 +11,7 @@ import {
   equipSpellLoadout,
   getFormationCells,
   getFormationIssue,
+  isFormationCellAllowed,
   mergeFormation,
 } from '@/lib/formation';
 import {
@@ -28,6 +29,7 @@ type FormationPanelProps = {
   commanderName: string;
   commanderModel: PlayerModelNumber;
   stacks: MinionStack[];
+  maxFielded?: number;
   formation: Record<string, BoardCell>;
   spellIds: string[];
   knownSpellIds: string[];
@@ -45,12 +47,34 @@ function getTierRoman(tier: string): string {
   return 'I';
 }
 
+function getPlacedFormationStacks(stacks: MinionStack[], formation: Record<string, BoardCell>): MinionStack[] {
+  return stacks.filter(stack => isFormationCellAllowed(formation[stack.id]));
+}
+
+function getFormationSelectionIssue(
+  formation: Record<string, BoardCell>,
+  placedStacks: MinionStack[],
+  requiredFielded: number,
+  maxFielded: number,
+): string | null {
+  if (placedStacks.length < requiredFielded) {
+    return `Place ${requiredFielded} units before starting battle.`;
+  }
+
+  if (placedStacks.length > maxFielded) {
+    return `Field only ${maxFielded} units. Keep extras on the bench.`;
+  }
+
+  return getFormationIssue(formation, placedStacks);
+}
+
 export default function FormationPanel({
   enemyName,
   enemySubtitle,
   commanderName,
   commanderModel,
   stacks,
+  maxFielded = 7,
   formation: formationInput,
   spellIds,
   knownSpellIds,
@@ -59,10 +83,13 @@ export default function FormationPanel({
   onStart,
   onBack,
 }: FormationPanelProps) {
-  const formation = useMemo(() => mergeFormation(stacks, formationInput), [stacks, formationInput]);
+  const defaultFieldedStacks = useMemo(() => stacks.slice(0, maxFielded), [maxFielded, stacks]);
+  const formation = useMemo(() => mergeFormation(defaultFieldedStacks, formationInput), [defaultFieldedStacks, formationInput]);
   const [selectedToken, setSelectedToken] = useState<SelectedToken>(stacks[0]?.id || COMMANDER_FORMATION_KEY);
   const [selectedSpellSlot, setSelectedSpellSlot] = useState(0);
-  const formationIssue = getFormationIssue(formation, stacks);
+  const placedStacks = useMemo(() => getPlacedFormationStacks(stacks, formation), [formation, stacks]);
+  const requiredFielded = Math.min(maxFielded, stacks.length);
+  const formationIssue = getFormationSelectionIssue(formation, placedStacks, requiredFielded, maxFielded);
   const equippedSpellIds = spellIds.length === 4 ? spellIds : [...spellIds, 'arcane-bolt', 'sanctified-mend', 'ember-dart'].slice(0, 4);
 
   const occupiedByCell = useMemo(() => {
@@ -71,12 +98,12 @@ export default function FormationPanel({
     if (commanderCell) {
       map.set(`${commanderCell.x}:${commanderCell.y}`, { token: COMMANDER_FORMATION_KEY });
     }
-    stacks.forEach(stack => {
+    placedStacks.forEach(stack => {
       const cell = formation[stack.id];
       if (cell) map.set(`${cell.x}:${cell.y}`, { token: stack.id, stack });
     });
     return map;
-  }, [formation, stacks]);
+  }, [formation, placedStacks]);
 
   const assignSelectedToCell = (cell: BoardCell) => {
     const occupying = occupiedByCell.get(`${cell.x}:${cell.y}`);
@@ -84,6 +111,10 @@ export default function FormationPanel({
       ? formation[COMMANDER_FORMATION_KEY]
       : formation[selectedToken];
     const nextFormation = { ...formation };
+
+    if (!occupying && selectedToken !== COMMANDER_FORMATION_KEY && !selectedCurrentCell && placedStacks.length >= maxFielded) {
+      return;
+    }
 
     if (occupying) {
       if (occupying.token === selectedToken) {
@@ -125,7 +156,17 @@ export default function FormationPanel({
     <div className="formation-screen-shell">
       <div className="formation-screen-stage">
         <aside className="formation-warband-dock ui-card rounded border">
-          <div className="arcane-label text-center">Warband</div>
+          <div className="formation-warband-dock-head">
+            <div>
+              <div className="arcane-label">Warband</div>
+              <div className="formation-warband-subcopy ui-faint text-[10px] font-bold">
+                Field {placedStacks.length}/{maxFielded}
+              </div>
+            </div>
+            <span className="ui-pill rounded border px-2 py-0.5 text-[10px] font-black">
+              {stacks.length} total
+            </span>
+          </div>
           <div className="formation-warband-list">
             <FormationHoverTip side="right" popover={<CommanderTooltipContent commanderName={commanderName} />}>
               <button
@@ -138,7 +179,10 @@ export default function FormationPanel({
                   variant="commander"
                   size="dock"
                 />
-                <span className="formation-warband-label">{shortWarbandLabel(commanderName)}</span>
+                <span className="formation-warband-copy">
+                  <span className="formation-warband-label">{shortWarbandLabel(commanderName, 18)}</span>
+                  <span className="formation-warband-role ui-faint">Commander</span>
+                </span>
                 <span className="formation-tier-badge formation-tier-badge-commander">C</span>
               </button>
             </FormationHoverTip>
@@ -150,14 +194,19 @@ export default function FormationPanel({
                   <button
                     type="button"
                     onClick={() => setSelectedToken(stack.id)}
-                    className={`formation-warband-card rounded border ${selectedToken === stack.id ? 'formation-unit-selected' : ''}`}
+                    className={`formation-warband-card rounded border ${selectedToken === stack.id ? 'formation-unit-selected' : ''} ${isFormationCellAllowed(formation[stack.id]) ? '' : 'formation-warband-card-reserve'}`}
                   >
                     <FormationUnitPortrait
                       imageSrc={`/assets/minions/${template.templateId}.png`}
                       variant="minion"
                       size="dock"
                     />
-                    <span className="formation-warband-label">{shortWarbandLabel(template.name)}</span>
+                    <span className="formation-warband-copy">
+                      <span className="formation-warband-label">{shortWarbandLabel(template.name, 18)}</span>
+                      <span className="formation-warband-role ui-faint">
+                        {MINION_CLASS_LABELS[template.class]} - Tier {getTierRoman(template.tier)}
+                      </span>
+                    </span>
                     <span className="formation-tier-badge">{getTierRoman(template.tier)}</span>
                   </button>
                 </FormationHoverTip>
@@ -166,18 +215,25 @@ export default function FormationPanel({
           </div>
         </aside>
 
-        <section className="formation-board-panel ui-card rounded border">
+        <section className="formation-board-panel">
           <div className="formation-board-head">
-            <h3 className="fantasy-heading text-lg leading-tight">
+            <p className="formation-board-eyebrow arcane-label">Deployment</p>
+            <h3 className="fantasy-heading formation-board-title text-lg leading-tight">
               vs <span className="ui-value">{enemyName}</span>
             </h3>
             {enemySubtitle ? <p className="formation-board-subtitle ui-faint text-[11px] font-bold">{enemySubtitle}</p> : null}
+            <p className="formation-board-hint ui-faint text-[10px] font-bold">
+              Select a unit, then tap a slot to place or swap.
+            </p>
           </div>
-          <p className="formation-board-hint ui-faint text-[10px] font-bold">
-            Select a unit, then tap a slot to place or swap.
-          </p>
           <div className="formation-battle-board-shell">
-            <div className="formation-battle-board grid">
+            <div className="formation-deploy-backdrop" aria-hidden="true" />
+            <div className="formation-deploy-frame">
+              <div className="formation-lane-labels" aria-hidden="true">
+                <span>Front</span>
+                <span>Rear</span>
+              </div>
+              <div className="formation-battle-board grid">
               {getFormationCells().map((cell, index) => {
                 const occupant = occupiedByCell.get(`${cell.x}:${cell.y}`);
                 const isCommander = occupant?.token === COMMANDER_FORMATION_KEY;
@@ -248,64 +304,92 @@ export default function FormationPanel({
                   </FormationHoverTip>
                 );
               })}
+              </div>
             </div>
           </div>
         </section>
 
-        <aside className="formation-spells-dock ui-card rounded border">
-          <div className="flex items-center justify-between gap-2">
-            <div className="arcane-label">Spells</div>
-            <span className="formation-spell-slot-indicator ui-faint text-[10px] font-black">Slot {selectedSpellSlot + 1}</span>
+        <aside className="formation-spells-dock">
+          <div className="formation-spells-head">
+            <p className="formation-spells-eyebrow arcane-label">King Spells</p>
+            <div className="formation-spells-head-row">
+              <h4 className="formation-spells-title fantasy-heading">Loadout</h4>
+              <span className="formation-spell-slot-indicator">Slot {selectedSpellSlot + 1}</span>
+            </div>
           </div>
-          <div className="formation-spell-slots">
-            {equippedSpellIds.map((spellId, index) => {
-              const spell = BATTLE_SPELLS.find(item => item.id === spellId);
-              if (!spell) return null;
-              return (
-                <FormationHoverTip
-                  key={`${spellId}-${index}`}
-                  side="left"
-                  popoverClassName="formation-hover-popover-spell"
-                  popover={<SpellTooltipContent spell={spell} equippedSlot={index + 1} />}
-                >
-                  <button
-                    type="button"
-                    aria-pressed={selectedSpellSlot === index}
-                    onClick={() => setSelectedSpellSlot(index)}
-                    className={`formation-spell-slot rounded border ${selectedSpellSlot === index ? 'formation-spell-slot-selected' : ''}`}
-                  >
-                    <span className="formation-spell-slot-index" aria-hidden="true">{index + 1}</span>
-                    <Image src={getSpellIconPath(spell)} alt="" width={64} height={64} className="formation-spell-slot-icon object-contain" unoptimized />
-                    <span className="formation-spell-slot-label">M{spell.cost}</span>
-                  </button>
-                </FormationHoverTip>
-              );
-            })}
-          </div>
-          <p className="formation-spell-hint ui-faint text-[10px] font-bold">
-            Tap a slot, then pick a spell below to swap.
-          </p>
-          <div className="formation-known-spells">
-            {unequippedKnownSpells.length > 0 ? unequippedKnownSpells.map(spell => (
-              <FormationHoverTip
-                key={spell.id}
-                side="left"
-                popoverClassName="formation-hover-popover-spell"
-                popover={<SpellTooltipContent spell={spell} />}
-              >
-                <button
-                  type="button"
-                  onClick={() => onChangeSpellIds(equipSpellLoadout(equippedSpellIds, selectedSpellSlot, spell.id))}
-                  className="formation-known-spell rounded border"
-                >
-                  <Image src={getSpellIconPath(spell)} alt="" width={56} height={56} className="formation-known-spell-icon object-contain" unoptimized />
-                </button>
-              </FormationHoverTip>
-            )) : (
-              <p className="formation-spell-pool-empty ui-faint col-span-full text-center text-[10px] font-bold">
-                All known spells are equipped.
+
+          <div className="formation-spells-stage">
+            <div className="formation-spells-backdrop" aria-hidden="true" />
+            <div className="formation-spells-frame">
+              <p className="formation-spells-section-label">Equipped</p>
+              <div className="formation-spell-slots">
+                {equippedSpellIds.map((spellId, index) => {
+                  const spell = BATTLE_SPELLS.find(item => item.id === spellId);
+                  if (!spell) return null;
+                  return (
+                    <FormationHoverTip
+                      key={`${spellId}-${index}`}
+                      side="left"
+                      popoverClassName="formation-hover-popover-spell"
+                      popover={<SpellTooltipContent spell={spell} equippedSlot={index + 1} />}
+                    >
+                      <button
+                        type="button"
+                        aria-pressed={selectedSpellSlot === index}
+                        onClick={() => setSelectedSpellSlot(index)}
+                        className={`formation-spell-slot ${getFormationSpellRarityClass(spell.rarity)} ${selectedSpellSlot === index ? 'formation-spell-slot-selected' : ''}`}
+                      >
+                        <span className="formation-spell-slot-index" aria-hidden="true">{index + 1}</span>
+                        <span className="formation-spell-slot-art">
+                          <Image src={getSpellIconPath(spell)} alt="" width={80} height={80} className="formation-spell-slot-icon object-contain" unoptimized />
+                        </span>
+                        <span className="formation-spell-slot-copy">
+                          <span className="formation-spell-slot-name">{spell.name}</span>
+                          <span className="formation-spell-slot-meta">
+                            <span className="formation-spell-slot-label">M{spell.cost}</span>
+                            <span className="formation-spell-slot-target">{getSpellTargetLabel(spell.target)}</span>
+                          </span>
+                        </span>
+                      </button>
+                    </FormationHoverTip>
+                  );
+                })}
+              </div>
+
+              <p className="formation-spell-hint ui-faint text-[10px] font-bold">
+                Tap a slot, then pick a spell below to swap.
               </p>
-            )}
+
+              <p className="formation-spells-section-label formation-spells-section-label-book">Spellbook</p>
+              <div className="formation-known-spells">
+                {unequippedKnownSpells.length > 0 ? unequippedKnownSpells.map(spell => (
+                  <FormationHoverTip
+                    key={spell.id}
+                    side="left"
+                    popoverClassName="formation-hover-popover-spell"
+                    popover={<SpellTooltipContent spell={spell} />}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => onChangeSpellIds(equipSpellLoadout(equippedSpellIds, selectedSpellSlot, spell.id))}
+                      className={`formation-known-spell ${getFormationSpellRarityClass(spell.rarity)}`}
+                    >
+                      <span className="formation-known-spell-art">
+                        <Image src={getSpellIconPath(spell)} alt="" width={72} height={72} className="formation-known-spell-icon object-contain" unoptimized />
+                      </span>
+                      <span className="formation-known-spell-copy">
+                        <span className="formation-known-spell-name">{spell.name}</span>
+                        <span className="formation-known-spell-meta">M{spell.cost} · {getSpellTargetLabel(spell.target)}</span>
+                      </span>
+                    </button>
+                  </FormationHoverTip>
+                )) : (
+                  <p className="formation-spell-pool-empty ui-faint col-span-full text-center text-[10px] font-bold">
+                    All known spells are equipped.
+                  </p>
+                )}
+              </div>
+            </div>
           </div>
 
           <div className="formation-spells-actions">
@@ -438,13 +522,23 @@ function MinionTooltipContent({ template }: { template: MinionTemplate }) {
   );
 }
 
+function getSpellTargetLabel(target: BattleSpell['target']): string {
+  if (target === 'enemy') return 'Enemy';
+  if (target === 'ally') return 'Ally';
+  return 'Field';
+}
+
+function getFormationSpellRarityClass(rarity: BattleSpell['rarity']): string {
+  return `formation-spell-rarity-${rarity}`;
+}
+
 function SpellTooltipContent({ spell, equippedSlot }: { spell: BattleSpell; equippedSlot?: number }) {
   const rarityClass = spell.rarity === 'legendary'
     ? 'formation-spell-tip-tag-legendary'
     : spell.rarity === 'rare'
       ? 'formation-spell-tip-tag-rare'
       : 'formation-spell-tip-tag-common';
-  const targetLabel = spell.target === 'enemy' ? 'Enemy' : spell.target === 'ally' ? 'Ally' : 'Field';
+  const targetLabel = getSpellTargetLabel(spell.target);
 
   return (
     <div className="formation-spell-tip">
@@ -499,12 +593,12 @@ function FormationUnitPortrait({
   variant?: 'minion' | 'commander';
   size?: 'dock' | 'formation';
 }) {
-  const dimension = size === 'formation' ? 80 : 56;
+  const dimension = size === 'formation' ? 80 : 72;
   const boxClass = size === 'formation' ? 'formation-portrait-formation' : 'formation-portrait-dock';
 
   return (
     <span
-      className={`run-minion-portrait formation-unit-portrait inline-flex overflow-hidden rounded-full border border-[rgba(232,217,184,0.24)] ${variant === 'commander' ? 'formation-commander-frame' : ''} ${boxClass}`}
+      className={`run-minion-portrait formation-unit-portrait inline-flex overflow-hidden rounded border border-[rgba(232,217,184,0.24)] ${variant === 'commander' ? 'formation-commander-frame' : ''} ${boxClass}`}
     >
       <Image
         src={imageSrc}
