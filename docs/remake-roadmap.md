@@ -15,6 +15,12 @@
 - Deployment and database integration were skipped in this audit; API contracts and the local adapter bridge remain the stopping point.
 - Open non-deployment items are command-panel action polish and the remaining combat-detail items tracked in `combat-professionalization-roadmap.md`.
 
+## Status Audit - 2026-06-18
+- Combat is now mostly second-pass tuning and ambient polish; the core tactical UI, animations, spell presentation, sounds, retaliation previews, colorblind cues, and enemy pacing are in place.
+- Random roguelike runs are the active gameplay branch: separate run progression, cinematic lobby/draft/reward/formation flows, branching roads, multi-boss paths, shops, omens, rerolls, and no main-map penalty are implemented.
+- Next non-deployment work should focus on content density and feel: more run rewards, more omens, boss-specific route modifiers, late-run enemy variety, and world-map respace against the wide map art.
+- Do not raise the random-run cap past 15 until the reward/event/boss pool supports longer runs without repetition.
+
 ## Current Polish Sprint
 - [x] Shrink cursor fog reveal radius by about 50% so map discovery feels tighter.
 - [x] Scale fog/player glow reveal with zoom so close zoom keeps characters readable.
@@ -206,6 +212,10 @@
 - [x] Rebuild the random-run lobby and unit draft into full-screen cinematic flows.
 - [x] Add random route rewards so hard-route fights and boss fights are followed by a shop or omen stop.
 - [x] Balance long-term random-run progression around a configurable content cap: permanent unlock pacing, encounter scaling, run-shop economy, and boss spacing.
+- [x] Add second-pass random-run reward variety: unit-offense, unit-defense, recovery, reroll economy, and scaled gear-cache options.
+- [ ] Add more random-run omen/event variants with clear positive, risky, and build-defining outcomes.
+- [ ] Add boss-specific route modifiers so each boss changes one or two road rules before the fight.
+- [ ] Add more late-run enemy formations before increasing run length or level cap.
 - [ ] Raise the random-run cap beyond 15 once there are enough bosses, enemies, run rewards, and late-run events to support it.
 
 ## Phase 10: PVP And Social Map

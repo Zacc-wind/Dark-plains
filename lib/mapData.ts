@@ -43,7 +43,7 @@ export interface POI {
 
 // Map configuration
 export const MAP_CONFIG = {
-  width: 86,
+  width: 84,
   height: 48,
   tileSize: 32,
 };
@@ -73,7 +73,7 @@ export function generateStaticMap(): Tile[][] {
   // Organic collision roads following the painted road network.
   addCurvedRoad(map, 5, 4, 43, 25, 1);
   addCurvedRoad(map, 2, 26, 43, 25, 1);
-  addCurvedRoad(map, 43, 25, 85, 25, 1);
+  addCurvedRoad(map, 43, 25, 83, 25, 1);
   addCurvedRoad(map, 43, 25, 64, 10, 1);
   addCurvedRoad(map, 43, 25, 77, 43, 1);
   addCurvedRoad(map, 43, 25, 43, 47, 1);

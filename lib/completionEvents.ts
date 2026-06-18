@@ -15,6 +15,7 @@ export interface CompletionNotice {
   artworkPath?: string;
   rewards?: CompletionRewardLine[];
   completedAt?: number;
+  skipReport?: boolean;
 }
 
 const COMPLETION_EVENT_NAME = 'wizardy:completion-notice';

@@ -5165,7 +5165,7 @@ export const RANDOM_RUN_BALANCE = {
   enemyLevelCap: 15,
   bossSpacing: 5,
   minBosses: 2,
-  currentContentBosses: 3,
+  currentContentBosses: 8,
   maxBankedCapLevels: 2,
 } as const;
 

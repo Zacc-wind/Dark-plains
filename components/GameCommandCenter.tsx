@@ -86,13 +86,13 @@ import {
 } from '@/lib/auth';
 import { emitCompletionNotice, type CompletionRewardLine } from '@/lib/completionEvents';
 import { emitFxEvent } from '@/lib/fxEvents';
-import { readGameJson, writeGameJson } from '@/lib/gameStore';
 import {
   getMusicVolumePercent,
   isMusicMuted,
   setMusicMuted,
   setMusicVolumePercent,
 } from '@/lib/backgroundMusic';
+import { readGameJson, writeGameJson } from '@/lib/gameStore';
 import {
   getGameSoundVolumePercent,
   isGameSoundId,
@@ -148,6 +148,8 @@ const statIconPaths: Record<string, string> = {
   Minions: '/assets/icons/attack.png',
   XP: '/assets/icons/xp.png',
 };
+
+const RUN_TUTORIAL_SETTING_KEY = 'wizardy_random_run_tutorial_enabled';
 
 function getEquipmentIconPath(item: Pick<Equipment, 'slot' | 'rarity'>): string {
   return `${EQUIPMENT_ICON_BASE}/${item.slot}-${item.rarity}.png`;
@@ -296,17 +298,18 @@ export default function GameCommandCenter({ onOpenAvatar }: GameCommandCenterPro
   const [selectedSpellSlot, setSelectedSpellSlot] = useState(0);
   const [expandedQuestId, setExpandedQuestId] = useState<string | null>(null);
   const [showDailyRun, setShowDailyRun] = useState(false);
-  const [showOnboarding, setShowOnboarding] = useState(false);
   const [isSecondaryNavOpen, setIsSecondaryNavOpen] = useState(true);
   const [friendSearch, setFriendSearch] = useState('');
   const [chatChannel, setChatChannel] = useState<SocialChatChannel>('global');
   const [chatDraft, setChatDraft] = useState('');
   const [isChatDockOpen, setIsChatDockOpen] = useState(false);
+  const [isMapActionRailCompact, setIsMapActionRailCompact] = useState(false);
   const [effectsVolume, setEffectsVolume] = useState(() => getGameSoundVolumePercent());
   const [musicVolume, setMusicVolume] = useState(() => getMusicVolumePercent());
   const [musicMuted, setMusicMutedState] = useState(() => isMusicMuted());
   const [combatSpeed, setCombatSpeed] = useState<CombatSpeed>(() => readCombatSpeedSetting());
   const [combatIndicatorMode, setCombatIndicatorMode] = useState<CombatIndicatorMode>(() => readCombatIndicatorMode());
+  const [runTutorialEnabled, setRunTutorialEnabled] = useState(() => readGameJson(RUN_TUTORIAL_SETTING_KEY, false));
   const lastActivityNoticeId = useRef<string | null>(null);
   const router = useRouter();
 
@@ -434,14 +437,6 @@ export default function GameCommandCenter({ onOpenAvatar }: GameCommandCenterPro
   }, [isCommandOpen]);
 
   useEffect(() => {
-    if (!user) return;
-    const key = `wizardy_first_steps_seen_${user.username}`;
-    const alreadySeen = readGameJson<boolean>(key, false);
-    const hasStarted = (user.activityLog?.length || 0) > 0 || (user.jobQueue?.length || 0) > 0 || Boolean(user.traveling);
-    setShowOnboarding(!alreadySeen && !hasStarted);
-  }, [user]);
-
-  useEffect(() => {
     const latestActivity = user?.activityLog?.[0];
     if (!latestActivity) return;
 
@@ -558,11 +553,6 @@ export default function GameCommandCenter({ onOpenAvatar }: GameCommandCenterPro
   const handleLogout = () => {
     logout();
     router.push('/');
-  };
-
-  const dismissOnboarding = () => {
-    writeGameJson(`wizardy_first_steps_seen_${player.username}`, true);
-    setShowOnboarding(false);
   };
 
   const handleEquip = (equipmentId: string) => {
@@ -790,6 +780,13 @@ export default function GameCommandCenter({ onOpenAvatar }: GameCommandCenterPro
     playGameSound('ui.toggle', { throttleMs: 100 });
   };
 
+  const handleRunTutorialToggle = () => {
+    const nextEnabled = !runTutorialEnabled;
+    setRunTutorialEnabled(nextEnabled);
+    writeGameJson(RUN_TUTORIAL_SETTING_KEY, nextEnabled);
+    playGameSound('ui.toggle', { throttleMs: 100 });
+  };
+
   const panelTitle = panelButtons.find(button => button.id === activePanel)?.label || 'Overview';
 
   const openPanel = (panelId: PanelId) => {
@@ -799,6 +796,7 @@ export default function GameCommandCenter({ onOpenAvatar }: GameCommandCenterPro
       setMusicMutedState(isMusicMuted());
       setCombatSpeed(readCombatSpeedSetting());
       setCombatIndicatorMode(readCombatIndicatorMode());
+      setRunTutorialEnabled(readGameJson(RUN_TUTORIAL_SETTING_KEY, false));
     }
     setActivePanel(panelId);
     if (secondaryPanelButtons.some(button => button.id === panelId)) setIsSecondaryNavOpen(true);
@@ -875,54 +873,6 @@ export default function GameCommandCenter({ onOpenAvatar }: GameCommandCenterPro
       {!isCommandOpen && !showDailyRun && renderChatDock()}
 
       {renderActionChips()}
-
-      {showOnboarding && !isCommandOpen && !showDailyRun && (
-        <aside className="first-session-guide command-panel vine-frame fixed bottom-24 left-4 z-40 w-[min(24rem,calc(100vw-2rem))] rounded border p-4 text-zinc-100">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <div className="arcane-label">First Steps</div>
-              <h3 className="fantasy-heading text-lg">Start the campaign loop</h3>
-            </div>
-            <button
-              type="button"
-              onClick={dismissOnboarding}
-              className="ui-button rounded px-2 py-1 text-[10px] font-black"
-            >
-              Hide
-            </button>
-          </div>
-          <div className="mt-3 grid gap-2 text-xs font-bold">
-            <button
-              type="button"
-              onClick={() => {
-                dismissOnboarding();
-                emitFxEvent({ type: 'daily', tone: 'blue', intensity: 0.62 });
-                setShowDailyRun(true);
-              }}
-              className="first-step-row rounded px-3 py-2 text-left"
-            >
-              <span className="ui-accent font-black">I.</span> Draft a random-run army.
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                dismissOnboarding();
-                openPanel('quests');
-              }}
-              className="first-step-row rounded px-3 py-2 text-left"
-            >
-              <span className="ui-accent font-black">II.</span> Check the town board.
-            </button>
-            <button
-              type="button"
-              onClick={dismissOnboarding}
-              className="first-step-row rounded px-3 py-2 text-left"
-            >
-              <span className="ui-accent font-black">III.</span> Walk to a nearby enemy before fighting.
-            </button>
-          </div>
-        </aside>
-      )}
 
       {isCommandOpen && (
       <aside className="command-panel command-center-shell vine-frame fixed bottom-4 left-4 right-4 top-20 z-50 overflow-hidden rounded border text-zinc-100">
@@ -1093,7 +1043,19 @@ export default function GameCommandCenter({ onOpenAvatar }: GameCommandCenterPro
       : `Random road - level ${hudRunState.runLevel}`;
 
     return (
-      <nav className="map-action-rail map-action-rail-runs command-panel vine-frame fixed right-4 bottom-4 z-40 w-[min(22rem,calc(100vw-2rem))] rounded border p-1.5 text-zinc-100" aria-label="World actions">
+      <nav
+        className={`map-action-rail map-action-rail-runs command-panel vine-frame fixed right-4 bottom-4 z-40 rounded border text-zinc-100 ${isMapActionRailCompact ? 'map-action-rail-compact' : 'map-action-rail-expanded'}`}
+        aria-label="World actions"
+      >
+        <button
+          type="button"
+          onClick={() => setIsMapActionRailCompact(compact => !compact)}
+          className="map-action-rail-toggle"
+          aria-label={isMapActionRailCompact ? 'Expand world action menu' : 'Collapse world action menu'}
+          title={isMapActionRailCompact ? 'Expand world action menu' : 'Collapse world action menu'}
+        >
+          {isMapActionRailCompact ? '+' : '-'}
+        </button>
         <button
           type="button"
           onClick={() => {
@@ -1593,6 +1555,21 @@ export default function GameCommandCenter({ onOpenAvatar }: GameCommandCenterPro
               </button>
             ))}
           </div>
+        </section>
+
+        <section className="ui-card rounded border p-4">
+          <SectionTitle title="Tutorial" action={runTutorialEnabled ? 'Enabled' : 'Disabled'} />
+          <button
+            type="button"
+            onClick={handleRunTutorialToggle}
+            className={`settings-speed-option w-full rounded border px-4 py-3 text-left ${runTutorialEnabled ? 'settings-speed-option-active' : ''}`}
+            aria-pressed={runTutorialEnabled}
+          >
+            <span className="block text-sm font-black text-zinc-100">Random Run Tutorial</span>
+            <span className="ui-faint mt-1 block text-xs font-bold">
+              Experimental first-run guidance. Disabled by default while the tutorial is still being expanded.
+            </span>
+          </button>
         </section>
       </div>
     );

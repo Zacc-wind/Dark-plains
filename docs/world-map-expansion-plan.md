@@ -12,6 +12,14 @@ Move from the current 60x60 painted world to a 120x120 world with about four tim
 - [x] Add more compact walk/job chips that avoid covering important map markers.
 - [x] Add travel-start and travel-cancel visual feedback on the map.
 
+## Current Wide-Map Step - 2026-06-18
+- [x] Move the active logical map to `84x48` tiles, matching the currently served `2688x1536` wide map at 32 px logical tile scale.
+- [x] Sync the new `assetsv2/world-map.jpg` into `public/assets/world-map.jpg` so the app serves the current painted map.
+- [x] Update the asset import script so future imports copy `world-map.jpg`, not only the old PNG.
+- [ ] Re-space quest NPCs, enemy regions, dungeon templates, and town/POI markers against the final wide map art after the map file is final.
+- [ ] Visually verify the first-session route: starter spawn, first town, first POIs, first enemy, and first quest NPC should all be readable without long empty travel.
+- [ ] Retune map fog reveal and camera defaults for the wider aspect ratio.
+
 ## Map Shape
 - Canvas target: `3840x3840` PNG, still painted as one non-looping world map.
 - Tile target: `120x120`, keeping the current 32 px logical tile scale.

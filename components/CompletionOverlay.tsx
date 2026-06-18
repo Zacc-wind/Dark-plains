@@ -1,13 +1,14 @@
 'use client';
 
 import Image from 'next/image';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { CompletionNotice, subscribeCompletionNotices } from '@/lib/completionEvents';
 import { emitFxEvent, type FxEventType } from '@/lib/fxEvents';
 import { getCurrentUser } from '@/lib/auth';
 import { getPlayerModelPath } from '@/lib/assetLoader';
 
 type CompletionPhase = 'burst' | 'report';
+const COMPLETION_BURST_DURATION_MS = 4200;
 
 function getCompletionFxType(notice: CompletionNotice): FxEventType {
   if (notice.kind === 'defeat') return 'defeat';
@@ -32,23 +33,44 @@ export default function CompletionOverlay() {
   const queueRef = useRef<CompletionNotice[]>([]);
   const seenRef = useRef<Set<string>>(new Set());
   const timerRef = useRef<number | null>(null);
-  const burstDurationMs = 3400;
+  const startNoticeRef = useRef<(notice: CompletionNotice) => void>(() => {});
+
+  const advanceNoticeQueue = useCallback(() => {
+    if (timerRef.current) window.clearTimeout(timerRef.current);
+    const next = queueRef.current.shift();
+    if (next) {
+      startNoticeRef.current(next);
+      return;
+    }
+
+    setActiveNotice(null);
+  }, []);
+
+  const startNotice = useCallback((notice: CompletionNotice) => {
+    seenRef.current.add(notice.id);
+    emitCompletionFx(notice);
+    setActiveNotice(notice);
+    setPhase('burst');
+
+    if (timerRef.current) window.clearTimeout(timerRef.current);
+    timerRef.current = window.setTimeout(() => {
+      if (notice.skipReport) {
+        advanceNoticeQueue();
+        return;
+      }
+      setPhase('report');
+    }, COMPLETION_BURST_DURATION_MS);
+  }, [advanceNoticeQueue]);
+
+  useEffect(() => {
+    startNoticeRef.current = startNotice;
+  }, [startNotice]);
 
   useEffect(() => {
     activeRef.current = activeNotice;
   }, [activeNotice]);
 
   useEffect(() => {
-    const showNotice = (notice: CompletionNotice) => {
-      seenRef.current.add(notice.id);
-      emitCompletionFx(notice);
-      setActiveNotice(notice);
-      setPhase('burst');
-
-      if (timerRef.current) window.clearTimeout(timerRef.current);
-      timerRef.current = window.setTimeout(() => setPhase('report'), burstDurationMs);
-    };
-
     const unsubscribe = subscribeCompletionNotices((notice) => {
       if (!notice?.id || seenRef.current.has(notice.id)) return;
       if (activeRef.current) {
@@ -57,27 +79,17 @@ export default function CompletionOverlay() {
         return;
       }
 
-      showNotice(notice);
+      startNotice(notice);
     });
 
     return () => {
       unsubscribe();
       if (timerRef.current) window.clearTimeout(timerRef.current);
     };
-  }, []);
+  }, [startNotice]);
 
   const closeNotice = () => {
-    if (timerRef.current) window.clearTimeout(timerRef.current);
-    const next = queueRef.current.shift();
-    if (next) {
-      emitCompletionFx(next);
-      setActiveNotice(next);
-      setPhase('burst');
-      timerRef.current = window.setTimeout(() => setPhase('report'), burstDurationMs);
-      return;
-    }
-
-    setActiveNotice(null);
+    advanceNoticeQueue();
   };
 
   if (!activeNotice) return null;
@@ -85,6 +97,8 @@ export default function CompletionOverlay() {
   const victoryTone = activeNotice.kind !== 'defeat';
   const currentUser = getCurrentUser();
   const modelPath = getPlayerModelPath(currentUser?.selectedModel || 3);
+  const hasCustomArtwork = Boolean(activeNotice.artworkPath);
+  const showReportArtwork = activeNotice.kind === 'defeat' || hasCustomArtwork;
   const artworkPath = activeNotice.artworkPath || (activeNotice.kind === 'defeat' ? '/assets/reaper.png' : modelPath);
   const artworkAlt = activeNotice.kind === 'defeat' ? 'Fallen reaper' : '';
 
@@ -98,7 +112,7 @@ export default function CompletionOverlay() {
               alt={artworkAlt}
               fill
               sizes="224px"
-              className={`object-contain ${activeNotice.kind === 'defeat' ? 'completion-avatar-defeat-art' : 'player-model-art'}`}
+              className={`object-contain ${activeNotice.kind === 'defeat' ? 'completion-avatar-defeat-art' : hasCustomArtwork ? 'completion-avatar-item-art' : 'player-model-art'}`}
               priority
               unoptimized
             />
@@ -110,14 +124,14 @@ export default function CompletionOverlay() {
         <section className={`completion-report command-panel vine-frame w-full max-w-2xl rounded border p-5 ${victoryTone ? 'completion-report-victory' : 'completion-report-defeat'}`}>
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div className="flex min-w-0 flex-1 items-start gap-4">
-              {activeNotice.kind === 'defeat' && (
+              {showReportArtwork && (
                 <span className="completion-report-art relative hidden shrink-0 overflow-hidden rounded border sm:block">
                   <Image
                     src={artworkPath}
                     alt={artworkAlt}
                     fill
                     sizes="96px"
-                    className="object-contain"
+                    className={`object-contain ${activeNotice.kind === 'defeat' ? 'completion-avatar-defeat-art' : hasCustomArtwork ? 'completion-avatar-item-art' : 'player-model-art'}`}
                     unoptimized
                   />
                 </span>

@@ -219,6 +219,7 @@ function Save-CroppedEquipmentIcon(
 }
 
 $largeAssets = @(
+  'world-map.jpg',
   'world-map.png',
   'rougealike-backgorund.png',
   'town-harborview-bg.png',
@@ -228,6 +229,21 @@ $largeAssets = @(
 foreach ($asset in $largeAssets) {
   $targetName = if ($asset -eq 'rougealike-backgorund.png') { 'roguelike-background.png' } else { $asset }
   Copy-Asset $asset (Join-Path $publicAssets $targetName)
+}
+
+$musicAssets = @(
+  @{ source = 'background-track\Goblet Bounce.mp3'; target = 'audio\music\goblet-bounce.mp3' },
+  @{ source = 'background-track\Goblet Bounce v.2.mp3'; target = 'audio\music\goblet-bounce-v2.mp3' },
+  @{ source = 'background-track\Tavern Crown Shuffle.mp3'; target = 'audio\music\tavern-crown-shuffle.mp3' },
+  @{ source = 'background-track\Tavern Crown Shuffle v.2.mp3'; target = 'audio\music\tavern-crown-shuffle-v2.mp3' },
+  @{ source = 'background-track\808 - In the tavern.mp3'; target = 'audio\music\in-the-tavern.mp3' },
+  @{ source = 'background-track\Guards are cleaning the tavern !.mp3'; target = 'audio\music\guards-cleaning-tavern.mp3' },
+  @{ source = 'background-track\Burning them wiches.mp3'; target = 'audio\music\burning-them-witches.mp3' },
+  @{ source = 'background-track\Mason of the Crown.mp3'; target = 'audio\music\mason-of-the-crown.mp3' }
+)
+
+foreach ($asset in $musicAssets) {
+  Copy-Asset $asset.source (Join-Path $publicAssets $asset.target)
 }
 
 $poiSprites = @(

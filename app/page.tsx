@@ -44,10 +44,13 @@ export default function AuthPage() {
   };
 
   return (
-    <div className="fantasy-ui flex min-h-screen items-center justify-center bg-[#05080a] p-4">
+    <div className="auth-page-shell fantasy-ui flex min-h-screen items-center justify-center bg-[#05080a] p-4">
       <ThreeFxOverlay />
-      <div className="command-panel vine-frame relative z-[100] w-full max-w-md rounded border p-8">
-        <h1 className="fantasy-heading mb-2 text-center text-4xl">Pirate Game</h1>
+      <div className="auth-card command-panel vine-frame relative z-[100] w-full max-w-md rounded border p-8">
+        <div className="mb-8 text-center">
+          <p className="arcane-label mb-2">Enter the road</p>
+          <h1 className="auth-title fantasy-heading text-center">Dark Plains</h1>
+        </div>
         <p className="arcane-label mb-8 text-center">
           {isLogin ? 'Login to continue' : 'Create your account'}
         </p>

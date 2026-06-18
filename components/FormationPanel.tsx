@@ -31,6 +31,7 @@ type FormationPanelProps = {
   commanderName: string;
   commanderModel: PlayerModelNumber;
   stacks: MinionStack[];
+  stackHealth?: Record<string, { current: number; max: number }>;
   maxFielded?: number;
   formation: Record<string, BoardCell>;
   spellIds: string[];
@@ -67,6 +68,7 @@ export default function FormationPanel({
   commanderName,
   commanderModel,
   stacks,
+  stackHealth,
   maxFielded = 7,
   formation: formationInput,
   spellIds,
@@ -87,6 +89,26 @@ export default function FormationPanel({
   );
   const formationIssue = getFormationSelectionIssue(formation, placedStacks, maxFielded);
   const equippedSpellIds = spellIds.length === 4 ? spellIds : [...spellIds, 'arcane-bolt', 'sanctified-mend', 'ember-dart'].slice(0, 4);
+  const commanderPlaced = isFormationCellAllowed(formation[COMMANDER_FORMATION_KEY]);
+  const selectedStack = selectedToken && selectedToken !== COMMANDER_FORMATION_KEY
+    ? stacks.find(stack => stack.id === selectedToken)
+    : undefined;
+  const selectedTemplate = selectedStack ? getMinionTemplate(selectedStack.templateId) : undefined;
+  const selectedLabel = selectedToken === COMMANDER_FORMATION_KEY
+    ? commanderName
+    : selectedTemplate?.name || 'No unit selected';
+  const selectedMeta = selectedToken === COMMANDER_FORMATION_KEY
+    ? 'Commander'
+    : selectedTemplate
+      ? `${MINION_CLASS_LABELS[selectedTemplate.class]} - Tier ${getTierRoman(selectedTemplate.tier)}`
+      : 'Pick from warband';
+  const selectedAction = !selectedToken
+    ? 'Select a unit on the left, then choose a deployment slot.'
+    : selectedToken === COMMANDER_FORMATION_KEY
+      ? 'Click a slot to reposition the commander.'
+      : isFormationCellAllowed(formation[selectedToken])
+        ? 'Click another slot to swap, or send this unit to bench.'
+        : 'Click an open slot to field this unit.';
 
   const occupiedByCell = useMemo(() => {
     const map = new Map<string, { token: SelectedToken; stack?: MinionStack }>();
@@ -215,6 +237,7 @@ export default function FormationPanel({
                     stack={stack}
                     selected={selectedToken === stack.id}
                     fielded
+                    health={stackHealth?.[stack.id]}
                     onClick={() => handleWarbandStackClick(stack.id)}
                     onBench={() => benchStack(stack.id)}
                   />
@@ -231,6 +254,7 @@ export default function FormationPanel({
                     stack={stack}
                     selected={selectedToken === stack.id}
                     fielded={false}
+                    health={stackHealth?.[stack.id]}
                     onClick={() => handleWarbandStackClick(stack.id)}
                     onBench={() => benchStack(stack.id)}
                   />
@@ -247,9 +271,31 @@ export default function FormationPanel({
               vs <span className="ui-value">{enemyName}</span>
             </h3>
             {enemySubtitle ? <p className="formation-board-subtitle ui-faint text-[11px] font-bold">{enemySubtitle}</p> : null}
-            <p className="formation-board-hint ui-faint text-[10px] font-bold">
-              Select a unit, tap a slot to place, or drag back to bench.
-            </p>
+          </div>
+          <div className="formation-deploy-command rounded border">
+            <div className="formation-deploy-selected">
+              <span className="formation-deploy-selected-kicker arcane-label">Selected</span>
+              <strong className="formation-deploy-selected-name">{selectedLabel}</strong>
+              <span className="formation-deploy-selected-meta">{selectedMeta}</span>
+            </div>
+            <div className="formation-deploy-rule">
+              <span className="formation-deploy-rule-main">{selectedAction}</span>
+              <span className="formation-deploy-rule-sub">Front line holds pressure. Rear line keeps safer support angles.</span>
+            </div>
+            <div className="formation-deploy-counts" aria-label="Formation status">
+              <span>
+                <strong>{placedStacks.length}</strong>
+                <small>fielded</small>
+              </span>
+              <span>
+                <strong>{benchedStacks.length}</strong>
+                <small>bench</small>
+              </span>
+              <span className={commanderPlaced ? 'formation-count-good' : 'formation-count-warning'}>
+                <strong>{commanderPlaced ? 'Set' : 'Need'}</strong>
+                <small>king</small>
+              </span>
+            </div>
           </div>
           <div className="formation-battle-board-shell formation-battle-board-shell-with-bench">
             <div className="formation-deploy-backdrop" aria-hidden="true" />
@@ -281,8 +327,14 @@ export default function FormationPanel({
             <div className="formation-deploy-stage">
             <div className="formation-deploy-frame">
               <div className="formation-lane-labels" aria-hidden="true">
-                <span>Front</span>
-                <span>Rear</span>
+                <span>
+                  <strong>Front</strong>
+                  <small>Guard</small>
+                </span>
+                <span>
+                  <strong>Rear</strong>
+                  <small>Support</small>
+                </span>
               </div>
               <div className="formation-battle-board grid">
               {getFormationCells().map((cell, index) => {
@@ -485,17 +537,26 @@ function WarbandStackCard({
   stack,
   selected,
   fielded,
+  health,
   onClick,
   onBench,
 }: {
   stack: MinionStack;
   selected: boolean;
   fielded: boolean;
+  health?: { current: number; max: number };
   onClick: () => void;
   onBench: () => void;
 }) {
   const template = getMinionTemplate(stack.templateId);
   if (!template) return null;
+  const healthMax = Math.max(1, health?.max ?? template.stats.health, typeof stack.runCurrentHealth === 'number' ? stack.runCurrentHealth : 0);
+  const healthCurrent = typeof health?.current === 'number'
+    ? Math.max(0, Math.min(healthMax, Math.round(health.current)))
+    : typeof stack.runCurrentHealth === 'number'
+      ? Math.max(0, Math.min(healthMax, Math.round(stack.runCurrentHealth)))
+    : healthMax;
+  const healthPercent = healthMax > 0 ? Math.max(0, Math.min(100, (healthCurrent / healthMax) * 100)) : 0;
 
   return (
     <FormationHoverTip side="right" popover={<MinionTooltipContent template={template} />}>
@@ -528,6 +589,12 @@ function WarbandStackCard({
             <span className={`formation-warband-status ${fielded ? 'formation-warband-status-field' : 'formation-warband-status-bench'}`}>
               {fielded ? 'On field' : 'Bench'}
             </span>
+          </span>
+          <span className="formation-warband-health" aria-label={`Health ${healthCurrent} of ${healthMax}`}>
+            <span className="formation-warband-health-track">
+              <span className="formation-warband-health-fill" style={{ width: `${healthPercent}%` }} />
+            </span>
+            <span className="formation-warband-health-text">{healthCurrent}/{healthMax}</span>
           </span>
         </span>
         <span className="formation-tier-badge">{getTierRoman(template.tier)}</span>

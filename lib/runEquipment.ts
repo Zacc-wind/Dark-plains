@@ -58,6 +58,50 @@ export function formatRunEquipmentSummary(item: Equipment): string {
   return parts.length > 0 ? parts.join(' · ') : 'Commander gear';
 }
 
+export type RunEquipmentStatKey = 'armyPower' | 'defensivePower' | 'morale' | 'spellPower' | 'maxHealth';
+
+export const RUN_EQUIPMENT_STAT_LABELS: Record<RunEquipmentStatKey, string> = {
+  armyPower: 'ATK',
+  defensivePower: 'DEF',
+  morale: 'SPD',
+  spellPower: 'MAG',
+  maxHealth: 'HP',
+};
+
+export const RUN_EQUIPMENT_STAT_KEYS: RunEquipmentStatKey[] = [
+  'armyPower',
+  'defensivePower',
+  'morale',
+  'spellPower',
+  'maxHealth',
+];
+
+export interface RunEquipmentStatRow {
+  key: RunEquipmentStatKey;
+  label: string;
+  value: number;
+  equippedValue: number;
+  delta: number;
+}
+
+export function getRunEquipmentStatRows(item: Equipment, compareEquipped?: Equipment): RunEquipmentStatRow[] {
+  return RUN_EQUIPMENT_STAT_KEYS.map(key => {
+    const value = getRunEquipmentStat(item, key);
+    const equippedValue = compareEquipped ? getRunEquipmentStat(compareEquipped, key) : 0;
+    return {
+      key,
+      label: RUN_EQUIPMENT_STAT_LABELS[key],
+      value,
+      equippedValue,
+      delta: compareEquipped ? value - equippedValue : 0,
+    };
+  }).filter(row => row.value > 0 || row.equippedValue > 0);
+}
+
+export function formatEquipmentRarityLabel(rarity: EquipmentRarity): string {
+  return rarity.charAt(0).toUpperCase() + rarity.slice(1);
+}
+
 export function rollRunEquipmentRarity(wins: number, targetBattles: number): EquipmentRarity {
   const progress = targetBattles > 0 ? Math.min(1, wins / targetBattles) : 0;
   const roll = Math.random();

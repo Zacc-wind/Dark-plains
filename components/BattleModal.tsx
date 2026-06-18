@@ -71,11 +71,9 @@ import {
 } from '@/lib/auth';
 import { emitCompletionNotice, type CompletionRewardLine } from '@/lib/completionEvents';
 import {
-  COMBAT_SPEED_OPTIONS,
   CombatSpeed,
   readCombatIndicatorMode,
   readCombatSpeedSetting,
-  writeCombatSpeedSetting,
 } from '@/lib/combatSettings';
 import { emitFxEvent, type FxEventType } from '@/lib/fxEvents';
 import { readGameJson, writeGameJson } from '@/lib/gameStore';
@@ -101,6 +99,13 @@ interface BattleCue {
   headline: string;
   detail: string;
   tone: BattleCueTone;
+}
+
+interface BattleTurnBannerData {
+  id: string;
+  side: BattleUnit['side'];
+  title: string;
+  detail: string;
 }
 
 interface BattleHoverPreviewData {
@@ -146,7 +151,7 @@ interface BattleSpeedConfig {
 /** Shared spell icon / unit presentation window for every spell cast. */
 const SPELL_PRESENTATION_MS = 2300;
 const SPELL_NOTICE_MS = 1450;
-const BATTLE_MOVE_TRANSIT_MS = 1100;
+const BATTLE_MOVE_TRANSIT_MS = 1450;
 
 /** Enemy turns always use this pacing, regardless of the combat speed setting. */
 const ENEMY_BATTLE_PACE = {
@@ -260,7 +265,6 @@ export default function BattleModal({
   availableSpellIds,
   persistentResults = true,
   onBattleEnd,
-  contextLabel,
 }: BattleModalProps) {
   const [battle, setBattle] = useState<BattleState | null>(() => {
     const user = getCurrentUser();
@@ -273,13 +277,16 @@ export default function BattleModal({
   });
   const [selectedSpellId, setSelectedSpellId] = useState<string | null>(null);
   const [isSpellMenuOpen, setIsSpellMenuOpen] = useState(false);
-  const [battleSpeed, setBattleSpeed] = useState<CombatSpeed>(() => readCombatSpeedSetting());
+  const [battleSpeed] = useState<CombatSpeed>(() => readCombatSpeedSetting());
   const [spellCastNotice, setSpellCastNotice] = useState<BattleSpellCastNoticeData | null>(null);
   const [presentationPin, setPresentationPin] = useState<PresentationPin | null>(null);
   const [resultReport, setResultReport] = useState<BattleResultReportData | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [isResolvingAction, setIsResolvingAction] = useState(false);
   const [battleCue, setBattleCue] = useState<BattleCue | null>(null);
+  const [turnBanner, setTurnBanner] = useState<BattleTurnBannerData | null>(null);
+  const [isOrderOpen, setIsOrderOpen] = useState(false);
+  const [combatControlsOpen, setCombatControlsOpen] = useState(true);
   const [hoveredCell, setHoveredCell] = useState<{ x: number; y: number } | null>(null);
   const [hoverCursor, setHoverCursor] = useState<{ x: number; y: number } | null>(null);
   const [pendingMoveUndo, setPendingMoveUndo] = useState<BattleState | null>(null);
@@ -291,6 +298,8 @@ export default function BattleModal({
   const defeatExitTimer = useRef<number | null>(null);
   const battleSoundTimers = useRef<number[]>([]);
   const spellNoticeTimer = useRef<number | null>(null);
+  const turnBannerTimer = useRef<number | null>(null);
+  const lastTurnBannerSide = useRef<BattleUnit['side'] | null>(null);
   const lastSoundLogEntryId = useRef<string | null>(null);
   const processedBattleLogIds = useRef<Set<string>>(new Set());
   const rewardClaimed = useRef(false);
@@ -318,9 +327,48 @@ export default function BattleModal({
     if (playerActionTimer.current) window.clearTimeout(playerActionTimer.current);
     if (defeatExitTimer.current) window.clearTimeout(defeatExitTimer.current);
     if (spellNoticeTimer.current) window.clearTimeout(spellNoticeTimer.current);
+    if (turnBannerTimer.current) window.clearTimeout(turnBannerTimer.current);
     battleSoundTimers.current.forEach(timer => window.clearTimeout(timer));
     battleSoundTimers.current = [];
   }, []);
+
+  useEffect(() => {
+    let scheduleTimer: number | null = null;
+
+    if (!battle || battle.status !== 'active') {
+      lastTurnBannerSide.current = null;
+      scheduleTimer = window.setTimeout(() => setTurnBanner(null), 0);
+      return () => {
+        if (scheduleTimer) window.clearTimeout(scheduleTimer);
+      };
+    }
+
+    const active = getActiveUnit(battle);
+    if (!active || lastTurnBannerSide.current === active.side) {
+      return () => {
+        if (scheduleTimer) window.clearTimeout(scheduleTimer);
+      };
+    }
+
+    lastTurnBannerSide.current = active.side;
+    const id = `${battle.id}-${battle.round}-${battle.activeUnitId}-${active.side}`;
+    scheduleTimer = window.setTimeout(() => setTurnBanner({
+      id,
+      side: active.side,
+      title: active.side === 'enemy' ? 'Enemy Turn' : 'Your Turn',
+      detail: active.side === 'enemy' ? `${active.name} advances.` : `${active.name} is ready.`,
+    }), 0);
+
+    if (turnBannerTimer.current) window.clearTimeout(turnBannerTimer.current);
+    turnBannerTimer.current = window.setTimeout(() => {
+      setTurnBanner(current => current?.id === id ? null : current);
+      turnBannerTimer.current = null;
+    }, active.side === 'enemy' ? 1450 : 1250);
+
+    return () => {
+      if (scheduleTimer) window.clearTimeout(scheduleTimer);
+    };
+  }, [battle]);
 
   useEffect(() => {
     if (!battle) return;
@@ -584,7 +632,7 @@ export default function BattleModal({
       intensity: cue.tone === 'danger' ? 0.76 : 0.62,
     });
 
-    const isSpellAction = Boolean(getRecentPresentationLogEntry(nextBattle, Date.now())?.action === 'spell');
+    const isSpellAction = Boolean(getRecentPresentationLogEntry(nextBattle, now)?.action === 'spell');
     const applyDelayMs = speedConfig.playerDelayMs;
 
     if (isSpellAction) {
@@ -873,7 +921,7 @@ export default function BattleModal({
     selectedSpell,
     recruitOfferPending,
   });
-  const visibleCue = battleCue || defaultCue;
+  const controlCue = battleCue || defaultCue;
   const hoverPreview = getBattleHoverPreview({
     battle,
     activeUnit,
@@ -897,7 +945,6 @@ export default function BattleModal({
   const hoveredThreatUnit = hoveredCell ? getUnitAt(battle, hoveredCell.x, hoveredCell.y) : undefined;
   const hoveredEnemyUnit = hoveredThreatUnit?.side === 'enemy' && hoveredThreatUnit.currentHealth > 0 ? hoveredThreatUnit : undefined;
   const hoverOverlayStyle = getHoverOverlayStyle(hoverCursor);
-  const showCenterCue = isResolvingAction || battle.status !== 'active' || (battle.status === 'active' && now - battle.turnStartedAt < 950);
 
   return (
     <div className="fixed inset-0 z-[70] overflow-hidden bg-black/78 p-1 backdrop-blur-sm">
@@ -949,33 +996,54 @@ export default function BattleModal({
             )}
 
             <div className="battle-combat-grid min-h-0 flex-1">
-              <aside className="battle-side-panel battle-side-panel-left">
-                <div className="battle-title-card panel-header rounded border px-3 py-2">
-                  <h2 className="fantasy-heading truncate text-xl">Battle: {enemy.name}</h2>
-                  <p className="arcane-label truncate">{contextLabel ? `${contextLabel} - ` : ''}{battle.mapName} - Round {battle.round}</p>
+              <aside className={`battle-side-panel battle-side-panel-left ${combatControlsOpen ? 'battle-side-panel-open' : 'battle-side-panel-collapsed'}`}>
+                <button
+                  type="button"
+                  onClick={() => setCombatControlsOpen(open => !open)}
+                  className="battle-controls-toggle"
+                  aria-label={combatControlsOpen ? 'Hide combat controls' : 'Show combat controls'}
+                  title={combatControlsOpen ? 'Hide combat controls' : `Show combat controls: ${controlCue.headline}`}
+                >
+                  {combatControlsOpen ? '-' : '+'}
+                </button>
+                {combatControlsOpen && (
+                <div className="battle-side-command-row">
+                  <button
+                    type="button"
+                    onClick={() => setIsOrderOpen(true)}
+                    className="ui-button rounded px-3 py-2 text-xs font-black"
+                  >
+                    Order
+                  </button>
+                  {battle.status === 'active' ? (
+                    <button onClick={handleRetreat} className="ui-button-danger rounded px-3 py-2 text-xs font-bold">
+                      Retreat
+                    </button>
+                  ) : (
+                    <button onClick={handleLeaveField} className="ui-button rounded px-3 py-2 text-xs font-bold">
+                      Leave Field
+                    </button>
+                  )}
                 </div>
-                <BattleHeaderStatus
-                  battle={battle}
-                  activeUnit={activeUnit}
-                  visibleCue={visibleCue}
-                  now={now}
-                  isPlayerTurn={isPlayerTurn}
-                  selectedSpell={selectedSpell}
-                />
-                <BattleHeaderActions
-                  isPlayerTurn={isPlayerTurn}
-                  isResolvingAction={isResolvingAction}
-                  selectedSpell={selectedSpell}
-                  onCancelSpell={handleCancelSpell}
-                />
-                <div className="battle-side-block battle-order-card rounded border p-2">
-                  <BattleTurnTimeline battle={battle} vertical />
-                </div>
+                )}
               </aside>
 
               <div className="battle-board-shell relative min-h-0">
-              <BattleCenterBanner cue={visibleCue} active={showCenterCue} />
+              {turnBanner && !spellCastNotice && <BattleTurnBanner key={turnBanner.id} banner={turnBanner} />}
               {spellCastNotice && <BattleSpellCastNotice key={spellCastNotice.id} notice={spellCastNotice} />}
+              {selectedSpell && isPlayerTurn && (
+                <button
+                  type="button"
+                  onClick={handleCancelSpell}
+                  disabled={isResolvingAction}
+                  className="battle-target-cancel"
+                >
+                  Cancel Spell
+                </button>
+              )}
+              {isOrderOpen && (
+                <BattleOrderOverlay battle={battle} onClose={() => setIsOrderOpen(false)} />
+              )}
               <BattleHoverOverlay
                 preview={hoverPreview}
                 forecast={hoverForecast}
@@ -1151,28 +1219,6 @@ export default function BattleModal({
               <CombatThreeFxLayer battle={battle} />
               </div>
             </div>
-              <aside className="battle-side-panel battle-side-panel-right">
-                <BattleSpeedControl
-                  value={battleSpeed}
-                  onChange={(speed) => {
-                    setBattleSpeed(speed);
-                    writeCombatSpeedSetting(speed);
-                    playGameSound('ui.toggle', { throttleMs: 100 });
-                  }}
-                />
-                <div className="battle-header-controls flex items-start justify-end gap-2">
-                  {battle.status === 'active' && (
-                    <button onClick={handleRetreat} className="ui-button-danger rounded px-3 py-2 text-xs font-bold">
-                      Retreat
-                    </button>
-                  )}
-                  {battle.status !== 'active' && (
-                    <button onClick={handleLeaveField} className="ui-button rounded px-3 py-2 text-xs font-bold">
-                      Leave Field
-                    </button>
-                  )}
-                </div>
-              </aside>
             </div>
           </main>
             </>
@@ -1280,74 +1326,31 @@ function BattleUnitActionOrbs({
   );
 }
 
-function BattleHeaderStatus({
-  battle,
-  activeUnit,
-  visibleCue,
-  now,
-  isPlayerTurn,
-  selectedSpell,
-}: {
-  battle: BattleState;
-  activeUnit?: BattleUnit;
-  visibleCue: BattleCue;
-  now: number;
-  isPlayerTurn: boolean;
-  selectedSpell?: BattleSpell;
-}) {
-  const turnLabel = battle.status === 'active'
-    ? isPlayerTurn ? 'Your Turn' : 'Enemy Turn'
-    : battle.status;
-  const secondsRemaining = Math.ceil(getTurnTimeRemaining(battle, now) / 1000);
-
+function BattleTurnBanner({ banner }: { banner: BattleTurnBannerData }) {
   return (
-    <div className={`battle-header-status relative rounded border px-3 py-2 ${isPlayerTurn ? 'battle-header-status-player' : 'battle-header-status-enemy'}`}>
-      <div className="min-w-0">
-        <div className="flex min-w-0 items-center gap-2">
-          <span className="fantasy-heading truncate text-base">{turnLabel}</span>
-          <span className="ui-faint truncate text-[10px] font-black uppercase">{activeUnit?.name || visibleCue.headline}</span>
-        </div>
-        {visibleCue.detail ? (
-          <div className="ui-muted truncate text-[11px] font-bold">{visibleCue.detail}</div>
-        ) : null}
-      </div>
-      <div className="flex shrink-0 items-center gap-2">
-        <span className="ui-pill rounded border px-2 py-1 text-[10px] font-black">{secondsRemaining}s</span>
-        <span className="ui-pill rounded border px-2 py-1 text-[10px] font-black">M {getBattleMana(battle, 'player')}</span>
-        {selectedSpell && (
-          <span className="ui-pill rounded border px-2 py-1 text-[10px] font-black text-red-200">Targeting</span>
-        )}
-      </div>
+    <div className={`battle-turn-banner battle-turn-banner-${banner.side}`} aria-hidden="true">
+      <span className="arcane-label">{banner.side === 'enemy' ? 'Hostile action' : 'Command ready'}</span>
+      <span className="fantasy-heading">{banner.title}</span>
+      <span>{banner.detail}</span>
     </div>
   );
 }
 
-function BattleHeaderActions({
-  isPlayerTurn,
-  isResolvingAction,
-  selectedSpell,
-  onCancelSpell,
-}: {
-  isPlayerTurn: boolean;
-  isResolvingAction: boolean;
-  selectedSpell?: BattleSpell;
-  onCancelSpell: () => void;
-}) {
-  if (!isPlayerTurn || !selectedSpell) {
-    return null;
-  }
-
+function BattleOrderOverlay({ battle, onClose }: { battle: BattleState; onClose: () => void }) {
   return (
-    <div className="battle-header-actions">
-      <button
-        type="button"
-        onClick={onCancelSpell}
-        disabled={isResolvingAction}
-        className="battle-header-action battle-header-action-cancel"
-        title="Cancel spell target mode"
-      >
-        Cancel
-      </button>
+    <div className="battle-order-overlay" role="dialog" aria-modal="true" aria-label="Turn order">
+      <section className="battle-order-panel command-panel vine-frame rounded border p-4">
+        <div className="mb-4 flex items-start justify-between gap-3">
+          <div>
+            <div className="arcane-label">Initiative</div>
+            <h3 className="fantasy-heading text-2xl">Turn Order</h3>
+          </div>
+          <button type="button" onClick={onClose} className="ui-button rounded px-4 py-2 text-xs font-black">
+            Close
+          </button>
+        </div>
+        <BattleTurnTimeline battle={battle} />
+      </section>
     </div>
   );
 }
@@ -2031,28 +2034,6 @@ function getBattleTerrainClassName(terrain: BattleTerrainType): string {
   return terrain === 'highGround' ? 'battle-terrain-high-ground' : `battle-terrain-${terrain}`;
 }
 
-function BattleSpeedControl({ value, onChange }: { value: CombatSpeed; onChange: (speed: CombatSpeed) => void }) {
-  return (
-    <div className="battle-speed-control rounded border px-2 py-1.5">
-      <span className="arcane-label mr-2 align-middle">Speed</span>
-      <span className="inline-flex gap-1 align-middle">
-        {COMBAT_SPEED_OPTIONS.map(({ id: speed, label }) => (
-          <button
-            key={speed}
-            type="button"
-            onClick={() => onChange(speed)}
-            className={`rounded px-2 py-1 text-[11px] font-black transition ${
-              value === speed ? 'battle-speed-active' : 'text-[var(--ui-muted)] hover:text-zinc-100'
-            }`}
-          >
-            {label}
-          </button>
-        ))}
-      </span>
-    </div>
-  );
-}
-
 function BattleResultReport({
   battle,
   report,
@@ -2246,33 +2227,6 @@ function BattleFloatingText({ text, tone }: { text: string; tone: 'damage' | 'he
       {text}
     </span>
   );
-}
-
-function BattleCenterBanner({ cue, active }: { cue: BattleCue; active: boolean }) {
-  if (!active) return null;
-
-  return (
-    <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center p-6">
-      <div className={`battle-center-banner max-w-sm rounded border px-5 py-3 text-center ${cueToneClasses(cue.tone)}`}>
-        <div className="fantasy-heading text-2xl">{cue.headline}</div>
-      </div>
-    </div>
-  );
-}
-
-function cueToneClasses(tone: BattleCueTone): string {
-  switch (tone) {
-    case 'player':
-      return 'border-[rgba(244,221,176,0.34)] bg-black/48 shadow-[0_0_18px_rgba(244,221,176,0.1)]';
-    case 'enemy':
-      return 'border-[rgba(248,113,113,0.34)] bg-red-950/34 shadow-[0_0_18px_rgba(248,113,113,0.12)]';
-    case 'danger':
-      return 'border-[rgba(255,180,180,0.38)] bg-red-950/44 shadow-[0_0_20px_rgba(248,113,113,0.14)]';
-    case 'victory':
-      return 'border-[rgba(250,204,21,0.42)] bg-amber-950/32 shadow-[0_0_20px_rgba(250,204,21,0.13)]';
-    default:
-      return 'border-[rgba(232,217,184,0.24)] bg-black/46 shadow-[0_0_16px_rgba(232,217,184,0.08)]';
-  }
 }
 
 function getBattleCueFxType(cue: BattleCue): FxEventType {

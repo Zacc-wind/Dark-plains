@@ -1,7 +1,7 @@
 'use client';
 
 import Image from 'next/image';
-import type { ReactNode } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import BattleModal from './BattleModal';
@@ -22,10 +22,12 @@ import {
   addRunEquipment,
   createEmptyRunEquipmentState,
   equipRunItem,
+  formatEquipmentRarityLabel,
   formatRunEquipmentSummary,
   generateRunLootEquipment,
   getEquippedRunItem,
   getRunEquipmentIconPath,
+  getRunEquipmentStatRows,
   getUnequippedRunEquipment,
   RUN_EQUIPMENT_LAYOUT,
   RUN_EQUIPMENT_SLOT_LABELS,
@@ -78,7 +80,7 @@ import {
   getRegionForTile,
 } from '@/lib/worldEvents';
 import { readGameJson, removeGameStorageItem, writeGameJson } from '@/lib/gameStore';
-import { getBossProfileById, getBossProfileByIndex } from '@/lib/bosses';
+import { BOSS_PROFILES, getBossProfileById, getBossProfileByIndex } from '@/lib/bosses';
 
 type RunMode = 'daily' | 'dungeon' | 'encounter';
 export type RunPhase = 'draft' | 'map' | 'formation' | 'battle' | 'reward' | 'shop' | 'event' | 'complete';
@@ -122,6 +124,17 @@ interface RunShopOffer {
   choiceId: string;
   cost: number;
   equipmentOffer?: Equipment;
+  purchased?: boolean;
+}
+
+interface RunCelebration {
+  id: string;
+  kind: 'gear' | 'unit' | 'fate';
+  title: string;
+  kicker: string;
+  description: string;
+  artworkPath: string;
+  rewards: CompletionRewardLine[];
 }
 
 interface DungeonNode {
@@ -174,8 +187,10 @@ interface RunSession {
   rewardClaimed?: boolean;
   shopOffers?: Record<string, RunShopOffer[]>;
   shopRerollsRemaining?: number;
+  blessingRerollsRemaining?: number;
   omenRerollsRemaining?: number;
   pendingPositiveOmen?: boolean;
+  pendingRunCelebrations?: RunCelebration[];
   startedAt?: number;
   bossHistory?: string[];
   shopBuyHistory?: string[];
@@ -322,6 +337,7 @@ interface RunRewardChoice {
   apply: (session: RunSession) => RunSession;
   isAvailable?: (session: RunSession) => boolean;
   equipmentOffer?: Equipment;
+  category?: string;
 }
 
 interface BattleEndResult {
@@ -349,6 +365,7 @@ interface EncounterRunModalProps {
 }
 
 const MINION_ICON_BASE = '/assets/minions';
+const RUN_GOLD_ICON = '/assets/icons/gold.png';
 const RUN_COMPLETION_STAT_ICONS = {
   wins: '/assets/icons/attack.png',
   standing: '/assets/icons/health.png',
@@ -401,11 +418,14 @@ const RUN_BLESSING_SPELL_OFFER_CHANCE = 0.05;
 const RUN_BLESSING_EQUIPMENT_OFFER_CHANCE = 0.12;
 const RUN_SHOP_SPELL_OFFER_CHANCE = 0.16;
 const RUN_SHOP_EQUIPMENT_OFFER_CHANCE = 0.22;
-const RUN_SHOP_CHOICE_COUNT = 4;
+const RUN_SHOP_CHOICE_COUNT = 8;
 const RUN_SHOP_REROLL_COUNT = 3;
+const RUN_BLESSING_REROLL_COUNT = 3;
 const RUN_OMEN_REROLL_COUNT = 1;
 const RUN_DEFEAT_BURST_MS = 3200;
+const RUN_FORMATION_INTRO_MS = 2800;
 const RUN_MAX_ROSTER = 10;
+const RANDOM_REWARD_ANIMATION_ICON = '/assets/icons/dice.png';
 
 const RUN_BUFFS: RunRewardChoice[] = [
   makeStatBuff('army-drill', 'Army Drill', '+2 Army Power for this run.', { armyPower: 2 }),
@@ -473,7 +493,57 @@ const RUN_BUFFS: RunRewardChoice[] = [
     id: 'run-gold',
     name: 'Black Coin Cache',
     description: '+60 run gold for run shops.',
+    category: 'gold',
     apply: session => ({ ...session, runGold: session.runGold + 60, notice: 'Found 60 run gold.' }),
+  },
+  makeStatBuff('frontline-drill', 'Frontline Drill', '+2 Army Power and +1 Morale for this run.', { armyPower: 2, morale: 1 }, 'unit-offense'),
+  makeStatBuff('shield-wall-vow', 'Shield-Wall Vow', '+2 Defensive Power and +1 Morale for this run.', { defensivePower: 2, morale: 1 }, 'unit-defense'),
+  makeStatBuff('candle-tactician', 'Candle Tactician', '+1 Army, Ward, Morale, Spell, and +10 health.', { armyPower: 1, defensivePower: 1, morale: 1, spellPower: 1, maxHealth: 10, health: 10 }, 'hybrid'),
+  {
+    id: 'field-surgeon-prayer',
+    name: 'Field Surgeon Prayer',
+    description: 'Heal every living run unit by 18 before the next fight.',
+    category: 'minion-heal',
+    isAvailable: hasWoundedRunMinions,
+    apply: session => healLivingRunMinions(session, 18, 'Field Surgeon Prayer restored the line.'),
+  },
+  {
+    id: 'saint-triage',
+    name: 'Saint Triage',
+    description: 'Heavily heal every living run unit before the next fight.',
+    category: 'minion-heal',
+    isAvailable: hasWoundedRunMinions,
+    apply: session => healLivingRunMinions(session, 999, 'Saint Triage restored the wounded.'),
+  },
+  {
+    id: 'quartermaster-ledger',
+    name: 'Quartermaster Ledger',
+    description: '+35 run gold and +1 shop reroll for this run.',
+    category: 'economy',
+    apply: session => ({
+      ...session,
+      runGold: session.runGold + 35,
+      shopRerollsRemaining: (session.shopRerollsRemaining ?? RUN_SHOP_REROLL_COUNT) + 1,
+      notice: 'Quartermaster Ledger claimed: +35 run gold and one shop reroll.',
+    }),
+  },
+  {
+    id: 'omen-candle',
+    name: 'Omen Candle',
+    description: '+1 omen reroll for this run.',
+    category: 'reroll',
+    apply: session => ({
+      ...session,
+      omenRerollsRemaining: (session.omenRerollsRemaining ?? RUN_OMEN_REROLL_COUNT) + 1,
+      notice: 'Omen Candle claimed: one extra omen reroll.',
+    }),
+  },
+  {
+    id: 'relic-gear-cache',
+    name: 'Relic Gear Cache',
+    description: 'Gain a commander gear piece scaled to this run.',
+    category: 'equipment',
+    apply: session => addRunEquipment(session, generateRunLootEquipment(session.wins, session.targetBattles)),
   },
 ];
 
@@ -870,7 +940,14 @@ function RunController({
   const aliveStacks = getRunFieldedStacks(session);
   const previousPhaseRef = useRef<RunPhase | null>(null);
   const completionIntroTimeoutRef = useRef<number | null>(null);
+  const emittedCelebrationsRef = useRef<Set<string>>(new Set());
   const [completionView, setCompletionView] = useState<'defeat-burst' | 'report' | null>(null);
+  const [formationIntro, setFormationIntro] = useState<{
+    key: string;
+    commanderName: string;
+    enemyName: string;
+    artworkPath: string;
+  } | null>(null);
   const isFormationPhase = session.phase === 'formation';
   const isMapPhase = session.phase === 'map';
   const isDraftPhase = session.phase === 'draft';
@@ -907,6 +984,65 @@ function RunController({
   useEffect(() => () => {
     if (completionIntroTimeoutRef.current) window.clearTimeout(completionIntroTimeoutRef.current);
   }, []);
+
+  useEffect(() => {
+    if (session.phase !== 'map' || !session.pendingRunCelebrations?.length) return;
+    const celebrations = session.pendingRunCelebrations.filter(item => !emittedCelebrationsRef.current.has(item.id));
+    if (celebrations.length === 0) return;
+
+    celebrations.forEach((celebration, index) => {
+      emittedCelebrationsRef.current.add(celebration.id);
+      window.setTimeout(() => {
+        emitCompletionNotice({
+          id: celebration.id,
+          kind: celebration.kind === 'unit' ? 'recruit' : 'run',
+          kicker: celebration.kicker,
+          title: celebration.title,
+          description: celebration.description,
+          artworkPath: celebration.artworkPath,
+          rewards: celebration.rewards,
+          completedAt: Date.now(),
+          skipReport: celebration.kind === 'unit' || celebration.kind === 'fate',
+        });
+      }, index * 420);
+    });
+
+    setSession(current => current && current.id === session.id
+      ? { ...current, pendingRunCelebrations: [] }
+      : current);
+  }, [session.id, session.pendingRunCelebrations, session.phase, setSession]);
+
+  useEffect(() => {
+    let introTimer: number | null = null;
+    let clearTimer: number | null = null;
+
+    if (session.phase !== 'formation' || !session.activeEnemy) {
+      introTimer = window.setTimeout(() => setFormationIntro(null), 0);
+      return () => {
+        if (introTimer) window.clearTimeout(introTimer);
+      };
+    }
+
+    const user = getCurrentUser();
+    const key = `${session.id}:${session.currentNodeIndex}:${session.activeEnemy.id}`;
+    introTimer = window.setTimeout(() => {
+      setFormationIntro({
+        key,
+        commanderName: user?.username || 'Commander',
+        enemyName: session.activeEnemy?.name || 'Enemy Commander',
+        artworkPath: getPlayerModelAsset(user?.selectedModel || 3),
+      });
+
+      clearTimer = window.setTimeout(() => {
+        setFormationIntro(current => current?.key === key ? null : current);
+      }, RUN_FORMATION_INTRO_MS);
+    }, 0);
+
+    return () => {
+      if (introTimer) window.clearTimeout(introTimer);
+      if (clearTimer) window.clearTimeout(clearTimer);
+    };
+  }, [session.activeEnemy, session.currentNodeIndex, session.id, session.phase]);
 
   useEffect(() => {
     let immediateTimer: number | null = null;
@@ -1025,7 +1161,7 @@ function RunController({
 
     setSession(current => {
       if (!current) return current;
-      const applied = choice.apply(current);
+      const applied = queueRunRewardCelebrations(current, choice.apply(current), choice);
 
       if (applied.rewardDestination === 'complete') {
         const completed = applied.nodes.length > 0
@@ -1146,6 +1282,16 @@ function RunController({
     );
   }
 
+  const formationStackHealth = session.phase === 'formation'
+    ? Object.fromEntries(session.minions.map(unit => [
+      unit.stack.id,
+      {
+        current: getRunUnitCurrentHealthForSession(session, unit),
+        max: getRunUnitMaxHealthForSession(session, unit),
+      },
+    ]))
+    : undefined;
+
   return (
     <div
       className={`run-modal-layer fixed inset-0 z-[68] flex items-center justify-center bg-black/76 text-zinc-100 backdrop-blur-sm ${isMapPhase || isFormationPhase || isDraftPhase || isCompletePhase || isRunIntermissionPhase ? 'p-1' : 'p-4'}`}
@@ -1161,6 +1307,7 @@ function RunController({
             {session.notice}
           </div>
         )}
+        {formationIntro && <RunFormationIntroSplash intro={formationIntro} />}
 
         <div className={`grid min-h-0 flex-1 ${isFormationPhase ? 'overflow-hidden p-2' : isCompletePhase ? 'run-completion-layout overflow-hidden' : isRunIntermissionPhase ? 'run-reward-layout overflow-hidden' : isMapPhase ? 'run-map-layout gap-3 overflow-hidden p-2 lg:grid-cols-[20rem_minmax(0,1fr)]' : isDraftPhase ? 'run-draft-layout overflow-hidden p-2' : 'gap-5 overflow-y-auto p-5 lg:grid-cols-[20rem_minmax(0,1fr)]'}`}>
           {!isFormationPhase && !isDraftPhase && !isCompletePhase && !isRunIntermissionPhase && (
@@ -1195,6 +1342,7 @@ function RunController({
                 commanderName={getCurrentUser()?.username || 'Commander'}
                 commanderModel={(getCurrentUser()?.selectedModel || 3) as PlayerModelNumber}
                 stacks={getAliveRunRoster(session)}
+                stackHealth={formationStackHealth}
                 maxFielded={MAX_FIELD_MINIONS}
                 formation={session.formation}
                 spellIds={session.spellIds}
@@ -1210,6 +1358,7 @@ function RunController({
               <RewardPanel
                 session={session}
                 choices={session.rewardChoices}
+                onReroll={() => setSession(current => current ? rerollRewardChoices(current) : current)}
                 onChoose={handleRewardChoice}
               />
             )}
@@ -1217,7 +1366,7 @@ function RunController({
             {session.phase === 'shop' && (
               <ShopPanel
                 session={session}
-                onBuy={(choice, cost) => setSession(current => current ? buyShopReward(current, choice, cost) : current)}
+                onBuy={(offerIndex, choice, cost) => setSession(current => current ? buyShopReward(current, offerIndex, choice, cost) : current)}
                 onReroll={() => setSession(current => current ? rerollShopOffers(current) : current)}
                 onSkip={() => setSession(current => current ? completeDungeonNode({ ...current, phase: 'map', notice: 'The shop fades behind you.' }) : current)}
               />
@@ -1551,7 +1700,6 @@ function DailyRouteMap({
                     className={`run-route-node run-route-node-${node.type} run-route-node-${state} transition ${reachable ? 'run-route-node-clickable' : ''}`}
                     style={{ left: `${x}%`, top: `${y}rem` }}
                     aria-label={`${getRunNodeStateLabel(node, state)} ${battleNumber ? `fight ${battleNumber}` : node.type}: ${node.label}`}
-                    title={state === 'reachable' ? `${getRunNodeActionLabel(node)}: ${node.label}` : node.label}
                   >
                     <span className={`run-route-node-icon run-route-node-icon-${node.type} relative`}>
                       <Image
@@ -1581,6 +1729,14 @@ function DailyRouteMap({
                       <span className="mt-3 flex flex-wrap gap-2">
                         {reachable && <span className="ui-pill rounded border px-2 py-1 text-[10px] font-black uppercase">{getRunNodeActionLabel(node)}</span>}
                         {node.type === 'elite' && <span className="ui-pill rounded border px-2 py-1 text-[10px] font-black uppercase text-red-100">Hard route</span>}
+                        {node.type === 'elite' && (
+                          <span className="run-route-tooltip-omen ui-pill rounded border px-2 py-1 text-[10px] font-black uppercase">
+                            <span className="run-route-tooltip-omen-icon relative" aria-hidden="true">
+                              <Image src={DUNGEON_NODE_ICONS.event} alt="" fill sizes="18px" className="object-contain" unoptimized />
+                            </span>
+                            Free omen after victory
+                          </span>
+                        )}
                       </span>
                     </span>
                   </button>
@@ -1704,6 +1860,40 @@ function getRunMapLaneX(rowSize: number, lane: number): number {
   return [20, 50, 80][clamp(lane, 0, 2)] || 50;
 }
 
+function RunFormationIntroSplash({
+  intro,
+}: {
+  intro: {
+    commanderName: string;
+    enemyName: string;
+    artworkPath: string;
+  };
+}) {
+  return (
+    <div className="run-formation-intro-splash" aria-hidden="true">
+      <div className="run-formation-intro-card">
+        <span className="run-formation-intro-aura" />
+        <span className="run-formation-intro-art relative block">
+          <Image
+            src={intro.artworkPath}
+            alt=""
+            fill
+            sizes="220px"
+            className="player-model-art object-contain"
+            priority
+            unoptimized
+          />
+        </span>
+        <span className="arcane-label">Deployment</span>
+        <span className="fantasy-heading run-formation-intro-title">Prepare Your Team</span>
+        <span className="run-formation-intro-copy">
+          {intro.commanderName} vs {intro.enemyName}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 function getDailyMapConnections(rows: Array<{ row: number; nodes: DungeonNode[] }>, mapHeightRem: number): Array<{
   from: DungeonNode;
   to: DungeonNode;
@@ -1751,13 +1941,16 @@ function getRunConnectionState(from: DungeonNode, to: DungeonNode, reachableIds:
 function RewardPanel({
   session,
   choices,
+  onReroll,
   onChoose,
 }: {
   session: RunSession;
   choices: RunRewardChoice[];
+  onReroll: () => void;
   onChoose: (choice: RunRewardChoice) => void;
 }) {
   const standingCount = getAliveRunRoster(session).length;
+  const rerollsRemaining = session.blessingRerollsRemaining ?? RUN_BLESSING_REROLL_COUNT;
 
   return (
     <div className="run-draft-stage run-reward-stage min-h-0">
@@ -1809,14 +2002,25 @@ function RewardPanel({
                 <div className="arcane-label">Choose One</div>
                 <h4 className="fantasy-heading text-lg sm:text-xl">Blessings Offered</h4>
               </div>
-              <span className="run-blessing-count ui-pill rounded border px-2.5 py-0.5 text-[10px] font-black sm:text-xs">
-                {choices.length} paths
-              </span>
+              <div className="run-reward-control-row">
+                <span className="run-blessing-count ui-pill rounded border px-2.5 py-0.5 text-[10px] font-black sm:text-xs">
+                  {choices.length} paths
+                </span>
+                <button
+                  type="button"
+                  onClick={onReroll}
+                  disabled={rerollsRemaining <= 0}
+                  className="run-reroll-button rounded border px-3 py-2 text-xs font-black disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <span className="run-reroll-icon" aria-hidden="true">↻</span>
+                  Reroll {rerollsRemaining}
+                </button>
+              </div>
             </div>
 
             <div className="run-blessing-grid">
               {choices.map(choice => (
-                <RunRewardCard key={choice.id} choice={choice} onChoose={() => onChoose(choice)} />
+                <RunRewardCard key={choice.id} choice={choice} onChoose={() => onChoose(choice)} variant="blessing" />
               ))}
             </div>
           </div>
@@ -1831,14 +2035,22 @@ function RunRewardCard({
   onChoose,
   disabled = false,
   cost,
+  variant = 'blessing',
 }: {
   choice: RunRewardChoice;
   onChoose: () => void;
   disabled?: boolean;
   cost?: number;
+  variant?: 'blessing' | 'shop';
 }) {
   const visual = getRunRewardVisual(choice);
   const [claiming, setClaiming] = useState(false);
+  const scenePath = visual.tone === 'gold' || visual.tone === 'gear' || visual.tone === 'morale'
+    ? '/assets/town-riverside-bg.png'
+    : '/assets/town-harborview-bg.png';
+  const cardStyle = {
+    '--run-reward-card-scene': `url("${scenePath}")`,
+  } as CSSProperties;
 
   const handleChoose = () => {
     if (disabled || claiming) return;
@@ -1850,11 +2062,17 @@ function RunRewardCard({
     <button
       onClick={handleChoose}
       disabled={disabled || claiming}
-      className={`run-blessing-card run-blessing-card-${visual.tone} run-reward-card run-reward-card-${visual.tone} ${claiming ? 'run-reward-card-claiming' : ''} rounded border text-left transition disabled:opacity-40`}
+      className={`run-blessing-card run-blessing-card-${visual.tone} run-reward-card run-reward-card-${visual.tone} run-reward-card-${variant} ${variant === 'shop' ? 'run-shop-offer-card' : 'run-blessing-choice-card'} ${claiming ? 'run-reward-card-claiming' : ''} rounded border text-left transition disabled:opacity-40`}
+      style={cardStyle}
     >
       <span className="run-reward-card-burst" aria-hidden="true" />
-      <span className="run-blessing-tier rounded border px-2 py-0.5 text-[10px] font-black uppercase">
-        {cost ? `${cost}g` : visual.tierLabel}
+      <span className={`run-blessing-tier ${cost ? 'run-shop-cost-badge' : ''} rounded border px-2 py-0.5 text-[10px] font-black uppercase`}>
+        {cost ? (
+          <>
+            <Image src={RUN_GOLD_ICON} alt="" width={18} height={18} className="run-shop-cost-icon" unoptimized />
+            <span>{cost}</span>
+          </>
+        ) : visual.tierLabel}
       </span>
       <span className="run-blessing-card-top">
         <span className={`run-blessing-art run-reward-icon run-reward-icon-${visual.tone} relative overflow-hidden rounded border`}>
@@ -1920,10 +2138,10 @@ function getRunRewardVisual(choice: RunRewardChoice): {
       ? 'Tier II'
       : 'Tier I';
 
-  if (normalized.includes('army') || normalized.includes('weapon')) {
+  if (normalized.includes('army') || normalized.includes('weapon') || normalized.includes('frontline')) {
     return { iconPath: '/assets/icons/attack.png', tierLabel, kindLabel: 'Offense', impactLabel: 'More damage', tone: 'attack' };
   }
-  if (normalized.includes('ward') || normalized.includes('armor') || normalized.includes('defensive')) {
+  if (normalized.includes('ward') || normalized.includes('armor') || normalized.includes('defensive') || normalized.includes('shield')) {
     return { iconPath: '/assets/icons/defense.png', tierLabel, kindLabel: 'Defense', impactLabel: 'More survival', tone: 'defense' };
   }
   if (normalized.includes('spell') || normalized.includes('focus') || normalized.includes('liturgy')) {
@@ -1932,11 +2150,14 @@ function getRunRewardVisual(choice: RunRewardChoice): {
   if (normalized.includes('morale') || normalized.includes('banner') || normalized.includes('chorus')) {
     return { iconPath: '/assets/icons/speed.png', tierLabel, kindLabel: 'Tempo', impactLabel: 'Faster turns', tone: 'morale' };
   }
-  if (normalized.includes('health') || normalized.includes('resurrect') || normalized.includes('mercy') || normalized.includes('vigor')) {
+  if (normalized.includes('health') || normalized.includes('heal') || normalized.includes('surgeon') || normalized.includes('triage') || normalized.includes('resurrect') || normalized.includes('mercy') || normalized.includes('vigor')) {
     return { iconPath: '/assets/icons/health.png', tierLabel, kindLabel: 'Recovery', impactLabel: 'Stay alive', tone: 'health' };
   }
   if (normalized.includes('recruit') || normalized.includes('promotion') || normalized.includes('minion')) {
     return { iconPath: '/assets/icons/attack.png', tierLabel, kindLabel: 'Army', impactLabel: 'More units', tone: 'unit' };
+  }
+  if (normalized.includes('gear') || normalized.includes('cache') || normalized.includes('relic')) {
+    return { iconPath: '/assets/icons/loot-chest.png', tierLabel, kindLabel: 'Gear', impactLabel: 'New item', tone: 'gear' };
   }
   return { iconPath: '/assets/icons/gold.png', tierLabel, kindLabel: 'Treasure', impactLabel: 'Shop power', tone: 'gold' };
 }
@@ -1948,15 +2169,12 @@ function ShopPanel({
   onSkip,
 }: {
   session: RunSession;
-  onBuy: (choice: RunRewardChoice, cost: number) => void;
+  onBuy: (offerIndex: number, choice: RunRewardChoice, cost: number) => void;
   onReroll: () => void;
   onSkip: () => void;
 }) {
   const node = session.nodes[session.currentNodeIndex];
   const offers = getShopOffersForSession(session);
-  const choices = offers
-    .map(offer => ({ offer, choice: getRunRewardChoiceById(offer.choiceId, offer.equipmentOffer) }))
-    .filter((item): item is { offer: RunShopOffer; choice: RunRewardChoice } => Boolean(item.choice));
   const rerollsRemaining = session.shopRerollsRemaining ?? RUN_SHOP_REROLL_COUNT;
 
   return (
@@ -1967,31 +2185,53 @@ function ShopPanel({
           <h3 className="fantasy-heading text-xl">{node?.label || (session.mode === 'dungeon' ? 'Black-Coin Merchant' : 'Roadside Quartermaster')}</h3>
           <p className="ui-muted mt-1 text-sm font-bold">Spend run gold on as many temporary blessings as you can afford.</p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="ui-pill rounded border px-3 py-2 text-xs font-black">{session.runGold} run gold</span>
+        <div className="run-shop-control-row">
+          <span className="run-shop-gold-pill rounded border">
+            <Image src={RUN_GOLD_ICON} alt="" width={28} height={28} className="run-shop-gold-icon" unoptimized />
+            <span>
+              <strong>{session.runGold}</strong>
+              <small>run gold</small>
+            </span>
+          </span>
           <button
             type="button"
             onClick={onReroll}
             disabled={rerollsRemaining <= 0}
-            className="ui-button rounded px-3 py-2 text-xs font-black disabled:cursor-not-allowed disabled:opacity-40"
+            className="run-reroll-button rounded border px-3 py-2 text-xs font-black disabled:cursor-not-allowed disabled:opacity-40"
           >
+            <span className="run-reroll-icon" aria-hidden="true">↻</span>
             Reroll Shop {rerollsRemaining}
+          </button>
+          <button onClick={onSkip} className="run-shop-leave-button ui-button-primary rounded px-5 py-3 text-sm font-black">
+            Leave Shop
           </button>
         </div>
       </section>
 
-      {choices.length > 0 ? (
+      {offers.length > 0 ? (
         <div className="run-reward-grid">
-          {choices.map(({ choice, offer }) => {
-            const canAfford = session.runGold >= offer.cost;
+          {offers.map((offer, offerIndex) => {
+            const choice = getRunRewardChoiceById(offer.choiceId, offer.equipmentOffer);
+            if (!choice) return null;
+            const canAfford = !offer.purchased && session.runGold >= offer.cost;
+
+            if (offer.purchased) {
+              return (
+                <RunShopEmptySlot
+                  key={`claimed-${offer.choiceId}-${offerIndex}`}
+                  cost={offer.cost}
+                />
+              );
+            }
 
             return (
               <RunRewardCard
-                key={`${choice.id}-${offer.cost}`}
+                key={`${choice.id}-${offer.cost}-${offerIndex}`}
                 choice={choice}
-                onChoose={() => onBuy(choice, offer.cost)}
+                onChoose={() => onBuy(offerIndex, choice, offer.cost)}
                 disabled={!canAfford}
                 cost={offer.cost}
+                variant="shop"
               />
             );
           })}
@@ -2003,9 +2243,21 @@ function ShopPanel({
           <p className="ui-muted mt-1 text-sm font-bold">Leave the shop, or spend a reroll if you saved one.</p>
         </section>
       )}
-      <button onClick={onSkip} className="ui-button rounded px-4 py-2 text-sm font-bold">
-        Leave Shop
-      </button>
+    </div>
+  );
+}
+
+function RunShopEmptySlot({ cost }: { cost: number }) {
+  return (
+    <div className="run-shop-empty-slot rounded border" aria-label="Purchased shop slot">
+      <span className="run-shop-empty-cost rounded border">
+        <Image src={RUN_GOLD_ICON} alt="" width={18} height={18} className="run-shop-cost-icon" unoptimized />
+        <span>{cost}</span>
+      </span>
+      <span className="run-shop-empty-mark" aria-hidden="true" />
+      <span className="arcane-label">Claimed</span>
+      <span className="run-shop-empty-title fantasy-heading">Taken</span>
+      <span className="run-shop-empty-copy ui-muted">This road offer has already joined the run.</span>
     </div>
   );
 }
@@ -2022,6 +2274,22 @@ interface OmenOutcome {
 }
 
 const OMEN_CHANNEL_MS = 2400;
+const OMEN_REROLL_MS = 780;
+
+function getOmenOutcomePresentation(outcome: Pick<OmenOutcome, 'tone' | 'title'>): { iconPath: string; label: string; impact: string } {
+  switch (outcome.tone) {
+    case 'curse':
+      return { iconPath: '/assets/icons/attack.png', label: 'Risk', impact: 'Road turns against you' };
+    case 'gold':
+      return { iconPath: RUN_GOLD_ICON, label: 'Treasure', impact: 'More shop power' };
+    case 'recruit':
+      return { iconPath: '/assets/icons/attack.png', label: 'Recruit', impact: 'Warband grows' };
+    case 'ward':
+      return { iconPath: '/assets/icons/defense.png', label: 'Ward', impact: 'More survival' };
+    default:
+      return { iconPath: '/assets/icons/magic.png', label: 'Blessing', impact: outcome.title };
+  }
+}
 
 function OmenPanel({
   session,
@@ -2035,7 +2303,8 @@ function OmenPanel({
   const node = session.nodes[session.currentNodeIndex];
   const revealKey = `${session.id}:${session.currentNodeIndex}`;
   const [outcome, setOutcome] = useState(() => rollDungeonEventOutcome(session));
-  const [revealState, setRevealState] = useState<{ key: string; stage: 'channeling' | 'revealed' }>({
+  const rerollTimerRef = useRef<number | null>(null);
+  const [revealState, setRevealState] = useState<{ key: string; stage: 'channeling' | 'rerolling' | 'revealed' }>({
     key: revealKey,
     stage: 'channeling',
   });
@@ -2043,15 +2312,23 @@ function OmenPanel({
   const rerollsRemaining = session.omenRerollsRemaining ?? RUN_OMEN_REROLL_COUNT;
 
   const handleReroll = () => {
-    if (rerollsRemaining <= 0) return;
-    onReroll();
-    setOutcome(rollDungeonEventOutcome({
-      ...session,
-      omenRerollsRemaining: Math.max(0, rerollsRemaining - 1),
-    }));
+    if (rerollsRemaining <= 0 || stage === 'rerolling') return;
+    if (rerollTimerRef.current) window.clearTimeout(rerollTimerRef.current);
+    setRevealState({ key: revealKey, stage: 'rerolling' });
+    emitFxEvent({ type: 'spell', tone: 'violet', intensity: 0.62 });
+    rerollTimerRef.current = window.setTimeout(() => {
+      rerollTimerRef.current = null;
+      onReroll();
+      setOutcome(rollDungeonEventOutcome({
+        ...session,
+        omenRerollsRemaining: Math.max(0, rerollsRemaining - 1),
+      }));
+      setRevealState({ key: revealKey, stage: 'channeling' });
+    }, OMEN_REROLL_MS);
   };
 
   useEffect(() => {
+    if (stage !== 'channeling') return undefined;
     const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     const delay = prefersReducedMotion ? 0 : OMEN_CHANNEL_MS;
     const timer = window.setTimeout(() => {
@@ -2064,7 +2341,11 @@ function OmenPanel({
     }, delay);
 
     return () => window.clearTimeout(timer);
-  }, [outcome.tone, revealKey]);
+  }, [outcome.detail, outcome.id, outcome.title, outcome.tone, revealKey, stage]);
+
+  useEffect(() => () => {
+    if (rerollTimerRef.current) window.clearTimeout(rerollTimerRef.current);
+  }, []);
 
   if (stage === 'channeling') {
     return (
@@ -2096,40 +2377,84 @@ function OmenPanel({
     );
   }
 
+  if (stage === 'rerolling') {
+    return (
+      <div className="run-omen-stage run-omen-stage-rerolling flex min-h-[28rem] items-center justify-center p-4">
+        <section className="run-omen-panel run-omen-rerolling w-full max-w-2xl rounded border p-8 text-center">
+          <div className="run-omen-reroll-orbit mx-auto mb-5">
+            <span className="run-omen-reroll-ring run-omen-reroll-ring-outer" aria-hidden="true" />
+            <span className="run-omen-reroll-ring run-omen-reroll-ring-inner" aria-hidden="true" />
+            <span className="run-omen-sigil-icon relative mx-auto block h-20 w-20 overflow-hidden rounded-full border">
+              <Image
+                src={node?.iconPath || DUNGEON_NODE_ICONS.event}
+                alt=""
+                fill
+                sizes="80px"
+                className="run-ui-art object-contain p-3"
+              />
+            </span>
+          </div>
+          <div className="arcane-label">Omen Reroll</div>
+          <h3 className="fantasy-heading mt-1 text-4xl">Fate Turns</h3>
+          <p className="run-omen-channel-copy ui-muted mx-auto mt-3 max-w-md text-sm font-bold leading-relaxed">
+            The sign breaks apart before another omen gathers.
+          </p>
+        </section>
+      </div>
+    );
+  }
+
+  const outcomePresentation = getOmenOutcomePresentation(outcome);
+
   return (
-    <div className="run-omen-stage flex min-h-[28rem] items-center justify-center p-4">
-      <section className={`run-omen-panel run-omen-reveal run-omen-${outcome.tone} w-full max-w-xl rounded border p-8 text-center`}>
-        <div className="run-omen-result-icon relative mx-auto mb-4 h-16 w-16 overflow-hidden rounded-full border">
-          <Image
-            src={DUNGEON_NODE_ICONS.event}
-            alt=""
-            fill
-            sizes="64px"
-            className="run-ui-art object-contain p-2.5"
-          />
-        </div>
-        <div className="arcane-label">Omen Resolved</div>
-        <h3 className="fantasy-heading mt-1 text-3xl">{outcome.title}</h3>
-        <p className="ui-muted mx-auto mt-3 max-w-md text-sm font-bold leading-relaxed">{outcome.flavor}</p>
-        <p className="run-omen-result-detail mx-auto mt-4 max-w-md rounded border px-4 py-3 text-sm font-black leading-relaxed text-zinc-100">
-          {outcome.detail}
-        </p>
-        <div className="mt-6 flex flex-wrap justify-center gap-3">
-          <button
-            type="button"
-            onClick={handleReroll}
-            disabled={rerollsRemaining <= 0}
-            className="ui-button rounded px-5 py-3 text-sm font-black disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            Reroll Omen {rerollsRemaining}
-          </button>
-          <button
-            type="button"
-            onClick={() => onComplete(outcome)}
-            className="ui-button-primary rounded px-6 py-3 text-sm font-black"
-          >
-            Continue Road
-          </button>
+    <div className="run-omen-stage run-omen-stage-revealed flex min-h-[28rem] items-stretch justify-center p-4">
+      <section className={`run-omen-panel run-omen-reveal run-omen-${outcome.tone} w-full rounded border p-0`}>
+        <div className="run-omen-reveal-layout">
+          <div className="run-omen-reveal-art">
+            <span className="run-omen-result-orbit" aria-hidden="true" />
+            <span className="run-omen-result-icon relative overflow-hidden rounded border">
+              <Image
+                src={outcomePresentation.iconPath}
+                alt=""
+                fill
+                sizes="160px"
+                className="run-ui-art object-contain p-5"
+                unoptimized
+              />
+            </span>
+            <span className="run-omen-impact-pill rounded border">{outcomePresentation.impact}</span>
+          </div>
+
+          <div className="run-omen-reveal-copy">
+            <div className="arcane-label">Omen Resolved</div>
+            <h3 className="fantasy-heading mt-2">{outcome.title}</h3>
+            <p className="run-omen-flavor ui-muted mt-4 font-bold leading-relaxed">{outcome.flavor}</p>
+            <p className="run-omen-result-detail mt-5 rounded border font-black leading-relaxed text-zinc-100">
+              {outcome.detail}
+            </p>
+            <div className="run-omen-meta-row mt-5">
+              <span className="run-omen-tone-pill rounded border">{outcomePresentation.label}</span>
+              <span className="run-omen-tone-pill rounded border">Rerolls {rerollsRemaining}</span>
+            </div>
+          </div>
+
+          <div className="run-omen-actions">
+            <button
+              type="button"
+              onClick={handleReroll}
+              disabled={rerollsRemaining <= 0}
+              className="ui-button rounded px-5 py-4 text-sm font-black disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Reroll Omen {rerollsRemaining}
+            </button>
+            <button
+              type="button"
+              onClick={() => onComplete(outcome)}
+              className="ui-button-primary rounded px-6 py-4 text-sm font-black"
+            >
+              Continue Road
+            </button>
+          </div>
         </div>
       </section>
     </div>
@@ -2699,33 +3024,57 @@ function RunGearPanel({
             <div key={rowIndex} className="run-gear-doll-row">
               {row.map(slot => {
                 const item = getEquippedRunItem(session, slot);
-                return (
-                  <button
-                    key={slot}
-                    type="button"
-                    className={`run-gear-square rounded border ${item ? runEquipmentRarityClass(item.rarity) : 'run-gear-square-empty'}`}
-                    onClick={() => item && onUnequip(slot)}
-                    disabled={!item}
-                    aria-label={item ? `Unequip ${item.name}` : `${RUN_EQUIPMENT_SLOT_LABELS[slot]} slot empty`}
-                    title={item ? `${item.name} — click to unequip` : RUN_EQUIPMENT_SLOT_LABELS[slot]}
-                  >
-                    {item ? (
-                      <span className="run-gear-square-icon relative overflow-hidden">
-                        <Image
-                          src={getRunEquipmentIconPath(item)}
-                          alt=""
-                          fill
-                          sizes="56px"
-                          className="object-contain p-1"
-                          style={{ imageRendering: 'pixelated' }}
-                        />
-                      </span>
-                    ) : (
+
+                if (!item) {
+                  return (
+                    <button
+                      key={slot}
+                      type="button"
+                      className="run-gear-square run-gear-square-empty rounded border"
+                      disabled
+                      aria-label={`${RUN_EQUIPMENT_SLOT_LABELS[slot]} slot empty`}
+                    >
                       <span className="run-gear-square-placeholder">
                         <span className="run-gear-square-abbr">{RUN_GEAR_SLOT_ABBR[slot]}</span>
                       </span>
-                    )}
+                    </button>
+                  );
+                }
+
+                const slotButton = (
+                  <button
+                    type="button"
+                    className={`run-gear-square rounded border ${runEquipmentRarityClass(item.rarity)}`}
+                    onClick={() => onUnequip(slot)}
+                    aria-label={`Unequip ${item.name}`}
+                  >
+                    <span className="run-gear-square-icon relative overflow-hidden">
+                      <Image
+                        src={getRunEquipmentIconPath(item)}
+                        alt=""
+                        fill
+                        sizes="56px"
+                        className="object-contain p-1"
+                        style={{ imageRendering: 'pixelated' }}
+                      />
+                    </span>
                   </button>
+                );
+
+                return (
+                  <RunRosterHoverTip
+                    key={slot}
+                    side="right"
+                    popoverClassName="run-gear-hover-popover"
+                    popover={(
+                      <RunEquipmentTooltip
+                        item={item}
+                        actionHint="Click to unequip"
+                      />
+                    )}
+                  >
+                    {slotButton}
+                  </RunRosterHoverTip>
                 );
               })}
             </div>
@@ -2744,17 +3093,21 @@ function RunGearPanel({
         </div>
       ) : (
         <div className={`run-gear-satchel-grid ${unequipped.length > 8 ? 'run-gear-satchel-grid-scroll' : ''}`}>
-          {unequipped.map(item => (
+          {unequipped.map(item => {
+            const equippedInSlot = getEquippedRunItem(session, item.slot);
+            const compareEquipped = equippedInSlot && equippedInSlot.id !== item.id ? equippedInSlot : undefined;
+
+            return (
             <RunRosterHoverTip
               key={item.id}
               side="right"
+              popoverClassName="run-gear-hover-popover"
               popover={(
-                <div>
-                  <div className={`run-roster-tip-title ${runEquipmentRarityClass(item.rarity)}`}>{item.name}</div>
-                  <div className="run-roster-tip-meta">{RUN_EQUIPMENT_SLOT_LABELS[item.slot]}</div>
-                  <div className="run-roster-tip-copy">{formatRunEquipmentSummary(item)}</div>
-                  <div className="run-roster-tip-copy ui-faint">Click to equip</div>
-                </div>
+                <RunEquipmentTooltip
+                  item={item}
+                  compareEquipped={compareEquipped}
+                  actionHint="Click to equip"
+                />
               )}
             >
               <button
@@ -2776,10 +3129,67 @@ function RunGearPanel({
                 </span>
               </button>
             </RunRosterHoverTip>
-          ))}
+            );
+          })}
         </div>
       )}
     </section>
+  );
+}
+
+function RunEquipmentTooltip({
+  item,
+  compareEquipped,
+  actionHint,
+}: {
+  item: Equipment;
+  compareEquipped?: Equipment;
+  actionHint?: string;
+}) {
+  const statRows = getRunEquipmentStatRows(item, compareEquipped);
+
+  return (
+    <div className="run-gear-tip">
+      <div className={`run-gear-tip-title ${runEquipmentRarityClass(item.rarity)}`}>{item.name}</div>
+      <div className="run-gear-tip-meta">
+        {RUN_EQUIPMENT_SLOT_LABELS[item.slot]} · {formatEquipmentRarityLabel(item.rarity)}
+      </div>
+
+      {statRows.length > 0 ? (
+        <div className="run-gear-tip-stats" role="list">
+          {statRows.map(row => (
+            <div key={row.key} className="run-gear-tip-stat" role="listitem">
+              <span className="run-gear-tip-stat-label">{row.label}</span>
+              <span className="run-gear-tip-stat-value">+{row.value}</span>
+              {compareEquipped && row.delta !== 0 && (
+                <span className={`run-gear-tip-stat-delta ${row.delta > 0 ? 'run-gear-tip-stat-delta-up' : 'run-gear-tip-stat-delta-down'}`}>
+                  {row.delta > 0 ? `+${row.delta}` : row.delta}
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="run-gear-tip-copy">Commander gear</div>
+      )}
+
+      {compareEquipped && (
+        <div className="run-gear-tip-compare">
+          <span className="run-gear-tip-compare-label">Compared to equipped</span>
+          <span className={`run-gear-tip-compare-name ${runEquipmentRarityClass(compareEquipped.rarity)}`}>
+            {compareEquipped.name}
+          </span>
+        </div>
+      )}
+
+      {item.passive && (
+        <div className="run-gear-tip-copy run-gear-tip-passive">{item.passive}</div>
+      )}
+
+      {actionHint && (
+        <div className="run-gear-tip-hint">{actionHint}</div>
+      )}
+    </div>
   );
 }
 
@@ -2787,10 +3197,12 @@ function RunRosterHoverTip({
   children,
   popover,
   side = 'right',
+  popoverClassName = '',
 }: {
   children: ReactNode;
   popover: ReactNode;
   side?: 'right' | 'left';
+  popoverClassName?: string;
 }) {
   const anchorRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
@@ -2838,7 +3250,7 @@ function RunRosterHoverTip({
       {children}
       {open && typeof document !== 'undefined' && createPortal(
         <div
-          className={`run-roster-hover-popover run-roster-hover-popover-${side} rounded border`}
+          className={`run-roster-hover-popover run-roster-hover-popover-${side}${popoverClassName ? ` ${popoverClassName}` : ''} rounded border`}
           role="tooltip"
           style={{ top: coords.top, left: coords.left }}
         >
@@ -2910,8 +3322,6 @@ function MinionPortrait({ template, size = 'small' }: { template: MinionTemplate
     </span>
   );
 }
-
-const RUN_GOLD_ICON = '/assets/icons/gold.png';
 
 const COMMANDER_STAT_ICONS = {
   Army: '/assets/icons/attack.png',
@@ -3079,10 +3489,14 @@ function hydrateRunSession(storedSession: StoredRunSession | null, challenge?: D
     shopRerollsRemaining: typeof storedSession.shopRerollsRemaining === 'number'
       ? storedSession.shopRerollsRemaining
       : RUN_SHOP_REROLL_COUNT,
+    blessingRerollsRemaining: typeof storedSession.blessingRerollsRemaining === 'number'
+      ? storedSession.blessingRerollsRemaining
+      : RUN_BLESSING_REROLL_COUNT,
     omenRerollsRemaining: typeof storedSession.omenRerollsRemaining === 'number'
       ? storedSession.omenRerollsRemaining
       : RUN_OMEN_REROLL_COUNT,
     pendingPositiveOmen: Boolean(storedSession.pendingPositiveOmen),
+    pendingRunCelebrations: storedSession.pendingRunCelebrations || [],
     startedAt: storedSession.startedAt || Date.now(),
     bossHistory: storedSession.bossHistory || [],
     shopBuyHistory: storedSession.shopBuyHistory || [],
@@ -3254,8 +3668,10 @@ function createDailySession(user: User, dailyChallenge = createRandomRunChalleng
     dailyChallenge,
     shopOffers: {},
     shopRerollsRemaining: RUN_SHOP_REROLL_COUNT,
+    blessingRerollsRemaining: RUN_BLESSING_REROLL_COUNT,
     omenRerollsRemaining: RUN_OMEN_REROLL_COUNT,
     pendingPositiveOmen: false,
+    pendingRunCelebrations: [],
     startedAt: Date.now(),
     bossHistory: [],
     shopBuyHistory: [],
@@ -3306,8 +3722,10 @@ function createDungeonSession(user: User, dungeon: WorldDungeon): RunSession {
     dungeon,
     shopOffers: {},
     shopRerollsRemaining: RUN_SHOP_REROLL_COUNT,
+    blessingRerollsRemaining: RUN_BLESSING_REROLL_COUNT,
     omenRerollsRemaining: RUN_OMEN_REROLL_COUNT,
     pendingPositiveOmen: false,
+    pendingRunCelebrations: [],
     ...createEmptyRunEquipmentState(),
   };
 }
@@ -3346,8 +3764,10 @@ function createEncounterSession(user: User, enemy: WorldEnemy): RunSession {
     encounterEnemy: enemy,
     shopOffers: {},
     shopRerollsRemaining: RUN_SHOP_REROLL_COUNT,
+    blessingRerollsRemaining: RUN_BLESSING_REROLL_COUNT,
     omenRerollsRemaining: RUN_OMEN_REROLL_COUNT,
     pendingPositiveOmen: false,
+    pendingRunCelebrations: [],
     notice: `${enemy.name} waits at the end of this road.`,
     ...createEmptyRunEquipmentState(),
   };
@@ -3526,13 +3946,16 @@ function makeRunEnemy({
 }): WorldEnemy {
   const modelNumbers: PlayerModelNumber[] = [1, 2, 4, 5, 6];
   const personalities: EnemyAiPersonality[] = ['balanced', 'aggressive', 'defensive', 'arcane'];
-  const dailyBossSolo = session.mode === 'daily' && boss;
+  const bossLevelBonus = boss ? 2 : 0;
   const effectiveLevel = session.mode === 'daily'
-    ? clamp(level + (dailyBossSolo ? 2 : 0), 1, RANDOM_RUN_BALANCE.enemyLevelCap)
+    ? clamp(level + bossLevelBonus, 1, RANDOM_RUN_BALANCE.enemyLevelCap)
     : level;
-  const minionCount = dailyBossSolo
-    ? 0
-    : clamp(2 + Math.floor(effectiveLevel / 4) + (boss ? 2 : elite ? 1 : 0), 2, boss ? 7 : 6);
+  const routeProgress = session.targetBattles > 0
+    ? clamp(index / session.targetBattles, 0, 1)
+    : clamp(effectiveLevel / RANDOM_RUN_BALANCE.enemyLevelCap, 0, 1);
+  const scalingCount = 2 + Math.floor(effectiveLevel / 3) + Math.floor(routeProgress * 3);
+  const minionCap = boss ? 10 : elite ? 9 : clamp(4 + Math.round(routeProgress * 6), 4, 10);
+  const minionCount = clamp(scalingCount + (boss ? 4 : elite ? 2 : 0), boss ? 6 : elite ? 4 : 2, minionCap);
   const activeNode = session.nodes[session.currentNodeIndex];
   const bossProfile = boss ? getBossProfileById(activeNode?.bossId || session.dailyChallenge?.bossId || session.dungeon?.bossId) : undefined;
   const runBoss = boss
@@ -3548,9 +3971,9 @@ function makeRunEnemy({
     }
     : undefined;
   const minions = Array.from({ length: minionCount }, (_, slot) => {
-    const templateId = boss && runBoss?.minionTemplates.length
-      ? runBoss.minionTemplates[slot % runBoss.minionTemplates.length]
-      : pickEnemyTemplate(effectiveLevel, slot, boss || elite).templateId;
+    const templateId = boss
+      ? pickBossEscortTemplate(effectiveLevel, slot, runBoss?.minionTemplates).templateId
+      : pickEnemyTemplate(effectiveLevel, slot, elite).templateId;
     return cloneRunStack(templateId, `enemy-${session.id}-${index}-${slot}`);
   });
 
@@ -3592,6 +4015,22 @@ function pickEnemyTemplate(level: number, slot: number, elite: boolean): MinionT
   return candidates[(level + slot) % candidates.length] || MINION_TEMPLATES[0];
 }
 
+function pickBossEscortTemplate(level: number, slot: number, bossTemplateIds: string[] = []): MinionTemplate {
+  const sourceTemplate = bossTemplateIds.length > 0
+    ? getMinionTemplate(bossTemplateIds[slot % bossTemplateIds.length])
+    : undefined;
+  const targetTier = slot % 4 === 1 ? 'tier2' : 'tier3';
+  const sameClassCandidates = sourceTemplate
+    ? MINION_TEMPLATES.filter(template => template.tier === targetTier && template.class === sourceTemplate.class)
+    : [];
+  const tierCandidates = MINION_TEMPLATES.filter(template => template.tier === targetTier);
+  const candidates = sameClassCandidates.length > 0 ? sameClassCandidates : tierCandidates;
+
+  return candidates[(level + slot) % candidates.length]
+    || sourceTemplate
+    || pickEnemyTemplate(level + 4, slot, true);
+}
+
 function getRandomRunBossBattleNumbers(battleCount: number): number[] {
   const safeCount = Math.max(2, Math.round(battleCount));
   const contentBossCap = Math.max(
@@ -3631,6 +4070,7 @@ function createDailyRunNodes(challenge: DailyRunChallenge, playerLevel: number):
   const nodes: DungeonNode[] = [];
   const bossBattleNumbers = getRandomRunBossBattleNumbers(battleCount);
   const intermediateBossNumbers = bossBattleNumbers.filter(number => number < battleCount);
+  const intermediateBossPool = shuffle(BOSS_PROFILES.filter(profile => profile.id !== challenge.bossId));
   let row = 0;
   let bonusStopIndex = 0;
 
@@ -3696,7 +4136,8 @@ function createDailyRunNodes(challenge: DailyRunChallenge, playerLevel: number):
     const bossIndex = intermediateBossNumbers.indexOf(battleNumber);
 
     if (bossIndex >= 0) {
-      const boss = getBossProfileByIndex(battleIndex + bossIndex);
+      const boss = intermediateBossPool[bossIndex % Math.max(1, intermediateBossPool.length)]
+        || getBossProfileByIndex(battleIndex + bossIndex);
       addRow([{
         type: 'boss',
         label: boss.name,
@@ -4384,6 +4825,7 @@ function getRunRewardChoiceById(choiceId: string, equipmentOffer?: Equipment): R
 }
 
 function getRunRewardCategory(choice: RunRewardChoice): string {
+  if (choice.category) return choice.category;
   const id = choice.id;
   if (id.startsWith('learn-')) return 'learn-spell';
   if (id.startsWith('gear-offer-') || choice.equipmentOffer) return 'equipment';
@@ -4397,19 +4839,21 @@ function getRunRewardCategory(choice: RunRewardChoice): string {
   if (id.includes('recruit')) return 'recruit';
   if (id.includes('upgrade') || id.includes('promotion')) return 'upgrade';
   if (id.includes('gold') || id.includes('coin')) return 'gold';
+  if (id.includes('reroll') || id.includes('omen')) return 'reroll';
   return id;
 }
 
 function pickRunRewardChoices(
   session: RunSession,
   count = RUN_REWARD_CHOICE_COUNT,
-  options?: { spellChance?: number; equipmentChance?: number },
+  options?: { spellChance?: number; equipmentChance?: number; excludeChoice?: (choice: RunRewardChoice) => boolean },
 ): RunRewardChoice[] {
   const spellChance = options?.spellChance ?? RUN_BLESSING_SPELL_OFFER_CHANCE;
   const equipmentChance = options?.equipmentChance ?? RUN_BLESSING_EQUIPMENT_OFFER_CHANCE;
-  const buffPool = RUN_BUFFS.filter(choice => !choice.isAvailable || choice.isAvailable(session));
-  const spellPool = RUN_SPELL_REWARDS.filter(choice => !choice.isAvailable || choice.isAvailable(session));
-  const buffFallback = RUN_BUFFS.filter(choice => !choice.isAvailable);
+  const excluded = options?.excludeChoice || (() => false);
+  const buffPool = RUN_BUFFS.filter(choice => (!choice.isAvailable || choice.isAvailable(session)) && !excluded(choice));
+  const spellPool = RUN_SPELL_REWARDS.filter(choice => (!choice.isAvailable || choice.isAvailable(session)) && !excluded(choice));
+  const buffFallback = RUN_BUFFS.filter(choice => !choice.isAvailable && !excluded(choice));
   const workingBuffPool = buffPool.length >= count ? buffPool : buffFallback;
 
   const selected: RunRewardChoice[] = [];
@@ -4417,6 +4861,7 @@ function pickRunRewardChoices(
 
   const tryAdd = (choice: RunRewardChoice): boolean => {
     if (selected.length >= count) return false;
+    if (excluded(choice)) return false;
     if (selected.some(item => item.id === choice.id)) return false;
     const category = getRunRewardCategory(choice);
     if (usedCategories.has(category)) return false;
@@ -4451,11 +4896,17 @@ function makeShopOffers(session: RunSession, count = RUN_SHOP_CHOICE_COUNT): Run
   return pickRunRewardChoices(session, count, {
     spellChance: RUN_SHOP_SPELL_OFFER_CHANCE,
     equipmentChance: RUN_SHOP_EQUIPMENT_OFFER_CHANCE,
+    excludeChoice: isRunShopRewardBlocked,
   }).map((choice, index) => ({
     choiceId: choice.id,
     cost: getRunShopOfferCost(session, index, choice),
     equipmentOffer: choice.equipmentOffer,
   }));
+}
+
+function isRunShopRewardBlocked(choice: RunRewardChoice): boolean {
+  const blockedCategories = new Set(['gold', 'reroll', 'economy', 'revive', 'upgrade', 'minion-heal']);
+  return blockedCategories.has(getRunRewardCategory(choice));
 }
 
 function getRunShopOfferCost(session: RunSession, index: number, choice: RunRewardChoice): number {
@@ -4489,7 +4940,10 @@ function getShopNodeOfferKey(session: RunSession): string {
 
 function getShopOffersForSession(session: RunSession): RunShopOffer[] {
   const key = getShopNodeOfferKey(session);
-  return (session.shopOffers?.[key] || []).filter(offer => Boolean(getRunRewardChoiceById(offer.choiceId, offer.equipmentOffer)));
+  return (session.shopOffers?.[key] || []).filter(offer => {
+    const choice = getRunRewardChoiceById(offer.choiceId, offer.equipmentOffer);
+    return Boolean(choice && !isRunShopRewardBlocked(choice));
+  });
 }
 
 function ensureShopOffers(session: RunSession): RunSession {
@@ -4521,12 +4975,27 @@ function rerollShopOffers(session: RunSession): RunSession {
   };
 }
 
-function buyShopReward(session: RunSession, choice: RunRewardChoice, cost: number): RunSession {
+function rerollRewardChoices(session: RunSession): RunSession {
+  const remaining = session.blessingRerollsRemaining ?? RUN_BLESSING_REROLL_COUNT;
+  if (remaining <= 0) return { ...session, notice: 'No blessing rerolls remain for this run.' };
+
+  return {
+    ...session,
+    rewardChoices: pickRunRewardChoices(session),
+    blessingRerollsRemaining: remaining - 1,
+    notice: `Blessings redrawn. ${remaining - 1} reroll${remaining - 1 === 1 ? '' : 's'} remain.`,
+  };
+}
+
+function buyShopReward(session: RunSession, offerIndex: number, choice: RunRewardChoice, cost: number): RunSession {
   if (session.runGold < cost) return { ...session, notice: 'Not enough run gold.' };
   const key = getShopNodeOfferKey(session);
   const offers = getShopOffersForSession(session);
+  const offer = offers[offerIndex];
+  if (!offer || offer.purchased) return { ...session, notice: 'That shop offer is already claimed.' };
+  if (offer.choiceId !== choice.id || offer.cost !== cost) return { ...session, notice: 'The shop offer changed. Pick again.' };
   const paidSession = { ...session, runGold: session.runGold - cost };
-  const applied = choice.apply(paidSession);
+  const applied = queueRunRewardCelebrations(paidSession, choice.apply(paidSession), choice);
 
   return {
     ...applied,
@@ -4535,7 +5004,7 @@ function buyShopReward(session: RunSession, choice: RunRewardChoice, cost: numbe
     rewardDestination: null,
     shopOffers: {
       ...(applied.shopOffers || session.shopOffers || {}),
-      [key]: offers.filter(offer => offer.choiceId !== choice.id),
+      [key]: offers.map((item, index) => index === offerIndex ? { ...item, purchased: true } : item),
     },
     shopBuyHistory: [...(applied.shopBuyHistory || session.shopBuyHistory || []), `${choice.name} (${cost}g)`],
     notice: `${choice.name} purchased for ${cost} run gold.`,
@@ -4582,8 +5051,9 @@ function applyHardRouteVictoryBonus(session: RunSession): RunSession {
     ...session,
     stats,
     runGold: session.runGold + goldBonus,
+    blessingRerollsRemaining: (session.blessingRerollsRemaining ?? RUN_BLESSING_REROLL_COUNT) + 1,
     pendingPositiveOmen: true,
-    notice: `Hard route bonus claimed: ${bonus.detail}, +${goldBonus} run gold.`,
+    notice: `Hard route bonus claimed: ${bonus.detail}, +${goldBonus} run gold, and +1 blessing reroll.`,
   };
 }
 
@@ -4767,8 +5237,13 @@ function rollDungeonEventOutcome(session: RunSession): OmenOutcome {
 }
 
 function applyDungeonEventOutcome(session: RunSession, outcome: OmenOutcome): RunSession {
+  const applied = queueRunRewardCelebrations(session, outcome.apply(session), {
+    id: outcome.id,
+    name: outcome.title,
+  });
+
   return completeDungeonNode({
-    ...outcome.apply(session),
+    ...applied,
     pendingPositiveOmen: false,
     omenHistory: [...(session.omenHistory || []), `${outcome.title}: ${outcome.detail}`],
     notice: outcome.detail,
@@ -4992,12 +5467,14 @@ function makeStatBuff(
   id: string,
   name: string,
   description: string,
-  bonus: Partial<Pick<CharacterStats, 'armyPower' | 'defensivePower' | 'morale' | 'spellPower' | 'maxHealth' | 'health'>>
+  bonus: Partial<Pick<CharacterStats, 'armyPower' | 'defensivePower' | 'morale' | 'spellPower' | 'maxHealth' | 'health'>>,
+  category?: string,
 ): RunRewardChoice {
   return {
     id,
     name,
     description,
+    category,
     apply: session => ({
       ...session,
       stats: {
@@ -5019,6 +5496,138 @@ function makeStatBuff(
 
 function hasFallenMinions(session: RunSession): boolean {
   return session.minions.some(unit => !unit.alive);
+}
+
+function queueRunRewardCelebrations(before: RunSession, after: RunSession, source: Pick<RunRewardChoice, 'id' | 'name'>): RunSession {
+  const pending = [...(after.pendingRunCelebrations || before.pendingRunCelebrations || [])];
+  const beforeEquipmentIds = new Set((before.runEquipment || []).map(item => item.id));
+  const beforeUnitIds = new Set(before.minions.map(unit => unit.stack.id));
+  const newEquipment = (after.runEquipment || []).filter(item => !beforeEquipmentIds.has(item.id));
+  const newUnits = after.minions.filter(unit => !beforeUnitIds.has(unit.stack.id));
+  const createdAt = Date.now();
+  const gearCelebrations: RunCelebration[] = newEquipment.map((item, index) => {
+    const statRewards = getRunEquipmentStatRows(item)
+      .slice(0, 3)
+      .map(row => ({
+        label: row.label,
+        value: `+${row.value}`,
+        tone: 'green' as const,
+      }));
+
+    return {
+      id: `run-gear-${source.id}-${item.id}-${createdAt}-${index}`,
+      kind: 'gear',
+      kicker: 'Run Satchel',
+      title: item.name,
+      description: `${formatEquipmentRarityLabel(item.rarity)} ${RUN_EQUIPMENT_SLOT_LABELS[item.slot]} claimed from ${source.name}. ${formatRunEquipmentSummary(item)}`,
+      artworkPath: getRunEquipmentIconPath(item),
+      rewards: statRewards.length > 0
+        ? statRewards
+        : [{ label: 'Gear', value: formatRunEquipmentSummary(item), tone: 'green' as const }],
+    };
+  });
+  const unitCelebrations: RunCelebration[] = newUnits
+    .map((unit, index): RunCelebration | null => {
+      const template = getMinionTemplate(unit.stack.templateId);
+      if (!template) return null;
+
+      return {
+        id: `run-unit-${source.id}-${unit.stack.id}-${createdAt}-${index}`,
+        kind: 'unit',
+        kicker: 'Joined the Team',
+        title: template.name,
+        description: `${MINION_TIER_LABELS[template.tier]} ${MINION_CLASS_LABELS[template.class]} joined the random-run warband.`,
+        artworkPath: `${MINION_ICON_BASE}/${template.assetName}`,
+        rewards: [
+          { label: 'Attack', value: String(template.stats.attack), tone: 'green' as const },
+          { label: 'Ward', value: String(template.stats.defense), tone: 'blue' as const },
+          { label: 'Health', value: String(template.stats.health), tone: 'green' as const },
+        ],
+      };
+    })
+    .filter((item): item is RunCelebration => Boolean(item));
+  const celebrations = [...gearCelebrations, ...unitCelebrations];
+
+  if (celebrations.length === 0) return after;
+  const randomCelebration = shouldShowRandomRewardRoll(source, {
+    newEquipmentCount: newEquipment.length,
+    newUnitCount: newUnits.length,
+  })
+    ? [{
+      id: `run-fate-${source.id}-${createdAt}`,
+      kind: 'fate' as const,
+      kicker: 'The Road Rolls',
+      title: 'Fate in Motion',
+      description: `${source.name} calls for a random prize. The dice decide what joins the run.`,
+      artworkPath: RANDOM_REWARD_ANIMATION_ICON,
+      rewards: [{ label: 'Random', value: newUnits.length > 0 ? 'Recruit' : 'Gear', tone: 'blue' as const }],
+    }]
+    : [];
+
+  return {
+    ...after,
+    pendingRunCelebrations: [...pending, ...randomCelebration, ...celebrations],
+  };
+}
+
+function shouldShowRandomRewardRoll(
+  source: Pick<RunRewardChoice, 'id' | 'name'>,
+  result: { newEquipmentCount: number; newUnitCount: number },
+): boolean {
+  if (result.newEquipmentCount <= 0 && result.newUnitCount <= 0) return false;
+  const normalized = `${source.id} ${source.name}`.toLowerCase();
+  return normalized.includes('random')
+    || normalized.includes('recruit')
+    || normalized.includes('gear')
+    || normalized.includes('cache')
+    || normalized.includes('veteran')
+    || normalized.includes('champion');
+}
+
+function getRunUnitMaxHealthForSession(session: RunSession, unit: RunUnit): number {
+  const template = getMinionTemplate(unit.stack.templateId);
+  if (!template) return 1;
+
+  return Math.max(
+    1,
+    template.stats.health
+      + Math.floor(session.stats.defensivePower * 0.9)
+      + Math.floor(session.stats.morale / 2)
+  );
+}
+
+function getRunUnitCurrentHealthForSession(session: RunSession, unit: RunUnit): number {
+  const maxHealth = getRunUnitMaxHealthForSession(session, unit);
+  if (typeof unit.stack.runCurrentHealth === 'number') {
+    return clamp(Math.round(unit.stack.runCurrentHealth), 0, maxHealth);
+  }
+  return maxHealth;
+}
+
+function hasWoundedRunMinions(session: RunSession): boolean {
+  return session.minions.some(unit => (
+    unit.alive
+    && getRunUnitCurrentHealthForSession(session, unit) < getRunUnitMaxHealthForSession(session, unit)
+  ));
+}
+
+function healLivingRunMinions(session: RunSession, amount: number, notice: string): RunSession {
+  return {
+    ...session,
+    minions: session.minions.map(unit => {
+      if (!unit.alive) return unit;
+      const maxHealth = getRunUnitMaxHealthForSession(session, unit);
+      const currentHealth = getRunUnitCurrentHealthForSession(session, unit);
+      return {
+        ...unit,
+        stack: {
+          ...unit.stack,
+          runCurrentHealth: Math.min(maxHealth, currentHealth + amount),
+        },
+      };
+    }),
+    notice,
+  };
 }
 
 function canAddRunMinion(session: RunSession): boolean {

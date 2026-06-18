@@ -173,6 +173,8 @@ export interface BattleState {
   turnTimeLimitMs: number;
   log: BattleLogEntry[];
   recruitOffer?: BattleRecruitOffer;
+  bossPhase?: 1 | 2;
+  bossSpecialRounds?: Record<string, number>;
   createdAt: number;
 }
 
@@ -255,6 +257,7 @@ const MAX_MANA = 12;
 
 const BOARD_WIDTH = 10;
 const BOARD_HEIGHT = 7;
+const ENEMY_FIELD_MINIONS = 10;
 const BOARD_ROWS = [0, 1, 2, 3, 4, 5, 6];
 const PLAYER_SPAWNS: BoardCell[] = [
   { x: 0, y: 3 },
@@ -1105,6 +1108,10 @@ function getBattleModifiers(stats: CharacterStats): BattleModifiers {
   };
 }
 
+function isBossBattleEnemy(enemy: Pick<WorldEnemy, 'personality' | 'bossId' | 'spawnKind'>): boolean {
+  return enemy.personality === 'boss' || Boolean(enemy.bossId) || enemy.spawnKind === 'world-boss';
+}
+
 function getSideMana(state: BattleState, side: BattleSide): number {
   return state.mana[side] || 0;
 }
@@ -1311,14 +1318,15 @@ function makeMinionUnit(stack: MinionStack, side: BattleSide, x: number, y: numb
   };
 }
 
-function makeEnemyCommanderStats(level: number): CharacterStats {
-  const maxHealth = 70 + level * 7;
+function makeEnemyCommanderStats(level: number, enemy?: Pick<WorldEnemy, 'personality' | 'bossId' | 'spawnKind'>): CharacterStats {
+  const boss = enemy ? isBossBattleEnemy(enemy) : false;
+  const maxHealth = boss ? 105 + level * 11 : 70 + level * 7;
 
   return {
-    armyPower: 4 + Math.floor(level * 0.85),
-    defensivePower: 3 + Math.floor(level * 0.58),
-    morale: 4 + Math.floor(level * 0.35),
-    spellPower: 2 + Math.floor(level * 0.48),
+    armyPower: 4 + Math.floor(level * 0.85) + (boss ? 4 + Math.floor(level * 0.12) : 0),
+    defensivePower: 3 + Math.floor(level * 0.58) + (boss ? 5 + Math.floor(level * 0.1) : 0),
+    morale: 4 + Math.floor(level * 0.35) + (boss ? 2 : 0),
+    spellPower: 2 + Math.floor(level * 0.48) + (boss ? 5 + Math.floor(level * 0.12) : 0),
     health: maxHealth,
     maxHealth,
     level,
@@ -1379,7 +1387,7 @@ function getEnemyBattleRating(enemy: WorldEnemy, enemyStats: CharacterStats): nu
 }
 
 export function getBattleRatingPreview(user: User, enemy: WorldEnemy): BattleRatingPreview {
-  const enemyStats = makeEnemyCommanderStats(enemy.level);
+  const enemyStats = makeEnemyCommanderStats(enemy.level, enemy);
   const playerRating = getUserBattleRating(user);
   const enemyRating = getEnemyBattleRating(enemy, enemyStats);
   const ratio = enemyRating <= 0 ? 99 : playerRating / enemyRating;
@@ -1465,9 +1473,10 @@ export function createNpcBattleState(user: User, enemy: WorldEnemy, options: Cre
   const battleMap = selectBattleMapTemplate(user, enemy);
   const playerStats = options.playerStats || user.stats;
   const playerModifiers = getBattleModifiers(playerStats);
-  const enemyStats = makeEnemyCommanderStats(enemy.level);
+  const enemyStats = makeEnemyCommanderStats(enemy.level, enemy);
   const enemyModifiers = getBattleModifiers(enemyStats);
   const recruitOffer = options.suppressRecruitOffer ? undefined : createRecruitOffer(user, enemy, enemyStats);
+  const bossBattle = isBossBattleEnemy(enemy);
   const commanderFormationCell = options.playerFormation?.[COMMANDER_FORMATION_KEY];
   const playerCommanderSpawn = isValidPlayerFormationCell(battleMap, commanderFormationCell)
     ? commanderFormationCell
@@ -1504,7 +1513,7 @@ export function createNpcBattleState(user: User, enemy: WorldEnemy, options: Cre
   const enemyUnits = [
     makeCommanderUnit('enemy', enemy.name, enemy.modelNumber, enemyStats, enemyCommanderSpawn.x, enemyCommanderSpawn.y, enemy.artworkPath),
     ...enemy.minions
-      .slice(0, MAX_FIELD_MINIONS)
+      .slice(0, ENEMY_FIELD_MINIONS)
       .map((stack, index) => {
         const preferredSpawn = getEnemyFormationSpawn(battleMap, enemy, index);
         const spawn = claimSpawnCell(
@@ -1554,6 +1563,8 @@ export function createNpcBattleState(user: User, enemy: WorldEnemy, options: Cre
     turnTimeLimitMs: TURN_TIME_LIMIT_MS,
     log: openingLog,
     recruitOffer,
+    bossPhase: bossBattle ? 1 : undefined,
+    bossSpecialRounds: bossBattle ? {} : undefined,
     createdAt: Date.now(),
   };
 
@@ -1637,6 +1648,7 @@ function getReachableMoveCosts(state: BattleState, unit: BattleUnit): Map<string
   const costs = new Map<string, number>();
   const maxRange = getMoveRange(unit);
   const queue: Array<{ x: number; y: number; cost: number }> = [{ x: unit.x, y: unit.y, cost: 0 }];
+  const startsInMud = getTerrainAt(state, unit.x, unit.y) === 'mud';
   costs.set(`${unit.x}:${unit.y}`, 0);
 
   for (let index = 0; index < queue.length; index += 1) {
@@ -1646,6 +1658,11 @@ function getReachableMoveCosts(state: BattleState, unit: BattleUnit): Map<string
       const ny = current.y + dy;
       if (!isInsideBoard(state, nx, ny) || isObstacle(state, nx, ny)) continue;
       if (getUnitAt(state, nx, ny)) continue;
+
+      const currentTerrain = getTerrainAt(state, current.x, current.y);
+      const nextTerrain = getTerrainAt(state, nx, ny);
+      const mudLocked = startsInMud || currentTerrain === 'mud' || nextTerrain === 'mud';
+      if (mudLocked && getDistance(unit, { x: nx, y: ny }) > 1) continue;
 
       const nextCost = current.cost + getStepMoveCost(state, nx, ny);
       if (nextCost > maxRange) continue;
@@ -2051,7 +2068,9 @@ export function getRecentPresentationLogEntry(battle: BattleState, now = Date.no
     && now - entry.createdAt < getBattleLogPresentationMs(entry)
   ));
 
-  return candidates.find(entry => entry.action === 'spell') ?? candidates[0];
+  const latest = candidates[0];
+  if (latest?.action === 'move') return latest;
+  return candidates.find(entry => entry.action === 'spell') ?? latest;
 }
 
 export function pickFreshPresentationLogEntry(entries: BattleLogEntry[]): BattleLogEntry | undefined {
@@ -2314,6 +2333,315 @@ function getMoveCells(state: BattleState, unit: BattleUnit): BoardCell[] {
   return getReachableMoveCells(state, unit);
 }
 
+function markBossSpecialUsed(state: BattleState, commander: BattleUnit): BattleState {
+  return {
+    ...state,
+    bossSpecialRounds: {
+      ...(state.bossSpecialRounds || {}),
+      [commander.id]: state.round,
+    },
+  };
+}
+
+function findBossSummonCell(state: BattleState, commander: BattleUnit): BoardCell | undefined {
+  const preferredHalf = Math.floor(state.boardWidth / 2);
+  const candidates: BoardCell[] = [];
+
+  for (let radius = 1; radius <= 4; radius += 1) {
+    for (let y = commander.y - radius; y <= commander.y + radius; y += 1) {
+      for (let x = commander.x - radius; x <= commander.x + radius; x += 1) {
+        if (getDistance(commander, { x, y }) !== radius) continue;
+        if (!isInsideBoard(state, x, y) || isObstacle(state, x, y) || getUnitAt(state, x, y)) continue;
+        candidates.push({ x, y });
+      }
+    }
+
+    const preferred = candidates.find(cell => cell.x >= preferredHalf);
+    if (preferred) return preferred;
+    if (candidates.length > 0) return candidates[0];
+  }
+
+  return undefined;
+}
+
+function getBossSummonTemplateId(state: BattleState, fallback: string, offset = 0): string {
+  const templates = state.enemy.minions.map(minion => minion.templateId).filter(Boolean);
+  if (templates.length === 0) return fallback;
+  return templates[(state.round + offset) % templates.length] || fallback;
+}
+
+function summonBossMinions(state: BattleState, commander: BattleUnit, templateIds: string[]): { state: BattleState; summonedIds: string[] } {
+  const liveEnemyMinions = state.units.filter(unit => unit.side === 'enemy' && unit.kind === 'minion' && unit.currentHealth > 0).length;
+  const summonLimit = ENEMY_FIELD_MINIONS + (state.bossPhase === 2 ? 2 : 0);
+  let nextState = state;
+  const summonedIds: string[] = [];
+
+  for (let index = 0; index < templateIds.length && liveEnemyMinions + summonedIds.length < summonLimit; index += 1) {
+    const cell = findBossSummonCell(nextState, commander);
+    if (!cell) break;
+
+    const stack = makeMinionStack(
+      templateIds[index],
+      `boss-summon-${state.id}-${state.round}-${index}`,
+    );
+    const summoned = makeMinionUnit(
+      stack,
+      'enemy',
+      cell.x,
+      cell.y,
+      getBattleModifiers(makeEnemyCommanderStats(Math.max(1, state.enemy.level - 1), state.enemy)),
+    );
+
+    if (!summoned) continue;
+    summonedIds.push(summoned.id);
+    nextState = {
+      ...nextState,
+      units: [...nextState.units, summoned],
+    };
+  }
+
+  return { state: nextState, summonedIds };
+}
+
+function activateBossSecondStage(state: BattleState, commander: BattleUnit): BattleState {
+  if (!isBossBattleEnemy(state.enemy) || state.bossPhase === 2 || commander.currentHealth > commander.maxHealth * 0.5) {
+    return state;
+  }
+
+  const targetIds = state.units
+    .filter(unit => unit.side === 'enemy' && unit.currentHealth > 0)
+    .map(unit => unit.id);
+  const awakenedState = setSideMana({
+    ...state,
+    bossPhase: 2,
+    units: state.units.map(unit => {
+      if (unit.side !== 'enemy' || unit.currentHealth <= 0) return unit;
+      if (unit.id === commander.id) {
+        const recovery = Math.floor(unit.maxHealth * 0.24);
+        return {
+          ...unit,
+          currentHealth: Math.min(unit.maxHealth, unit.currentHealth + recovery),
+          attack: unit.attack + 4,
+          defense: unit.defense + 4,
+          magic: unit.magic + 4,
+          speed: unit.speed + 2,
+          movement: Math.min(5, unit.movement + 1),
+        };
+      }
+
+      return {
+        ...unit,
+        attack: unit.attack + 2,
+        defense: unit.defense + 2,
+        speed: unit.speed + 1,
+      };
+    }),
+  }, 'enemy', getSideMana(state, 'enemy') + 3);
+
+  return withBattleLog(
+    awakenedState,
+    `${commander.name} enters a second stage. The boss recovers and the warband surges.`,
+    {
+      side: 'enemy',
+      actor: commander.name,
+      actorId: commander.id,
+      targetIds,
+      action: 'spell',
+      style: 'buff',
+      spellId: 'time-crown-edict',
+    }
+  );
+}
+
+function finishBossSpecial(
+  state: BattleState,
+  commander: BattleUnit,
+  message: string,
+  targetIds: string[],
+  style: BattleLogStyle,
+  spellId: string,
+): BattleState {
+  return advanceBattleTurn(updateBattleStatus(withBattleLog(
+    markBossSpecialUsed(state, commander),
+    message,
+    {
+      side: 'enemy',
+      actor: commander.name,
+      actorId: commander.id,
+      targetIds,
+      action: 'spell',
+      style,
+      spellId,
+    }
+  )));
+}
+
+function runBossSpecialAbility(state: BattleState, commander: BattleUnit): BattleState | null {
+  if (!isBossBattleEnemy(state.enemy) || state.bossSpecialRounds?.[commander.id] === state.round) return null;
+
+  const players = state.units.filter(unit => unit.side === 'player' && unit.currentHealth > 0);
+  const enemies = state.units.filter(unit => unit.side === 'enemy' && unit.currentHealth > 0);
+  if (players.length === 0 || enemies.length === 0) return null;
+
+  const playerCommander = players.find(unit => unit.kind === 'commander');
+  const spellPower = Math.max(2, commander.magic);
+  const damageAllPlayers = (incoming: BattleState, amount: number): BattleState => ({
+    ...incoming,
+    units: incoming.units.map(unit => (
+      unit.side === 'player' && unit.currentHealth > 0
+        ? { ...unit, currentHealth: Math.max(0, unit.currentHealth - amount) }
+        : unit
+    )),
+  });
+  const healEnemySide = (incoming: BattleState, amount: number): BattleState => ({
+    ...incoming,
+    units: incoming.units.map(unit => (
+      unit.side === 'enemy' && unit.currentHealth > 0
+        ? { ...unit, currentHealth: Math.min(unit.maxHealth, unit.currentHealth + amount) }
+        : unit
+    )),
+  });
+  const bossId = state.enemy.bossId || state.enemy.id;
+
+  switch (bossId) {
+    case 'mother-cindervein': {
+      const damage = 7 + Math.floor(spellPower * 0.65) + (state.bossPhase || 1);
+      const healing = 10 + Math.floor(spellPower * 0.55);
+      const nextState = healEnemySide(damageAllPlayers(state, damage), healing);
+      return finishBossSpecial(
+        nextState,
+        commander,
+        `${commander.name} lights the black candles, burning your army and mending her faithful.`,
+        [...players.map(unit => unit.id), ...enemies.map(unit => unit.id)],
+        'spell-drain',
+        'blood-star',
+      );
+    }
+    case 'ser-kael-duskplate': {
+      const { state: summonedState, summonedIds } = summonBossMinions(state, commander, [
+        getBossSummonTemplateId(state, 'templar-crusader'),
+      ]);
+      const nextState = mutateUnits(summonedState, 'enemy', unit => ({ ...unit, defense: unit.defense + 3 }));
+      return finishBossSpecial(
+        nextState,
+        commander,
+        `${commander.name} raises the blue oath. His line hardens and another templar answers.`,
+        [...enemies.map(unit => unit.id), ...summonedIds],
+        'buff',
+        'iron-benediction',
+      );
+    }
+    case 'prior-moon-voss': {
+      const damage = 6 + Math.floor(spellPower * 0.55);
+      const nextState = {
+        ...damageAllPlayers(state, damage),
+        units: damageAllPlayers(state, damage).units.map(unit => (
+          unit.side === 'player' && unit.currentHealth > 0
+            ? { ...unit, movement: Math.max(1, unit.movement - 1), speed: Math.max(1, unit.speed - 2) }
+            : unit
+        )),
+      };
+      return finishBossSpecial(
+        nextState,
+        commander,
+        `${commander.name} reads the moonwell. Frost slows every living reflection.`,
+        players.map(unit => unit.id),
+        'spell-control',
+        'frost-lance',
+      );
+    }
+    case 'key-saint-ardan': {
+      const target = playerCommander || players.sort((a, b) => b.attack - a.attack)[0];
+      let nextState = target ? damageUnit(state, target.id, 12 + spellPower) : state;
+      nextState = mutateUnits(nextState, 'enemy', unit => ({ ...unit, defense: unit.defense + 2, attack: unit.attack + 1 }));
+      return finishBossSpecial(
+        nextState,
+        commander,
+        `${commander.name} turns the last key, striking your command and sealing his own line.`,
+        target ? [target.id, ...enemies.map(unit => unit.id)] : enemies.map(unit => unit.id),
+        'spell-damage',
+        'judgement',
+      );
+    }
+    case 'blackroot-vessel': {
+      const { state: summonedState, summonedIds } = summonBossMinions(state, commander, [
+        getBossSummonTemplateId(state, 'templar-crusader'),
+        getBossSummonTemplateId(state, 'priest-cleric', 1),
+      ]);
+      const nextState = {
+        ...summonedState,
+        units: summonedState.units.map(unit => (
+          unit.side === 'player' && unit.currentHealth > 0
+            ? { ...unit, movement: Math.max(1, unit.movement - 1), speed: Math.max(1, unit.speed - 2) }
+            : unit
+        )),
+      };
+      return finishBossSpecial(
+        nextState,
+        commander,
+        `${commander.name} splits the road with black roots. New servants climb from the ground.`,
+        [...players.map(unit => unit.id), ...summonedIds],
+        'spell-control',
+        'gravity-snare',
+      );
+    }
+    case 'lady-mirror-veyra': {
+      const { state: summonedState, summonedIds } = summonBossMinions(state, commander, [
+        getBossSummonTemplateId(state, 'wizard-magus'),
+        getBossSummonTemplateId(state, 'wizard-apprentice', 1),
+      ]);
+      const nextState = mutateUnits(summonedState, 'enemy', unit => ({ ...unit, magic: unit.magic + 2, speed: unit.speed + 1 }));
+      return finishBossSpecial(
+        nextState,
+        commander,
+        `${commander.name} breaks the mirror line. Illusions step into the fight.`,
+        [...enemies.map(unit => unit.id), ...summonedIds],
+        'buff',
+        'time-crown-edict',
+      );
+    }
+    case 'scarlet-matron-yvane': {
+      const damage = 9 + Math.floor(spellPower * 0.75);
+      const drainedState = damageAllPlayers(state, damage);
+      const nextState = healUnit(drainedState, commander.id, Math.floor(damage * 0.75) + 8);
+      return finishBossSpecial(
+        nextState,
+        commander,
+        `${commander.name} knots a blood-star curse, wounding every enemy and drinking the echo.`,
+        [...players.map(unit => unit.id), commander.id],
+        'spell-drain',
+        'blood-star',
+      );
+    }
+    case 'emperor-grave-aurel': {
+      const damage = 10 + Math.floor(spellPower * 0.7) + (state.bossPhase === 2 ? 4 : 0);
+      const { state: summonedState, summonedIds } = summonBossMinions(damageAllPlayers(state, damage), commander, [
+        getBossSummonTemplateId(state, 'templar-paragon'),
+      ]);
+      return finishBossSpecial(
+        summonedState,
+        commander,
+        `${commander.name} issues a dead emperor's command. The field buckles and another oath rises.`,
+        [...players.map(unit => unit.id), ...summonedIds],
+        'spell-damage',
+        'eclipse-nova',
+      );
+    }
+    default: {
+      const damage = 7 + Math.floor(spellPower * 0.6);
+      const nextState = mutateUnits(damageAllPlayers(state, damage), 'enemy', unit => ({ ...unit, attack: unit.attack + 1 }));
+      return finishBossSpecial(
+        nextState,
+        commander,
+        `${commander.name} unleashes a boss rite, shocking your army and rallying the enemy line.`,
+        [...players.map(unit => unit.id), ...enemies.map(unit => unit.id)],
+        'spell-damage',
+        'chain-spark',
+      );
+    }
+  }
+}
+
 function runEnemyCommanderSpell(state: BattleState, commander: BattleUnit, personality: EnemyAiPersonality): BattleState | null {
   const mana = getSideMana(state, commander.side);
   const playerTargets = state.units.filter(unit => unit.side === 'player' && unit.currentHealth > 0);
@@ -2446,44 +2774,56 @@ function scoreEnemyMoveCell(
 }
 
 export function runEnemyBattleTurn(state: BattleState): BattleState {
-  const activeUnit = getActiveUnit(state);
-  if (!activeUnit || activeUnit.side !== 'enemy' || state.status !== 'active') return state;
-  const personality = state.enemy.personality || 'balanced';
+  let currentState = state;
+  let activeUnit = getActiveUnit(currentState);
+  if (!activeUnit || activeUnit.side !== 'enemy' || currentState.status !== 'active') return currentState;
+  const personality = currentState.enemy.personality || 'balanced';
 
   if (activeUnit.kind === 'commander') {
-    const spellState = runEnemyCommanderSpell(state, activeUnit, personality);
+    const phasedState = activateBossSecondStage(currentState, activeUnit);
+    if (phasedState.bossPhase !== currentState.bossPhase) {
+      return advanceBattleTurn(updateBattleStatus(phasedState));
+    }
+
+    currentState = phasedState;
+    activeUnit = getActiveUnit(currentState) || activeUnit;
+
+    const bossSpecialState = runBossSpecialAbility(currentState, activeUnit);
+    if (bossSpecialState) return bossSpecialState;
+
+    const spellState = runEnemyCommanderSpell(currentState, activeUnit, personality);
     if (spellState) return spellState;
   }
 
-  const healTargets = getHealTargets(state, activeUnit);
+  const healTargets = getHealTargets(currentState, activeUnit);
   if (healTargets.length > 0 && Math.random() < getEnemyHealChance(personality)) {
     const target = healTargets.sort((a, b) => (a.currentHealth / a.maxHealth) - (b.currentHealth / b.maxHealth))[0];
-    return advanceBattleTurn(healBattleUnit(state, activeUnit.id, target.id));
+    return advanceBattleTurn(healBattleUnit(currentState, activeUnit.id, target.id));
   }
 
-  const attackTargets = getAttackTargets(state, activeUnit);
+  const attackTargets = getAttackTargets(currentState, activeUnit);
   if (attackTargets.length > 0) {
-    const rankedTargets = sortTargetsForPersonality(personality, activeUnit, attackTargets, state);
+    const rankedTargets = sortTargetsForPersonality(personality, activeUnit, attackTargets, currentState);
     const target = personality === 'balanced' ? getRandomItem(rankedTargets) || rankedTargets[0] : rankedTargets[0];
-    return advanceBattleTurn(attackBattleUnit(state, activeUnit.id, target.id));
+    return advanceBattleTurn(attackBattleUnit(currentState, activeUnit.id, target.id));
   }
 
-  const playerTargets = state.units.filter(unit => unit.side === 'player' && unit.currentHealth > 0);
-  const rankedTargets = sortTargetsForPersonality(personality, activeUnit, playerTargets, state);
+  const playerTargets = currentState.units.filter(unit => unit.side === 'player' && unit.currentHealth > 0);
+  const rankedTargets = sortTargetsForPersonality(personality, activeUnit, playerTargets, currentState);
   const nearestTarget = rankedTargets.sort((a, b) => getDistance(activeUnit, a) - getDistance(activeUnit, b))[0];
-  const moveCells = getMoveCells(state, activeUnit);
+  const moveCells = getMoveCells(currentState, activeUnit);
 
   if (nearestTarget && moveCells.length > 0) {
     const goodCells = moveCells
-      .sort((a, b) => scoreEnemyMoveCell(state, activeUnit, a, nearestTarget, personality) - scoreEnemyMoveCell(state, activeUnit, b, nearestTarget, personality))
+      .sort((a, b) => scoreEnemyMoveCell(currentState, activeUnit, a, nearestTarget, personality) - scoreEnemyMoveCell(currentState, activeUnit, b, nearestTarget, personality))
       .slice(0, getEnemyMoveCandidateCount(personality));
     const bestCell = personality === 'balanced' ? getRandomItem(goodCells) || goodCells[0] : goodCells[0];
-    const movedState = moveBattleUnit(state, activeUnit.id, bestCell.x, bestCell.y);
+    const movedState = moveBattleUnit(currentState, activeUnit.id, bestCell.x, bestCell.y);
     // Enemy movement consumes the action; otherwise NPCs get a hidden move-then-strike turn.
     return advanceBattleTurn(movedState);
   }
 
-  return waitBattleUnit(state, activeUnit.id);
+  return waitBattleUnit(currentState, activeUnit.id);
 }
 
 type StoredBattleChallenge = Omit<BattleChallenge, 'status' | 'confirmedBy'> & {
