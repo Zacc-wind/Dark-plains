@@ -1,4 +1,4 @@
-import { MAP_CONFIG } from './mapData';
+import { MAP_CONFIG, POIType, getStaticPOIs } from './mapData';
 import type { EnemyAiPersonality, PlayerModelNumber } from './battle';
 import { BOSS_PROFILES, getBossProfileById } from './bosses';
 
@@ -217,6 +217,74 @@ function hashText(value: string): number {
   return value.split('').reduce((hash, char) => ((hash << 5) - hash + char.charCodeAt(0)) | 0, 0);
 }
 
+const DUNGEON_FOOTPRINT = 3;
+
+function clampDungeonCoord(value: number, max: number): number {
+  return Math.max(2, Math.min(max, value));
+}
+
+function getPoiCollisionFootprint(type: POIType): { width: number; height: number } {
+  if (type === POIType.TOWN) return { width: 8, height: 8 };
+  if (type === POIType.CAMPFIRE) return { width: 2, height: 2 };
+  return { width: 4, height: 4 };
+}
+
+function footprintsOverlap(
+  ax: number,
+  ay: number,
+  aw: number,
+  ah: number,
+  bx: number,
+  by: number,
+  bw: number,
+  bh: number
+): boolean {
+  return ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by;
+}
+
+function dungeonOverlapsPoi(x: number, y: number, pois = getStaticPOIs()): boolean {
+  return pois.some(poi => {
+    const footprint = getPoiCollisionFootprint(poi.type);
+    return footprintsOverlap(x, y, DUNGEON_FOOTPRINT, DUNGEON_FOOTPRINT, poi.x, poi.y, footprint.width, footprint.height);
+  });
+}
+
+function resolveDungeonPosition(
+  preferredX: number,
+  preferredY: number,
+  seed: number,
+  pois = getStaticPOIs()
+): { x: number; y: number } {
+  const candidates: Array<{ x: number; y: number; distance: number }> = [];
+
+  for (let radius = 0; radius <= 12; radius += 1) {
+    for (let dx = -radius; dx <= radius; dx += 1) {
+      for (let dy = -radius; dy <= radius; dy += 1) {
+        if (radius > 0 && Math.abs(dx) !== radius && Math.abs(dy) !== radius) continue;
+
+        const x = clampDungeonCoord(preferredX + dx, MAP_CONFIG.width - 4);
+        const y = clampDungeonCoord(preferredY + dy, MAP_CONFIG.height - 4);
+        if (dungeonOverlapsPoi(x, y, pois)) continue;
+
+        candidates.push({ x, y, distance: Math.hypot(dx, dy) });
+      }
+    }
+
+    if (candidates.length > 0) break;
+  }
+
+  if (candidates.length === 0) {
+    return {
+      x: clampDungeonCoord(preferredX, MAP_CONFIG.width - 4),
+      y: clampDungeonCoord(preferredY, MAP_CONFIG.height - 4),
+    };
+  }
+
+  candidates.sort((a, b) => a.distance - b.distance || a.x - b.x || a.y - b.y);
+  const tieGroup = candidates.filter(candidate => candidate.distance === candidates[0].distance);
+  return tieGroup[Math.floor(seededRoll(seed + 99) * tieGroup.length)] || candidates[0];
+}
+
 export function getRegionForTile(x: number, y: number): RegionBand {
   return REGION_BANDS.find(region => (
     x >= region.minX &&
@@ -238,8 +306,9 @@ export function getActiveDungeons(now = Date.now(), playerLevel = 1): WorldDunge
     const bossProfile = getBossProfileById(template.bossId) || BOSS_PROFILES[(startIndex + index) % BOSS_PROFILES.length];
     const offsetX = Math.floor(seededRoll(seed + 7) * 7) - 3;
     const offsetY = Math.floor(seededRoll(seed + 11) * 7) - 3;
-    const x = Math.max(2, Math.min(MAP_CONFIG.width - 4, template.x + offsetX));
-    const y = Math.max(2, Math.min(MAP_CONFIG.height - 4, template.y + offsetY));
+    const preferredX = clampDungeonCoord(template.x + offsetX, MAP_CONFIG.width - 4);
+    const preferredY = clampDungeonCoord(template.y + offsetY, MAP_CONFIG.height - 4);
+    const { x, y } = resolveDungeonPosition(preferredX, preferredY, seed);
     const region = getRegionForTile(x, y);
     const regionFloor = Number(region.levelRange.split('-')[0]) || 1;
 

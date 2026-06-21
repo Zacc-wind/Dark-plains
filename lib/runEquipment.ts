@@ -39,11 +39,13 @@ export function getRunEquipmentStat(
   item: Equipment,
   stat: 'armyPower' | 'defensivePower' | 'morale' | 'spellPower' | 'maxHealth',
 ): number {
-  if (stat === 'armyPower') return item.stats.armyPower ?? item.stats.attack ?? 0;
-  if (stat === 'defensivePower') return item.stats.defensivePower ?? item.stats.defense ?? 0;
-  if (stat === 'morale') return item.stats.morale ?? item.stats.speed ?? 0;
-  if (stat === 'spellPower') return item.stats.spellPower ?? 0;
-  return item.stats.maxHealth ?? 0;
+  const finite = (value: unknown) => (typeof value === 'number' && Number.isFinite(value) ? value : 0);
+
+  if (stat === 'armyPower') return finite(item.stats.armyPower ?? item.stats.attack);
+  if (stat === 'defensivePower') return finite(item.stats.defensivePower ?? item.stats.defense);
+  if (stat === 'morale') return finite(item.stats.morale ?? item.stats.speed);
+  if (stat === 'spellPower') return finite(item.stats.spellPower);
+  return finite(item.stats.maxHealth);
 }
 
 export function formatRunEquipmentSummary(item: Equipment): string {

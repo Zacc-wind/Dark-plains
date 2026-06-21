@@ -1326,7 +1326,7 @@ function makeEnemyCommanderStats(level: number, enemy?: Pick<WorldEnemy, 'person
     armyPower: 4 + Math.floor(level * 0.85) + (boss ? 4 + Math.floor(level * 0.12) : 0),
     defensivePower: 3 + Math.floor(level * 0.58) + (boss ? 5 + Math.floor(level * 0.1) : 0),
     morale: 4 + Math.floor(level * 0.35) + (boss ? 2 : 0),
-    spellPower: 2 + Math.floor(level * 0.48) + (boss ? 5 + Math.floor(level * 0.12) : 0),
+    spellPower: 2 + Math.floor(level * 0.48) + (boss ? 3 + Math.floor(level * 0.08) : 0),
     health: maxHealth,
     maxHealth,
     level,
@@ -1701,23 +1701,38 @@ export function canMoveTo(state: BattleState, unit: BattleUnit, x: number, y: nu
   return cost !== undefined && cost > 0 && cost <= getMoveRange(unit);
 }
 
+export function isInRangedReach(origin: BoardCell, target: BoardCell, range: number): boolean {
+  // Terrain, mud, and intervening units do not block ranged attacks or heals.
+  return getDistance(origin, target) <= range;
+}
+
+export function getHealRange(healer: BattleUnit): number {
+  return healer.range;
+}
+
+export function isPriestHealer(unit: BattleUnit): boolean {
+  if (unit.kind !== 'minion' || unit.healing <= 0 || unit.currentHealth <= 0) return false;
+
+  const template = unit.templateId ? getMinionTemplate(unit.templateId) : undefined;
+  return !template || template.class === 'priest';
+}
+
 export function canAttack(attacker: BattleUnit, target: BattleUnit): boolean {
-  return attacker.side !== target.side && getDistance(attacker, target) <= attacker.range;
+  return attacker.side !== target.side && isInRangedReach(attacker, target, attacker.range);
 }
 
 export function canHeal(healer: BattleUnit, target: BattleUnit): boolean {
   return (
-    canChargePriestHeal(healer) &&
+    isPriestHealer(healer) &&
     healer.side === target.side &&
     target.currentHealth > 0 &&
     target.currentHealth < target.maxHealth &&
-    getDistance(healer, target) <= healer.range
+    isInRangedReach(healer, target, getHealRange(healer))
   );
 }
 
 function canChargePriestHeal(unit: BattleUnit): boolean {
-  const template = unit.templateId ? getMinionTemplate(unit.templateId) : undefined;
-  return unit.kind === 'minion' && template?.class === 'priest' && unit.healing > 0 && unit.currentHealth > 0;
+  return isPriestHealer(unit);
 }
 
 function getAdjacentAllies(state: BattleState, unit: BattleUnit): BattleUnit[] {
@@ -2216,8 +2231,8 @@ export function castBattleSpell(state: BattleState, spellId: string, targetId?: 
       break;
     case 'blood-star':
       if (target) {
-        const damage = 14 + spellPower * 2;
-        const healing = 10 + spellPower;
+        const damage = 10 + Math.floor(spellPower * 1.35);
+        const healing = 7 + Math.floor(spellPower * 0.65);
         nextState = damageUnit(nextState, target.id, damage);
         nextState = healUnit(nextState, caster.id, healing);
         spellTargetIds = [target.id, caster.id];
@@ -2478,6 +2493,7 @@ function finishBossSpecial(
 
 function runBossSpecialAbility(state: BattleState, commander: BattleUnit): BattleState | null {
   if (!isBossBattleEnemy(state.enemy) || state.bossSpecialRounds?.[commander.id] === state.round) return null;
+  if (Math.random() > 0.58) return null;
 
   const players = state.units.filter(unit => unit.side === 'player' && unit.currentHealth > 0);
   const enemies = state.units.filter(unit => unit.side === 'enemy' && unit.currentHealth > 0);
@@ -2505,8 +2521,8 @@ function runBossSpecialAbility(state: BattleState, commander: BattleUnit): Battl
 
   switch (bossId) {
     case 'mother-cindervein': {
-      const damage = 7 + Math.floor(spellPower * 0.65) + (state.bossPhase || 1);
-      const healing = 10 + Math.floor(spellPower * 0.55);
+      const damage = 4 + Math.floor(spellPower * 0.42) + Math.max(0, (state.bossPhase || 1) - 1);
+      const healing = 6 + Math.floor(spellPower * 0.35);
       const nextState = healEnemySide(damageAllPlayers(state, damage), healing);
       return finishBossSpecial(
         nextState,
@@ -2601,9 +2617,9 @@ function runBossSpecialAbility(state: BattleState, commander: BattleUnit): Battl
       );
     }
     case 'scarlet-matron-yvane': {
-      const damage = 9 + Math.floor(spellPower * 0.75);
+      const damage = 5 + Math.floor(spellPower * 0.48);
       const drainedState = damageAllPlayers(state, damage);
-      const nextState = healUnit(drainedState, commander.id, Math.floor(damage * 0.75) + 8);
+      const nextState = healUnit(drainedState, commander.id, Math.floor(damage * 0.55) + 5);
       return finishBossSpecial(
         nextState,
         commander,
@@ -2614,7 +2630,7 @@ function runBossSpecialAbility(state: BattleState, commander: BattleUnit): Battl
       );
     }
     case 'emperor-grave-aurel': {
-      const damage = 10 + Math.floor(spellPower * 0.7) + (state.bossPhase === 2 ? 4 : 0);
+      const damage = 7 + Math.floor(spellPower * 0.52) + (state.bossPhase === 2 ? 2 : 0);
       const { state: summonedState, summonedIds } = summonBossMinions(damageAllPlayers(state, damage), commander, [
         getBossSummonTemplateId(state, 'templar-paragon'),
       ]);
@@ -2628,7 +2644,7 @@ function runBossSpecialAbility(state: BattleState, commander: BattleUnit): Battl
       );
     }
     default: {
-      const damage = 7 + Math.floor(spellPower * 0.6);
+      const damage = 5 + Math.floor(spellPower * 0.42);
       const nextState = mutateUnits(damageAllPlayers(state, damage), 'enemy', unit => ({ ...unit, attack: unit.attack + 1 }));
       return finishBossSpecial(
         nextState,
@@ -2651,10 +2667,10 @@ function runEnemyCommanderSpell(state: BattleState, commander: BattleUnit, perso
   const playerCommander = playerTargets.find(unit => unit.kind === 'commander');
 
   if (personality === 'boss') {
-    if (mana >= 6 && Math.random() < 0.35) return castBattleSpell(state, 'moonlit-veil');
-    if (mana >= 5 && playerCommander && Math.random() < 0.55) return castBattleSpell(state, 'judgement', playerCommander.id);
-    if (mana >= 5 && Math.random() < 0.35) return castBattleSpell(state, 'royal-command');
-    if (mana >= 4 && Math.random() < 0.55) return castBattleSpell(state, 'chain-spark');
+    if (mana >= 6 && Math.random() < 0.22) return castBattleSpell(state, 'moonlit-veil');
+    if (mana >= 5 && playerCommander && Math.random() < 0.38) return castBattleSpell(state, 'judgement', playerCommander.id);
+    if (mana >= 5 && Math.random() < 0.22) return castBattleSpell(state, 'royal-command');
+    if (mana >= 4 && Math.random() < 0.38) return castBattleSpell(state, 'chain-spark');
   }
 
   if (personality === 'arcane') {

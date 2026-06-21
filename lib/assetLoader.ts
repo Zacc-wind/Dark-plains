@@ -2,6 +2,22 @@
 export class AssetLoader {
   private static imageCache: Map<string, HTMLImageElement> = new Map();
   private static loadingPromises: Map<string, Promise<HTMLImageElement>> = new Map();
+  private static devCacheBust = process.env.NODE_ENV === 'development' ? `?v=${Date.now()}` : '';
+
+  private static resolveSrc(path: string): string {
+    if (!this.devCacheBust) return path;
+    return `${path}${path.includes('?') ? '&' : '?'}${this.devCacheBust.slice(1)}`;
+  }
+
+  static clearCache(path?: string): void {
+    if (path) {
+      this.imageCache.delete(path);
+      this.loadingPromises.delete(path);
+      return;
+    }
+    this.imageCache.clear();
+    this.loadingPromises.clear();
+  }
 
   static async loadImage(path: string): Promise<HTMLImageElement> {
     // Return cached image if available
@@ -26,7 +42,7 @@ export class AssetLoader {
         this.loadingPromises.delete(path);
         reject(new Error(`Failed to load image: ${path}`));
       };
-      img.src = path;
+      img.src = this.resolveSrc(path);
     });
 
     this.loadingPromises.set(path, loadPromise);
@@ -65,7 +81,7 @@ export const ASSET_PATHS = {
     battlefield: '/assets/battlefield-bg.png',
     harbor: '/assets/town-harborview-bg.png',
     riverside: '/assets/town-riverside-bg.png',
-    road: '/assets/roguelike-background.png',
+    road: '/assets/run-background.jpg',
   },
   icons: {
     attack: '/assets/icons/attack.png',
@@ -110,6 +126,7 @@ export async function preloadAllAssets(): Promise<void> {
     ...Object.values(ASSET_PATHS.map),
     ...Object.values(ASSET_PATHS.pois),
     ...Object.values(ASSET_PATHS.towns),
+    ...Object.values(ASSET_PATHS.runScenes),
     ...Object.values(ASSET_PATHS.icons),
     ...Object.values(ASSET_PATHS.player),
     ...Object.values(ASSET_PATHS.bosses),

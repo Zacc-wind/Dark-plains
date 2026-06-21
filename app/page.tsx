@@ -23,7 +23,7 @@ export default function AuthPage() {
       const result = login(username, password);
       if (result.success) {
         emitFxEvent({ type: 'spell', tone: 'violet', intensity: 0.7 });
-        router.push('/game');
+        router.push('/mode');
       } else {
         setError(result.error || 'Login failed');
         emitFxEvent({ type: 'status', tone: 'red', intensity: 0.42 });

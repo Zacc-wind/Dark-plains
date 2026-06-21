@@ -10,6 +10,7 @@ import PlayerModelSelector from '@/components/PlayerModelSelector';
 import CompletionOverlay from '@/components/CompletionOverlay';
 import ThreeFxOverlay from '@/components/ThreeFxOverlay';
 import MapFogOverlay from '@/components/MapFogOverlay';
+import { writeGameMode } from '@/lib/gameMode';
 
 export default function GamePage() {
   const router = useRouter();
@@ -23,6 +24,7 @@ export default function GamePage() {
       setHasUser(Boolean(user));
       setAuthChecked(true);
       if (!user) router.replace('/');
+      else writeGameMode('multiplayer');
     });
 
     return () => window.cancelAnimationFrame(frameId);
@@ -39,7 +41,7 @@ export default function GamePage() {
   return (
     <div className="fantasy-ui flex min-h-screen flex-col bg-[#05080a] text-[var(--ui-text)]">
       <BackgroundMusic />
-      <GameCommandCenter onOpenAvatar={() => setShowAvatar(true)} />
+      <GameCommandCenter onOpenAvatar={() => setShowAvatar(true)} showRandomRun={false} />
       <main className="flex-1">
         <MapRenderer />
       </main>

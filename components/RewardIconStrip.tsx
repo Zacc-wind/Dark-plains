@@ -9,6 +9,7 @@ interface RewardIconStripProps {
   chips: RewardChip[];
   emptyLabel?: string;
   className?: string;
+  size?: 'compact' | 'large' | 'poi';
 }
 
 type PopoverSide = 'left' | 'right';
@@ -17,6 +18,7 @@ export default function RewardIconStrip({
   chips,
   emptyLabel = 'No rewards',
   className = '',
+  size = 'compact',
 }: RewardIconStripProps) {
   const [activeChip, setActiveChip] = useState<RewardChip | null>(null);
   const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null);
@@ -91,9 +93,14 @@ export default function RewardIconStrip({
       }
     : null;
 
+  const isPoi = size === 'poi';
+  const isLarge = size === 'large' || isPoi;
+  const iconSize = isPoi ? 128 : isLarge ? 56 : 34;
+  const gridClassName = `reward-icon-grid ${isPoi ? 'reward-icon-grid-poi' : isLarge ? 'reward-icon-grid-large' : ''} ${className}`.trim();
+
   return (
     <>
-      <div className={`reward-icon-grid ${className}`.trim()} role="list" aria-label="Rewards">
+      <div className={gridClassName} role="list" aria-label="Rewards">
         {chips.map(chip => (
           <div
             key={chip.id}
@@ -105,20 +112,20 @@ export default function RewardIconStrip({
             onFocus={(event) => showChip(chip, event.currentTarget)}
             onBlur={scheduleHide}
           >
-            <div className={`reward-icon-tile rounded border ${chip.rarityClass || ''}`} tabIndex={-1}>
-              <span className="reward-icon-image overflow-hidden rounded">
+            <div className={`reward-icon-tile rounded border ${isPoi ? 'reward-icon-tile-poi' : isLarge ? 'reward-icon-tile-large' : ''} ${chip.rarityClass || ''}`} tabIndex={-1}>
+              <span className={`reward-icon-image overflow-hidden rounded ${isPoi ? 'reward-icon-image-smooth' : ''}`}>
                 <Image
                   src={chip.iconPath}
                   alt=""
-                  width={34}
-                  height={34}
-                  className="object-contain p-0.5"
-                  style={{ imageRendering: 'pixelated' }}
+                  width={iconSize}
+                  height={iconSize}
+                  className={isPoi ? 'object-contain reward-icon-image-smooth-target' : 'object-contain p-0.5'}
+                  style={isPoi ? undefined : { imageRendering: 'pixelated' }}
                   unoptimized
                 />
               </span>
               {chip.quantity !== undefined && (
-                <span className="reward-icon-quantity">{chip.quantity}</span>
+                <span className={`reward-icon-quantity ${isPoi ? 'reward-icon-quantity-poi' : isLarge ? 'reward-icon-quantity-large' : ''}`}>{chip.quantity}</span>
               )}
             </div>
           </div>
@@ -169,14 +176,13 @@ export function RewardHoverPopoverContent({ chip }: { chip: RewardChip }) {
   return (
     <>
       <div className="reward-hover-popover-hero">
-        <span className="reward-hover-popover-icon">
+        <span className="reward-hover-popover-icon reward-icon-image-smooth">
           <Image
             src={chip.iconPath}
             alt=""
-            width={56}
-            height={56}
-            className="object-contain"
-            style={{ imageRendering: 'pixelated' }}
+            width={96}
+            height={96}
+            className="object-contain reward-icon-image-smooth-target"
             unoptimized
           />
         </span>

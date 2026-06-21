@@ -82,12 +82,105 @@ const MAP_MARKER_TONES = {
   },
 } satisfies Record<string, MarkerTone>;
 
-const CHARACTER_GLOWS = {
-  player: 'rgba(255, 255, 255, 0.68)',
-  enemy: 'rgba(248, 113, 113, 0.72)',
-  npc: 'rgba(125, 211, 252, 0.72)',
-  quest: 'rgba(250, 204, 21, 0.76)',
+const JOB_POI_GLOW_TONES: Partial<Record<POIType, { inner: string; outer: string; ring: string; shadow: string }>> = {
+  [POIType.FOREST]: { inner: '164, 198, 122', outer: '48, 72, 38', ring: 'rgba(148, 178, 108, 0.34)', shadow: 'rgba(148, 178, 108, 0.58)' },
+  [POIType.MOUNTAIN]: { inner: '196, 188, 176', outer: '72, 68, 76', ring: 'rgba(176, 168, 156, 0.34)', shadow: 'rgba(176, 168, 156, 0.55)' },
+  [POIType.FARM]: { inner: '232, 196, 118', outer: '118, 84, 36', ring: 'rgba(214, 178, 108, 0.36)', shadow: 'rgba(214, 178, 108, 0.58)' },
+  [POIType.HUNTING_LODGE]: { inner: '214, 168, 108', outer: '102, 68, 38', ring: 'rgba(196, 154, 102, 0.36)', shadow: 'rgba(196, 154, 102, 0.56)' },
+  [POIType.WINDMILL]: { inner: '236, 210, 138', outer: '124, 96, 44', ring: 'rgba(220, 194, 128, 0.36)', shadow: 'rgba(220, 194, 128, 0.58)' },
+  [POIType.CRAB_TRAP]: { inner: '132, 188, 204', outer: '38, 84, 98', ring: 'rgba(118, 176, 194, 0.34)', shadow: 'rgba(118, 176, 194, 0.55)' },
+  [POIType.FISHING_DOCK]: { inner: '128, 176, 210', outer: '36, 72, 98', ring: 'rgba(112, 162, 196, 0.34)', shadow: 'rgba(112, 162, 196, 0.56)' },
+  [POIType.GRANITE_QUARRY]: { inner: '206, 198, 186', outer: '82, 76, 84', ring: 'rgba(186, 178, 168, 0.34)', shadow: 'rgba(186, 178, 168, 0.55)' },
+  [POIType.COFFEE_PLANTATION]: { inner: '206, 154, 96', outer: '98, 62, 28', ring: 'rgba(188, 142, 88, 0.36)', shadow: 'rgba(188, 142, 88, 0.56)' },
 };
+
+const JOB_POI_DISK = {
+  border: 'rgba(122, 112, 98, 0.64)',
+  borderHover: 'rgba(188, 172, 142, 0.8)',
+};
+
+const JOB_POI_SKY_TONES: Partial<Record<POIType, { top: string; mid: string; bottom: string }>> = {
+  [POIType.FOREST]: { top: 'rgba(104, 122, 132, 0.96)', mid: 'rgba(78, 92, 82, 0.92)', bottom: 'rgba(50, 46, 40, 0.94)' },
+  [POIType.MOUNTAIN]: { top: 'rgba(118, 128, 142, 0.96)', mid: 'rgba(88, 86, 94, 0.92)', bottom: 'rgba(58, 54, 60, 0.94)' },
+  [POIType.FARM]: { top: 'rgba(124, 138, 154, 0.96)', mid: 'rgba(102, 92, 74, 0.92)', bottom: 'rgba(74, 58, 42, 0.94)' },
+  [POIType.HUNTING_LODGE]: { top: 'rgba(118, 132, 146, 0.96)', mid: 'rgba(94, 82, 68, 0.92)', bottom: 'rgba(66, 52, 40, 0.94)' },
+  [POIType.WINDMILL]: { top: 'rgba(128, 140, 156, 0.96)', mid: 'rgba(104, 94, 76, 0.92)', bottom: 'rgba(76, 62, 46, 0.94)' },
+  [POIType.CRAB_TRAP]: { top: 'rgba(108, 132, 148, 0.96)', mid: 'rgba(78, 92, 98, 0.92)', bottom: 'rgba(48, 58, 62, 0.94)' },
+  [POIType.FISHING_DOCK]: { top: 'rgba(102, 128, 152, 0.96)', mid: 'rgba(74, 88, 100, 0.92)', bottom: 'rgba(46, 56, 66, 0.94)' },
+  [POIType.GRANITE_QUARRY]: { top: 'rgba(116, 126, 138, 0.96)', mid: 'rgba(90, 86, 88, 0.92)', bottom: 'rgba(60, 56, 58, 0.94)' },
+  [POIType.COFFEE_PLANTATION]: { top: 'rgba(120, 134, 148, 0.96)', mid: 'rgba(98, 84, 66, 0.92)', bottom: 'rgba(70, 54, 38, 0.94)' },
+};
+
+const DEFAULT_JOB_POI_SKY = {
+  top: 'rgba(118, 132, 146, 0.96)',
+  mid: 'rgba(94, 88, 78, 0.92)',
+  bottom: 'rgba(64, 56, 48, 0.94)',
+};
+
+const DEFAULT_JOB_POI_GLOW = {
+  inner: '214, 188, 132',
+  outer: '92, 72, 44',
+  ring: 'rgba(196, 168, 118, 0.34)',
+  shadow: 'rgba(196, 168, 118, 0.55)',
+};
+
+const CAMPFIRE_MARKER_TILES = 1.5;
+
+function campfireSeed(value: number): number {
+  const seeded = Math.sin(value) * 10000;
+  return seeded - Math.floor(seeded);
+}
+
+function drawCampfireGroundGlow(
+  ctx: CanvasRenderingContext2D,
+  centerX: number,
+  centerY: number,
+  size: number,
+  alpha: number
+): void {
+  const radius = size * 0.38;
+  const glow = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, radius);
+  glow.addColorStop(0, `rgba(255, 142, 58, ${alpha})`);
+  glow.addColorStop(0.55, `rgba(220, 88, 32, ${alpha * 0.35})`);
+  glow.addColorStop(1, 'rgba(0, 0, 0, 0)');
+  ctx.fillStyle = glow;
+  ctx.beginPath();
+  ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function drawCampfireEmberParticles(
+  ctx: CanvasRenderingContext2D,
+  centerX: number,
+  centerY: number,
+  size: number,
+  now: number,
+  pulse: number
+): void {
+  const seedBase = centerX * 0.17 + centerY * 0.23;
+  const particleCount = 4;
+
+  for (let index = 0; index < particleCount; index += 1) {
+    const particleSeed = seedBase + index * 17.17;
+    const phase = (now / 2400 + index * 0.21 + campfireSeed(particleSeed)) % 1;
+    const drift = (campfireSeed(particleSeed + 3) - 0.5) * size * 0.26;
+    const x = centerX + drift;
+    const y = centerY + size * 0.03 - phase * size * 0.34;
+    const sparkWidth = 1;
+    const sparkHeight = 1.2 + campfireSeed(particleSeed + 5) * 2.2;
+    const alpha = (1 - phase) * (0.07 + pulse * 0.09);
+    const green = 128 + Math.floor(campfireSeed(particleSeed + 7) * 48);
+    const blue = 34 + Math.floor(campfireSeed(particleSeed + 9) * 24);
+    const angle = campfireSeed(particleSeed + 11) * Math.PI * 2;
+
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(angle);
+    ctx.fillStyle = `rgba(255, ${green}, ${blue}, ${alpha})`;
+    ctx.fillRect(-sparkWidth / 2, -sparkHeight / 2, sparkWidth, sparkHeight);
+    ctx.restore();
+  }
+}
 
 const DEFAULT_MAP_ZOOM = 1.75;
 const MAX_MAP_ZOOM = 2.75;
@@ -333,78 +426,393 @@ function drawMapLabel(
   ctx.restore();
 }
 
-function drawCircularImageMarker(
+function drawGroundShadow(
+  ctx: CanvasRenderingContext2D,
+  centerX: number,
+  centerY: number,
+  radiusX: number,
+  radiusY: number
+): void {
+  ctx.save();
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.34)';
+  ctx.beginPath();
+  ctx.ellipse(centerX, centerY, radiusX, radiusY, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawJobPoiSkyBackdrop(
+  ctx: CanvasRenderingContext2D,
+  centerX: number,
+  centerY: number,
+  radius: number,
+  sky: { top: string; mid: string; bottom: string },
+  hovered: boolean
+): void {
+  const skyTop = centerY - radius;
+  const skyGradient = ctx.createLinearGradient(centerX, skyTop, centerX, centerY + radius);
+  skyGradient.addColorStop(0, sky.top);
+  skyGradient.addColorStop(0.52, sky.mid);
+  skyGradient.addColorStop(1, sky.bottom);
+  ctx.fillStyle = skyGradient;
+  ctx.beginPath();
+  ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+  ctx.fill();
+
+  const haze = ctx.createRadialGradient(
+    centerX,
+    centerY + radius * 0.12,
+    0,
+    centerX,
+    centerY,
+    radius
+  );
+  haze.addColorStop(0, hovered ? 'rgba(214, 198, 168, 0.16)' : 'rgba(196, 184, 164, 0.12)');
+  haze.addColorStop(0.72, 'rgba(120, 108, 92, 0.06)');
+  haze.addColorStop(1, 'rgba(0, 0, 0, 0)');
+  ctx.fillStyle = haze;
+  ctx.beginPath();
+  ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function drawJobPoiDisk(
+  ctx: CanvasRenderingContext2D,
+  centerX: number,
+  centerY: number,
+  radius: number,
+  hovered: boolean,
+  sky: { top: string; mid: string; bottom: string },
+  accentRing?: string
+): void {
+  drawJobPoiSkyBackdrop(ctx, centerX, centerY, radius, sky, hovered);
+
+  ctx.save();
+  ctx.lineWidth = hovered ? 1.35 : 1.1;
+  ctx.strokeStyle = hovered ? JOB_POI_DISK.borderHover : JOB_POI_DISK.border;
+  ctx.beginPath();
+  ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+  ctx.stroke();
+
+  if (accentRing) {
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = hovered
+      ? accentRing.replace(/[\d.]+\)$/, '0.34)')
+      : accentRing.replace(/[\d.]+\)$/, '0.18)');
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, radius - 1.8, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawMapGlowPool(
   ctx: CanvasRenderingContext2D,
   options: {
     centerX: number;
     centerY: number;
-    radius: number;
+    radiusX: number;
+    radiusY: number;
+    innerRgb: string;
+    outerRgb: string;
+    alpha: number;
+  }
+): void {
+  const { centerX, centerY, radiusX, radiusY, innerRgb, outerRgb, alpha } = options;
+  const glow = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, Math.max(radiusX, radiusY));
+  glow.addColorStop(0, `rgba(${innerRgb}, ${alpha})`);
+  glow.addColorStop(0.55, `rgba(${outerRgb}, ${alpha * 0.48})`);
+  glow.addColorStop(1, 'rgba(0, 0, 0, 0)');
+  ctx.fillStyle = glow;
+  ctx.beginPath();
+  ctx.ellipse(centerX, centerY, radiusX, radiusY, 0, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function drawMapPulseRing(
+  ctx: CanvasRenderingContext2D,
+  centerX: number,
+  centerY: number,
+  radius: number,
+  color: string,
+  pulse: number,
+  dashed = true
+): void {
+  ctx.save();
+  ctx.strokeStyle = color.replace(/[\d.]+\)$/, `${0.16 + pulse * 0.14})`);
+  ctx.lineWidth = 1;
+  if (dashed) ctx.setLineDash([2, 4]);
+  ctx.beginPath();
+  ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+  ctx.stroke();
+  if (dashed) ctx.setLineDash([]);
+  ctx.restore();
+}
+
+function drawCircularLandmarkMarker(
+  ctx: CanvasRenderingContext2D,
+  options: {
+    centerX: number;
+    centerY: number;
+    footprint: number;
+    radiusRatio: number;
+    hoveredRadiusRatio?: number;
     image?: HTMLImageElement | null;
-    tone: MarkerTone;
     hovered?: boolean;
-    imageScale?: number;
-    imageOffsetX?: number;
-    imageOffsetY?: number;
     fallbackLabel?: string;
     label?: string;
+    showLabel?: boolean;
+    ringColor: string;
+    ringHoverColor: string;
+    backingColor: string;
+    labelColor: string;
+    ringWidth?: number;
+    ringHoverWidth?: number;
+    accentColor?: string;
+    idleImageFilter?: string;
   }
 ): void {
   const {
     centerX,
     centerY,
-    radius,
+    footprint,
+    radiusRatio,
+    hoveredRadiusRatio = radiusRatio * 1.08,
     image,
-    tone,
     hovered = false,
-    imageScale = 1.12,
-    imageOffsetX = 0,
-    imageOffsetY = 0,
     fallbackLabel = '?',
     label,
+    showLabel = false,
+    ringColor,
+    ringHoverColor,
+    backingColor,
+    labelColor,
+    ringWidth = 1,
+    ringHoverWidth = 1.5,
+    accentColor,
+    idleImageFilter,
   } = options;
+  const radius = footprint * (hovered ? hoveredRadiusRatio : radiusRatio);
+
+  drawGroundShadow(ctx, centerX, centerY + radius * 0.72, radius * 0.72, radius * 0.22);
 
   ctx.save();
-  ctx.shadowColor = hovered ? tone.glowHover : tone.glow;
-  ctx.shadowBlur = hovered ? radius * 0.46 : radius * 0.26;
-  ctx.fillStyle = tone.fill;
+  ctx.fillStyle = backingColor;
   ctx.beginPath();
   ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
   ctx.fill();
-  ctx.lineWidth = Math.max(1.5, radius * 0.06);
-  ctx.strokeStyle = hovered ? tone.ringHover : tone.ring;
+  ctx.lineWidth = hovered ? ringHoverWidth : ringWidth;
+  ctx.strokeStyle = hovered ? ringHoverColor : ringColor;
   ctx.stroke();
   ctx.restore();
 
   ctx.save();
   ctx.beginPath();
-  ctx.arc(centerX, centerY, radius * 0.82, 0, Math.PI * 2);
+  ctx.arc(centerX, centerY, radius * 0.86, 0, Math.PI * 2);
   ctx.clip();
   if (image) {
-    const imageSize = radius * 2 * imageScale;
-    ctx.shadowColor = 'rgba(255, 255, 255, 0.72)';
-    ctx.shadowBlur = radius * 0.18;
-    ctx.drawImage(image, centerX - imageSize / 2 + imageOffsetX, centerY - imageSize / 2 + imageOffsetY, imageSize, imageSize);
+    const imageSize = radius * 2.05;
+    ctx.save();
+    if (!hovered && idleImageFilter) {
+      ctx.filter = idleImageFilter;
+    }
+    ctx.drawImage(image, centerX - imageSize / 2, centerY - imageSize / 2, imageSize, imageSize);
+    ctx.restore();
   } else {
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.12)';
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
     ctx.fillRect(centerX - radius, centerY - radius, radius * 2, radius * 2);
-    ctx.fillStyle = tone.label;
-    ctx.font = `bold ${Math.max(10, radius * 0.46)}px serif`;
+    ctx.fillStyle = labelColor;
+    ctx.font = `bold ${Math.max(8, radius * 0.55)}px serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(fallbackLabel, centerX, centerY);
   }
   ctx.restore();
 
+  if (accentColor) {
+    ctx.save();
+    ctx.strokeStyle = hovered ? accentColor : accentColor.replace(/[\d.]+\)$/, '0.52)');
+    ctx.lineWidth = hovered ? 1.35 : 1.1;
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, radius - 0.6, Math.PI * 0.18, Math.PI * 0.82);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  if (label && (showLabel || hovered)) {
+    ctx.save();
+    ctx.fillStyle = labelColor;
+    ctx.font = `bold ${hovered ? 10 : 9}px serif`;
+    ctx.textAlign = 'center';
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.9)';
+    ctx.shadowBlur = 3;
+    ctx.fillText(label, centerX, centerY + radius + 9);
+    ctx.restore();
+  }
+}
+
+function drawTownMarker(
+  ctx: CanvasRenderingContext2D,
+  options: {
+    centerX: number;
+    centerY: number;
+    footprint: number;
+    image?: HTMLImageElement | null;
+    hovered?: boolean;
+    fallbackLabel?: string;
+    label: string;
+  }
+): void {
+  const { centerX, centerY, footprint, image, hovered = false, fallbackLabel = '?', label } = options;
+
+  drawCircularLandmarkMarker(ctx, {
+    centerX,
+    centerY,
+    footprint,
+    radiusRatio: 0.13,
+    hoveredRadiusRatio: 0.15,
+    image,
+    hovered,
+    fallbackLabel,
+    label,
+    showLabel: true,
+    ringColor: 'rgba(234, 220, 154, 0.72)',
+    ringHoverColor: 'rgba(255, 236, 170, 0.95)',
+    backingColor: 'rgba(8, 7, 9, 0.55)',
+    labelColor: MAP_MARKER_TONES.town.label,
+    ringWidth: 1.25,
+    ringHoverWidth: 2,
+  });
+}
+
+function drawCampfireMarker(
+  ctx: CanvasRenderingContext2D,
+  options: {
+    centerX: number;
+    centerY: number;
+    footprint: number;
+    image?: HTMLImageElement | null;
+    hovered?: boolean;
+    label?: string;
+    now?: number;
+  }
+): void {
+  const { centerX, centerY, footprint, image, hovered = false, label, now = 0 } = options;
+  const pulse = 0.5 + 0.5 * Math.sin(now / 1400);
+  const flicker = 0.5 + 0.5 * Math.sin(now / 760 + 0.8);
+  const size = footprint * (hovered ? 1.06 : 1);
+  const poolAlpha = (0.16 + pulse * 0.1) * (0.94 + flicker * 0.06);
+  const fogHaloAlpha = (0.045 + pulse * 0.028) * (0.9 + flicker * 0.08);
+
+  drawMapGlowPool(ctx, {
+    centerX,
+    centerY,
+    radiusX: size * 1.9,
+    radiusY: size * 1.55,
+    innerRgb: '255, 108, 42',
+    outerRgb: '214, 68, 22',
+    alpha: fogHaloAlpha,
+  });
+  drawCampfireGroundGlow(ctx, centerX, centerY, size, poolAlpha);
+  drawCampfireGroundGlow(ctx, centerX, centerY, size, poolAlpha * 0.28);
+
+  if (image) {
+    ctx.drawImage(
+      image,
+      centerX - size / 2,
+      centerY - size / 2,
+      size,
+      size
+    );
+  }
+
+  drawCampfireEmberParticles(ctx, centerX, centerY, size, now, pulse);
+
+  if (hovered && label) {
+    drawMapLabel(ctx, label, centerX, centerY + size * 0.56, '#ffd7a8');
+  }
+}
+
+function drawJobPoiMarker(
+  ctx: CanvasRenderingContext2D,
+  options: {
+    centerX: number;
+    centerY: number;
+    footprint: number;
+    poiType: POIType;
+    image?: HTMLImageElement | null;
+    hovered?: boolean;
+    fallbackLabel?: string;
+    label?: string;
+    now?: number;
+  }
+): void {
+  const { centerX, centerY, footprint, poiType, image, hovered = false, fallbackLabel = '?', label, now = 0 } = options;
+  const pulse = 0.5 + 0.5 * Math.sin(now / 520);
+  const radius = footprint * (hovered ? 0.22 : 0.2);
+  const diskRadius = radius * 0.88;
+  const glow = JOB_POI_GLOW_TONES[poiType] ?? DEFAULT_JOB_POI_GLOW;
+  const sky = JOB_POI_SKY_TONES[poiType] ?? DEFAULT_JOB_POI_SKY;
+  const poolAlpha = hovered ? 0.2 : 0.08 + pulse * 0.06;
+  const glowStrength = hovered ? 0.62 : 0.26 + pulse * 0.14;
+
+  drawGroundShadow(ctx, centerX, centerY + diskRadius * 0.66, diskRadius * 0.72, diskRadius * 0.2);
+
   ctx.save();
-  ctx.lineWidth = Math.max(1, radius * 0.035);
-  ctx.strokeStyle = 'rgba(255, 255, 255, 0.36)';
-  ctx.beginPath();
-  ctx.arc(centerX, centerY, radius * 0.92, 0, Math.PI * 2);
-  ctx.stroke();
+  drawMapGlowPool(ctx, {
+    centerX,
+    centerY: centerY + radius * 0.02,
+    radiusX: diskRadius * 1.08,
+    radiusY: diskRadius * 0.96,
+    innerRgb: glow.inner,
+    outerRgb: glow.outer,
+    alpha: poolAlpha,
+  });
   ctx.restore();
 
-  if (label) {
-    drawMapLabel(ctx, label, centerX, centerY + radius + 10, tone.label);
+  drawJobPoiDisk(ctx, centerX, centerY, diskRadius, hovered, sky, glow.ring);
+
+  const clipRadius = diskRadius - 1.2;
+  const imageZoom = hovered ? 1.82 : 1.74;
+  const imageOffsetY = clipRadius * 0.04;
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(centerX, centerY, clipRadius, 0, Math.PI * 2);
+  ctx.clip();
+
+  drawJobPoiSkyBackdrop(ctx, centerX, centerY, clipRadius, sky, hovered);
+
+  if (image) {
+    const imageSize = clipRadius * 2 * imageZoom;
+    ctx.save();
+    ctx.shadowColor = glow.shadow.replace(/[\d.]+\)$/, `${glowStrength})`);
+    ctx.shadowBlur = hovered ? 10 : 4 + pulse * 4;
+    ctx.globalAlpha = hovered ? 0.99 : 0.97;
+    ctx.filter = hovered
+      ? 'brightness(1.06) saturate(1.05)'
+      : `brightness(${0.99 + pulse * 0.02}) saturate(${0.96 + pulse * 0.03})`;
+    ctx.drawImage(
+      image,
+      centerX - imageSize / 2,
+      centerY - imageSize / 2 - imageOffsetY,
+      imageSize,
+      imageSize
+    );
+    ctx.restore();
+  } else {
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.08)';
+    ctx.fillRect(centerX - clipRadius, centerY - clipRadius, clipRadius * 2, clipRadius * 2);
+    ctx.fillStyle = MAP_MARKER_TONES.poi.label;
+    ctx.font = `bold ${Math.max(8, clipRadius * 0.48)}px serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(fallbackLabel, centerX, centerY);
+  }
+  ctx.restore();
+
+  if (hovered && label) {
+    drawMapLabel(ctx, label, centerX, centerY + diskRadius + 8, MAP_MARKER_TONES.poi.label);
   }
 }
 
@@ -421,7 +829,6 @@ function drawCharacterSprite(
     topText?: string;
     topTextColor?: string;
     hovered?: boolean;
-    glowColor?: string;
   }
 ): void {
   const {
@@ -435,46 +842,26 @@ function drawCharacterSprite(
     topText,
     topTextColor = labelColor,
     hovered = false,
-    glowColor,
   } = options;
   const drawX = x;
   const drawY = y;
   const drawSize = Math.max(1, size);
 
   if (image) {
-    if (glowColor || hovered) {
-      const centerX = drawX + drawSize / 2;
-      const centerY = drawY + drawSize * 0.64;
-      const glowRadius = Math.max(10, Math.min(38, drawSize * (hovered ? 0.58 : 0.46)));
-      const gradient = ctx.createRadialGradient(centerX, centerY, drawSize * 0.08, centerX, centerY, glowRadius);
-      gradient.addColorStop(0, glowColor || 'rgba(255, 255, 255, 0.46)');
-      gradient.addColorStop(0.58, glowColor ? glowColor.replace(/0\.\d+\)/, hovered ? '0.22)' : '0.14)') : 'rgba(255, 255, 255, 0.14)');
-      gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
-
-      ctx.save();
-      ctx.globalAlpha = hovered ? 0.72 : 0.52;
-      ctx.fillStyle = gradient;
-      ctx.beginPath();
-      ctx.ellipse(centerX, centerY, glowRadius * 0.92, glowRadius * 0.56, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
-    }
+    const shadowX = drawX + drawSize / 2;
+    const shadowY = drawY + drawSize * 0.9;
+    drawGroundShadow(ctx, shadowX, shadowY, drawSize * 0.26, drawSize * 0.09);
 
     ctx.save();
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
-    ctx.shadowColor = 'rgba(0, 0, 0, 0.38)';
-    ctx.shadowBlur = Math.max(2, Math.min(7, drawSize * 0.08));
-    ctx.shadowOffsetY = Math.max(1, drawSize * 0.025);
-    ctx.filter = 'brightness(1.015) contrast(1.035) saturate(1.035)';
+    if (hovered) {
+      ctx.filter = 'brightness(1.06) contrast(1.04)';
+    }
     ctx.drawImage(image, drawX, drawY, drawSize, drawSize);
     ctx.restore();
   } else {
     ctx.save();
-    if (glowColor || hovered) {
-      ctx.shadowColor = glowColor || 'rgba(255, 255, 255, 0.65)';
-      ctx.shadowBlur = Math.max(6, Math.min(26, drawSize * (hovered ? 0.34 : 0.2)));
-    }
     ctx.fillStyle = fallbackColor;
     ctx.fillRect(drawX + drawSize * 0.2, drawY + drawSize * 0.2, drawSize * 0.6, drawSize * 0.6);
     ctx.restore();
@@ -600,6 +987,7 @@ export default function MapRenderer({
   const [playerListLocation, setPlayerListLocation] = useState<{ x: number; y: number } | null>(null);
   const [currentUser, setCurrentUser] = useState(getCurrentUser());
   const [worldNow, setWorldNow] = useState(() => Date.now());
+  const [mapAnimNow, setMapAnimNow] = useState(() => Date.now());
   const [pendingTravel, setPendingTravel] = useState<PendingTravelIntent | null>(null);
   const [isMounted, setIsMounted] = useState(false);
   const [mainQuestTrackerHidden, setMainQuestTrackerHidden] = useState(() => {
@@ -700,6 +1088,23 @@ export default function MapRenderer({
 
     return () => window.clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    if (!assetsLoaded) return;
+
+    let frameId = 0;
+    let lastTick = 0;
+    const loop = (timestamp: number) => {
+      if (timestamp - lastTick >= 33) {
+        lastTick = timestamp;
+        setMapAnimNow(Date.now());
+      }
+      frameId = window.requestAnimationFrame(loop);
+    };
+
+    frameId = window.requestAnimationFrame(loop);
+    return () => window.cancelAnimationFrame(frameId);
+  }, [assetsLoaded]);
 
   // Handle window resize for fullscreen
   useEffect(() => {
@@ -815,14 +1220,25 @@ export default function MapRenderer({
         }
       : null;
 
+    const campfires = poisData
+      .filter(poi => poi.type === POIType.CAMPFIRE)
+      .map(poi => {
+        const footprint = getPoiFootprint(poi);
+        return {
+          x: poi.x * scaledTileSize - cameraX + (footprint.width * scaledTileSize) / 2,
+          y: poi.y * scaledTileSize - cameraY + (footprint.height * scaledTileSize) / 2,
+        };
+      });
+
     emitMapFogState({
       pointer: cursorScreen,
       player: playerPoint,
+      campfires,
       width: actualWidth,
       height: actualHeight,
       zoom: effectiveZoom,
     });
-  }, [actualHeight, actualWidth, cameraX, cameraY, cursorScreen, effectiveZoom, renderedUserPosition, scaledTileSize]);
+  }, [actualHeight, actualWidth, cameraX, cameraY, cursorScreen, effectiveZoom, poisData, renderedUserPosition, scaledTileSize]);
 
   const clampZoom = (value: number) => Math.max(minMapZoom, Math.min(MAX_MAP_ZOOM, Number(value.toFixed(2))));
 
@@ -960,52 +1376,75 @@ export default function MapRenderer({
       });
     }
 
-    // Draw POIs with images - 4x4 tiles (8x8 for towns)
-    poisData.forEach(poi => {
+    const drawPoiMarker = (poi: POI) => {
       const screenX = poi.x * tileSize - cameraX;
       const screenY = poi.y * tileSize - cameraY;
-      const poiSize = poi.type === POIType.TOWN ? tileSize * 8 : 
-                      poi.type === POIType.CAMPFIRE ? tileSize * 2 : tileSize * 4; // 8x8 for towns, 2x2 for campfire, 4x4 for others
+      const footprint = getPoiFootprint(poi);
+      const footprintWidth = footprint.width * tileSize;
+      const footprintHeight = footprint.height * tileSize;
+      const poiSize = poi.type === POIType.TOWN ? footprintWidth :
+                      poi.type === POIType.CAMPFIRE ? tileSize * CAMPFIRE_MARKER_TILES : footprintWidth;
+      const boundsSize = poi.type === POIType.CAMPFIRE ? footprintWidth : poiSize;
 
-      // Only draw if in viewport
-      if (screenX >= -poiSize && screenX < actualWidth && 
-          screenY >= -poiSize && screenY < actualHeight) {
-        
-        // Get the image for this POI
-        let imagePath = POI_IMAGE_PATHS[poi.type];
-        
-        // Reuse the two town art styles until each expansion city has unique sprites.
-        if (poi.type === POIType.TOWN) {
-          imagePath = ["Harborview", "Blackwater Gate", "Eclipse Hold"].includes(poi.name)
-            ? ASSET_PATHS.pois.harborview
-            : ASSET_PATHS.pois.riverside;
-        }
-        
-        const poiImage = AssetLoader.getImage(imagePath);
-        const markerRadius = poi.type === POIType.TOWN
-          ? poiSize * 0.095
-          : poi.type === POIType.CAMPFIRE
-            ? poiSize * 0.15
-            : poiSize * 0.12;
-        const markerCenterX = screenX + poiSize / 2;
-        const markerCenterY = screenY + poiSize / 2;
-        const hovered = hoveredPOI?.id === poi.id;
+      if (screenX < -boundsSize || screenX >= actualWidth || screenY < -boundsSize || screenY >= actualHeight) {
+        return;
+      }
 
-        drawCircularImageMarker(ctx, {
+      let imagePath = POI_IMAGE_PATHS[poi.type];
+
+      if (poi.type === POIType.TOWN) {
+        imagePath = ["Harborview", "Blackwater Gate", "Eclipse Hold"].includes(poi.name)
+          ? ASSET_PATHS.pois.harborview
+          : ASSET_PATHS.pois.riverside;
+      }
+
+      const poiImage = AssetLoader.getImage(imagePath);
+      const markerCenterX = screenX + footprintWidth / 2;
+      const markerCenterY = screenY + footprintHeight / 2;
+      const hovered = hoveredPOI?.id === poi.id;
+
+      if (poi.type === POIType.TOWN) {
+        drawTownMarker(ctx, {
           centerX: markerCenterX,
           centerY: markerCenterY,
-          radius: markerRadius,
+          footprint: poiSize,
           image: poiImage,
-          tone: poi.type === POIType.TOWN ? MAP_MARKER_TONES.town : MAP_MARKER_TONES.poi,
           hovered,
-          imageScale: poi.type === POIType.TOWN ? 1.1 : poi.type === POIType.CAMPFIRE ? 1.16 : 1.05,
-          imageOffsetX: 0,
-          imageOffsetY: 0,
           fallbackLabel: poi.name.slice(0, 2).toUpperCase(),
-          label: poi.type === POIType.TOWN || hovered ? poi.name : undefined,
+          label: poi.name,
         });
+        return;
       }
-    });
+
+      if (poi.type === POIType.CAMPFIRE) {
+        drawCampfireMarker(ctx, {
+          centerX: markerCenterX,
+          centerY: markerCenterY,
+          footprint: poiSize,
+          image: poiImage,
+          hovered,
+          label: poi.name,
+          now: mapAnimNow,
+        });
+        return;
+      }
+
+      drawJobPoiMarker(ctx, {
+        centerX: markerCenterX,
+        centerY: markerCenterY,
+        footprint: poiSize,
+        poiType: poi.type,
+        image: poiImage,
+        hovered,
+        fallbackLabel: poi.name.slice(0, 2).toUpperCase(),
+        label: poi.name,
+        now: worldNow,
+      });
+    };
+
+    poisData
+      .filter(poi => poi.type === POIType.TOWN || poi.type === POIType.CAMPFIRE)
+      .forEach(drawPoiMarker);
 
     worldDungeons.forEach(dungeon => {
       const dungeonSize = tileSize * 1.45;
@@ -1051,6 +1490,10 @@ export default function MapRenderer({
         ctx.restore();
       }
     });
+
+    poisData
+      .filter(poi => poi.type !== POIType.TOWN && poi.type !== POIType.CAMPFIRE)
+      .forEach(drawPoiMarker);
 
     visibleQuestNpcs.forEach(npc => {
       const npcScreenX = npc.x * tileSize - cameraX;
@@ -1105,7 +1548,6 @@ export default function MapRenderer({
           fallbackColor: '#ffd700',
           label: currentUser.username,
           labelColor: '#ffffff',
-          glowColor: CHARACTER_GLOWS.player,
         });
       }
     }
@@ -1133,11 +1575,6 @@ export default function MapRenderer({
           fallbackColor: '#0e7490',
           label: player.username,
           labelColor: partyMember ? '#a7f3d0' : friend ? '#bfdbfe' : '#ffffff',
-          glowColor: partyMember
-            ? 'rgba(52, 211, 153, 0.7)'
-            : friend
-              ? 'rgba(125, 211, 252, 0.66)'
-              : CHARACTER_GLOWS.player,
         });
       }
     });
@@ -1176,13 +1613,12 @@ export default function MapRenderer({
           label: isWorldBoss || hoveredEnemy?.id === enemy.id ? enemy.name : undefined,
           labelColor: '#fecaca',
           hovered: hoveredEnemy?.id === enemy.id,
-          glowColor: isWorldBoss ? 'rgba(248, 113, 113, 0.86)' : CHARACTER_GLOWS.enemy,
         });
       }
     });
 
     ctx.shadowBlur = 0;
-  }, [cameraX, cameraY, actualWidth, actualHeight, hoveredPOI, hoveredEnemy, hoveredDungeon, hoveredQuestNpc, cursorScreen, currentUser, renderedUserPosition, pendingTravel, otherPlayers, assetsLoaded, worldEnemies, worldDungeons, visibleQuestNpcs, poisData, scaledTileSize, effectiveZoom, worldNow]);
+  }, [cameraX, cameraY, actualWidth, actualHeight, hoveredPOI, hoveredEnemy, hoveredDungeon, hoveredQuestNpc, cursorScreen, currentUser, renderedUserPosition, pendingTravel, otherPlayers, assetsLoaded, worldEnemies, worldDungeons, visibleQuestNpcs, poisData, scaledTileSize, effectiveZoom, worldNow, mapAnimNow]);
 
   // Mouse drag handlers
   const handleMouseDown = (e: React.MouseEvent) => {

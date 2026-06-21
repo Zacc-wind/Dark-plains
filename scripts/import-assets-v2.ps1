@@ -231,6 +231,19 @@ foreach ($asset in $largeAssets) {
   Copy-Asset $asset (Join-Path $publicAssets $targetName)
 }
 
+$runBackgroundJpg = Join-Path $sourceRoot 'run-bg.jpg'
+$runBackgroundPng = Join-Path $sourceRoot 'run-bg.png'
+$runBackgroundLegacy = Join-Path $sourceRoot 'run-bakground.png'
+if (Test-Path $runBackgroundJpg) {
+  $runBackgroundTargetJpg = Join-Path $publicAssets 'run-background.jpg'
+  Copy-Asset 'run-bg.jpg' $runBackgroundTargetJpg
+  Copy-Item -LiteralPath $runBackgroundTargetJpg -Destination (Join-Path $publicAssets 'run-background.png') -Force
+} elseif (Test-Path $runBackgroundPng) {
+  Copy-Asset 'run-bg.png' (Join-Path $publicAssets 'run-background.png')
+} elseif (Test-Path $runBackgroundLegacy) {
+  Copy-Asset 'run-bakground.png' (Join-Path $publicAssets 'run-background.png')
+}
+
 $musicAssets = @(
   @{ source = 'background-track\Goblet Bounce.mp3'; target = 'audio\music\goblet-bounce.mp3' },
   @{ source = 'background-track\Goblet Bounce v.2.mp3'; target = 'audio\music\goblet-bounce-v2.mp3' },

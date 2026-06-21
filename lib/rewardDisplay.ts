@@ -73,8 +73,7 @@ function getInventoryChip(item: InventoryItem): RewardChip {
 }
 
 export function buildJobRewardChips(
-  reward: JobRewardPreview,
-  options?: { travelLabel?: string }
+  reward: JobRewardPreview
 ): RewardChip[] {
   const chips: RewardChip[] = [];
 
@@ -146,17 +145,6 @@ export function buildJobRewardChips(
       meta: 'Warband unit',
       description: 'A guaranteed minion recruit joins your warband.',
       rarityClass: getMinionTierRarityClass(reward.minionTier),
-    });
-  }
-
-  if (options?.travelLabel) {
-    chips.push({
-      id: 'travel',
-      iconPath: ASSET_PATHS.icons.speed,
-      quantity: `+${options.travelLabel}`,
-      title: 'Route Time',
-      meta: 'Travel',
-      description: 'Extra time walking to this work site before the job starts.',
     });
   }
 

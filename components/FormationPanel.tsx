@@ -63,8 +63,8 @@ function getFormationSelectionIssue(
 }
 
 export default function FormationPanel({
-  enemyName,
-  enemySubtitle,
+  enemyName: _enemyName,
+  enemySubtitle: _enemySubtitle,
   commanderName,
   commanderModel,
   stacks,
@@ -89,26 +89,6 @@ export default function FormationPanel({
   );
   const formationIssue = getFormationSelectionIssue(formation, placedStacks, maxFielded);
   const equippedSpellIds = spellIds.length === 4 ? spellIds : [...spellIds, 'arcane-bolt', 'sanctified-mend', 'ember-dart'].slice(0, 4);
-  const commanderPlaced = isFormationCellAllowed(formation[COMMANDER_FORMATION_KEY]);
-  const selectedStack = selectedToken && selectedToken !== COMMANDER_FORMATION_KEY
-    ? stacks.find(stack => stack.id === selectedToken)
-    : undefined;
-  const selectedTemplate = selectedStack ? getMinionTemplate(selectedStack.templateId) : undefined;
-  const selectedLabel = selectedToken === COMMANDER_FORMATION_KEY
-    ? commanderName
-    : selectedTemplate?.name || 'No unit selected';
-  const selectedMeta = selectedToken === COMMANDER_FORMATION_KEY
-    ? 'Commander'
-    : selectedTemplate
-      ? `${MINION_CLASS_LABELS[selectedTemplate.class]} - Tier ${getTierRoman(selectedTemplate.tier)}`
-      : 'Pick from warband';
-  const selectedAction = !selectedToken
-    ? 'Select a unit on the left, then choose a deployment slot.'
-    : selectedToken === COMMANDER_FORMATION_KEY
-      ? 'Click a slot to reposition the commander.'
-      : isFormationCellAllowed(formation[selectedToken])
-        ? 'Click another slot to swap, or send this unit to bench.'
-        : 'Click an open slot to field this unit.';
 
   const occupiedByCell = useMemo(() => {
     const map = new Map<string, { token: SelectedToken; stack?: MinionStack }>();
@@ -196,12 +176,12 @@ export default function FormationPanel({
         <aside className="formation-warband-dock ui-card rounded border">
           <div className="formation-warband-dock-head">
             <div>
-              <div className="arcane-label">Warband</div>
-              <div className="formation-warband-subcopy ui-faint text-[10px] font-bold">
+              <h4 className="formation-warband-title fantasy-heading">Warband</h4>
+              <div className="formation-warband-subcopy">
                 Field {placedStacks.length}/{maxFielded} · Bench {benchedStacks.length}
               </div>
             </div>
-            <span className="ui-pill rounded border px-2 py-0.5 text-[10px] font-black">
+            <span className="ui-pill rounded border px-2 py-0.5 text-[11px] font-black">
               {stacks.length} total
             </span>
           </div>
@@ -218,7 +198,7 @@ export default function FormationPanel({
                   size="dock"
                 />
                 <span className="formation-warband-copy">
-                  <span className="formation-warband-label">{shortWarbandLabel(commanderName, 18)}</span>
+                  <span className="formation-warband-label">{shortWarbandLabel(commanderName, 26)}</span>
                   <span className="formation-warband-meta">
                     <span className="formation-warband-role ui-faint">Commander</span>
                     <span className="formation-warband-status formation-warband-status-field">On field</span>
@@ -265,40 +245,9 @@ export default function FormationPanel({
         </aside>
 
         <section className="formation-board-panel">
-          <div className="formation-board-head">
-            <p className="formation-board-eyebrow arcane-label">Deployment</p>
-            <h3 className="fantasy-heading formation-board-title text-lg leading-tight">
-              vs <span className="ui-value">{enemyName}</span>
-            </h3>
-            {enemySubtitle ? <p className="formation-board-subtitle ui-faint text-[11px] font-bold">{enemySubtitle}</p> : null}
-          </div>
-          <div className="formation-deploy-command rounded border">
-            <div className="formation-deploy-selected">
-              <span className="formation-deploy-selected-kicker arcane-label">Selected</span>
-              <strong className="formation-deploy-selected-name">{selectedLabel}</strong>
-              <span className="formation-deploy-selected-meta">{selectedMeta}</span>
-            </div>
-            <div className="formation-deploy-rule">
-              <span className="formation-deploy-rule-main">{selectedAction}</span>
-              <span className="formation-deploy-rule-sub">Front line holds pressure. Rear line keeps safer support angles.</span>
-            </div>
-            <div className="formation-deploy-counts" aria-label="Formation status">
-              <span>
-                <strong>{placedStacks.length}</strong>
-                <small>fielded</small>
-              </span>
-              <span>
-                <strong>{benchedStacks.length}</strong>
-                <small>bench</small>
-              </span>
-              <span className={commanderPlaced ? 'formation-count-good' : 'formation-count-warning'}>
-                <strong>{commanderPlaced ? 'Set' : 'Need'}</strong>
-                <small>king</small>
-              </span>
-            </div>
-          </div>
           <div className="formation-battle-board-shell formation-battle-board-shell-with-bench">
             <div className="formation-deploy-backdrop" aria-hidden="true" />
+            <div className="formation-deploy-cluster">
             <button
               type="button"
               className={`formation-bench-zone rounded border ${benchDragActive ? 'formation-bench-zone-active' : ''}`}
@@ -410,9 +359,7 @@ export default function FormationPanel({
                           <span className="formation-tier-badge">{getTierRoman(template.tier)}</span>
                         </span>
                       ) : (
-                        <span className={`formation-slot-marker ${selectedToken ? 'formation-token-ready' : ''}`}>
-                          <span className="formation-open-number">{index + 1}</span>
-                        </span>
+                        <span className={`formation-slot-marker ${selectedToken ? 'formation-token-ready' : ''}`} />
                       )}
                     </button>
                   </FormationHoverTip>
@@ -421,16 +368,16 @@ export default function FormationPanel({
               </div>
             </div>
             </div>
+            </div>
           </div>
         </section>
 
         <aside className="formation-spells-dock">
           <div className="formation-spells-head">
-            <p className="formation-spells-eyebrow arcane-label">King Spells</p>
-            <div className="formation-spells-head-row">
-              <h4 className="formation-spells-title fantasy-heading">Loadout</h4>
-              <span className="formation-spell-slot-indicator">Slot {selectedSpellSlot + 1}</span>
-            </div>
+            <h4 className="formation-spells-title fantasy-heading">King Spells</h4>
+            <p className="formation-spells-subtitle">
+              Loadout slot {selectedSpellSlot + 1} · choose from spellbook to swap
+            </p>
           </div>
 
           <div className="formation-spells-stage">
@@ -451,18 +398,17 @@ export default function FormationPanel({
                       <button
                         type="button"
                         aria-pressed={selectedSpellSlot === index}
+                        aria-label={`${spell.name}, slot ${index + 1}`}
                         onClick={() => setSelectedSpellSlot(index)}
                         className={`formation-spell-slot ${getFormationSpellRarityClass(spell.rarity)} ${selectedSpellSlot === index ? 'formation-spell-slot-selected' : ''}`}
                       >
-                        <span className="formation-spell-slot-index" aria-hidden="true">{index + 1}</span>
                         <span className="formation-spell-slot-art">
-                          <Image src={getSpellIconPath(spell)} alt="" width={80} height={80} className="formation-spell-slot-icon object-contain" unoptimized />
+                          <Image src={getSpellIconPath(spell)} alt="" width={104} height={104} className="formation-spell-slot-icon object-contain" unoptimized />
                         </span>
                         <span className="formation-spell-slot-copy">
                           <span className="formation-spell-slot-name">{spell.name}</span>
                           <span className="formation-spell-slot-meta">
-                            <span className="formation-spell-slot-label">M{spell.cost}</span>
-                            <span className="formation-spell-slot-target">{getSpellTargetLabel(spell.target)}</span>
+                            Mana {spell.cost} · {getSpellTargetLabel(spell.target)}
                           </span>
                         </span>
                       </button>
@@ -470,10 +416,6 @@ export default function FormationPanel({
                   );
                 })}
               </div>
-
-              <p className="formation-spell-hint ui-faint font-bold">
-                Tap a slot, then pick a spell below to swap.
-              </p>
 
               <p className="formation-spells-section-label formation-spells-section-label-book">Spellbook</p>
               <div className="formation-known-spells">
@@ -490,11 +432,11 @@ export default function FormationPanel({
                       className={`formation-known-spell ${getFormationSpellRarityClass(spell.rarity)}`}
                     >
                       <span className="formation-known-spell-art">
-                        <Image src={getSpellIconPath(spell)} alt="" width={72} height={72} className="formation-known-spell-icon object-contain" unoptimized />
+                        <Image src={getSpellIconPath(spell)} alt="" width={88} height={88} className="formation-known-spell-icon object-contain" unoptimized />
                       </span>
                       <span className="formation-known-spell-copy">
                         <span className="formation-known-spell-name">{spell.name}</span>
-                        <span className="formation-known-spell-meta">M{spell.cost} · {getSpellTargetLabel(spell.target)}</span>
+                        <span className="formation-known-spell-meta">Mana {spell.cost} · {getSpellTargetLabel(spell.target)}</span>
                       </span>
                     </button>
                   </FormationHoverTip>
@@ -581,7 +523,7 @@ function WarbandStackCard({
           size="dock"
         />
         <span className="formation-warband-copy">
-          <span className="formation-warband-label">{shortWarbandLabel(template.name, 18)}</span>
+          <span className="formation-warband-label">{shortWarbandLabel(template.name, 26)}</span>
           <span className="formation-warband-meta">
             <span className="formation-warband-role ui-faint">
               {MINION_CLASS_LABELS[template.class]} · Tier {getTierRoman(template.tier)}
@@ -779,7 +721,7 @@ function FormationUnitPortrait({
   variant?: 'minion' | 'commander';
   size?: 'dock' | 'formation';
 }) {
-  const dimension = size === 'formation' ? 80 : 44;
+  const dimension = size === 'formation' ? 99 : 48;
   const boxClass = size === 'formation' ? 'formation-portrait-formation' : 'formation-portrait-dock';
 
   return (

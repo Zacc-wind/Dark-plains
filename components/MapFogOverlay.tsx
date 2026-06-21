@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from 'react';
 import * as THREE from 'three';
-import { MAP_FOG_EVENT_NAME, type MapFogState } from '@/lib/mapFogEvents';
+import { MAP_FOG_EVENT_NAME, MAP_FOG_MAX_CAMPFIRES, type MapFogState } from '@/lib/mapFogEvents';
 
 function setCameraSize(camera: THREE.OrthographicCamera, width: number, height: number): void {
   camera.left = -width / 2;
@@ -29,6 +29,7 @@ export default function MapFogOverlay() {
     let lastTime = performance.now();
     let pointerTarget: { x: number; y: number } | null = null;
     let playerTarget: { x: number; y: number } | null = null;
+    let campfireTargets: Array<{ x: number; y: number }> = [];
     let zoomTarget = 1;
     let pointerPrimed = false;
     let playerPrimed = false;
@@ -36,6 +37,7 @@ export default function MapFogOverlay() {
     let playerStrength = 0;
     const pointerLight = new THREE.Vector2(0, 0);
     const playerLight = new THREE.Vector2(0, 0);
+    const campfireLights = Array.from({ length: MAP_FOG_MAX_CAMPFIRES }, () => new THREE.Vector2(0, 0));
 
     const scene = new THREE.Scene();
     const camera = new THREE.OrthographicCamera(0, 0, 0, 0, -10, 10);
@@ -61,6 +63,8 @@ export default function MapFogOverlay() {
       uHasPlayer: { value: 0 },
       uPointerStrength: { value: 0 },
       uPlayerStrength: { value: 0 },
+      uCampfires: { value: campfireLights },
+      uCampfireCount: { value: 0 },
       uTime: { value: 0 },
       uZoom: { value: 1 },
     };
@@ -90,6 +94,8 @@ export default function MapFogOverlay() {
         uniform int uHasPlayer;
         uniform float uPointerStrength;
         uniform float uPlayerStrength;
+        uniform vec2 uCampfires[8];
+        uniform int uCampfireCount;
         uniform float uTime;
         uniform float uZoom;
 
@@ -101,6 +107,7 @@ export default function MapFogOverlay() {
         void main() {
           float veil = 0.46;
           float reveal = 0.0;
+          float warmGlow = 0.0;
           float zoomGlow = clamp(uZoom / 1.75, 0.78, 1.48);
 
           if (uHasPointer == 1) {
@@ -111,10 +118,19 @@ export default function MapFogOverlay() {
             reveal += radial(uPlayer, 60.0 * zoomGlow, 76.0 * zoomGlow) * 0.24 * uPlayerStrength;
           }
 
+          for (int i = 0; i < 8; i++) {
+            if (i >= uCampfireCount) break;
+            float pulse = 0.9 + 0.1 * sin(uTime * 1.4 + float(i) * 1.9);
+            float spot = radial(uCampfires[i], 62.0 * zoomGlow, 88.0 * zoomGlow);
+            reveal += spot * 0.18 * pulse;
+            warmGlow += spot * 0.24 * pulse;
+          }
+
           float grain = sin((vWorld.x + uTime * 11.0) * 0.018) * sin((vWorld.y - uTime * 7.0) * 0.022);
           float edge = smoothstep(0.48, 1.0, distance(vWorld / max(uResolution.x, uResolution.y), vec2(0.0)));
           float alpha = clamp(veil + edge * 0.08 + grain * 0.018 - reveal, 0.04, 0.56);
           vec3 fogColor = mix(vec3(0.015, 0.018, 0.018), vec3(0.0, 0.0, 0.0), 0.62);
+          fogColor = mix(fogColor, vec3(0.22, 0.09, 0.025), clamp(warmGlow, 0.0, 0.42));
 
           gl_FragColor = vec4(fogColor, alpha);
         }
@@ -129,6 +145,7 @@ export default function MapFogOverlay() {
       if (!detail) return;
 
       playerTarget = detail.player;
+      campfireTargets = Array.isArray(detail.campfires) ? detail.campfires.slice(0, MAP_FOG_MAX_CAMPFIRES) : [];
       zoomTarget = Number.isFinite(detail.zoom) ? detail.zoom : 1;
       if (detail.pointer) {
         pointerTarget = detail.pointer;
@@ -187,6 +204,16 @@ export default function MapFogOverlay() {
         playerStrength = 0;
         uniforms.uHasPlayer.value = 0;
         uniforms.uPlayerStrength.value = 0;
+      }
+
+      uniforms.uCampfireCount.value = campfireTargets.length;
+      for (let index = 0; index < MAP_FOG_MAX_CAMPFIRES; index += 1) {
+        const target = campfireTargets[index];
+        if (!target) {
+          campfireLights[index].set(0, 0);
+          continue;
+        }
+        campfireLights[index].copy(screenToWorld(target, width, height));
       }
 
       renderer.render(scene, camera);

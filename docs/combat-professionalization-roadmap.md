@@ -7,6 +7,15 @@ Goal: make battles feel like a polished dark fantasy tactics game: readable like
 - Deployment and database integration are intentionally out of scope for this audit.
 - Remaining combat details are mostly second-pass polish: define/tune duration targets, add AI debug tooling, and add optional ambient/low-health ambience.
 
+## Status Audit - 2026-06-19
+- Combat board is intentionally back at 10x7 after the wider grid made terrain/spawn composition feel worse.
+- The bulky left turn/action box is removed; player actions now live in a compact board overlay that can collapse, with spell cancel shown as a larger board-level control.
+- Enemy movement consumes its action and recent movement logs are prioritized for presentation so enemy commander movement should animate instead of being hidden by old spell presentation.
+- Mud movement has a hard one-step movement lock when entering, leaving, or standing in mud, while ranged attack range remains unchanged.
+- Turn banners now queue behind active or pending commander spell notices instead of timing out while hidden behind the spell card.
+- Terrain hover no longer shows a black "Ground" tooltip for empty non-action cells; actionable cells still show move/attack/heal previews.
+- Current risk: enemy commander spell-to-player-turn sequencing needs one focused real-battle QA pass, because the queue fix is code/build verified but not yet reproduced through a natural enemy spell turn.
+
 ## Current Combat Baseline
 - 10x7 square tactical board.
 - One commander plus up to 7 fielded minions.
@@ -36,6 +45,13 @@ Goal: make battles feel like a polished dark fantasy tactics game: readable like
 - [x] Add retaliation damage preview, including adjacent ranged attackers being countered by melee defenders.
 - [x] Add colorblind-safe combat indicators with patterned move, damage, support, threat, and health cues.
 - [x] Slow enemy action handoff so NPC movement and commander spells remain readable across all combat speeds.
+- [x] Revert the experimental 13/14-wide board back to the stable 10x7 tactical layout.
+- [x] Move combat action controls onto the board as a compact collapsible overlay.
+- [x] Add a larger bottom-board cancel control for selected commander spells.
+- [x] Lock mud movement to one grid step without reducing ranged attack reach.
+- [x] Visual QA the new board overlay controls in a player turn at the stable 10x7 board size.
+- [x] Tune turn-banner timing so enemy turn/player turn notices queue behind spell notices instead of stacking or expiring hidden.
+- [ ] Visual QA commander spell turns and enemy turns through a full fight with enemy spell casts.
 
 ## Design Pillars
 - Readable first: every unit, target, turn, and danger zone must be obvious at a glance.
@@ -72,7 +88,7 @@ Goal: make battles feel like a polished dark fantasy tactics game: readable like
 - [x] Retire blocker, stone, water, bridge, and cover terrain from active maps.
 - [x] `holyGround`: priests heal more when standing on or healing into consecrated tiles.
 - [ ] Add undead/dark holy-ground damage over time after enemy factions are modeled.
-- [x] Show terrain tooltip on hover with one short rules line.
+- [x] Show special terrain/action hover feedback with one short rules line, while suppressing plain ground-only tooltips.
 
 ## Phase 4: Action UX
 - [x] Add selected unit panel with portrait, stats, role, range, movement, and current status.
@@ -170,7 +186,7 @@ Goal: make battles feel like a polished dark fantasy tactics game: readable like
 - `public/assets/combat/effect-strike.png`: 256x256 transparent red slash burst.
 - `public/assets/combat/effect-heal.png`: 256x256 transparent holy healing pulse.
 - `public/assets/combat/effect-arcane.png`: 256x256 transparent blue-violet spell burst.
-- `public/assets/spells/*.png`: 96x96 transparent spell icons for the 20-spell library.
+- `public/assets/spells/*.png`: 96x96 transparent spell icons for the 20-spell library. Current technical coverage is complete through `lib/spellAssets.ts`; `thorn-ward` intentionally reuses `warding-prayer.png`, but a unique Thorn Ward icon would improve polish.
 - `public/assets/combat/turn-player.png` and `turn-enemy.png`: small initiative-ring accents if we replace CSS circles with art.
 
 ## Sora Prompt Prefix

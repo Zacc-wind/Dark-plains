@@ -1,20 +1,13 @@
 'use client';
 
-import { type CSSProperties, type DragEvent, useEffect, useRef, useState } from 'react';
+import { type CSSProperties, type DragEvent, type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { getPlayerModelPath } from '@/lib/assetLoader';
 import { BATTLE_SPELLS, type BattleSpell } from '@/lib/battle';
-import {
-  CombatIndicatorMode,
-  COMBAT_SPEED_OPTIONS,
-  CombatSpeed,
-  readCombatIndicatorMode,
-  readCombatSpeedSetting,
-  writeCombatIndicatorMode,
-  writeCombatSpeedSetting,
-} from '@/lib/combatSettings';
 import { DailyRunModal, getSavedDailyRunSummary } from './RoguelikeRunModal';
+import GameSettingsPanel from './GameSettingsPanel';
 import {
   ActivityEntry,
   AllocatableStat,
@@ -89,16 +82,11 @@ import { emitFxEvent } from '@/lib/fxEvents';
 import {
   getMusicVolumePercent,
   isMusicMuted,
-  setMusicMuted,
-  setMusicVolumePercent,
 } from '@/lib/backgroundMusic';
-import { readGameJson, writeGameJson } from '@/lib/gameStore';
 import {
-  getGameSoundVolumePercent,
   isGameSoundId,
   playGameSound,
   preloadGameSounds,
-  setGameSoundVolumePercent,
 } from '@/lib/sound';
 import { getSpellIconPath } from '@/lib/spellAssets';
 
@@ -112,6 +100,7 @@ type PanelButtonConfig = {
 
 interface GameCommandCenterProps {
   onOpenAvatar: () => void;
+  showRandomRun?: boolean;
 }
 
 const panelButtons: PanelButtonConfig[] = [
@@ -144,12 +133,11 @@ const statIconPaths: Record<string, string> = {
   Spell: '/assets/icons/magic.png',
   Health: '/assets/icons/health.png',
   Gold: '/assets/icons/gold.png',
+  Gems: '/assets/icons/rare-gem.png',
   Resources: '/assets/icons/gold.png',
   Minions: '/assets/icons/attack.png',
   XP: '/assets/icons/xp.png',
 };
-
-const RUN_TUTORIAL_SETTING_KEY = 'wizardy_random_run_tutorial_enabled';
 
 function getEquipmentIconPath(item: Pick<Equipment, 'slot' | 'rarity'>): string {
   return `${EQUIPMENT_ICON_BASE}/${item.slot}-${item.rarity}.png`;
@@ -180,16 +168,189 @@ function getInventoryIconPath(item: InventoryItem): string {
   return item.imagePath || getInventoryItemDefinition(item.id)?.imagePath || statIconPaths[item.name] || '/assets/icons/loot-chest.png';
 }
 
-function getEquipmentStat(item: Equipment, stat: 'armyPower' | 'defensivePower' | 'morale' | 'spellPower' | 'maxHealth'): number {
-  const socketValue = (item.socketBonuses || [])
-    .filter(bonus => bonus.stat === stat)
-    .reduce((total, bonus) => total + getEquipmentSocketBonusValue(bonus), 0);
+type EquipmentStatKey = 'armyPower' | 'defensivePower' | 'morale' | 'spellPower' | 'maxHealth';
 
-  if (stat === 'armyPower') return (item.stats.armyPower ?? item.stats.attack ?? 0) + socketValue;
-  if (stat === 'defensivePower') return (item.stats.defensivePower ?? item.stats.defense ?? 0) + socketValue;
-  if (stat === 'morale') return (item.stats.morale ?? item.stats.speed ?? 0) + socketValue;
-  if (stat === 'spellPower') return (item.stats.spellPower ?? 0) + socketValue;
-  return (item.stats.maxHealth ?? 0) + socketValue;
+const EQUIPMENT_STAT_LABELS: Record<EquipmentStatKey, string> = {
+  armyPower: 'ATK',
+  defensivePower: 'DEF',
+  morale: 'SPD',
+  spellPower: 'MAG',
+  maxHealth: 'HP',
+};
+
+const EQUIPMENT_STAT_KEYS: EquipmentStatKey[] = [
+  'armyPower',
+  'defensivePower',
+  'morale',
+  'spellPower',
+  'maxHealth',
+];
+
+function finiteStat(value: number): number {
+  return Number.isFinite(value) ? value : 0;
+}
+
+function getEquipmentStat(item: Equipment, stat: EquipmentStatKey): number {
+  const socketValue = finiteStat((item.socketBonuses || [])
+    .filter(bonus => bonus.stat === stat)
+    .reduce((total, bonus) => total + getEquipmentSocketBonusValue(bonus), 0));
+
+  if (stat === 'armyPower') return finiteStat((item.stats.armyPower ?? item.stats.attack ?? 0) + socketValue);
+  if (stat === 'defensivePower') return finiteStat((item.stats.defensivePower ?? item.stats.defense ?? 0) + socketValue);
+  if (stat === 'morale') return finiteStat((item.stats.morale ?? item.stats.speed ?? 0) + socketValue);
+  if (stat === 'spellPower') return finiteStat((item.stats.spellPower ?? 0) + socketValue);
+  return finiteStat((item.stats.maxHealth ?? 0) + socketValue);
+}
+
+function getEquipmentStatRows(item: Equipment, compareEquipped?: Equipment) {
+  return EQUIPMENT_STAT_KEYS.map(key => {
+    const value = getEquipmentStat(item, key);
+    const equippedValue = compareEquipped ? getEquipmentStat(compareEquipped, key) : 0;
+    return {
+      key,
+      label: EQUIPMENT_STAT_LABELS[key],
+      value,
+      delta: compareEquipped ? value - equippedValue : 0,
+    };
+  }).filter(row => row.value > 0 || (compareEquipped && row.delta !== 0));
+}
+
+function EquipmentGearPopover({
+  item,
+  compareEquipped,
+  actionHint = 'Click to equip this piece.',
+}: {
+  item: Equipment;
+  compareEquipped?: Equipment;
+  actionHint?: string;
+}) {
+  const statRows = getEquipmentStatRows(item, compareEquipped);
+
+  return (
+    <div className="run-gear-tip">
+      <div className={`run-gear-tip-title ${rarityClasses(item.rarity)}`}>{item.name}</div>
+      <div className="run-gear-tip-meta">
+        {item.slot.replace('-', ' ')} · {item.rarity}
+      </div>
+
+      {statRows.length > 0 ? (
+        <div className="run-gear-tip-stats" role="list">
+          {statRows.map(row => (
+            <div key={row.key} className="run-gear-tip-stat" role="listitem">
+              <span className="run-gear-tip-stat-label">{row.label}</span>
+              <span className="run-gear-tip-stat-value">+{row.value}</span>
+              {compareEquipped && row.delta !== 0 && (
+                <span className={`run-gear-tip-stat-delta ${row.delta > 0 ? 'run-gear-tip-stat-delta-up' : 'run-gear-tip-stat-delta-down'}`}>
+                  {row.delta > 0 ? `+${row.delta}` : row.delta}
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="run-gear-tip-copy">No stat bonuses.</div>
+      )}
+
+      {compareEquipped && (
+        <div className="run-gear-tip-compare">
+          <span className="run-gear-tip-compare-label">Compared to equipped</span>
+          <span className={`run-gear-tip-compare-name ${rarityClasses(compareEquipped.rarity)}`}>
+            {compareEquipped.name}
+          </span>
+        </div>
+      )}
+
+      {actionHint && <div className="run-gear-tip-hint">{actionHint}</div>}
+    </div>
+  );
+}
+
+function CommandGearHoverTip({
+  children,
+  popover,
+}: {
+  children: ReactNode;
+  popover: ReactNode;
+}) {
+  const anchorRef = useRef<HTMLDivElement>(null);
+  const hideTimer = useRef<number | null>(null);
+  const [open, setOpen] = useState(false);
+  const [side, setSide] = useState<'left' | 'right'>('right');
+  const [coords, setCoords] = useState({ top: 0, left: 0 });
+
+  const clearHideTimer = () => {
+    if (hideTimer.current) {
+      window.clearTimeout(hideTimer.current);
+      hideTimer.current = null;
+    }
+  };
+
+  const updatePosition = useCallback(() => {
+    const anchor = anchorRef.current;
+    if (!anchor) return;
+
+    const rect = anchor.getBoundingClientRect();
+    const gap = 12;
+    const popoverWidth = 296;
+    const roomRight = window.innerWidth - rect.right;
+    const roomLeft = rect.left;
+    const nextSide: 'left' | 'right' = roomRight >= popoverWidth + gap || roomRight >= roomLeft
+      ? 'right'
+      : 'left';
+
+    setSide(nextSide);
+    setCoords({
+      top: rect.top + rect.height / 2,
+      left: nextSide === 'right' ? rect.right + gap : rect.left - gap,
+    });
+  }, []);
+
+  const show = () => {
+    clearHideTimer();
+    updatePosition();
+    setOpen(true);
+  };
+
+  const scheduleHide = () => {
+    clearHideTimer();
+    hideTimer.current = window.setTimeout(() => setOpen(false), 80);
+  };
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    const handle = () => updatePosition();
+    window.addEventListener('scroll', handle, true);
+    window.addEventListener('resize', handle);
+    return () => {
+      window.removeEventListener('scroll', handle, true);
+      window.removeEventListener('resize', handle);
+    };
+  }, [open, updatePosition]);
+
+  useEffect(() => () => clearHideTimer(), []);
+
+  return (
+    <div
+      ref={anchorRef}
+      className="command-gear-hover-anchor"
+      onMouseEnter={show}
+      onMouseLeave={scheduleHide}
+      onFocus={show}
+      onBlur={scheduleHide}
+    >
+      {children}
+      {open && typeof document !== 'undefined' && createPortal(
+        <div
+          className={`run-roster-hover-popover run-roster-hover-popover-${side} run-gear-hover-popover command-gear-hover-popover rounded border`}
+          role="tooltip"
+          style={{ top: coords.top, left: coords.left }}
+        >
+          {popover}
+        </div>,
+        document.body,
+      )}
+    </div>
+  );
 }
 
 function formatTime(ms: number): string {
@@ -286,7 +447,7 @@ function activityToCompletionRewards(activity: ActivityEntry): CompletionRewardL
   return rewards.length > 0 ? rewards : [{ label: 'Result', value: 'Recorded', tone: 'neutral' }];
 }
 
-export default function GameCommandCenter({ onOpenAvatar }: GameCommandCenterProps) {
+export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false }: GameCommandCenterProps) {
   const [user, setUser] = useState(getCurrentUser());
   const [activePanel, setActivePanel] = useState<PanelId>('overview');
   const [isCommandOpen, setIsCommandOpen] = useState(false);
@@ -303,13 +464,7 @@ export default function GameCommandCenter({ onOpenAvatar }: GameCommandCenterPro
   const [chatChannel, setChatChannel] = useState<SocialChatChannel>('global');
   const [chatDraft, setChatDraft] = useState('');
   const [isChatDockOpen, setIsChatDockOpen] = useState(false);
-  const [isMapActionRailCompact, setIsMapActionRailCompact] = useState(false);
-  const [effectsVolume, setEffectsVolume] = useState(() => getGameSoundVolumePercent());
-  const [musicVolume, setMusicVolume] = useState(() => getMusicVolumePercent());
-  const [musicMuted, setMusicMutedState] = useState(() => isMusicMuted());
-  const [combatSpeed, setCombatSpeed] = useState<CombatSpeed>(() => readCombatSpeedSetting());
-  const [combatIndicatorMode, setCombatIndicatorMode] = useState<CombatIndicatorMode>(() => readCombatIndicatorMode());
-  const [runTutorialEnabled, setRunTutorialEnabled] = useState(() => readGameJson(RUN_TUTORIAL_SETTING_KEY, false));
+  const [isMapActionRailCompact, setIsMapActionRailCompact] = useState(true);
   const lastActivityNoticeId = useRef<string | null>(null);
   const router = useRouter();
 
@@ -427,9 +582,10 @@ export default function GameCommandCenter({ onOpenAvatar }: GameCommandCenterPro
   }, []);
 
   useEffect(() => {
+    if (!showRandomRun) return;
     document.body.classList.toggle('daily-run-open', showDailyRun);
     return () => document.body.classList.remove('daily-run-open');
-  }, [showDailyRun]);
+  }, [showDailyRun, showRandomRun]);
 
   useEffect(() => {
     document.body.classList.toggle('command-center-open', isCommandOpen);
@@ -749,55 +905,9 @@ export default function GameCommandCenter({ onOpenAvatar }: GameCommandCenterPro
     setUser(getCurrentUser());
   };
 
-  const handleEffectsVolumeChange = (value: number) => {
-    setGameSoundVolumePercent(value);
-    setEffectsVolume(getGameSoundVolumePercent());
-  };
-
-  const handleMusicVolumeChange = (value: number) => {
-    setMusicVolumePercent(value);
-    setMusicVolume(getMusicVolumePercent());
-    setMusicMutedState(isMusicMuted());
-  };
-
-  const handleMusicMutedToggle = () => {
-    const nextMuted = !musicMuted;
-    setMusicMuted(nextMuted);
-    setMusicMutedState(isMusicMuted());
-    setMusicVolume(getMusicVolumePercent());
-    playGameSound('ui.toggle', { throttleMs: 100 });
-  };
-
-  const handleCombatSpeedChange = (speed: CombatSpeed) => {
-    setCombatSpeed(speed);
-    writeCombatSpeedSetting(speed);
-    playGameSound('ui.toggle', { throttleMs: 100 });
-  };
-
-  const handleCombatIndicatorModeChange = (mode: CombatIndicatorMode) => {
-    setCombatIndicatorMode(mode);
-    writeCombatIndicatorMode(mode);
-    playGameSound('ui.toggle', { throttleMs: 100 });
-  };
-
-  const handleRunTutorialToggle = () => {
-    const nextEnabled = !runTutorialEnabled;
-    setRunTutorialEnabled(nextEnabled);
-    writeGameJson(RUN_TUTORIAL_SETTING_KEY, nextEnabled);
-    playGameSound('ui.toggle', { throttleMs: 100 });
-  };
-
   const panelTitle = panelButtons.find(button => button.id === activePanel)?.label || 'Overview';
 
   const openPanel = (panelId: PanelId) => {
-    if (panelId === 'settings') {
-      setEffectsVolume(getGameSoundVolumePercent());
-      setMusicVolume(getMusicVolumePercent());
-      setMusicMutedState(isMusicMuted());
-      setCombatSpeed(readCombatSpeedSetting());
-      setCombatIndicatorMode(readCombatIndicatorMode());
-      setRunTutorialEnabled(readGameJson(RUN_TUTORIAL_SETTING_KEY, false));
-    }
     setActivePanel(panelId);
     if (secondaryPanelButtons.some(button => button.id === panelId)) setIsSecondaryNavOpen(true);
     setIsCommandOpen(true);
@@ -813,7 +923,7 @@ export default function GameCommandCenter({ onOpenAvatar }: GameCommandCenterPro
       case 'jobs': return `${activeJobs.length}/4`;
       case 'quests': return '';
       case 'social': return String(acceptedFriends.length);
-      case 'settings': return musicMuted ? 'Muted' : `${musicVolume}%`;
+      case 'settings': return isMusicMuted() ? 'Muted' : `${getMusicVolumePercent()}%`;
       case 'runs': return savedDailyRun ? 'Resume' : 'Open';
       case 'leaderboards': return '';
       case 'history': return `${activityLog.length}`;
@@ -823,7 +933,7 @@ export default function GameCommandCenter({ onOpenAvatar }: GameCommandCenterPro
 
   return (
     <>
-      <header className="game-hud fixed left-0 right-0 top-0 z-30 min-h-[4.75rem] text-zinc-100">
+      <header className="game-hud fixed left-0 right-0 top-0 z-30 min-h-[5.35rem] text-zinc-100">
         <div className="flex h-full items-center justify-between gap-3 px-4 py-2">
           <button
             onClick={onOpenAvatar}
@@ -832,10 +942,9 @@ export default function GameCommandCenter({ onOpenAvatar }: GameCommandCenterPro
             <Image
               src={getPlayerModelPath(currentModel)}
               alt="Player Avatar"
-              width={52}
-              height={52}
+              width={128}
+              height={128}
               className="hud-commander-sprite shrink-0 object-contain"
-              style={{ imageRendering: 'pixelated' }}
               unoptimized
             />
             <span className="min-w-0 text-left">
@@ -861,16 +970,22 @@ export default function GameCommandCenter({ onOpenAvatar }: GameCommandCenterPro
             </span>
           </button>
 
-          <div className="hidden lg:grid flex-1 grid-cols-3 gap-2 max-w-2xl">
-            <HudMetric label="Health" value={`${player.stats.health}/${player.stats.maxHealth}`} tone="red" />
-            <HudMetric label="Resources" value={`${player.gold} gold / ${rareGemCount} gems`} tone="gold" />
-            <HudMetric label="Minions" value={`${toRoman(fieldedMinions.length)}/${toRoman(minions.length)}`} tone="teal" />
+          <div className="hidden md:flex flex-1 items-center justify-end gap-2 max-w-3xl ml-auto">
+            <HudMetric
+              label="Health"
+              value={`${player.stats.health}/${player.stats.maxHealth}`}
+              tone="red"
+              progress={Math.round((player.stats.health / Math.max(1, player.stats.maxHealth)) * 100)}
+            />
+            <HudMetric label="Gold" value={String(player.gold)} tone="gold" />
+            <HudMetric label="Gems" value={String(rareGemCount)} tone="violet" />
+            <HudMetric label="Minions" value={`${fieldedMinions.length}/${MAX_FIELD_MINIONS}`} tone="teal" />
           </div>
         </div>
       </header>
 
-      {!isCommandOpen && !showDailyRun && renderMapActionRail()}
-      {!isCommandOpen && !showDailyRun && renderChatDock()}
+      {!isCommandOpen && (!showRandomRun || !showDailyRun) && renderMapActionRail()}
+      {!isCommandOpen && (!showRandomRun || !showDailyRun) && renderChatDock()}
 
       {renderActionChips()}
 
@@ -953,7 +1068,9 @@ export default function GameCommandCenter({ onOpenAvatar }: GameCommandCenterPro
       )}
 
       {selectedTemplateId && selectedMinion && renderMinionDetailsModal(selectedTemplateId, selectedMinion)}
-      <DailyRunModal isOpen={showDailyRun} onClose={() => setShowDailyRun(false)} />
+      {showRandomRun && (
+        <DailyRunModal isOpen={showDailyRun} onClose={() => setShowDailyRun(false)} />
+      )}
     </>
   );
 
@@ -1044,7 +1161,7 @@ export default function GameCommandCenter({ onOpenAvatar }: GameCommandCenterPro
 
     return (
       <nav
-        className={`map-action-rail map-action-rail-runs command-panel vine-frame fixed right-4 bottom-4 z-40 rounded border text-zinc-100 ${isMapActionRailCompact ? 'map-action-rail-compact' : 'map-action-rail-expanded'}`}
+        className={`map-action-rail ${showRandomRun ? 'map-action-rail-runs' : ''} command-panel vine-frame fixed right-4 bottom-4 z-40 rounded border text-zinc-100 ${isMapActionRailCompact ? 'map-action-rail-compact' : 'map-action-rail-expanded'}`}
         aria-label="World actions"
       >
         <button
@@ -1056,30 +1173,32 @@ export default function GameCommandCenter({ onOpenAvatar }: GameCommandCenterPro
         >
           {isMapActionRailCompact ? '+' : '-'}
         </button>
-        <button
-          type="button"
-          onClick={() => {
-            emitFxEvent({ type: 'daily', tone: 'blue', intensity: 0.72 });
-            setShowDailyRun(true);
-          }}
-          className={`map-action-button map-action-button-primary map-action-button-run-primary ${savedDailyRun ? 'map-action-button-resume' : ''}`}
-          title={savedDailyRun ? `Resume ${savedDailyRun.title}` : 'Start random roguelike run'}
-        >
-          <span className="map-action-icon map-action-icon-daily relative overflow-hidden">
-            <Image
-              src="/assets/icons/xp.png"
-              alt=""
-              fill
-              className="object-contain p-1"
-              style={{ imageRendering: 'pixelated' }}
-            />
-          </span>
-          <span className="map-action-copy">
-            <span className="map-action-label">{dailyLabel}</span>
-            <span className="map-action-detail">{dailyDetail}</span>
-          </span>
-          <span className="map-action-badge">{savedDailyRun ? 'Run' : `Lv ${hudRunState.runLevel}`}</span>
-        </button>
+        {showRandomRun && (
+          <button
+            type="button"
+            onClick={() => {
+              emitFxEvent({ type: 'daily', tone: 'blue', intensity: 0.72 });
+              setShowDailyRun(true);
+            }}
+            className={`map-action-button map-action-button-primary map-action-button-run-primary ${savedDailyRun ? 'map-action-button-resume' : ''}`}
+            title={savedDailyRun ? `Resume ${savedDailyRun.title}` : 'Start random roguelike run'}
+          >
+            <span className="map-action-icon map-action-icon-daily relative overflow-hidden">
+              <Image
+                src="/assets/icons/xp.png"
+                alt=""
+                fill
+                className="object-contain p-1"
+                style={{ imageRendering: 'pixelated' }}
+              />
+            </span>
+            <span className="map-action-copy">
+              <span className="map-action-label">{dailyLabel}</span>
+              <span className="map-action-detail">{dailyDetail}</span>
+            </span>
+            <span className="map-action-badge">{savedDailyRun ? 'Run' : `Lv ${hudRunState.runLevel}`}</span>
+          </button>
+        )}
 
         <button
           type="button"
@@ -1088,14 +1207,14 @@ export default function GameCommandCenter({ onOpenAvatar }: GameCommandCenterPro
             setIsCommandOpen(true);
           }}
           className="map-action-button"
-          title="Open command center"
+          title="Open menu"
         >
           <span className="map-action-icon">
             <PanelIcon icon="overview" />
           </span>
           <span className="map-action-copy">
-            <span className="map-action-label">Command</span>
-            <span className="map-action-detail">Army, gear, quests</span>
+            <span className="map-action-label">Menu</span>
+            <span className="map-action-detail">Gear, army, quests</span>
           </span>
           <span className="map-action-badge">{inventoryUsed}/{inventorySlots}</span>
         </button>
@@ -1432,143 +1551,22 @@ export default function GameCommandCenter({ onOpenAvatar }: GameCommandCenterPro
   }
 
   function renderSettings() {
-    const activeSpeedLabel = COMBAT_SPEED_OPTIONS.find(option => option.id === combatSpeed)?.label || 'Normal';
-    const musicStatusLabel = musicMuted ? 'Muted' : `${musicVolume}%`;
-
     return (
-      <div className="grid gap-4 xl:grid-cols-2">
-        <section className="ui-card rounded border p-4">
-          <SectionTitle title="Audio" action={`FX ${effectsVolume}%`} />
-          <div className="grid gap-3">
-            <label className="settings-volume-card rounded border px-4 py-3">
-              <span className="mb-3 flex items-center justify-between gap-3">
-                <span className="min-w-0">
-                  <span className="block text-sm font-black text-zinc-100">Sound Effects</span>
-                  <span className="ui-faint block text-xs font-bold">UI, map, combat, and inventory sounds</span>
-                </span>
-                <span className="ui-pill shrink-0 rounded border px-3 py-1 text-xs font-black">{effectsVolume}%</span>
-              </span>
-              <input
-                type="range"
-                min={0}
-                max={100}
-                step={5}
-                value={effectsVolume}
-                onChange={(event) => handleEffectsVolumeChange(Number(event.target.value))}
-                className="settings-volume-range"
-                aria-label="Sound effects volume"
-                style={{ '--settings-volume': `${effectsVolume}%` } as CSSProperties}
-              />
-            </label>
-
-            <label className="settings-volume-card rounded border px-4 py-3">
-              <span className="mb-3 flex items-center justify-between gap-3">
-                <span className="min-w-0">
-                  <span className="block text-sm font-black text-zinc-100">Background Music</span>
-                  <span className="ui-faint block text-xs font-bold">Looping tavern ambience while you play</span>
-                </span>
-                <span className="ui-pill shrink-0 rounded border px-3 py-1 text-xs font-black">{musicStatusLabel}</span>
-              </span>
-              <input
-                type="range"
-                min={0}
-                max={100}
-                step={5}
-                value={musicVolume}
-                onChange={(event) => handleMusicVolumeChange(Number(event.target.value))}
-                className="settings-volume-range"
-                aria-label="Background music volume"
-                disabled={musicMuted}
-                style={{ '--settings-volume': `${musicVolume}%` } as CSSProperties}
-              />
-            </label>
-
-            <button
-              type="button"
-              onClick={handleMusicMutedToggle}
-              className={`settings-speed-option rounded border px-4 py-3 text-left ${musicMuted ? 'settings-speed-option-active' : ''}`}
-              aria-pressed={musicMuted}
-            >
-              <span className="block text-sm font-black text-zinc-100">
-                {musicMuted ? 'Unmute Background Music' : 'Mute Background Music'}
-              </span>
-              <span className="ui-faint mt-1 block text-xs font-bold">
-                {musicMuted ? 'Resume looping music at your saved volume' : 'Silence looping music while keeping sound effects'}
-              </span>
-            </button>
-
-            <button
-              type="button"
-              data-sound-click="off"
-              onClick={() => playGameSound('ui.click', { throttleMs: 80 })}
-              disabled={effectsVolume <= 0}
-              className="ui-button rounded px-4 py-3 text-sm font-black disabled:opacity-40"
-            >
-              Test Sound Effects
-            </button>
-          </div>
-        </section>
-
-        <section className="ui-card rounded border p-4">
-          <SectionTitle title="Combat Speed" action={activeSpeedLabel} />
-          <div className="grid gap-3">
-            <div className="settings-speed-grid">
-              {COMBAT_SPEED_OPTIONS.map(option => (
-                <button
-                  key={option.id}
-                  type="button"
-                  onClick={() => handleCombatSpeedChange(option.id)}
-                  className={`settings-speed-option rounded border px-4 py-3 text-left ${combatSpeed === option.id ? 'settings-speed-option-active' : ''}`}
-                  aria-pressed={combatSpeed === option.id}
-                >
-                  <span className="block text-sm font-black text-zinc-100">{option.label}</span>
-                  <span className="ui-faint mt-1 block text-xs font-bold">
-                    {option.id === 'normal' ? 'Readable combat pacing' : option.id === 'fast' ? 'Shorter action pauses' : 'Minimum waits'}
-                  </span>
-                </button>
-              ))}
-            </div>
-
-            <div className="grid grid-cols-2 gap-2">
-              <StatusPill label="Active" value={activeSpeedLabel} />
-              <StatusPill label="Scope" value="Combat" />
-            </div>
-          </div>
-        </section>
-
-        <section className="ui-card rounded border p-4">
-          <SectionTitle title="Combat Readability" action={combatIndicatorMode === 'colorblind' ? 'Colorblind' : 'Default'} />
-          <div className="settings-speed-grid">
-            {([
-              { id: 'default' as const, label: 'Default', detail: 'Classic red, green, and gold combat cues' },
-              { id: 'colorblind' as const, label: 'Colorblind Safe', detail: 'Patterned move, heal, damage, threat, and health indicators' },
-            ]).map(option => (
-              <button
-                key={option.id}
-                type="button"
-                onClick={() => handleCombatIndicatorModeChange(option.id)}
-                className={`settings-speed-option rounded border px-4 py-3 text-left ${combatIndicatorMode === option.id ? 'settings-speed-option-active' : ''}`}
-                aria-pressed={combatIndicatorMode === option.id}
-              >
-                <span className="block text-sm font-black text-zinc-100">{option.label}</span>
-                <span className="ui-faint mt-1 block text-xs font-bold">{option.detail}</span>
-              </button>
-            ))}
-          </div>
-        </section>
-
-        <section className="ui-card rounded border p-4">
-          <SectionTitle title="Tutorial" action={runTutorialEnabled ? 'Enabled' : 'Disabled'} />
+      <div className="settings-panel-grid">
+        <div className="settings-panel-primary">
+          <GameSettingsPanel compact showRunTutorial={showRandomRun} />
+        </div>
+        <section className="ui-card settings-mode-card rounded border p-3">
+          <SectionTitle title="Game Mode" action="Multiplayer" />
+          <p className="ui-muted text-sm font-bold leading-relaxed">
+            Switch between the shared world map and the singleplayer run hall.
+          </p>
           <button
             type="button"
-            onClick={handleRunTutorialToggle}
-            className={`settings-speed-option w-full rounded border px-4 py-3 text-left ${runTutorialEnabled ? 'settings-speed-option-active' : ''}`}
-            aria-pressed={runTutorialEnabled}
+            onClick={() => router.push('/mode')}
+            className="ui-button mt-3 rounded px-4 py-2.5 text-sm font-black"
           >
-            <span className="block text-sm font-black text-zinc-100">Random Run Tutorial</span>
-            <span className="ui-faint mt-1 block text-xs font-bold">
-              Experimental first-run guidance. Disabled by default while the tutorial is still being expanded.
-            </span>
+            Change Mode
           </button>
         </section>
       </div>
@@ -1577,7 +1575,6 @@ export default function GameCommandCenter({ onOpenAvatar }: GameCommandCenterPro
 
   function renderOverview() {
     const latestActivity = activityLog.slice(0, 4);
-    const completeQuests = quests.filter(quest => quest.progress >= quest.requirement.count && !quest.claimed).length;
     const trackedCityQuest = (player.cityQuests || [])
       .map(progress => {
         const template = getCityQuestTemplate(progress.questId);
@@ -1587,43 +1584,46 @@ export default function GameCommandCenter({ onOpenAvatar }: GameCommandCenterPro
       .find(item => item && !item.status.claimed) || null;
 
     return (
-      <div className="overview-dashboard-grid">
+      <div className="overview-dashboard-grid overview-dashboard-slim">
         <section className="ui-card rounded border p-4">
-          <SectionTitle title="Commander" action={`Level ${player.stats.level}`} />
-          <div className="grid grid-cols-2 gap-3">
-            <OverviewTile label="Army" value={String(player.stats.armyPower)} accent="text-red-300" />
-            <OverviewTile label="Ward" value={String(player.stats.defensivePower)} accent="text-cyan-300" />
-            <OverviewTile label="Morale" value={String(player.stats.morale)} accent="text-emerald-300" />
-            <OverviewTile label="Spell" value={String(player.stats.spellPower)} accent="text-violet-300" />
+          <SectionTitle title="Quick Access" />
+          <div className="overview-quick-links">
+            <button type="button" onClick={() => setActivePanel('character')} className="overview-quick-link ui-button rounded px-3 py-2.5 text-sm font-black">
+              Commander
+            </button>
+            <button type="button" onClick={() => setActivePanel('inventory')} className="overview-quick-link ui-button rounded px-3 py-2.5 text-sm font-black">
+              Gear
+            </button>
+            <button type="button" onClick={() => setActivePanel('minions')} className="overview-quick-link ui-button rounded px-3 py-2.5 text-sm font-black">
+              Army
+            </button>
+            <button type="button" onClick={() => setActivePanel('quests')} className="overview-quick-link ui-button rounded px-3 py-2.5 text-sm font-black">
+              Quests
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={() => setActivePanel('character')}
-            className="ui-button mt-3 w-full rounded px-3 py-2 text-sm font-black"
-          >
-            Open Character
-          </button>
         </section>
 
-        <section className="ui-card rounded border p-4">
-          <SectionTitle
-            title="Random Run"
-            action={savedDailyRun ? 'Resume' : 'Open'}
-          />
-          <div className="fantasy-heading truncate text-lg">{savedDailyRun?.title || 'Roguelike Road'}</div>
-          <p className="ui-muted mt-1 line-clamp-2 text-xs font-bold">
-            {savedDailyRun
-              ? `${savedDailyRun.phaseLabel}: ${savedDailyRun.wins}/${savedDailyRun.targetBattles} wins, ${savedDailyRun.unitsStanding}/${savedDailyRun.totalUnits || 7} units standing.`
-              : `Draft seven temporary units and push through a fresh randomized road. Run level ${hudRunState.runLevel}.`}
-          </p>
-          <button
-            type="button"
-            onClick={() => setShowDailyRun(true)}
-            className="ui-button-primary mt-3 w-full rounded px-3 py-2 text-sm font-black"
-          >
-            {savedDailyRun ? 'Resume Run' : 'Start Run'}
-          </button>
-        </section>
+        {showRandomRun && (
+          <section className="ui-card rounded border p-4">
+            <SectionTitle
+              title="Run"
+              action={savedDailyRun ? 'Resume' : 'Open'}
+            />
+            <div className="fantasy-heading truncate text-lg">{savedDailyRun?.title || 'Roguelike Road'}</div>
+            <p className="ui-muted mt-1 line-clamp-2 text-xs font-bold">
+              {savedDailyRun
+                ? `${savedDailyRun.phaseLabel}: ${savedDailyRun.wins}/${savedDailyRun.targetBattles} wins, ${savedDailyRun.unitsStanding}/${savedDailyRun.totalUnits || 7} units standing.`
+                : `Draft seven temporary units and push through a fresh randomized road. Run level ${hudRunState.runLevel}.`}
+            </p>
+            <button
+              type="button"
+              onClick={() => setShowDailyRun(true)}
+              className="ui-button-primary mt-3 w-full rounded px-3 py-2 text-sm font-black"
+            >
+              {savedDailyRun ? 'Resume Run' : 'Start Run'}
+            </button>
+          </section>
+        )}
 
         <section className="ui-card rounded border p-4">
           <SectionTitle title="Quest" action={trackedCityQuest ? trackedCityQuest.template.town : 'None'} />
@@ -1665,16 +1665,6 @@ export default function GameCommandCenter({ onOpenAvatar }: GameCommandCenterPro
               {activeJobs.slice(0, 2).map(job => renderJobCard(job.id, true))}
             </div>
           )}
-        </section>
-
-        <section className="ui-card rounded border p-4">
-          <SectionTitle title="Resources" action={completeQuests > 0 ? `${completeQuests} quest rewards` : undefined} />
-          <div className="grid grid-cols-2 gap-2 text-center text-xs font-bold">
-            <StatusPill label="Health" value={`${player.stats.health}/${player.stats.maxHealth}`} />
-            <StatusPill label="Gold" value={String(player.gold)} />
-            <StatusPill label="Items" value={`${inventoryUsed}/${inventorySlots}`} />
-            <StatusPill label="Units" value={`${fieldedMinions.length}/${MAX_FIELD_MINIONS}`} />
-          </div>
         </section>
 
         <section className="ui-card rounded border p-4">
@@ -1874,29 +1864,33 @@ export default function GameCommandCenter({ onOpenAvatar }: GameCommandCenterPro
           ) : (
             <div className="command-icon-grid gear-available-grid">
               {unequippedItems.map(item => (
-                <button
+                <CommandGearHoverTip
                   key={item.id}
-                  type="button"
-                  onClick={() => handleEquip(item.id)}
-                  className={`command-icon-tile rounded border ${rarityClasses(item.rarity)}`}
-                  aria-label={`Equip ${item.name}`}
-                >
-                  <span className="command-icon-image overflow-hidden rounded">
-                    <Image
-                      src={getEquipmentIconPath(item)}
-                      alt=""
-                      fill
-                      sizes="88px"
-                      className="object-contain p-1.5"
-                      style={{ imageRendering: 'pixelated' }}
+                  popover={(
+                    <EquipmentGearPopover
+                      item={item}
+                      compareEquipped={getEquippedItem(item.slot)}
                     />
-                  </span>
-                  <span className="command-icon-tooltip rounded border">
-                    <span className="command-icon-tooltip-title block font-black text-zinc-100">{item.name}</span>
-                    <span className="command-icon-tooltip-meta ui-faint block font-black uppercase">{item.slot.replace('-', ' ')} - {item.rarity}</span>
-                    <span className="command-icon-tooltip-copy ui-muted block font-bold">Click to equip this piece.</span>
-                  </span>
-                </button>
+                  )}
+                >
+                  <button
+                    type="button"
+                    onClick={() => handleEquip(item.id)}
+                    className={`command-icon-tile command-icon-tile-external-tip rounded border ${rarityClasses(item.rarity)}`}
+                    aria-label={`Equip ${item.name}`}
+                  >
+                    <span className="command-icon-image overflow-hidden rounded">
+                      <Image
+                        src={getEquipmentIconPath(item)}
+                        alt=""
+                        fill
+                        sizes="88px"
+                        className="object-contain p-1.5"
+                        style={{ imageRendering: 'pixelated' }}
+                      />
+                    </span>
+                  </button>
+                </CommandGearHoverTip>
               ))}
             </div>
           )}
@@ -1912,7 +1906,8 @@ export default function GameCommandCenter({ onOpenAvatar }: GameCommandCenterPro
     return (
       <div className="minions-layout-grid">
         <section className="ui-card minion-field-strip rounded p-4">
-          <SectionTitle title="Fielded Warband" action={`${fieldedMinions.length}/${MAX_FIELD_MINIONS}`} />
+          <SectionTitle title="Battle Slots" action={`${fieldedMinions.length}/${MAX_FIELD_MINIONS} fielded`} />
+          <p className="ui-muted mb-3 text-xs font-bold">These units fight with you in combat. Tap a slot to inspect.</p>
           <div className="grid grid-cols-7 gap-1">
             {Array.from({ length: MAX_FIELD_MINIONS }, (_, index) => {
               const minion = fieldedMinions[index];
@@ -1945,7 +1940,8 @@ export default function GameCommandCenter({ onOpenAvatar }: GameCommandCenterPro
         </section>
 
         <section>
-          <SectionTitle title="Army Roster" action={`${totalMinions} total`} />
+          <SectionTitle title="Recruited Units" action={`${totalMinions} total`} />
+          <p className="ui-muted mb-3 text-xs font-bold">Drag roster cards to reorder who fills empty battle slots first.</p>
           {minions.length === 0 ? (
             <EmptyState text="No recruited minions." />
           ) : (
@@ -2108,7 +2104,7 @@ export default function GameCommandCenter({ onOpenAvatar }: GameCommandCenterPro
         <section className="ui-card rounded border p-4">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <div className="arcane-label">Random Run</div>
+              <div className="arcane-label">Run</div>
               <h3 className="fantasy-heading text-xl">Roguelike Road</h3>
             </div>
             <span className="ui-pill rounded border px-2 py-1 text-[10px] font-black uppercase">
@@ -2130,11 +2126,11 @@ export default function GameCommandCenter({ onOpenAvatar }: GameCommandCenterPro
             onClick={() => setShowDailyRun(true)}
             className="ui-button-primary mt-4 rounded px-4 py-3 text-sm font-black"
           >
-            {savedDailyRun ? 'Resume Random Run' : 'Start Random Run'}
+            {savedDailyRun ? 'Resume Run' : 'Start Run'}
           </button>
           {lastRun && (
             <div className="ui-pill mt-3 rounded border px-3 py-2 text-xs font-bold text-[var(--ui-muted)]">
-              Last clear: {lastRun.challengeName || 'Random Run'} - {lastRun.wins}/{lastRun.targetBattles} wins, {lastRun.score || 0} score, {lastRun.exp} run XP.
+              Last clear: {lastRun.challengeName || 'Run'} - {lastRun.wins}/{lastRun.targetBattles} wins, {lastRun.score || 0} score, {lastRun.exp} run XP.
             </div>
           )}
         </section>
@@ -2142,7 +2138,7 @@ export default function GameCommandCenter({ onOpenAvatar }: GameCommandCenterPro
         <section className="ui-card rounded border p-4">
           <SectionTitle title="Run Ledger" action={leaderboard.length > 0 ? 'Local top' : 'No clears'} />
           {leaderboard.length === 0 ? (
-            <EmptyState text="No random-run clears recorded yet." />
+            <EmptyState text="No run clears recorded yet." />
           ) : (
             <div className="space-y-2">
               {leaderboard.map((entry, index) => (
@@ -2789,34 +2785,36 @@ export default function GameCommandCenter({ onOpenAvatar }: GameCommandCenterPro
 
 function HudMetric({ label, value, tone, progress }: { label: string; value: string; tone: 'red' | 'gold' | 'blue' | 'teal' | 'violet'; progress?: number }) {
   const toneClasses = {
-    red: 'text-red-300',
-    gold: 'text-[var(--ui-gold)]',
-    blue: 'text-sky-300',
-    teal: 'text-[var(--ui-accent)]',
-    violet: 'text-violet-300',
+    red: 'hud-stat-tone-red',
+    gold: 'hud-stat-tone-gold',
+    blue: 'hud-stat-tone-blue',
+    teal: 'hud-stat-tone-teal',
+    violet: 'hud-stat-tone-violet',
   };
-  const iconPath = statIconPaths[label];
-  const gemIconPath = '/assets/icons/rare-gem.png';
-  const resourceParts = label === 'Resources' ? value.split('/').map(part => part.trim()) : [];
-  const displayTone = label === 'Minions' ? 'text-white' : toneClasses[tone];
+  const iconPath = statIconPaths[label] || statIconPaths.Resources;
 
   return (
-    <div className="hud-card hud-card-minimal rounded px-3 py-2">
-      {label === 'Resources' ? (
-        <div className="flex items-center gap-4">
-          <HudIconValue iconPath={iconPath} value={resourceParts[0]?.replace(' gold', '') || '0'} toneClass={toneClasses.gold} />
-          <HudIconValue iconPath={gemIconPath} value={resourceParts[1]?.replace(' gems', '') || '0'} toneClass="text-violet-200" />
-        </div>
-      ) : (
-        <div className="flex items-center gap-2">
-          <HudIconValue iconPath={iconPath} value={value} toneClass={displayTone} />
-        </div>
-      )}
-      {progress !== undefined && (
-        <div className="ui-progress-track mt-1 h-1 overflow-hidden rounded border">
-          <div className="ui-progress-fill h-full" style={{ width: `${progress}%` }} />
-        </div>
-      )}
+    <div className={`hud-stat-chip hud-stat-chip-${tone}`} title={label}>
+      <span className="hud-stat-chip-icon-wrap">
+        <Image
+          src={iconPath}
+          alt=""
+          width={22}
+          height={22}
+          className="hud-stat-chip-icon object-contain"
+          style={{ imageRendering: 'pixelated' }}
+          unoptimized
+        />
+      </span>
+      <span className="hud-stat-chip-copy min-w-0">
+        <span className="hud-stat-chip-label">{label}</span>
+        <span className={`hud-stat-chip-value ${toneClasses[tone]}`}>{value}</span>
+      </span>
+      {progress !== undefined ? (
+        <span className="hud-stat-chip-bar" aria-hidden>
+          <span className="hud-stat-chip-bar-fill" style={{ width: `${progress}%` }} />
+        </span>
+      ) : null}
     </div>
   );
 }

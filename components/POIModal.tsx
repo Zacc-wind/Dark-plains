@@ -1,9 +1,11 @@
 'use client';
 
+import Image from 'next/image';
 import { useEffect, useState } from 'react';
 import { getCurrentUser, getJobRewardPreview, getJobTravelDurationMs, JOB_DURATION_LABELS, startJob } from '@/lib/auth';
+import { ASSET_PATHS } from '@/lib/assetLoader';
 import { emitFxEvent } from '@/lib/fxEvents';
-import { POI } from '@/lib/mapData';
+import { POI, POIType } from '@/lib/mapData';
 import { buildJobRewardChips } from '@/lib/rewardDisplay';
 import RewardIconStrip from '@/components/RewardIconStrip';
 
@@ -13,6 +15,19 @@ interface POIModalProps {
   onSelectJob: (poiId: string, job: string) => void;
   onTravel: () => void;
 }
+
+const POI_ART: Partial<Record<POIType, string>> = {
+  [POIType.CAMPFIRE]: ASSET_PATHS.pois.campfire,
+  [POIType.FOREST]: ASSET_PATHS.pois.forest,
+  [POIType.MOUNTAIN]: ASSET_PATHS.pois.mountain,
+  [POIType.FARM]: ASSET_PATHS.pois.farm,
+  [POIType.HUNTING_LODGE]: ASSET_PATHS.pois.hunting_lodge,
+  [POIType.WINDMILL]: ASSET_PATHS.pois.windmill,
+  [POIType.CRAB_TRAP]: ASSET_PATHS.pois.crab_trap,
+  [POIType.FISHING_DOCK]: ASSET_PATHS.pois.fishing_dock,
+  [POIType.GRANITE_QUARRY]: ASSET_PATHS.pois.granite_quarry,
+  [POIType.COFFEE_PLANTATION]: ASSET_PATHS.pois.coffee_plantation,
+};
 
 export default function POIModal({ poi, onClose, onSelectJob, onTravel }: POIModalProps) {
   const [user, setUser] = useState(getCurrentUser());
@@ -28,10 +43,16 @@ export default function POIModal({ poi, onClose, onSelectJob, onTravel }: POIMod
     return () => window.clearInterval(interval);
   }, []);
 
+  useEffect(() => {
+    if (!poi) return undefined;
+    document.body.classList.add('poi-view-open');
+    return () => document.body.classList.remove('poi-view-open');
+  }, [poi]);
+
   if (!poi) return null;
 
   const jobDurations = JOB_DURATION_LABELS;
-  const isCampfire = poi.type === 'campfire';
+  const isCampfire = poi.type === POIType.CAMPFIRE;
   const poiWidth = isCampfire ? 2 : 4;
   const poiHeight = isCampfire ? 2 : 4;
   const poiTargetX = poi.x + Math.floor(poiWidth / 2);
@@ -55,6 +76,8 @@ export default function POIModal({ poi, onClose, onSelectJob, onTravel }: POIMod
   const distance = distanceX + distanceY;
   const travelEtaMs = directTravelRemainingMs + (user ? getJobTravelDurationMs(user, distance) : 0);
   const travelEtaLabel = formatPoiTravelEta(travelEtaMs);
+  const poiArt = POI_ART[poi.type as POIType];
+  const siteLabel = isCampfire ? 'Campfire' : poi.type.replace(/_/g, ' ');
 
   const handleStartJob = (jobName: string, jobIndex: number) => {
     const result = startJob(poi.id, poi.name, jobName, jobIndex, poiTargetX, poiTargetY, poi.type);
@@ -69,99 +92,121 @@ export default function POIModal({ poi, onClose, onSelectJob, onTravel }: POIMod
   };
 
   return (
-    <div className="world-popup-layer poi-modal-layer pointer-events-none fixed inset-0 flex items-center justify-center px-4">
+    <div
+      className={`poi-site-modal-root ${isCampfire ? 'poi-site-modal-root--campfire' : 'poi-site-modal-root--field'}`}
+      onClick={onClose}
+    >
+      <div className="poi-site-scrim" aria-hidden="true" />
+
       <div
-        className="world-popup-panel poi-job-panel command-panel vine-frame pointer-events-auto relative w-full max-w-xl overflow-visible rounded border text-zinc-100"
+        className="poi-site-panel command-panel vine-frame rounded border text-zinc-100"
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="panel-header flex items-start justify-between gap-4 border-b px-5 py-4">
-          <div>
-            <h2 className="fantasy-heading text-xl">{poi.name}</h2>
-            <p className="arcane-label">{poi.type.replace('_', ' ')}</p>
-          </div>
-          <button
-            onClick={onClose}
-            className="ui-button rounded px-3 py-1 text-xs font-bold"
-          >
-            Close
-          </button>
-        </div>
+        <header className={`poi-site-head ${isCampfire ? 'poi-site-head--campfire' : 'poi-site-head--field'}`}>
+          <div className="poi-site-head-shade" aria-hidden="true" />
+          <div className="poi-site-head-grid" aria-hidden="true" />
+          <div className="poi-site-head-row">
+            {poiArt && (
+              <div className="poi-site-art rounded border">
+                <Image
+                  src={poiArt}
+                  alt=""
+                  width={72}
+                  height={72}
+                  className="object-contain p-1.5"
+                  style={{ imageRendering: 'pixelated' }}
+                  unoptimized
+                />
+              </div>
+            )}
 
-        <div className="space-y-4 p-5">
-          <div className="poi-job-summary rounded border p-3">
-            <div className="arcane-label">{isCampfire ? 'Safe Rest' : 'Field Work'}</div>
-            <p className="ui-muted mt-1 text-sm font-bold">
-              {poi.description || (isCampfire
-                ? 'A dry traveler camp for healing, rumors, and short rests before the next road.'
-                : 'Queue work here or preview the route while your commander is already walking.')}
-            </p>
-            {!atLocation && (
-              <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-                <span className="ui-faint text-xs font-black uppercase">Route {travelEtaLabel}</span>
+            <div className="poi-site-head-copy min-w-0">
+              <div className="poi-site-head-title-row">
+                <p className="arcane-label">{siteLabel}</p>
+                <span className="poi-site-queue-badge">Queue {queuedJobs}/4</span>
+              </div>
+              <h1 className="fantasy-heading poi-site-title">{poi.name}</h1>
+            </div>
+
+            <div className="poi-site-head-actions">
+              {!atLocation && (
                 <button
                   type="button"
                   onClick={onTravel}
                   disabled={!user || Boolean(user.traveling)}
-                  className="ui-button-primary rounded px-3 py-2 text-xs font-black disabled:opacity-40"
+                  className="ui-button-primary poi-site-walkbutton"
                 >
-                  {user?.traveling ? 'Walking' : 'Walk Here'}
+                  {user?.traveling ? 'Walking…' : `Walk · ${travelEtaLabel}`}
                 </button>
-              </div>
-            )}
-          </div>
-
-          <div className="grid grid-cols-3 gap-2 text-center">
-            <InfoPill label="Queue" value={`${queuedJobs}/4`} />
-            <InfoPill label="Route" value={atLocation ? 'Here' : travelEtaLabel} />
-            <InfoPill label="Board" value={isCampfire ? 'Rest' : 'Jobs'} />
+              )}
+              <button
+                type="button"
+                onClick={onClose}
+                className="ui-button poi-site-close"
+                aria-label="Close"
+              >
+                Close
+              </button>
+            </div>
           </div>
 
           {error && (
-            <div className="rounded border border-red-700 bg-red-950/70 px-4 py-3 text-sm font-bold text-red-200">
+            <div className="poi-site-error">
               {error}
             </div>
           )}
+        </header>
 
-          <div className="poi-job-grid grid grid-cols-1 gap-3 sm:grid-cols-2">
-            {poi.jobs.map((job, index) => {
-              const reward = getJobRewardPreview(index, poi.type);
-              const levelLocked = Boolean(user && (user.stats.level || 1) < (reward.levelRequirement || 1));
-              const rewardChips = buildJobRewardChips(reward, {
-                travelLabel: atLocation ? undefined : travelEtaLabel,
-              });
+        <div className={`poi-site-body ${isCampfire ? 'poi-site-body--campfire' : 'poi-site-body--field'}`}>
+          <div className="poi-site-body-shade" aria-hidden="true" />
+          <div className="poi-site-job-grid">
+          {poi.jobs.map((job, index) => {
+            const reward = getJobRewardPreview(index, poi.type);
+            const levelLocked = Boolean(user && (user.stats.level || 1) < (reward.levelRequirement || 1));
+            const rewardChips = buildJobRewardChips(reward);
 
-              return (
-                <div
-                  key={job}
-                  className={`poi-job-card rounded border p-3 ${levelLocked ? 'opacity-60' : ''}`}
-                >
-                  <div className="min-w-0">
-                    <div className="flex items-start justify-between gap-3">
-                      <h3 className="text-sm font-black text-zinc-100">{job}</h3>
-                      {reward.levelRequirement && reward.levelRequirement > 1 && (
-                        <span className="ui-pill shrink-0 rounded border px-2 py-1 text-[10px] font-black">Lv {reward.levelRequirement}</span>
-                      )}
-                    </div>
-                    <div className="poi-job-rewards mt-2">
-                      <div className="poi-job-duration ui-faint text-[10px] font-black uppercase">{jobDurations[index]}</div>
-                      <RewardIconStrip chips={rewardChips} className="mt-1.5" />
-                    </div>
-                    {reward.rewardNote && <p className="ui-faint mt-2 text-[10px] font-bold">{reward.rewardNote}</p>}
+            return (
+              <article
+                key={job}
+                className={`poi-site-job-card rounded border ${isCampfire ? 'poi-site-job-card--campfire' : 'poi-site-job-card--field'} ${levelLocked ? 'poi-site-job-card--locked' : ''}`}
+              >
+                <div className="poi-site-job-card-head">
+                  <h3 className="fantasy-heading poi-site-job-title">{job}</h3>
+                  <div className="poi-site-job-meta">
+                    {reward.levelRequirement && reward.levelRequirement > 1 && (
+                      <span className="ui-pill poi-site-level-pill rounded border px-2 py-0.5 text-[11px] font-black">
+                        Lv {reward.levelRequirement}
+                      </span>
+                    )}
+                    <span className="poi-site-job-duration">{jobDurations[index]}</span>
                   </div>
+                </div>
+
+                <div className="poi-site-job-rewards poi-site-job-rewards-strip">
+                  <RewardIconStrip chips={rewardChips} size="poi" emptyLabel="—" />
+                </div>
+
+                <footer className="poi-site-job-card-footer">
                   <button
+                    type="button"
                     onClick={() => handleStartJob(job, index)}
                     disabled={queuedJobs >= 4 || levelLocked}
-                    className="ui-button-primary mt-4 w-full rounded px-3 py-2 text-xs font-black transition disabled:opacity-40"
+                    className="ui-button-primary poi-site-job-action"
                   >
                     {levelLocked
-                      ? `Requires Level ${reward.levelRequirement}`
+                      ? `Lv ${reward.levelRequirement}`
                       : queuedJobs >= 4
                         ? 'Queue Full'
-                        : atLocation ? 'Start Job' : user?.traveling ? 'Queue After Walk' : 'Travel & Queue'}
+                        : atLocation
+                          ? 'Start'
+                          : user?.traveling
+                            ? 'Queue After Walk'
+                            : 'Travel & Queue'}
                   </button>
-                </div>
-              );
-            })}
+                </footer>
+              </article>
+            );
+          })}
           </div>
         </div>
       </div>
@@ -173,13 +218,4 @@ function formatPoiTravelEta(ms: number): string {
   const seconds = Math.max(0, Math.ceil(ms / 1000));
   if (seconds < 60) return `${seconds}s`;
   return `${Math.ceil(seconds / 60)}m`;
-}
-
-function InfoPill({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="poi-info-pill rounded border px-3 py-2">
-      <div className="text-[10px] font-black uppercase text-[var(--ui-faint)]">{label}</div>
-      <div className="ui-value text-sm font-black">{value}</div>
-    </div>
-  );
 }

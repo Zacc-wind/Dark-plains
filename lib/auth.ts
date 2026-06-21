@@ -1680,7 +1680,7 @@ function getSocketUpgradeStep(stat: EquipmentSocketStat): number {
 }
 
 export function getEquipmentSocketBonusValue(bonus: Pick<EquipmentSocketBonus, 'stat' | 'baseValue' | 'upgradeLevel'>): number {
-  return bonus.baseValue + (bonus.upgradeLevel || 0) * getSocketUpgradeStep(bonus.stat);
+  return toFiniteNumber(bonus.baseValue, 0) + (bonus.upgradeLevel || 0) * getSocketUpgradeStep(bonus.stat);
 }
 
 function getEquipmentSocketStatValue(item: Equipment, stat: EquipmentSocketStat): number {
@@ -5415,7 +5415,7 @@ export function getLeaderboardBoards(): LeaderboardBoard[] {
     },
     {
       id: 'daily',
-      title: 'Random Run',
+      title: 'Run',
       subtitle: 'Run chain, best clear depth, and total clears.',
       entries: makeLeaderboardEntries(
         'daily',
