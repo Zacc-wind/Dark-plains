@@ -31,26 +31,21 @@ export async function registerWithSupabase(
     return { success: false, error: 'Password must be at least 6 characters for online accounts.' };
   }
 
-  const supabase = createClient();
-  const email = usernameToAuthEmail(username);
-
-  const { data, error } = await supabase.auth.signUp({
-    email,
-    password,
-    options: {
-      data: { username: username.trim() },
-    },
+  const response = await fetch('/api/auth/register', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, password }),
   });
 
-  if (error) {
-    return { success: false, error: error.message };
+  let payload: { ok?: boolean; error?: string } = {};
+  try {
+    payload = await response.json();
+  } catch {
+    return { success: false, error: 'Registration failed.' };
   }
 
-  if (!data.session) {
-    return {
-      success: true,
-      needsEmailConfirmation: true,
-    };
+  if (!response.ok || !payload.ok) {
+    return { success: false, error: payload.error || 'Registration failed.' };
   }
 
   const hydrated = await hydrateLocalUserFromSession();
