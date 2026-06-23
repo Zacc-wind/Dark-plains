@@ -167,6 +167,27 @@ export default function GameSettingsPanel({ showRunTutorial = false, compact = f
             >
               Test FX
             </button>
+            <button
+              type="button"
+              data-sound-click="off"
+              onClick={() => playGameSound('combat.unitDeath', { throttleMs: 80 })}
+              disabled={effectsVolume <= 0}
+              className="ui-button rounded px-3 py-2 text-xs font-black disabled:opacity-40"
+            >
+              Test Death
+            </button>
+            <button
+              type="button"
+              data-sound-click="off"
+              onClick={() => {
+                playGameSound('combat.spellCast', { throttleMs: 80, volumeScale: 0.28 });
+                window.setTimeout(() => playGameSound('combat.blessing', { throttleMs: 80, volumeScale: 0.78 }), 75);
+              }}
+              disabled={effectsVolume <= 0}
+              className="ui-button rounded px-3 py-2 text-xs font-black disabled:opacity-40"
+            >
+              Test Blessing
+            </button>
           </div>
         </div>
       </section>

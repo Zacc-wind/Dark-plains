@@ -1034,6 +1034,26 @@ textarea {
   color: #c9bcaa;
 }
 
+button.sp-hub-bonus-tile-spendable {
+  cursor: pointer;
+  transition: border-color 160ms ease, background 160ms ease, transform 160ms ease;
+}
+
+button.sp-hub-bonus-tile-spendable:hover,
+button.sp-hub-bonus-tile-spendable:focus-visible {
+  border-color: rgba(244, 221, 176, 0.42);
+  background: rgba(244, 221, 176, 0.08);
+  transform: translateY(-1px);
+}
+
+.sp-hub-bonus-tile-action {
+  font-size: 0.58rem;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #f0d7a2;
+}
+
 .sp-milestone-tile {
   display: flex;
   flex-direction: column;
@@ -1137,6 +1157,22 @@ textarea {
 
 .sp-milestone-card-locked {
   opacity: 0.88;
+}
+
+.sp-milestone-card-claimable {
+  cursor: pointer;
+  transition: border-color 160ms ease, transform 160ms ease, box-shadow 160ms ease;
+}
+
+.sp-milestone-card-claimable:hover,
+.sp-milestone-card-claimable:focus-visible {
+  border-color: rgba(244, 221, 176, 0.42);
+  transform: translateY(-1px);
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.22);
+}
+
+.sp-milestone-card-claimed {
+  opacity: 0.82;
 }
 
 .sp-milestone-card-title {
@@ -15182,15 +15218,11 @@ button.vine-frame::before,
 }
 
 .battle-piece-anim-death {
-  animation: battle-piece-death-collapse 1180ms cubic-bezier(0.4, 0, 0.68, 0.2) forwards;
+  animation: battle-piece-death-collapse var(--battle-death-dissolve-ms, 1600ms) cubic-bezier(0.42, 0, 0.58, 1) forwards;
 }
 
-.battle-piece-anim-death .battle-piece-image {
-  filter:
-    grayscale(0.55)
-    brightness(0.82)
-    contrast(1.02)
-    drop-shadow(0 4px 8px rgba(0, 0, 0, 0.5));
+.battle-death-sprite {
+  animation: battle-death-sprite-desaturate var(--battle-death-dissolve-ms, 1600ms) ease-out forwards;
 }
 
 .battle-death-marker {
@@ -15200,7 +15232,6 @@ button.vine-frame::before,
   display: flex;
   align-items: center;
   justify-content: center;
-  animation: battle-death-fade 1180ms ease-out forwards;
   pointer-events: none;
 }
 
@@ -15211,14 +15242,475 @@ button.vine-frame::before,
 .battle-death-ash {
   position: absolute;
   left: 50%;
-  bottom: 14%;
-  z-index: 4;
-  width: 42%;
-  height: 12%;
+  pointer-events: none;
+  border-radius: 999px;
+}
+
+.battle-death-ash-core {
+  bottom: 12%;
+  z-index: 6;
+  width: 48%;
+  height: 14%;
+  transform: translateX(-50%);
+  background: radial-gradient(circle, rgba(244, 221, 176, 0.62), rgba(82, 72, 58, 0.22) 52%, transparent 72%);
+  filter: blur(2px);
+  animation: battle-death-ash-core-rise var(--battle-death-dissolve-ms, 1600ms) ease-out forwards;
+}
+
+.battle-death-ash-puff {
+  z-index: 5;
+  width: 22%;
+  height: 10%;
+  background: radial-gradient(circle, rgba(232, 220, 196, 0.5), rgba(40, 36, 32, 0.08) 68%);
+  filter: blur(3px);
+  opacity: 0;
+  animation: battle-death-ash-puff-rise var(--battle-death-dissolve-ms, 1600ms) ease-out forwards;
+}
+
+.battle-death-ash-puff-1 {
+  bottom: 18%;
+  animation-delay: calc(var(--battle-death-dissolve-ms, 1600ms) * 0.42);
+}
+
+.battle-death-ash-puff-2 {
+  bottom: 22%;
+  width: 18%;
+  animation-delay: calc(var(--battle-death-dissolve-ms, 1600ms) * 0.5);
+}
+
+.battle-death-ash-puff-3 {
+  bottom: 16%;
+  width: 26%;
+  animation-delay: calc(var(--battle-death-dissolve-ms, 1600ms) * 0.58);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .battle-piece-anim-death,
+  .battle-death-sprite,
+  .battle-death-ash-core,
+  .battle-death-ash-puff {
+    animation-duration: 420ms !important;
+    animation-delay: 0ms !important;
+  }
+}
+
+.battle-boss-cinematic-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 24;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.battle-boss-last-stand-overlay {
+  animation: battle-boss-cinematic-overlay-in var(--boss-last-stand-ms, 5400ms) ease-out forwards;
+}
+
+.battle-boss-special-overlay {
+  animation: battle-boss-cinematic-overlay-in var(--boss-special-ms, 4000ms) ease-out forwards;
+}
+
+.battle-boss-cinematic-veil {
+  position: absolute;
+  inset: 0;
+}
+
+.battle-boss-last-stand-veil {
+  background:
+    radial-gradient(circle at 50% 42%, rgba(250, 204, 21, 0.14), transparent 46%),
+    radial-gradient(circle at 50% 56%, rgba(88, 28, 135, 0.22), transparent 68%);
+  animation: battle-boss-cinematic-veil-pulse var(--boss-last-stand-ms, 5400ms) ease-out forwards;
+}
+
+.battle-boss-special-veil {
+  background:
+    radial-gradient(circle at 50% 42%, rgba(248, 113, 113, 0.12), transparent 44%),
+    radial-gradient(circle at 50% 56%, rgba(88, 28, 135, 0.18), transparent 70%);
+  animation: battle-boss-cinematic-veil-pulse var(--boss-special-ms, 4000ms) ease-out forwards;
+}
+
+.battle-boss-cinematic-burst {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 18%;
+  aspect-ratio: 1;
+  transform: translate(-50%, -50%) scale(0.2);
+  border-radius: 999px;
+  opacity: 0;
+}
+
+.battle-boss-last-stand-burst {
+  background: radial-gradient(circle, rgba(255, 248, 220, 0.72), rgba(250, 204, 21, 0.22) 42%, transparent 72%);
+  box-shadow: 0 0 40px rgba(250, 204, 21, 0.24);
+  animation: battle-boss-cinematic-burst var(--boss-last-stand-ms, 5400ms) cubic-bezier(0.18, 0.88, 0.28, 1) forwards;
+}
+
+.battle-boss-special-burst {
+  background: radial-gradient(circle, rgba(255, 228, 228, 0.68), rgba(248, 113, 113, 0.2) 42%, transparent 72%);
+  box-shadow: 0 0 36px rgba(248, 113, 113, 0.22);
+  animation: battle-boss-cinematic-burst var(--boss-special-ms, 4000ms) cubic-bezier(0.18, 0.88, 0.28, 1) forwards;
+}
+
+.battle-boss-cinematic-ring {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  border-radius: 999px;
+  transform: translate(-50%, -50%) scale(0.35);
+  opacity: 0;
+}
+
+.battle-boss-cinematic-ring-1 {
+  width: 34%;
+  aspect-ratio: 1;
+}
+
+.battle-boss-cinematic-ring-2 {
+  width: 48%;
+  aspect-ratio: 1;
+}
+
+.battle-boss-last-stand-overlay .battle-boss-cinematic-ring {
+  border: 1px solid rgba(250, 204, 21, 0.34);
+  animation: battle-boss-cinematic-ring var(--boss-last-stand-ms, 5400ms) ease-out forwards;
+}
+
+.battle-boss-last-stand-overlay .battle-boss-cinematic-ring-2 {
+  animation-delay: 280ms;
+}
+
+.battle-boss-special-ring {
+  border: 1px solid rgba(248, 113, 113, 0.34);
+  animation: battle-boss-cinematic-ring var(--boss-special-ms, 4000ms) ease-out forwards;
+}
+
+.battle-boss-special-overlay .battle-boss-cinematic-ring-2 {
+  animation-delay: 220ms;
+}
+
+.battle-boss-cinematic-sprite-wrap {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: min(34vw, 14rem);
+  height: min(42vw, 17rem);
+  background: transparent;
+  animation: battle-boss-cinematic-sprite-rise var(--boss-last-stand-ms, 5400ms) cubic-bezier(0.18, 0.88, 0.28, 1) forwards;
+}
+
+.battle-boss-special-overlay .battle-boss-cinematic-sprite-wrap {
+  animation-duration: var(--boss-special-ms, 4000ms);
+}
+
+.battle-boss-cinematic-sprite-glow {
+  position: absolute;
+  inset: -14%;
+  border-radius: 999px;
+  filter: blur(10px);
+  background: transparent;
+  animation: battle-boss-cinematic-glow-pulse var(--boss-last-stand-ms, 5400ms) ease-in-out forwards;
+}
+
+.battle-boss-last-stand-sprite-glow {
+  background: radial-gradient(circle, rgba(250, 204, 21, 0.28), rgba(168, 85, 247, 0.1) 48%, transparent 72%);
+}
+
+.battle-boss-special-sprite-glow {
+  background: radial-gradient(circle, rgba(248, 113, 113, 0.24), rgba(88, 28, 135, 0.1) 48%, transparent 72%);
+  animation-duration: var(--boss-special-ms, 4000ms);
+}
+
+.battle-boss-cinematic-sprite {
+  position: relative;
+  z-index: 1;
+  width: auto;
+  height: min(38vw, 15rem);
+  max-width: min(34vw, 14rem);
+  background: transparent;
+  filter: drop-shadow(0 10px 22px rgba(0, 0, 0, 0.42));
+}
+
+.battle-boss-last-stand-sprite {
+  filter:
+    drop-shadow(0 10px 22px rgba(0, 0, 0, 0.42))
+    drop-shadow(0 0 24px rgba(250, 204, 21, 0.18));
+}
+
+.battle-boss-special-sprite {
+  filter:
+    drop-shadow(0 10px 22px rgba(0, 0, 0, 0.42))
+    drop-shadow(0 0 22px rgba(248, 113, 113, 0.16));
+}
+
+.battle-boss-cinematic-copy {
+  position: absolute;
+  left: 50%;
+  bottom: 10%;
+  z-index: 3;
+  display: flex;
+  width: min(88%, 24rem);
+  flex-direction: column;
+  align-items: center;
+  gap: 0.2rem;
+  transform: translateX(-50%);
+  text-align: center;
+  background: transparent;
+  animation: battle-boss-cinematic-copy-rise var(--boss-last-stand-ms, 5400ms) ease-out forwards;
+}
+
+.battle-boss-special-overlay .battle-boss-cinematic-copy {
+  animation-duration: var(--boss-special-ms, 4000ms);
+}
+
+.battle-boss-cinematic-phase {
+  font-size: clamp(1.45rem, 3.2vw, 2.35rem);
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #f8e7b8;
+  text-shadow:
+    0 0 18px rgba(250, 204, 21, 0.28),
+    0 3px 14px rgba(0, 0, 0, 0.62);
+}
+
+.battle-boss-special-overlay .battle-boss-cinematic-phase {
+  color: #ffd7d7;
+  text-shadow:
+    0 0 18px rgba(248, 113, 113, 0.24),
+    0 3px 14px rgba(0, 0, 0, 0.62);
+}
+
+.battle-boss-cinematic-title {
+  font-size: clamp(1.05rem, 2.1vw, 1.55rem);
+  font-weight: 700;
+  line-height: 1.1;
+  color: #fff7e8;
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.55);
+}
+
+.battle-boss-cinematic-subtitle {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: rgba(232, 217, 184, 0.78);
+}
+
+.battle-boss-cinematic-detail {
+  margin-top: 0.15rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1.35;
+  color: rgba(255, 244, 215, 0.72);
+}
+
+@keyframes battle-boss-cinematic-overlay-in {
+  0% { opacity: 0; }
+  6% { opacity: 1; }
+  88% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+@keyframes battle-boss-cinematic-veil-pulse {
+  0% { opacity: 0; filter: brightness(0.82); }
+  10% { opacity: 1; filter: brightness(1.04); }
+  84% { opacity: 1; filter: brightness(1); }
+  100% { opacity: 0; filter: brightness(0.94); }
+}
+
+@keyframes battle-boss-cinematic-burst {
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(0.2); }
+  12% { opacity: 0.95; transform: translate(-50%, -50%) scale(1.15); }
+  34% { opacity: 0.42; transform: translate(-50%, -50%) scale(1.8); }
+  100% { opacity: 0; transform: translate(-50%, -50%) scale(2.4); }
+}
+
+@keyframes battle-boss-cinematic-ring {
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(0.35); }
+  14% { opacity: 0.85; }
+  100% { opacity: 0; transform: translate(-50%, -50%) scale(1.35); }
+}
+
+@keyframes battle-boss-cinematic-sprite-rise {
+  0% { opacity: 0; transform: translateY(22px) scale(0.78); }
+  12% { opacity: 1; transform: translateY(0) scale(1); }
+  84% { opacity: 1; transform: translateY(0) scale(1); }
+  100% { opacity: 0; transform: translateY(10px) scale(0.96); }
+}
+
+@keyframes battle-boss-cinematic-glow-pulse {
+  0%, 100% { opacity: 0.55; transform: scale(0.94); }
+  18%, 62% { opacity: 1; transform: scale(1.08); }
+}
+
+@keyframes battle-boss-cinematic-copy-rise {
+  0% { opacity: 0; transform: translate(-50%, 16px); }
+  16% { opacity: 1; transform: translate(-50%, 0); }
+  84% { opacity: 1; transform: translate(-50%, 0); }
+  100% { opacity: 0; transform: translate(-50%, 8px); }
+}
+
+.battle-boss-resurrection-pulse-raid .battle-boss-resurrection-ground {
+  background: radial-gradient(circle, rgba(248, 113, 113, 0.34), rgba(88, 28, 135, 0.16) 58%, transparent 76%);
+}
+
+.battle-boss-resurrection-pulse-raid .battle-boss-resurrection-beam {
+  background: linear-gradient(180deg, rgba(255, 228, 228, 0.04), rgba(248, 113, 113, 0.28) 42%, rgba(88, 28, 135, 0.14));
+}
+
+.battle-boss-resurrection-pulse-raid .battle-boss-resurrection-spark {
+  background: radial-gradient(circle, rgba(255, 228, 228, 0.78), transparent 72%);
+}
+
+.battle-boss-resurrection-pulse {
+  position: absolute;
+  inset: 0;
+  z-index: 7;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.battle-boss-resurrection-ground {
+  position: absolute;
+  left: 50%;
+  bottom: 10%;
+  width: 62%;
+  height: 16%;
   transform: translateX(-50%);
   border-radius: 999px;
-  background: radial-gradient(circle, rgba(244, 221, 176, 0.45), rgba(10, 10, 10, 0.08) 62%);
-  filter: blur(2px);
+  background: radial-gradient(circle, rgba(250, 204, 21, 0.42), rgba(88, 28, 135, 0.18) 58%, transparent 76%);
+  opacity: 0;
+  animation: battle-boss-resurrection-ground var(--boss-last-stand-ms, 5400ms) ease-out forwards;
+  animation-delay: calc(var(--boss-respawn-reveal-ms, 2400ms) - 180ms);
+}
+
+.battle-boss-resurrection-beam {
+  position: absolute;
+  left: 50%;
+  bottom: 8%;
+  width: 28%;
+  height: 72%;
+  transform: translateX(-50%) scaleY(0.2);
+  transform-origin: bottom center;
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(255, 248, 220, 0.05), rgba(250, 204, 21, 0.34) 42%, rgba(168, 85, 247, 0.18));
+  filter: blur(1px);
+  opacity: 0;
+  animation: battle-boss-resurrection-beam var(--boss-last-stand-ms, 5400ms) ease-out forwards;
+  animation-delay: calc(var(--boss-respawn-reveal-ms, 2400ms) - 220ms);
+}
+
+.battle-boss-resurrection-sprite {
+  position: relative;
+  width: 72%;
+  height: 72%;
+  opacity: 0;
+  transform: translateY(18px) scale(0.72);
+  filter: grayscale(0.35) brightness(1.12);
+  animation: battle-boss-resurrection-sprite var(--boss-last-stand-ms, 5400ms) cubic-bezier(0.18, 0.88, 0.28, 1) forwards;
+  animation-delay: var(--boss-respawn-reveal-ms, 2400ms);
+}
+
+.battle-boss-resurrection-spark {
+  position: absolute;
+  width: 18%;
+  height: 18%;
+  border-radius: 999px;
+  background: radial-gradient(circle, rgba(255, 248, 220, 0.82), transparent 72%);
+  opacity: 0;
+  animation: battle-boss-resurrection-spark var(--boss-last-stand-ms, 5400ms) ease-out forwards;
+  animation-delay: calc(var(--boss-respawn-reveal-ms, 2400ms) + 120ms);
+}
+
+.battle-boss-resurrection-spark-1 {
+  left: 22%;
+  top: 24%;
+}
+
+.battle-boss-resurrection-spark-2 {
+  right: 18%;
+  top: 34%;
+}
+
+.battle-piece-wrap-rising .battle-piece-anim-rise {
+  animation: battle-piece-rise var(--boss-last-stand-ms, 5400ms) cubic-bezier(0.18, 0.88, 0.28, 1) forwards;
+  animation-delay: var(--boss-respawn-reveal-ms, 2400ms);
+}
+
+@keyframes battle-boss-resurrection-ground {
+  0%, 44% { opacity: 0; transform: translateX(-50%) scale(0.5); }
+  58% { opacity: 0.9; transform: translateX(-50%) scale(1); }
+  100% { opacity: 0; transform: translateX(-50%) scale(1.35); }
+}
+
+@keyframes battle-boss-resurrection-beam {
+  0%, 44% { opacity: 0; transform: translateX(-50%) scaleY(0.2); }
+  58% { opacity: 0.82; transform: translateX(-50%) scaleY(1); }
+  100% { opacity: 0; transform: translateX(-50%) scaleY(1.08); }
+}
+
+@keyframes battle-boss-resurrection-sprite {
+  0%, 44% { opacity: 0; transform: translateY(18px) scale(0.72); filter: grayscale(0.8) brightness(0.7); }
+  58% { opacity: 1; transform: translateY(0) scale(1); filter: grayscale(0.1) brightness(1.12); }
+  82% { opacity: 1; transform: translateY(0) scale(1); filter: grayscale(0) brightness(1); }
+  100% { opacity: 0; transform: translateY(-6px) scale(0.98); }
+}
+
+@keyframes battle-boss-resurrection-spark {
+  0% { opacity: 0; transform: scale(0.4); }
+  24% { opacity: 0.9; transform: scale(1); }
+  100% { opacity: 0; transform: translateY(-16px) scale(1.2); }
+}
+
+@keyframes battle-piece-rise {
+  0%, 44% { opacity: 0; transform: translateY(16px) scale(0.78); filter: grayscale(0.75) brightness(0.72); }
+  58% { opacity: 1; transform: translateY(0) scale(1.04); filter: grayscale(0.15) brightness(1.08); }
+  82% { opacity: 1; transform: translateY(0) scale(1); filter: grayscale(0) brightness(1); }
+  100% { opacity: 1; transform: translateY(0) scale(1); filter: grayscale(0) brightness(1); }
+}
+
+.run-victory-boss-layer {
+  background: transparent;
+}
+
+.run-victory-boss-overlay {
+  position: relative;
+  inset: auto;
+  width: min(92vw, 44rem);
+  height: min(88vh, 50rem);
+  background: transparent !important;
+  box-shadow: none;
+}
+
+.run-victory-boss-overlay .battle-boss-cinematic-veil,
+.run-victory-boss-overlay .battle-boss-cinematic-copy {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .battle-boss-cinematic-overlay,
+  .battle-boss-cinematic-veil,
+  .battle-boss-cinematic-burst,
+  .battle-boss-cinematic-ring,
+  .battle-boss-cinematic-sprite-wrap,
+  .battle-boss-cinematic-sprite-glow,
+  .battle-boss-cinematic-copy,
+  .battle-boss-resurrection-pulse,
+  .battle-boss-resurrection-ground,
+  .battle-boss-resurrection-beam,
+  .battle-boss-resurrection-sprite,
+  .battle-boss-resurrection-spark,
+  .battle-piece-anim-rise {
+    animation-duration: 900ms !important;
+    animation-delay: 0ms !important;
+  }
 }
 
 .battle-floating-text {
@@ -15444,17 +15936,76 @@ button.vine-frame::before,
     transform: translateY(0) scale(1) rotate(0deg);
     opacity: 1;
   }
-  28% {
-    transform: translateY(2px) scale(0.97, 1.01) rotate(2deg);
-    opacity: 0.88;
+  38% {
+    transform: translateY(3px) scale(0.98, 1.01) rotate(2deg);
+    opacity: 0.92;
   }
-  58% {
-    transform: translateY(5px) scale(0.9, 0.98) rotate(4deg);
-    opacity: 0.55;
+  62% {
+    transform: translateY(7px) scale(0.9, 0.97) rotate(5deg);
+    opacity: 0.62;
+  }
+  82% {
+    transform: translateY(11px) scale(0.72, 0.9) rotate(7deg);
+    opacity: 0.22;
   }
   100% {
-    transform: translateY(10px) scale(0.78, 0.92) rotate(6deg);
+    transform: translateY(14px) scale(0.45, 0.82) rotate(9deg);
     opacity: 0;
+  }
+}
+
+@keyframes battle-death-sprite-desaturate {
+  0% {
+    filter: grayscale(0) brightness(1) contrast(1) sepia(0);
+    opacity: 1;
+  }
+  28% {
+    filter: grayscale(0.35) brightness(0.92) contrast(1.02) sepia(0.08);
+    opacity: 0.96;
+  }
+  52% {
+    filter: grayscale(0.72) brightness(0.78) contrast(1.04) sepia(0.16);
+    opacity: 0.82;
+  }
+  72% {
+    filter: grayscale(0.95) brightness(0.62) contrast(1.06) sepia(0.22);
+    opacity: 0.48;
+  }
+  100% {
+    filter: grayscale(1) brightness(0.42) contrast(1.08) sepia(0.28);
+    opacity: 0;
+  }
+}
+
+@keyframes battle-death-ash-core-rise {
+  0%, 44% {
+    opacity: 0;
+    transform: translateX(-50%) scale(0.35);
+  }
+  58% {
+    opacity: 0.9;
+    transform: translateX(-50%) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(-50%) translateY(-20px) scale(1.65);
+    filter: blur(8px);
+  }
+}
+
+@keyframes battle-death-ash-puff-rise {
+  0% {
+    opacity: 0;
+    transform: translateX(-50%) scale(0.4);
+  }
+  22% {
+    opacity: 0.75;
+    transform: translateX(-50%) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(-62%) translateY(-26px) scale(1.5);
+    filter: blur(7px);
   }
 }
 
@@ -16245,4 +16796,142 @@ button.vine-frame::before,
     opacity: 0.3;
     transform: translate(calc(-50% + var(--burst-x, 0.8rem)), calc(-50% + var(--burst-y, -0.5rem))) scale(0.55);
   }
+}
+
+/* Visual repair overrides for route shell screens restored after tutorial work. */
+.singleplayer-tutorial-layer {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 9999 !important;
+  width: 100vw !important;
+  height: 100dvh !important;
+  margin: 0 !important;
+}
+
+.mode-select-screen .mode-select-copy {
+  margin-bottom: clamp(2.5rem, 5vh, 4rem) !important;
+  transform: translateY(-2vh);
+}
+
+.mode-select-screen .mode-select-title {
+  font-size: clamp(4.8rem, 10vw, 8rem) !important;
+  line-height: 0.82 !important;
+  text-shadow:
+    0 0 18px rgba(255, 248, 231, 0.42),
+    0 0 36px rgba(139, 30, 42, 0.34),
+    0 4px 16px rgba(0, 0, 0, 0.95) !important;
+}
+
+.mode-select-screen .mode-select-grid {
+  max-width: min(78rem, calc(100vw - 5rem)) !important;
+  gap: clamp(1rem, 2vw, 1.6rem) !important;
+}
+
+.mode-select-screen .mode-select-card {
+  min-height: clamp(18rem, 28vh, 24rem) !important;
+  padding: clamp(1.65rem, 2.8vw, 2.5rem) !important;
+}
+
+.mode-select-screen .mode-select-card > .fantasy-heading {
+  font-size: clamp(3rem, 4vw, 4.2rem) !important;
+  line-height: 0.9 !important;
+}
+
+.mode-select-screen .mode-select-card .ui-muted {
+  font-size: clamp(1rem, 1.25vw, 1.18rem) !important;
+  line-height: 1.55 !important;
+}
+
+.singleplayer-hub-shell .sp-hub-panel {
+  grid-template-rows: minmax(25rem, 48vh) minmax(0, 1fr) !important;
+  background:
+    radial-gradient(circle at 18% 0%, rgba(250, 204, 21, 0.09), transparent 34%),
+    radial-gradient(circle at 82% 10%, rgba(125, 211, 252, 0.09), transparent 36%),
+    linear-gradient(180deg, rgba(7, 8, 10, 0.98), rgba(1, 3, 4, 0.96)) !important;
+}
+
+.singleplayer-hub-shell .sp-hub-hero.random-run-lobby-hero {
+  background:
+    radial-gradient(circle at 16% 22%, rgba(250, 204, 21, 0.2), transparent 39%),
+    radial-gradient(circle at 72% 8%, rgba(125, 211, 252, 0.15), transparent 34%),
+    linear-gradient(90deg, rgba(7, 9, 10, 0.98) 0%, rgba(7, 9, 10, 0.84) 38%, rgba(7, 9, 10, 0.32) 70%, rgba(7, 9, 10, 0.1) 100%),
+    var(--run-bg-riverside) !important;
+  background-position: center !important;
+  background-size: cover !important;
+}
+
+.singleplayer-hub-shell .sp-hub-hero > .relative {
+  padding: clamp(1.25rem, 2vw, 2rem) !important;
+}
+
+.singleplayer-hub-shell .sp-hub-hero .random-run-lobby-boss {
+  opacity: 0.78 !important;
+  object-position: right bottom !important;
+  transform: translateX(7%) translateY(4%) scale(1.04) !important;
+}
+
+.singleplayer-hub-shell .sp-hub-hero-main {
+  margin-top: auto !important;
+  padding-bottom: clamp(1rem, 3vh, 2rem) !important;
+}
+
+.singleplayer-hub-shell .sp-hub-arcane-label {
+  font-size: clamp(0.9rem, 1.2vw, 1.05rem) !important;
+}
+
+.singleplayer-hub-shell .sp-hub-hero-title {
+  font-size: clamp(4rem, 7vw, 6.6rem) !important;
+  line-height: 0.84 !important;
+  text-shadow:
+    0 0 18px rgba(255, 248, 231, 0.28),
+    0 4px 28px rgba(0, 0, 0, 0.72) !important;
+}
+
+.singleplayer-hub-shell .sp-hub-hero-copy {
+  max-width: 48rem !important;
+  font-size: clamp(1.05rem, 1.45vw, 1.24rem) !important;
+  line-height: 1.55 !important;
+}
+
+.singleplayer-hub-shell .sp-hub-start-btn {
+  min-height: 4.2rem !important;
+  font-size: clamp(1.05rem, 1.4vw, 1.3rem) !important;
+}
+
+.singleplayer-hub-shell .sp-hub-body {
+  padding: clamp(0.7rem, 1.3vw, 1rem) !important;
+  background:
+    linear-gradient(180deg, rgba(2, 7, 8, 0.48), rgba(0, 0, 0, 0.74)),
+    var(--run-bg-battlefield) !important;
+  background-position: center !important;
+  background-size: cover !important;
+}
+
+.run-route-map,
+.run-route-map-bg-wrap {
+  background:
+    linear-gradient(180deg, rgba(7, 10, 12, 0.1), rgba(0, 0, 0, 0.18)),
+    var(--run-bg-road) center 42% / cover no-repeat,
+    #0a1218 !important;
+}
+
+.run-route-map-bg-layer {
+  background:
+    var(--run-bg-road) center 42% / cover no-repeat !important;
+  opacity: 1 !important;
+}
+
+.run-route-map-bg-image {
+  opacity: 1 !important;
+  filter: saturate(1.12) contrast(1.08) brightness(1.08) !important;
+}
+
+.run-route-map-bg-mist {
+  opacity: 0.34 !important;
+}
+
+.run-route-map-bg-veil {
+  background:
+    radial-gradient(circle at 50% 16%, rgba(244, 221, 176, 0.04), transparent 40%),
+    linear-gradient(180deg, rgba(4, 7, 10, 0.03), rgba(2, 4, 6, 0.1)) !important;
 }

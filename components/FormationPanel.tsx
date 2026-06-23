@@ -5,7 +5,7 @@ import type { ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BATTLE_SPELLS, type BattleSpell, type BoardCell, type PlayerModelNumber } from '@/lib/battle';
-import { getPlayerModelPath } from '@/lib/assetLoader';
+import { getMinionAssetPath, getPlayerModelPath } from '@/lib/assetLoader';
 import {
   COMMANDER_FORMATION_KEY,
   equipSpellLoadout,
@@ -278,11 +278,11 @@ export default function FormationPanel({
               <div className="formation-lane-labels" aria-hidden="true">
                 <span>
                   <strong>Front</strong>
-                  <small>Guard</small>
+                  <small>Rear</small>
                 </span>
                 <span>
                   <strong>Rear</strong>
-                  <small>Support</small>
+                  <small>Front</small>
                 </span>
               </div>
               <div className="formation-battle-board grid">
@@ -352,7 +352,7 @@ export default function FormationPanel({
                           onDragEnd={() => setBenchDragActive(false)}
                         >
                           <FormationUnitPortrait
-                            imageSrc={`/assets/minions/${template.templateId}.png`}
+                            imageSrc={getMinionAssetPath(template.assetName)}
                             variant="minion"
                             size="formation"
                           />
@@ -518,7 +518,7 @@ function WarbandStackCard({
         className={`formation-warband-card rounded border ${selected ? 'formation-unit-selected' : ''} ${fielded ? 'formation-warband-card-fielded' : 'formation-warband-card-bench'}`}
       >
         <FormationUnitPortrait
-          imageSrc={`/assets/minions/${template.templateId}.png`}
+          imageSrc={getMinionAssetPath(template.assetName)}
           variant="minion"
           size="dock"
         />

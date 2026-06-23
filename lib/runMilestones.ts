@@ -302,6 +302,17 @@ export function getFeaturedHubMilestones(state: DailyRunState, limit = 6): RunMi
   return [...picked, ...remaining].slice(0, limit);
 }
 
+export function getRunMilestoneRewardExp(milestoneId: string): number {
+  if (milestoneId.startsWith('boss-')) return 75;
+  if (milestoneId.startsWith('meta-')) return 60;
+  if (milestoneId.startsWith('spell-')) return 50;
+  return 40;
+}
+
+export function isRunMilestoneRewardClaimed(state: DailyRunState, milestoneId: string): boolean {
+  return (state.claimedMilestoneIds || []).includes(milestoneId);
+}
+
 export function getRunMilestoneUnlockCounts(state: DailyRunState): { unlocked: number; total: number } {
   const views = getRunMilestoneViews(state);
   return {

@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "import-assets": "powershell -ExecutionPolicy Bypass -File scripts/import-assets-v2.ps1"
   },
   "dependencies": {
     "next": "16.1.6",

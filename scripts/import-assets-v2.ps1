@@ -316,6 +316,28 @@ foreach ($asset in $iconAssets) {
   Save-TrimmedSprite $asset (Join-Path $iconsRoot $asset) 96 6
 }
 
+$directIconAssets = @('dice.png')
+foreach ($asset in $directIconAssets) {
+  $sourcePath = Join-Path $sourceRoot $asset
+  if (Test-Path $sourcePath) {
+    Copy-Asset $asset (Join-Path $iconsRoot $asset)
+  }
+}
+
+$bossAssetsRoot = Join-Path $publicAssets 'bosses'
+New-Item -ItemType Directory -Force -Path $bossAssetsRoot | Out-Null
+foreach ($index in 1..8) {
+  $bossName = "boss$index.png"
+  $sourcePath = Join-Path $sourceRoot $bossName
+  if (Test-Path $sourcePath) {
+    Copy-Asset $bossName (Join-Path $bossAssetsRoot $bossName)
+  }
+}
+
+if (Test-Path (Join-Path $sourceRoot 'reaper.png')) {
+  Copy-Asset 'reaper.png' (Join-Path $publicAssets 'reaper.png')
+}
+
 $minionAssets = @(
   'wizard-apprentice.png',
   'wizard-magus.png',
@@ -374,4 +396,14 @@ foreach ($item in $itemColumns) {
 
 $sheet.Dispose()
 
+$assetVersion = Get-Date -Format 'yyyyMMddHHmmss'
+$generatedDir = Join-Path $repoRoot 'lib\generated'
+New-Item -ItemType Directory -Force -Path $generatedDir | Out-Null
+$assetVersionFile = Join-Path $generatedDir 'assetVersion.ts'
+@"
+// Auto-updated by ``npm run import-assets``. Do not edit manually.
+export const ASSET_VERSION = '$assetVersion';
+"@ | Set-Content -Path $assetVersionFile -Encoding utf8
+
 Write-Host "Imported assetsv2 into public/assets and generated 28 equipment icons from the sheet."
+Write-Host "Asset cache version: $assetVersion"

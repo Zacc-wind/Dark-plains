@@ -254,6 +254,7 @@ export interface DailyRunState {
   runExp: number;
   runUpgradePoints: number;
   permanentStats: RandomRunPermanentStats;
+  claimedMilestoneIds?: string[];
 }
 
 export interface DailyRunStatus {
@@ -5272,6 +5273,7 @@ function normalizeDailyRunState(state?: Partial<DailyRunState> | null): DailyRun
     runExp,
     runUpgradePoints: Math.max(0, Math.floor(toFiniteNumber(state?.runUpgradePoints, 0))),
     permanentStats: capRandomRunPermanentStats(normalizeRandomRunPermanentStats(state?.permanentStats), runLevel),
+    claimedMilestoneIds: Array.from(new Set((state?.claimedMilestoneIds || []).filter(Boolean))).slice(0, 64),
   };
 }
 
@@ -5516,6 +5518,111 @@ export function recordDailyRunCompletionState(
     runExp,
     runUpgradePoints: Math.max(0, state.runUpgradePoints + levelUps),
     permanentStats,
+    claimedMilestoneIds: state.claimedMilestoneIds || [],
+  };
+}
+
+export type RandomRunUpgradeStat = keyof RandomRunPermanentStats;
+
+const RANDOM_RUN_UPGRADE_INCREMENTS: Record<RandomRunUpgradeStat, number> = {
+  armyPower: 1,
+  defensivePower: 1,
+  morale: 1,
+  spellPower: 1,
+  maxHealth: 10,
+  unitPower: 1,
+  unitWard: 1,
+};
+
+function applyRandomRunExperienceGain(state: DailyRunState, gainedExp: number): DailyRunState {
+  const safeGain = Math.max(0, Math.floor(gainedExp));
+  if (safeGain <= 0) return state;
+
+  let runLevel = state.runLevel;
+  let runExp = state.runExp + safeGain;
+  let permanentStats = normalizeRandomRunPermanentStats(state.permanentStats);
+  let levelUps = 0;
+
+  while (runExp >= getRandomRunExpNeeded(runLevel) && runLevel < RANDOM_RUN_BALANCE.levelCap) {
+    runExp -= getRandomRunExpNeeded(runLevel);
+    runLevel += 1;
+    levelUps += 1;
+    permanentStats = applyAutomaticRandomRunUpgrade(permanentStats, runLevel);
+  }
+
+  if (runLevel >= RANDOM_RUN_BALANCE.levelCap) {
+    runExp = Math.min(runExp, getRandomRunExpNeeded(runLevel) * RANDOM_RUN_BALANCE.maxBankedCapLevels);
+  }
+
+  permanentStats = capRandomRunPermanentStats(permanentStats, runLevel);
+
+  return {
+    ...state,
+    runLevel,
+    runExp,
+    runUpgradePoints: Math.max(0, state.runUpgradePoints + levelUps),
+    permanentStats,
+  };
+}
+
+export function spendRunUpgradePoint(
+  user: Pick<User, 'dailyRun'>,
+  stat: RandomRunUpgradeStat,
+): { ok: boolean; message: string; dailyRun: DailyRunState } {
+  const state = getDailyRunState(user);
+  if (state.runUpgradePoints <= 0) {
+    return { ok: false, message: 'No upgrade points available.', dailyRun: state };
+  }
+
+  const increment = RANDOM_RUN_UPGRADE_INCREMENTS[stat];
+  const capped = capRandomRunPermanentStats(state.permanentStats, state.runLevel);
+  if (state.permanentStats[stat] >= capped[stat]) {
+    return { ok: false, message: 'That bonus is already capped for your run level.', dailyRun: state };
+  }
+
+  const nextStats = capRandomRunPermanentStats({
+    ...state.permanentStats,
+    [stat]: state.permanentStats[stat] + increment,
+  }, state.runLevel);
+
+  if (nextStats[stat] === state.permanentStats[stat]) {
+    return { ok: false, message: 'That bonus is already capped for your run level.', dailyRun: state };
+  }
+
+  const dailyRun: DailyRunState = {
+    ...state,
+    runUpgradePoints: state.runUpgradePoints - 1,
+    permanentStats: nextStats,
+  };
+
+  return { ok: true, message: `+${increment} ${stat} applied.`, dailyRun };
+}
+
+export function claimRunMilestoneReward(
+  user: Pick<User, 'dailyRun'>,
+  milestoneId: string,
+  rewardExp: number,
+  isUnlocked: boolean,
+): { ok: boolean; message: string; dailyRun: DailyRunState } {
+  const state = getDailyRunState(user);
+  const claimed = new Set(state.claimedMilestoneIds || []);
+
+  if (!isUnlocked) {
+    return { ok: false, message: 'That milestone is not unlocked yet.', dailyRun: state };
+  }
+  if (claimed.has(milestoneId)) {
+    return { ok: false, message: 'Milestone reward already claimed.', dailyRun: state };
+  }
+
+  const dailyRun = applyRandomRunExperienceGain({
+    ...state,
+    claimedMilestoneIds: [...claimed, milestoneId],
+  }, rewardExp);
+
+  return {
+    ok: true,
+    message: `Milestone reward claimed: +${rewardExp} run XP.`,
+    dailyRun,
   };
 }
 

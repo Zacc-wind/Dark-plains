@@ -1,14 +1,16 @@
 import {
   CharacterStats,
   MAX_FIELD_MINIONS,
+  MINION_TEMPLATES,
   MinionStack,
+  MinionTier,
   User,
   getFieldedMinions,
   getCurrentUser,
   getUsers,
   getMinionTemplate,
 } from './auth';
-import { getPlayerModelPath } from './assetLoader';
+import { getMinionAssetPath, getPlayerModelPath } from './assetLoader';
 import { readGameJson, removeGameStorageItem, writeGameJson } from './gameStore';
 import { MAP_CONFIG, POIType, TileType, getStaticMap, getStaticPOIs } from './mapData';
 import { BOSS_PROFILES, type BossProfile } from './bosses';
@@ -34,7 +36,9 @@ export type BattleLogStyle =
   | 'spell-damage'
   | 'spell-drain'
   | 'spell-support'
-  | 'spell-control';
+  | 'spell-control'
+  | 'boss-phase'
+  | 'boss-special';
 export type BattleChallengeStatus = 'pending' | 'ready' | 'declined' | 'expired' | 'cancelled';
 
 export interface BoardCell {
@@ -119,6 +123,10 @@ export interface BattleUnit {
   y: number;
   retaliatedRound?: number;
   chargedHeal?: boolean;
+  slowDebuff?: {
+    movementPenalty: number;
+    speedPenalty: number;
+  };
 }
 
 export interface BattleSpell {
@@ -144,6 +152,8 @@ export interface BattleLogEntry {
   fromY?: number;
   toX?: number;
   toY?: number;
+  resurrectedUnitIds?: string[];
+  summonedUnitIds?: string[];
   message: string;
   createdAt: number;
 }
@@ -175,6 +185,7 @@ export interface BattleState {
   recruitOffer?: BattleRecruitOffer;
   bossPhase?: 1 | 2;
   bossSpecialRounds?: Record<string, number>;
+  bossSpecialUses?: Record<string, number>;
   createdAt: number;
 }
 
@@ -1139,7 +1150,7 @@ function grantCommanderMana(state: BattleState, unit: BattleUnit | undefined): B
 function createBattleLogEntry(
   state: Pick<BattleState, 'round'>,
   message: string,
-  options: Partial<Pick<BattleLogEntry, 'side' | 'actor' | 'actorId' | 'targetIds' | 'action' | 'style' | 'spellId' | 'fromX' | 'fromY' | 'toX' | 'toY'>> = {}
+  options: Partial<Pick<BattleLogEntry, 'side' | 'actor' | 'actorId' | 'targetIds' | 'action' | 'style' | 'spellId' | 'fromX' | 'fromY' | 'toX' | 'toY' | 'resurrectedUnitIds' | 'summonedUnitIds'>> = {}
 ): BattleLogEntry {
   return {
     id: `log-${Date.now()}-${Math.random().toString(16).slice(2)}`,
@@ -1155,6 +1166,8 @@ function createBattleLogEntry(
     fromY: options.fromY,
     toX: options.toX,
     toY: options.toY,
+    resurrectedUnitIds: options.resurrectedUnitIds,
+    summonedUnitIds: options.summonedUnitIds,
     message,
     createdAt: Date.now(),
   };
@@ -1163,7 +1176,7 @@ function createBattleLogEntry(
 function withBattleLog(
   state: BattleState,
   message: string,
-  options: Partial<Pick<BattleLogEntry, 'side' | 'actor' | 'actorId' | 'targetIds' | 'action' | 'style' | 'spellId' | 'fromX' | 'fromY' | 'toX' | 'toY'>> = {}
+  options: Partial<Pick<BattleLogEntry, 'side' | 'actor' | 'actorId' | 'targetIds' | 'action' | 'style' | 'spellId' | 'fromX' | 'fromY' | 'toX' | 'toY' | 'resurrectedUnitIds' | 'summonedUnitIds'>> = {}
 ): BattleState {
   return {
     ...state,
@@ -1301,7 +1314,7 @@ function makeMinionUnit(stack: MinionStack, side: BattleSide, x: number, y: numb
     rosterId: stack.id,
     templateId: template.templateId,
     name: template.name,
-    assetPath: `/assets/minions/${template.assetName}`,
+    assetPath: getMinionAssetPath(template.assetName),
     quantity: 1,
     currentHealth,
     maxHealth,
@@ -1565,6 +1578,7 @@ export function createNpcBattleState(user: User, enemy: WorldEnemy, options: Cre
     recruitOffer,
     bossPhase: bossBattle ? 1 : undefined,
     bossSpecialRounds: bossBattle ? {} : undefined,
+    bossSpecialUses: bossBattle ? {} : undefined,
     createdAt: Date.now(),
   };
 
@@ -1575,8 +1589,34 @@ export function getDisplayedQuantity(unit: BattleUnit): number {
   return unit.kind === 'minion' && unit.currentHealth > 0 ? 1 : 1;
 }
 
+export function getEffectiveMovement(unit: BattleUnit): number {
+  const penalty = unit.slowDebuff?.movementPenalty || 0;
+  return Math.max(1, unit.movement - penalty);
+}
+
+export function getEffectiveSpeed(unit: BattleUnit): number {
+  const penalty = unit.slowDebuff?.speedPenalty || 0;
+  return Math.max(1, unit.speed - penalty);
+}
+
+function applySlowDebuff(unit: BattleUnit, movementPenalty: number, speedPenalty: number): BattleUnit {
+  return {
+    ...unit,
+    slowDebuff: {
+      movementPenalty: Math.max(0, movementPenalty),
+      speedPenalty: Math.max(0, speedPenalty),
+    },
+  };
+}
+
+function clearSlowDebuff(unit: BattleUnit): BattleUnit {
+  if (!unit.slowDebuff) return unit;
+  const { slowDebuff: _removed, ...rest } = unit;
+  return rest;
+}
+
 export function getMoveRange(unit: BattleUnit): number {
-  return unit.movement;
+  return getEffectiveMovement(unit);
 }
 
 export function getBattleMana(state: BattleState, side: BattleSide): number {
@@ -1595,7 +1635,7 @@ export function getTurnTimeRemaining(state: BattleState, now = Date.now()): numb
 export function getTurnOrder(units: BattleUnit[]): BattleUnit[] {
   return units
     .filter(unit => unit.currentHealth > 0)
-    .sort((a, b) => b.speed - a.speed || a.id.localeCompare(b.id));
+    .sort((a, b) => getEffectiveSpeed(b) - getEffectiveSpeed(a) || a.id.localeCompare(b.id));
 }
 
 export function getActiveUnit(state: BattleState): BattleUnit | undefined {
@@ -1864,12 +1904,22 @@ export function advanceBattleTurn(state: BattleState): BattleState {
   const updatedState = updateBattleStatus(state);
   if (updatedState.status !== 'active') return updatedState;
 
-  const order = getTurnOrder(updatedState.units);
-  const currentIndex = order.findIndex(unit => unit.id === updatedState.activeUnitId);
+  const finishingUnitId = updatedState.activeUnitId;
+  const stateWithClearedSlow = finishingUnitId
+    ? {
+      ...updatedState,
+      units: updatedState.units.map(unit => (
+        unit.id === finishingUnitId ? clearSlowDebuff(unit) : unit
+      )),
+    }
+    : updatedState;
+
+  const order = getTurnOrder(stateWithClearedSlow.units);
+  const currentIndex = order.findIndex(unit => unit.id === stateWithClearedSlow.activeUnitId);
   const nextIndex = currentIndex === -1 ? 0 : (currentIndex + 1) % order.length;
-  const nextRound = nextIndex === 0 ? updatedState.round + 1 : updatedState.round;
+  const nextRound = nextIndex === 0 ? stateWithClearedSlow.round + 1 : stateWithClearedSlow.round;
   const nextState = {
-    ...updatedState,
+    ...stateWithClearedSlow,
     activeUnitId: order[nextIndex].id,
     round: nextRound,
     turnStartedAt: Date.now(),
@@ -1949,19 +1999,15 @@ export function attackBattleUnit(state: BattleState, attackerId: string, targetI
   if (!attacker || !target || !canAttack(attacker, target)) return state;
 
   const damage = getAttackDamage(attacker, target, state);
-  const nextHealth = Math.max(0, target.currentHealth - damage);
-  const defeated = nextHealth === 0;
+  const { state: attackedState, lastStand } = applyDamageToUnit(state, targetId, damage);
+  const targetAfterHit = attackedState.units.find(unit => unit.id === targetId);
+  const defeated = !lastStand && (!targetAfterHit || targetAfterHit.currentHealth <= 0);
   const guard = getGuardingAlly(state, target);
   const flanking = getFlankingBonus(state, attacker, target) > 0;
 
-  const attackedState = {
-    ...state,
-    units: state.units.map(unit => unit.id === targetId ? { ...unit, currentHealth: nextHealth } : unit),
-  };
-
   let resolvedState = withBattleLog(
     attackedState,
-    `${attacker.name} hits ${target.name} for ${damage}${flanking ? ' with a flank' : ''}${guard ? ` through ${guard.name}'s guard` : ''}${defeated ? ' and defeats it' : ''}.`,
+    `${attacker.name} hits ${target.name} for ${damage}${flanking ? ' with a flank' : ''}${guard ? ` through ${guard.name}'s guard` : ''}${defeated ? ' and defeats it' : ''}${lastStand ? ', but the boss endures.' : ''}.`,
     { side: attacker.side, actor: attacker.name, actorId: attacker.id, targetIds: [target.id], action: 'attack', style: attacker.range > 1 ? 'ranged' : 'melee' }
   );
 
@@ -1971,20 +2017,20 @@ export function attackBattleUnit(state: BattleState, attackerId: string, targetI
 
   if (canRetaliate && defenderAfterHit && attackerAfterHit) {
     const retaliationDamage = getRetaliationDamage(resolvedState, attackerAfterHit, defenderAfterHit);
-    const retaliationHealth = Math.max(0, attackerAfterHit.currentHealth - retaliationDamage);
+    const { state: retaliatedState } = applyDamageToUnit(resolvedState, attackerAfterHit.id, retaliationDamage);
+    const attackerAfterRetaliation = retaliatedState.units.find(unit => unit.id === attackerAfterHit.id);
+    const retaliationDropped = !attackerAfterRetaliation || attackerAfterRetaliation.currentHealth <= 0;
     resolvedState = {
-      ...resolvedState,
-      units: resolvedState.units.map(unit => (
-        unit.id === attackerAfterHit.id
-          ? { ...unit, currentHealth: retaliationHealth }
-          : unit.id === defenderAfterHit.id
-            ? { ...unit, retaliatedRound: resolvedState.round }
-            : unit
+      ...retaliatedState,
+      units: retaliatedState.units.map(unit => (
+        unit.id === defenderAfterHit.id
+          ? { ...unit, retaliatedRound: resolvedState.round }
+          : unit
       )),
     };
     resolvedState = withBattleLog(
       resolvedState,
-      `${defenderAfterHit.name} retaliates for ${retaliationDamage}${retaliationHealth === 0 ? ' and drops the attacker' : ''}.`,
+      `${defenderAfterHit.name} retaliates for ${retaliationDamage}${retaliationDropped ? ' and drops the attacker' : ''}.`,
       { side: defenderAfterHit.side, actor: defenderAfterHit.name, actorId: defenderAfterHit.id, targetIds: [attackerAfterHit.id], action: 'attack', style: defenderAfterHit.range > 1 ? 'ranged' : 'melee' }
     );
   }
@@ -2018,14 +2064,188 @@ export function healBattleUnit(state: BattleState, healerId: string, targetId: s
   );
 }
 
-function damageUnit(state: BattleState, targetId: string, damage: number): BattleState {
-  return {
-    ...state,
-    units: state.units.map(unit => {
-      if (unit.id !== targetId || unit.currentHealth <= 0) return unit;
-      return { ...unit, currentHealth: Math.max(0, unit.currentHealth - Math.max(1, damage)) };
+function isBossCommanderLethalTrigger(unit: BattleUnit, state: BattleState): boolean {
+  return (
+    unit.kind === 'commander' &&
+    unit.side === 'enemy' &&
+    isBossBattleEnemy(state.enemy) &&
+    state.bossPhase !== 2
+  );
+}
+
+function upgradeMinionTemplateId(templateId: string): string {
+  const template = getMinionTemplate(templateId);
+  if (!template || template.tier === 'tier3') return templateId;
+
+  const nextTier: MinionTier = template.tier === 'tier1' ? 'tier2' : 'tier3';
+  return MINION_TEMPLATES.find(item => item.class === template.class && item.tier === nextTier)?.templateId || templateId;
+}
+
+function isVacantBattleCell(state: BattleState, x: number, y: number): boolean {
+  if (!isInsideBoard(state, x, y) || isObstacle(state, x, y)) return false;
+  return !state.units.some(unit => unit.currentHealth > 0 && unit.x === x && unit.y === y);
+}
+
+function getEnemyHalfStart(state: BattleState): number {
+  return Math.max(0, Math.floor(state.boardWidth / 2) - 1);
+}
+
+function getEnemyResurrectionCells(state: BattleState, commander: BattleUnit): BoardCell[] {
+  const enemyHalfStart = getEnemyHalfStart(state);
+  const candidates: BoardCell[] = [];
+
+  for (let y = 0; y < state.boardHeight; y += 1) {
+    for (let x = enemyHalfStart; x < state.boardWidth; x += 1) {
+      if (isVacantBattleCell(state, x, y)) candidates.push({ x, y });
+    }
+  }
+
+  return candidates.sort((a, b) => getDistance(commander, a) - getDistance(commander, b));
+}
+
+function findResurrectionCell(
+  state: BattleState,
+  dead: BattleUnit,
+  commander: BattleUnit,
+  usedCells: Set<string>,
+): BoardCell | undefined {
+  const enemyHalfStart = getEnemyHalfStart(state);
+  const deadKey = getCellKey(dead);
+
+  if (
+    isVacantBattleCell(state, dead.x, dead.y) &&
+    !usedCells.has(deadKey) &&
+    dead.x >= enemyHalfStart
+  ) {
+    return { x: dead.x, y: dead.y };
+  }
+
+  return getEnemyResurrectionCells(state, commander).find(cell => !usedCells.has(getCellKey(cell)));
+}
+
+function resurrectBossMinions(
+  state: BattleState,
+  commander: BattleUnit,
+  count = 2,
+): { state: BattleState; resurrectedIds: string[] } {
+  const deadMinions = state.units.filter(
+    unit => unit.side === 'enemy' && unit.kind === 'minion' && unit.currentHealth <= 0,
+  );
+  if (deadMinions.length === 0) return { state, resurrectedIds: [] };
+
+  const picks = [...deadMinions].sort(() => Math.random() - 0.5).slice(0, count);
+  const modifiers = getBattleModifiers(makeEnemyCommanderStats(state.enemy.level, state.enemy));
+  const liveEnemyMinions = state.units.filter(unit => unit.side === 'enemy' && unit.kind === 'minion' && unit.currentHealth > 0).length;
+  const summonLimit = ENEMY_FIELD_MINIONS + 2;
+
+  let nextState = state;
+  const resurrectedIds: string[] = [];
+  const usedCells = new Set<string>();
+
+  for (const dead of picks) {
+    if (liveEnemyMinions + resurrectedIds.length >= summonLimit) break;
+
+    const cell = findResurrectionCell(nextState, dead, commander, usedCells);
+    if (!cell) continue;
+    usedCells.add(getCellKey(cell));
+
+    const upgradedTemplateId = upgradeMinionTemplateId(dead.templateId || getBossSummonTemplateId(state, 'knight-squire'));
+    const stack = makeMinionStack(upgradedTemplateId, `boss-risen-${state.id}-${resurrectedIds.length}`);
+    const risen = makeMinionUnit(stack, 'enemy', cell.x, cell.y, modifiers);
+    if (!risen) continue;
+
+    nextState = {
+      ...nextState,
+      units: nextState.units.map(unit => (
+        unit.id === dead.id
+          ? { ...risen, id: dead.id, x: cell.x, y: cell.y, currentHealth: risen.maxHealth }
+          : unit
+      )),
+    };
+    resurrectedIds.push(dead.id);
+  }
+
+  return { state: nextState, resurrectedIds };
+}
+
+function applyBossLastStand(state: BattleState, commander: BattleUnit): BattleState {
+  const phase2Health = Math.max(1, Math.floor(commander.maxHealth * 0.5));
+  const bossDefenseBonus = 6;
+  const isFinalBoss = state.enemy.personality === 'boss';
+  const resurrectCount = isFinalBoss ? 4 : 2;
+  const { state: risenState, resurrectedIds } = resurrectBossMinions(state, commander, resurrectCount);
+  const targetIds = [
+    commander.id,
+    ...resurrectedIds,
+    ...risenState.units.filter(unit => unit.side === 'enemy' && unit.currentHealth > 0).map(unit => unit.id),
+  ];
+
+  const nextState = setSideMana({
+    ...risenState,
+    bossPhase: 2,
+    units: risenState.units.map(unit => {
+      if (unit.id === commander.id) {
+        return {
+          ...unit,
+          currentHealth: phase2Health,
+          defense: unit.defense + bossDefenseBonus,
+          attack: unit.attack + 2,
+          magic: unit.magic + 2,
+        };
+      }
+      if (unit.side === 'enemy' && unit.currentHealth > 0 && unit.kind === 'minion') {
+        return { ...unit, defense: unit.defense + 2 };
+      }
+      return unit;
     }),
+  }, 'enemy', getSideMana(risenState, 'enemy') + 2);
+
+  const risenText = resurrectedIds.length > 0
+    ? ` ${resurrectedIds.length} fallen servant${resurrectedIds.length === 1 ? '' : 's'} rise one tier stronger.`
+    : '';
+
+  return withBattleLog(
+    nextState,
+    `${commander.name} refuses death. A second oath ignites—healed to half strength, armored for the final stand.${risenText}`,
+    {
+      side: 'enemy',
+      actor: commander.name,
+      actorId: commander.id,
+      targetIds,
+      resurrectedUnitIds: resurrectedIds,
+      action: 'spell',
+      style: 'boss-phase',
+      spellId: 'saint-king-aegis',
+    },
+  );
+}
+
+function applyDamageToUnit(state: BattleState, targetId: string, damage: number): { state: BattleState; lastStand: boolean } {
+  const target = state.units.find(unit => unit.id === targetId && unit.currentHealth > 0);
+  if (!target) return { state, lastStand: false };
+
+  const effectiveDamage = Math.max(1, damage);
+  const nextHealth = target.currentHealth - effectiveDamage;
+
+  if (nextHealth <= 0 && isBossCommanderLethalTrigger(target, state)) {
+    return { state: applyBossLastStand(state, target), lastStand: true };
+  }
+
+  return {
+    state: {
+      ...state,
+      units: state.units.map(unit => (
+        unit.id === targetId
+          ? { ...unit, currentHealth: Math.max(0, nextHealth) }
+          : unit
+      )),
+    },
+    lastStand: false,
   };
+}
+
+function damageUnit(state: BattleState, targetId: string, damage: number): BattleState {
+  return applyDamageToUnit(state, targetId, damage).state;
 }
 
 function healUnit(state: BattleState, targetId: string, amount: number): BattleState {
@@ -2066,31 +2286,74 @@ export function getBattleSpellLogStyle(spellId: string): BattleLogStyle {
 export const BATTLE_SPELL_PRESENTATION_MS = 2300;
 export const BATTLE_ENEMY_PRESENTATION_MS = 1850;
 export const BATTLE_DEFAULT_PRESENTATION_MS = 1500;
+/** Brief hit reaction on the victim sprite before the ash dissolve. */
+export const BATTLE_DEATH_HIT_MS = 480;
+/** Grayscale slump and dissolve into ash after the hit reaction. */
+export const BATTLE_DEATH_DISSOLVE_MS = 1600;
+/** Full-screen boss last-stand presentation over the combat grid. */
+export const BOSS_LAST_STAND_PRESENTATION_MS = 5400;
+/** Delay before resurrected minions pulse in on the battlefield. */
+export const BOSS_LAST_STAND_RESPAWN_REVEAL_MS = 2400;
+/** Boss raid ability cinematic before Phase II. */
+export const BOSS_SPECIAL_PRESENTATION_MS = 4000;
+/** Delay before boss-summoned minions pulse in on the battlefield. */
+export const BOSS_SPECIAL_SUMMON_REVEAL_MS = 1800;
+/** Maximum boss raid abilities per fight before Phase II. */
+export const BOSS_SPECIAL_MAX_USES_BEFORE_PHASE_2 = 2;
+
+export function getBattleDeathPresentationMs(): number {
+  return BATTLE_DEATH_HIT_MS + BATTLE_DEATH_DISSOLVE_MS;
+}
+
+export function hasDefeatedLogTarget(battle: BattleState, entry: BattleLogEntry): boolean {
+  return Boolean(entry.targetIds?.some(targetId => {
+    const unit = battle.units.find(candidate => candidate.id === targetId);
+    return unit && unit.currentHealth <= 0;
+  }));
+}
 
 export function isPresentationBattleLogAction(action: BattleLogAction): boolean {
   return action !== 'round' && action !== 'system';
 }
 
-export function getBattleLogPresentationMs(entry: BattleLogEntry): number {
-  if (entry.action === 'spell') return BATTLE_SPELL_PRESENTATION_MS;
-  if (entry.side === 'enemy') return BATTLE_ENEMY_PRESENTATION_MS;
-  return BATTLE_DEFAULT_PRESENTATION_MS;
+export function getBattleLogPresentationMs(entry: BattleLogEntry, battle?: BattleState): number {
+  if (entry.style === 'boss-phase') return BOSS_LAST_STAND_PRESENTATION_MS;
+  if (entry.style === 'boss-special') return BOSS_SPECIAL_PRESENTATION_MS;
+
+  let base: number;
+  if (entry.action === 'spell') base = BATTLE_SPELL_PRESENTATION_MS;
+  else if (entry.side === 'enemy') base = BATTLE_ENEMY_PRESENTATION_MS;
+  else base = BATTLE_DEFAULT_PRESENTATION_MS;
+
+  if (
+    battle
+    && (entry.action === 'attack' || entry.action === 'spell')
+    && hasDefeatedLogTarget(battle, entry)
+  ) {
+    base = Math.max(base, getBattleDeathPresentationMs() + 120);
+  }
+
+  return base;
 }
 
 export function getRecentPresentationLogEntry(battle: BattleState, now = Date.now()): BattleLogEntry | undefined {
   const candidates = battle.log.filter(entry => (
     isPresentationBattleLogAction(entry.action)
-    && now - entry.createdAt < getBattleLogPresentationMs(entry)
+    && now - entry.createdAt < getBattleLogPresentationMs(entry, battle)
   ));
 
-  const latest = candidates[0];
-  if (latest?.action === 'move') return latest;
-  return candidates.find(entry => entry.action === 'spell') ?? latest;
+  const recentMove = candidates.find(entry => entry.action === 'move');
+  if (recentMove) return recentMove;
+  const recentSpell = candidates.find(entry => entry.action === 'spell');
+  if (recentSpell) return recentSpell;
+  return candidates[0];
 }
 
 export function pickFreshPresentationLogEntry(entries: BattleLogEntry[]): BattleLogEntry | undefined {
   if (entries.length === 0) return undefined;
-  return entries.find(entry => entry.action === 'spell')
+  return entries.find(entry => entry.style === 'boss-phase')
+    ?? entries.find(entry => entry.style === 'boss-special')
+    ?? entries.find(entry => entry.action === 'spell')
     ?? entries.find(entry => isPresentationBattleLogAction(entry.action));
 }
 
@@ -2196,14 +2459,12 @@ export function castBattleSpell(state: BattleState, spellId: string, targetId?: 
     case 'chain-spark':
       {
         const damage = 6 + spellPower;
-        spellTargetIds = nextState.units.filter(unit => unit.side === enemySide && unit.currentHealth > 0).map(unit => unit.id);
-        nextState = {
-          ...nextState,
-          units: nextState.units.map(unit => unit.side === enemySide && unit.currentHealth > 0
-            ? { ...unit, currentHealth: Math.max(0, unit.currentHealth - damage) }
-            : unit
-          ),
-        };
+        const enemyTargets = nextState.units.filter(unit => unit.side === enemySide && unit.currentHealth > 0);
+        spellTargetIds = enemyTargets.map(unit => unit.id);
+        nextState = enemyTargets.reduce(
+          (incoming, unit) => damageUnit(incoming, unit.id, damage),
+          nextState,
+        );
         logMessage = `${caster.name} casts ${spell.name}, striking every enemy for up to ${damage}.`;
       }
       break;
@@ -2213,11 +2474,9 @@ export function castBattleSpell(state: BattleState, spellId: string, targetId?: 
         nextState = damageUnit(nextState, target.id, damage);
         nextState = {
           ...nextState,
-          units: nextState.units.map(unit => unit.id === target.id ? {
-            ...unit,
-            movement: Math.max(1, unit.movement - 1),
-            speed: Math.max(1, unit.speed - 3),
-          } : unit),
+          units: nextState.units.map(unit => unit.id === target.id
+            ? applySlowDebuff(unit, 1, 3)
+            : unit),
         };
         logMessage = `${caster.name} casts ${spell.name} on ${target.name} for ${damageDone(target, damage)} and slows it.`;
       }
@@ -2256,11 +2515,9 @@ export function castBattleSpell(state: BattleState, spellId: string, targetId?: 
         nextState = damageUnit(nextState, target.id, damage);
         nextState = {
           ...nextState,
-          units: nextState.units.map(unit => unit.id === target.id ? {
-            ...unit,
-            movement: Math.max(1, unit.movement - 2),
-            speed: Math.max(1, unit.speed - 4),
-          } : unit),
+          units: nextState.units.map(unit => unit.id === target.id
+            ? applySlowDebuff(unit, 2, 4)
+            : unit),
         };
         logMessage = `${caster.name} casts ${spell.name} on ${target.name} for ${damageDone(target, damage)} and freezes its advance.`;
       }
@@ -2283,14 +2540,12 @@ export function castBattleSpell(state: BattleState, spellId: string, targetId?: 
     case 'eclipse-nova':
       {
         const damage = 14 + spellPower * 2;
-        spellTargetIds = nextState.units.filter(unit => unit.side === enemySide && unit.currentHealth > 0).map(unit => unit.id);
-        nextState = {
-          ...nextState,
-          units: nextState.units.map(unit => unit.side === enemySide && unit.currentHealth > 0
-            ? { ...unit, currentHealth: Math.max(0, unit.currentHealth - damage) }
-            : unit
-          ),
-        };
+        const enemyTargets = nextState.units.filter(unit => unit.side === enemySide && unit.currentHealth > 0);
+        spellTargetIds = enemyTargets.map(unit => unit.id);
+        nextState = enemyTargets.reduce(
+          (incoming, unit) => damageUnit(incoming, unit.id, damage),
+          nextState,
+        );
         logMessage = `${caster.name} casts ${spell.name}, bursting across every enemy for up to ${damage}.`;
       }
       break;
@@ -2313,7 +2568,7 @@ export function castBattleSpell(state: BattleState, spellId: string, targetId?: 
         units: nextState.units.map(unit => {
           if (unit.currentHealth <= 0) return unit;
           if (unit.side === caster.side) return { ...unit, speed: unit.speed + 3 };
-          return { ...unit, speed: Math.max(1, unit.speed - 3), movement: Math.max(1, unit.movement - 1) };
+          return applySlowDebuff(unit, 1, 3);
         }),
       };
       logMessage = `${caster.name} casts ${spell.name}, hastening allies and slowing enemies.`;
@@ -2348,9 +2603,17 @@ function getMoveCells(state: BattleState, unit: BattleUnit): BoardCell[] {
   return getReachableMoveCells(state, unit);
 }
 
+function getBossSpecialUses(state: BattleState, commanderId: string): number {
+  return state.bossSpecialUses?.[commanderId] ?? 0;
+}
+
 function markBossSpecialUsed(state: BattleState, commander: BattleUnit): BattleState {
   return {
     ...state,
+    bossSpecialUses: {
+      ...(state.bossSpecialUses || {}),
+      [commander.id]: getBossSpecialUses(state, commander.id) + 1,
+    },
     bossSpecialRounds: {
       ...(state.bossSpecialRounds || {}),
       [commander.id]: state.round,
@@ -2418,63 +2681,13 @@ function summonBossMinions(state: BattleState, commander: BattleUnit, templateId
   return { state: nextState, summonedIds };
 }
 
-function activateBossSecondStage(state: BattleState, commander: BattleUnit): BattleState {
-  if (!isBossBattleEnemy(state.enemy) || state.bossPhase === 2 || commander.currentHealth > commander.maxHealth * 0.5) {
-    return state;
-  }
-
-  const targetIds = state.units
-    .filter(unit => unit.side === 'enemy' && unit.currentHealth > 0)
-    .map(unit => unit.id);
-  const awakenedState = setSideMana({
-    ...state,
-    bossPhase: 2,
-    units: state.units.map(unit => {
-      if (unit.side !== 'enemy' || unit.currentHealth <= 0) return unit;
-      if (unit.id === commander.id) {
-        const recovery = Math.floor(unit.maxHealth * 0.24);
-        return {
-          ...unit,
-          currentHealth: Math.min(unit.maxHealth, unit.currentHealth + recovery),
-          attack: unit.attack + 4,
-          defense: unit.defense + 4,
-          magic: unit.magic + 4,
-          speed: unit.speed + 2,
-          movement: Math.min(5, unit.movement + 1),
-        };
-      }
-
-      return {
-        ...unit,
-        attack: unit.attack + 2,
-        defense: unit.defense + 2,
-        speed: unit.speed + 1,
-      };
-    }),
-  }, 'enemy', getSideMana(state, 'enemy') + 3);
-
-  return withBattleLog(
-    awakenedState,
-    `${commander.name} enters a second stage. The boss recovers and the warband surges.`,
-    {
-      side: 'enemy',
-      actor: commander.name,
-      actorId: commander.id,
-      targetIds,
-      action: 'spell',
-      style: 'buff',
-      spellId: 'time-crown-edict',
-    }
-  );
-}
-
 function finishBossSpecial(
   state: BattleState,
   commander: BattleUnit,
   message: string,
   targetIds: string[],
-  style: BattleLogStyle,
   spellId: string,
+  summonedUnitIds: string[] = [],
 ): BattleState {
   return advanceBattleTurn(updateBattleStatus(withBattleLog(
     markBossSpecialUsed(state, commander),
@@ -2484,15 +2697,19 @@ function finishBossSpecial(
       actor: commander.name,
       actorId: commander.id,
       targetIds,
+      summonedUnitIds: summonedUnitIds.length > 0 ? summonedUnitIds : undefined,
       action: 'spell',
-      style,
+      style: 'boss-special',
       spellId,
     }
   )));
 }
 
 function runBossSpecialAbility(state: BattleState, commander: BattleUnit): BattleState | null {
-  if (!isBossBattleEnemy(state.enemy) || state.bossSpecialRounds?.[commander.id] === state.round) return null;
+  if (!isBossBattleEnemy(state.enemy)) return null;
+  if (state.bossPhase === 2) return null;
+  if (getBossSpecialUses(state, commander.id) >= BOSS_SPECIAL_MAX_USES_BEFORE_PHASE_2) return null;
+  if (state.bossSpecialRounds?.[commander.id] === state.round) return null;
   if (Math.random() > 0.58) return null;
 
   const players = state.units.filter(unit => unit.side === 'player' && unit.currentHealth > 0);
@@ -2529,7 +2746,6 @@ function runBossSpecialAbility(state: BattleState, commander: BattleUnit): Battl
         commander,
         `${commander.name} lights the black candles, burning your army and mending her faithful.`,
         [...players.map(unit => unit.id), ...enemies.map(unit => unit.id)],
-        'spell-drain',
         'blood-star',
       );
     }
@@ -2543,17 +2759,18 @@ function runBossSpecialAbility(state: BattleState, commander: BattleUnit): Battl
         commander,
         `${commander.name} raises the blue oath. His line hardens and another templar answers.`,
         [...enemies.map(unit => unit.id), ...summonedIds],
-        'buff',
         'iron-benediction',
+        summonedIds,
       );
     }
     case 'prior-moon-voss': {
       const damage = 6 + Math.floor(spellPower * 0.55);
+      const damagedState = damageAllPlayers(state, damage);
       const nextState = {
-        ...damageAllPlayers(state, damage),
-        units: damageAllPlayers(state, damage).units.map(unit => (
+        ...damagedState,
+        units: damagedState.units.map(unit => (
           unit.side === 'player' && unit.currentHealth > 0
-            ? { ...unit, movement: Math.max(1, unit.movement - 1), speed: Math.max(1, unit.speed - 2) }
+            ? applySlowDebuff(unit, 1, 2)
             : unit
         )),
       };
@@ -2562,7 +2779,6 @@ function runBossSpecialAbility(state: BattleState, commander: BattleUnit): Battl
         commander,
         `${commander.name} reads the moonwell. Frost slows every living reflection.`,
         players.map(unit => unit.id),
-        'spell-control',
         'frost-lance',
       );
     }
@@ -2575,7 +2791,6 @@ function runBossSpecialAbility(state: BattleState, commander: BattleUnit): Battl
         commander,
         `${commander.name} turns the last key, striking your command and sealing his own line.`,
         target ? [target.id, ...enemies.map(unit => unit.id)] : enemies.map(unit => unit.id),
-        'spell-damage',
         'judgement',
       );
     }
@@ -2588,7 +2803,7 @@ function runBossSpecialAbility(state: BattleState, commander: BattleUnit): Battl
         ...summonedState,
         units: summonedState.units.map(unit => (
           unit.side === 'player' && unit.currentHealth > 0
-            ? { ...unit, movement: Math.max(1, unit.movement - 1), speed: Math.max(1, unit.speed - 2) }
+            ? applySlowDebuff(unit, 1, 2)
             : unit
         )),
       };
@@ -2597,8 +2812,8 @@ function runBossSpecialAbility(state: BattleState, commander: BattleUnit): Battl
         commander,
         `${commander.name} splits the road with black roots. New servants climb from the ground.`,
         [...players.map(unit => unit.id), ...summonedIds],
-        'spell-control',
         'gravity-snare',
+        summonedIds,
       );
     }
     case 'lady-mirror-veyra': {
@@ -2612,8 +2827,8 @@ function runBossSpecialAbility(state: BattleState, commander: BattleUnit): Battl
         commander,
         `${commander.name} breaks the mirror line. Illusions step into the fight.`,
         [...enemies.map(unit => unit.id), ...summonedIds],
-        'buff',
         'time-crown-edict',
+        summonedIds,
       );
     }
     case 'scarlet-matron-yvane': {
@@ -2625,12 +2840,11 @@ function runBossSpecialAbility(state: BattleState, commander: BattleUnit): Battl
         commander,
         `${commander.name} knots a blood-star curse, wounding every enemy and drinking the echo.`,
         [...players.map(unit => unit.id), commander.id],
-        'spell-drain',
         'blood-star',
       );
     }
     case 'emperor-grave-aurel': {
-      const damage = 7 + Math.floor(spellPower * 0.52) + (state.bossPhase === 2 ? 2 : 0);
+      const damage = 7 + Math.floor(spellPower * 0.52) + Math.max(0, (state.bossPhase || 1) - 1);
       const { state: summonedState, summonedIds } = summonBossMinions(damageAllPlayers(state, damage), commander, [
         getBossSummonTemplateId(state, 'templar-paragon'),
       ]);
@@ -2639,8 +2853,8 @@ function runBossSpecialAbility(state: BattleState, commander: BattleUnit): Battl
         commander,
         `${commander.name} issues a dead emperor's command. The field buckles and another oath rises.`,
         [...players.map(unit => unit.id), ...summonedIds],
-        'spell-damage',
         'eclipse-nova',
+        summonedIds,
       );
     }
     default: {
@@ -2651,7 +2865,6 @@ function runBossSpecialAbility(state: BattleState, commander: BattleUnit): Battl
         commander,
         `${commander.name} unleashes a boss rite, shocking your army and rallying the enemy line.`,
         [...players.map(unit => unit.id), ...enemies.map(unit => unit.id)],
-        'spell-damage',
         'chain-spark',
       );
     }
@@ -2796,14 +3009,6 @@ export function runEnemyBattleTurn(state: BattleState): BattleState {
   const personality = currentState.enemy.personality || 'balanced';
 
   if (activeUnit.kind === 'commander') {
-    const phasedState = activateBossSecondStage(currentState, activeUnit);
-    if (phasedState.bossPhase !== currentState.bossPhase) {
-      return advanceBattleTurn(updateBattleStatus(phasedState));
-    }
-
-    currentState = phasedState;
-    activeUnit = getActiveUnit(currentState) || activeUnit;
-
     const bossSpecialState = runBossSpecialAbility(currentState, activeUnit);
     if (bossSpecialState) return bossSpecialState;
 

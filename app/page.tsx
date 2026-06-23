@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { register, login } from '@/lib/auth';
+import { authorizeBackgroundMusic } from '@/lib/backgroundMusic';
 import { emitFxEvent } from '@/lib/fxEvents';
 import ThreeFxOverlay from '@/components/ThreeFxOverlay';
 
@@ -22,6 +23,7 @@ export default function AuthPage() {
     if (isLogin) {
       const result = login(username, password);
       if (result.success) {
+        authorizeBackgroundMusic();
         emitFxEvent({ type: 'spell', tone: 'violet', intensity: 0.7 });
         router.push('/mode');
       } else {

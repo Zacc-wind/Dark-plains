@@ -242,6 +242,11 @@ function playTrack(trackId: BackgroundMusicTrackId, crossfade = true): void {
   fadeAudioVolume(audio, getEffectiveMusicVolume(), crossfade ? MUSIC_CROSSFADE_MS : 0);
 }
 
+export function authorizeBackgroundMusic(): void {
+  if (!canUseAudio() || unlocked) return;
+  unlocked = true;
+}
+
 export function unlockBackgroundMusic(): void {
   if (!canUseAudio() || unlocked) return;
   unlocked = true;

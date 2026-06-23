@@ -1,7 +1,8 @@
 'use client';
 
 import Image from 'next/image';
-import { useRef } from 'react';
+import { useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import type { SingleplayerRunTutorialStep } from '@/lib/singleplayerTutorial';
 
 export type TutorialOverlayStep = Omit<SingleplayerRunTutorialStep, 'id'> & {
@@ -18,13 +19,18 @@ export default function SingleplayerTutorialOverlay({
   onSkip: () => void;
 }) {
   const actionFiredRef = useRef(false);
+
+  useEffect(() => {
+    actionFiredRef.current = false;
+  }, [step.id]);
+
   const fireAction = (handler: () => void) => {
     if (actionFiredRef.current) return;
     actionFiredRef.current = true;
     handler();
   };
 
-  return (
+  const overlay = (
     <div
       className="singleplayer-tutorial-layer fixed inset-0 z-[120] flex items-end justify-center p-3 text-zinc-100 sm:p-5"
       data-step-id={step.id}
@@ -118,4 +124,8 @@ export default function SingleplayerTutorialOverlay({
       </section>
     </div>
   );
+
+  if (typeof document === 'undefined') return overlay;
+
+  return createPortal(overlay, document.body);
 }

@@ -1,11 +1,19 @@
 'use client';
 
 import Image from 'next/image';
-import { useMemo } from 'react';
-import type { DailyRunState } from '@/lib/auth';
+import { useMemo, useState } from 'react';
 import {
+  claimRunMilestoneReward,
+  getCurrentUser,
+  getDailyRunState,
+  updateCurrentUser,
+  type DailyRunState,
+} from '@/lib/auth';
+import {
+  getRunMilestoneRewardExp,
   getRunMilestoneUnlockCounts,
   getRunMilestoneViews,
+  isRunMilestoneRewardClaimed,
   RUN_MILESTONE_CATEGORY_LABELS,
   type RunMilestoneCategory,
   type RunMilestoneView,
@@ -57,10 +65,32 @@ export function MilestoneIconTile({
 }
 
 export default function RunMilestonesModal({ isOpen, runState, onClose }: RunMilestonesModalProps) {
-  const views = useMemo(() => getRunMilestoneViews(runState), [runState]);
-  const counts = useMemo(() => getRunMilestoneUnlockCounts(runState), [runState]);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [claimNotice, setClaimNotice] = useState<string | null>(null);
+  const player = getCurrentUser();
+  const currentRunState = useMemo(() => getDailyRunState(player), [player, refreshKey, runState]);
+  const views = useMemo(() => getRunMilestoneViews(currentRunState), [currentRunState]);
+  const counts = useMemo(() => getRunMilestoneUnlockCounts(currentRunState), [currentRunState]);
 
   if (!isOpen) return null;
+
+  const handleClaim = (milestone: RunMilestoneView) => {
+    if (!player || !milestone.unlocked) return;
+    if (isRunMilestoneRewardClaimed(currentRunState, milestone.id)) return;
+
+    const result = claimRunMilestoneReward(
+      player,
+      milestone.id,
+      getRunMilestoneRewardExp(milestone.id),
+      milestone.unlocked,
+    );
+
+    setClaimNotice(result.message);
+    if (!result.ok) return;
+
+    updateCurrentUser({ dailyRun: result.dailyRun });
+    setRefreshKey(value => value + 1);
+  };
 
   return (
     <div
@@ -80,8 +110,9 @@ export default function RunMilestonesModal({ isOpen, runState, onClose }: RunMil
             <p className="arcane-label">Singleplayer Campaign</p>
             <h2 id="sp-milestones-title" className="fantasy-heading text-2xl">Run Milestones</h2>
             <p className="ui-muted mt-1 text-sm font-bold">
-              {counts.unlocked} of {counts.total} unlocked — spell rewards will tie into milestones later.
+              {counts.unlocked} of {counts.total} unlocked — click completed milestones to claim run XP.
             </p>
+            {claimNotice ? <p className="ui-value mt-1 text-xs font-bold">{claimNotice}</p> : null}
           </div>
           <button type="button" onClick={onClose} className="ui-button rounded px-3 py-1 text-xs font-bold">
             Close
@@ -104,27 +135,47 @@ export default function RunMilestonesModal({ isOpen, runState, onClose }: RunMil
                 </div>
 
                 <div className="sp-milestones-grid">
-                  {inCategory.map(milestone => (
-                    <article
-                      key={milestone.id}
-                      className={`sp-milestone-card${milestone.unlocked ? ' sp-milestone-card-unlocked' : ' sp-milestone-card-locked'}`}
-                    >
-                      <MilestoneIconTile milestone={milestone} size="lg" showTitle={false} />
-                      <div className="sp-milestone-card-copy min-w-0">
-                        <h4 className="sp-milestone-card-title">{milestone.title}</h4>
-                        <p className="sp-milestone-card-desc ui-muted">{milestone.description}</p>
-                        {milestone.rewardHint ? (
-                          <p className="sp-milestone-card-reward ui-faint">{milestone.rewardHint}</p>
-                        ) : null}
-                        {milestone.progressLabel ? (
-                          <p className="sp-milestone-card-progress ui-value">{milestone.progressLabel}</p>
-                        ) : null}
-                      </div>
-                      <span className={`sp-milestone-status ui-pill rounded border px-2 py-1 text-[10px] font-black uppercase${milestone.unlocked ? ' sp-milestone-status-unlocked' : ''}`}>
-                        {milestone.unlocked ? 'Unlocked' : 'Locked'}
-                      </span>
-                    </article>
-                  ))}
+                  {inCategory.map(milestone => {
+                    const claimed = isRunMilestoneRewardClaimed(currentRunState, milestone.id);
+                    const rewardExp = getRunMilestoneRewardExp(milestone.id);
+                    const claimable = milestone.unlocked && !claimed;
+
+                    return (
+                      <article
+                        key={milestone.id}
+                        className={`sp-milestone-card${milestone.unlocked ? ' sp-milestone-card-unlocked' : ' sp-milestone-card-locked'}${claimable ? ' sp-milestone-card-claimable' : ''}${claimed ? ' sp-milestone-card-claimed' : ''}`}
+                        onClick={claimable ? () => handleClaim(milestone) : undefined}
+                        onKeyDown={claimable ? event => {
+                          if (event.key === 'Enter' || event.key === ' ') {
+                            event.preventDefault();
+                            handleClaim(milestone);
+                          }
+                        } : undefined}
+                        role={claimable ? 'button' : undefined}
+                        tabIndex={claimable ? 0 : undefined}
+                      >
+                        <MilestoneIconTile milestone={milestone} size="lg" showTitle={false} />
+                        <div className="sp-milestone-card-copy min-w-0">
+                          <h4 className="sp-milestone-card-title">{milestone.title}</h4>
+                          <p className="sp-milestone-card-desc ui-muted">{milestone.description}</p>
+                          {milestone.rewardHint ? (
+                            <p className="sp-milestone-card-reward ui-faint">{milestone.rewardHint}</p>
+                          ) : null}
+                          {milestone.progressLabel ? (
+                            <p className="sp-milestone-card-progress ui-value">{milestone.progressLabel}</p>
+                          ) : null}
+                          {milestone.unlocked ? (
+                            <p className="sp-milestone-card-reward ui-faint">
+                              {claimed ? 'Reward claimed' : `Reward: +${rewardExp} run XP`}
+                            </p>
+                          ) : null}
+                        </div>
+                        <span className={`sp-milestone-status ui-pill rounded border px-2 py-1 text-[10px] font-black uppercase${milestone.unlocked ? ' sp-milestone-status-unlocked' : ''}`}>
+                          {claimed ? 'Claimed' : milestone.unlocked ? 'Claim XP' : 'Locked'}
+                        </span>
+                      </article>
+                    );
+                  })}
                 </div>
               </section>
             );

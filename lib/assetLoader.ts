@@ -1,3 +1,11 @@
+import { ASSET_VERSION } from '@/lib/generated/assetVersion';
+
+export function getVersionedAssetPath(path: string): string {
+  if (!path.startsWith('/assets/')) return path;
+  const separator = path.includes('?') ? '&' : '?';
+  return `${path}${separator}v=${ASSET_VERSION}`;
+}
+
 // Helper to load and cache image assets
 export class AssetLoader {
   private static imageCache: Map<string, HTMLImageElement> = new Map();
@@ -81,7 +89,7 @@ export const ASSET_PATHS = {
     battlefield: '/assets/battlefield-bg.png',
     harbor: '/assets/town-harborview-bg.png',
     riverside: '/assets/town-riverside-bg.png',
-    road: '/assets/run-background.jpg',
+    road: '/assets/run-background.png',
   },
   icons: {
     attack: '/assets/icons/attack.png',
@@ -117,7 +125,11 @@ export const ASSET_PATHS = {
 
 export function getPlayerModelPath(modelNumber = 3): string {
   const normalizedModel = [1, 2, 3, 4, 5, 6].includes(modelNumber) ? modelNumber : 3;
-  return ASSET_PATHS.player[`model${normalizedModel}` as keyof typeof ASSET_PATHS.player];
+  return getVersionedAssetPath(ASSET_PATHS.player[`model${normalizedModel}` as keyof typeof ASSET_PATHS.player]);
+}
+
+export function getMinionAssetPath(assetName: string): string {
+  return getVersionedAssetPath(`/assets/minions/${assetName}`);
 }
 
 // Preload all assets

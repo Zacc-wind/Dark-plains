@@ -14,6 +14,7 @@ import {
   skipModeTutorial,
 } from '@/lib/modeTutorial';
 import { playGameSound } from '@/lib/sound';
+import BackgroundMusic from '@/components/BackgroundMusic';
 import SingleplayerTutorialOverlay from '@/components/SingleplayerTutorialOverlay';
 import ThreeFxOverlay from '@/components/ThreeFxOverlay';
 
@@ -44,6 +45,7 @@ export default function ModePage() {
 
   return (
     <>
+      <BackgroundMusic autoStartDelayMs={3000} />
       <ThreeFxOverlay />
       <FixedModeSelectScreen />
     </>

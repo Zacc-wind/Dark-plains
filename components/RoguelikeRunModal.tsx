@@ -11,6 +11,7 @@ import {
   BATTLE_SPELLS,
   BoardCell,
   BattleState,
+  BOSS_LAST_STAND_PRESENTATION_MS,
   EnemyAiPersonality,
   PlayerModelNumber,
   WorldEnemy,
@@ -641,7 +642,7 @@ function restoreRunEquipmentReward(choiceId: string, item: Equipment): RunReward
 }
 
 function makeRunEquipmentReward(session: RunSession, forcedRarity?: EquipmentRarity): RunRewardChoice {
-  const item = generateRunLootEquipment(session.wins, session.targetBattles, forcedRarity);
+  const item = generateRunLootEquipment(session.wins, session.targetBattles, forcedRarity, { offer: true });
   return restoreRunEquipmentReward(`gear-offer-${item.id}`, item);
 }
 
@@ -1172,7 +1173,9 @@ function RunController({
     setCompletionView('report');
   };
 
-  triggerCompletionIntroRef.current = triggerCompletionIntro;
+  useEffect(() => {
+    triggerCompletionIntroRef.current = triggerCompletionIntro;
+  });
 
   useEffect(() => {
     if (!isCompletePhase) return;
@@ -1214,18 +1217,26 @@ function RunController({
       const clearedNode = withLosses.nodes[withLosses.currentNodeIndex];
       const hardRouteCleared = clearedNode?.type === 'elite';
       const withHardRouteBonus = hardRouteCleared ? applyHardRouteVictoryBonus(withLosses) : withLosses;
-      const rewardDestination = getRewardDestination(withHardRouteBonus, nextWins);
-      const goldEarned = getRunGoldEarned(withHardRouteBonus, result.battle);
-      const permanentUnlock = maybeUnlockPermanentRunSpell(withHardRouteBonus);
+      const isBossFight = clearedNode?.type === 'boss';
+      const bonusGearDrop = !isBossFight && Math.random() < 0.33
+        ? generateRunLootEquipment(nextWins, withHardRouteBonus.targetBattles)
+        : null;
+      const withBonusGear = bonusGearDrop
+        ? addRunEquipment(withHardRouteBonus, bonusGearDrop)
+        : withHardRouteBonus;
+      const rewardDestination = getRewardDestination(withBonusGear, nextWins);
+      const goldEarned = getRunGoldEarned(withBonusGear, result.battle);
+      const permanentUnlock = maybeUnlockPermanentRunSpell(withBonusGear);
       const noticeParts = [
         hardRouteCleared
           ? `${result.battle.enemy.name} defeated. +${goldEarned} run gold. Hard-route boon gained; a clean omen waits after the reward.`
           : `${result.battle.enemy.name} defeated. +${goldEarned} run gold. Choose a run reward.`,
+        bonusGearDrop ? `${bonusGearDrop.name} dropped into your run satchel.` : '',
         permanentUnlock ? `${permanentUnlock} permanently unlocked.` : '',
       ].filter(Boolean);
 
       return {
-        ...withHardRouteBonus,
+        ...withBonusGear,
         phase: 'reward',
         activeEnemy: null,
         wins: nextWins,
@@ -1233,11 +1244,11 @@ function RunController({
         rewardChoices: pickRunRewardChoices(withHardRouteBonus),
         rewardDestination,
         bossHistory: clearedNode?.type === 'boss'
-          ? [...(withHardRouteBonus.bossHistory || []), clearedNode.label]
-          : withHardRouteBonus.bossHistory || [],
+          ? [...(withBonusGear.bossHistory || []), clearedNode.label]
+          : withBonusGear.bossHistory || [],
         permanentSpellUnlocks: permanentUnlock
-          ? [...(withHardRouteBonus.permanentSpellUnlocks || []), permanentUnlock]
-          : withHardRouteBonus.permanentSpellUnlocks || [],
+          ? [...(withBonusGear.permanentSpellUnlocks || []), permanentUnlock]
+          : withBonusGear.permanentSpellUnlocks || [],
         notice: noticeParts.join(' '),
       };
     });
@@ -1408,6 +1419,7 @@ function RunController({
         {formationIntro && <RunFormationIntroSplash intro={formationIntro} />}
         {tutorialStep && (
           <SingleplayerTutorialOverlay
+            key={tutorialStep.id}
             step={tutorialStep}
             onContinue={() => handleTutorialContinue(tutorialStep.id)}
             onSkip={handleTutorialSkip}
@@ -1850,6 +1862,8 @@ function DailyRouteMap({
   const rows = getDailyNodeRows(session.nodes);
   const mapHeightRem = getRunMapHeightRem(rows);
   const connections = getDailyMapConnections(rows, mapHeightRem);
+  const mapFrameRef = useRef<HTMLDivElement>(null);
+  const reachableKey = Array.from(reachableIds).sort().join('|');
   const [tutorialFocusIndex, setTutorialFocusIndex] = useState(0);
   const tutorialFocus = tutorialActive
     ? RUN_ROUTE_TUTORIAL_STEPS[tutorialFocusIndex % RUN_ROUTE_TUTORIAL_STEPS.length]
@@ -1865,9 +1879,37 @@ function DailyRouteMap({
     return () => window.clearInterval(timer);
   }, [tutorialActive]);
 
+  useEffect(() => {
+    const frame = mapFrameRef.current;
+    if (!frame || session.phase !== 'map' || reachableIds.size === 0 || tutorialActive) return undefined;
+
+    const timer = window.setTimeout(() => {
+      const reachableNodes = session.nodes.filter(node => reachableIds.has(node.id));
+      if (reachableNodes.length === 0) return;
+
+      const rowIndexes = reachableNodes.map(node => {
+        if (typeof node.row === 'number') {
+          return rows.findIndex(entry => entry.row === node.row);
+        }
+        return rows.findIndex(entry => entry.nodes.some(item => item.id === node.id));
+      }).filter(index => index >= 0);
+
+      if (rowIndexes.length === 0) return;
+
+      const centerRowIndex = (Math.min(...rowIndexes) + Math.max(...rowIndexes)) / 2;
+      const centerRem = getRunMapRowTopRem(centerRowIndex);
+      const rootFontSize = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+      const centerPx = centerRem * rootFontSize;
+      const targetScroll = Math.max(0, centerPx - frame.clientHeight / 2);
+      frame.scrollTo({ top: targetScroll, behavior: 'smooth' });
+    }, 90);
+
+    return () => window.clearTimeout(timer);
+  }, [session.phase, session.currentNodeIndex, session.wins, reachableKey, rows, tutorialActive, reachableIds]);
+
   return (
     <div className={`run-route-shell run-route-shell-full ${tutorialActive ? 'run-route-shell-tutorial' : ''}`}>
-      <div className="run-route-map-frame run-route-map-frame-full">
+      <div ref={mapFrameRef} className="run-route-map-frame run-route-map-frame-full">
         <div
           className={`run-route-map ${tutorialActive ? 'run-route-map-tutorial-active' : ''}`}
           style={{ height: `${mapHeightRem}rem`, minHeight: `${mapHeightRem}rem` }}
@@ -2867,6 +2909,59 @@ function RunWarbandHeroSprites({
   );
 }
 
+function getRunVictoryBossArtwork(session: RunSession): { name: string; assetPath: string } | null {
+  if (session.outcome !== 'victory') return null;
+
+  const finalBossNode = [...session.nodes].reverse().find(node => node.type === 'boss');
+  const bossId = finalBossNode?.bossId || session.dailyChallenge?.bossId || session.dungeon?.bossId;
+  if (!bossId) return null;
+
+  const profile = getBossProfileById(bossId);
+  if (!profile?.assetPath) return null;
+
+  return { name: profile.name, assetPath: profile.assetPath };
+}
+
+function RunVictoryBossOverlay({
+  boss,
+  onFinished,
+}: {
+  boss: { name: string; assetPath: string };
+  onFinished: () => void;
+}) {
+  useEffect(() => {
+    const timer = window.setTimeout(onFinished, BOSS_LAST_STAND_PRESENTATION_MS);
+    return () => window.clearTimeout(timer);
+  }, [onFinished]);
+
+  return (
+    <div
+      className="run-victory-boss-layer fixed inset-0 z-[68] flex items-center justify-center pointer-events-none"
+      aria-hidden="true"
+    >
+      <div
+        className="battle-boss-cinematic-overlay battle-boss-last-stand-overlay run-victory-boss-overlay"
+        style={{ '--boss-last-stand-ms': `${BOSS_LAST_STAND_PRESENTATION_MS}ms` } as CSSProperties}
+      >
+        <span className="battle-boss-cinematic-ring battle-boss-cinematic-ring-1" />
+        <span className="battle-boss-cinematic-ring battle-boss-cinematic-ring-2" />
+        <span className="battle-boss-cinematic-burst battle-boss-last-stand-burst" />
+        <span className="battle-boss-cinematic-sprite-wrap">
+          <span className="battle-boss-cinematic-sprite-glow battle-boss-last-stand-sprite-glow" />
+          <Image
+            src={boss.assetPath}
+            alt=""
+            width={320}
+            height={380}
+            className="battle-boss-cinematic-sprite battle-boss-last-stand-sprite object-contain object-center"
+            unoptimized
+          />
+        </span>
+      </div>
+    </div>
+  );
+}
+
 function CompletionPanel({
   session,
   onClaim,
@@ -2880,6 +2975,8 @@ function CompletionPanel({
   const abandoned = session.outcome === 'abandoned';
   const tone = victory ? 'victory' : abandoned ? 'abandoned' : 'defeat';
   const [statsOpen, setStatsOpen] = useState(false);
+  const victoryBossArtwork = victory ? getRunVictoryBossArtwork(session) : null;
+  const [showVictoryBoss, setShowVictoryBoss] = useState(Boolean(victoryBossArtwork));
   const headline = victory ? 'Run Cleared' : abandoned ? 'Run Retreated' : 'Run Failed';
   const subtitle = victory
     ? 'The road is yours. Claim your reward and return to the run hall.'
@@ -2889,6 +2986,12 @@ function CompletionPanel({
 
   return (
     <>
+      {showVictoryBoss && victoryBossArtwork ? (
+        <RunVictoryBossOverlay
+          boss={victoryBossArtwork}
+          onFinished={() => setShowVictoryBoss(false)}
+        />
+      ) : null}
       <div className="run-draft-stage run-completion-stage min-h-0">
         <section className={`run-draft-hero run-completion-tone-${tone} relative min-h-0 overflow-hidden p-4 sm:p-5`}>
           <div className="relative z-10 max-w-xl">
@@ -4287,16 +4390,21 @@ function makeRunEnemy({
 }): WorldEnemy {
   const modelNumbers: PlayerModelNumber[] = [1, 2, 4, 5, 6];
   const personalities: EnemyAiPersonality[] = ['balanced', 'aggressive', 'defensive', 'arcane'];
-  const bossLevelBonus = boss ? 2 : 0;
+  const finalBoss = isFinalRunBossFight(session, index, boss);
+  const bossLevelBonus = finalBoss ? 2 : boss ? 0 : 0;
   const effectiveLevel = session.mode === 'daily'
     ? clamp(level + bossLevelBonus, 1, RANDOM_RUN_BALANCE.enemyLevelCap)
-    : level;
+    : level + bossLevelBonus;
   const routeProgress = session.targetBattles > 0
     ? clamp(index / session.targetBattles, 0, 1)
     : clamp(effectiveLevel / RANDOM_RUN_BALANCE.enemyLevelCap, 0, 1);
   const scalingCount = 2 + Math.floor(effectiveLevel / 3) + Math.floor(routeProgress * 3);
-  const minionCap = boss ? 10 : elite ? 9 : clamp(4 + Math.round(routeProgress * 6), 4, 10);
-  const minionCount = clamp(scalingCount + (boss ? 4 : elite ? 2 : 0), boss ? 6 : elite ? 4 : 2, minionCap);
+  const minionCap = finalBoss ? 10 : boss ? 7 : elite ? 9 : clamp(4 + Math.round(routeProgress * 6), 4, 10);
+  const minionCount = clamp(
+    scalingCount + (finalBoss ? 4 : boss ? 1 : elite ? 2 : 0),
+    finalBoss ? 6 : boss ? 4 : elite ? 4 : 2,
+    minionCap,
+  );
   const activeNode = session.nodes[session.currentNodeIndex];
   const bossProfile = boss ? getBossProfileById(activeNode?.bossId || session.dailyChallenge?.bossId || session.dungeon?.bossId) : undefined;
   const runBoss = boss
@@ -4311,18 +4419,26 @@ function makeRunEnemy({
       minionTemplates: bossProfile?.minionTemplates || session.dungeon?.bossMinionTemplates || [],
     }
     : undefined;
-  const minions = Array.from({ length: minionCount }, (_, slot) => {
-    const templateId = boss
-      ? pickBossEscortTemplate(effectiveLevel, slot, runBoss?.minionTemplates).templateId
-      : pickEnemyTemplate(effectiveLevel, slot, elite).templateId;
-    return cloneRunStack(templateId, `enemy-${session.id}-${index}-${slot}`);
-  });
+  const minions = enforcePostBossMinionTiers(
+    Array.from({ length: minionCount }, (_, slot) => {
+      const templateId = boss
+        ? pickBossEscortTemplate(effectiveLevel, slot, runBoss?.minionTemplates, finalBoss).templateId
+        : pickEnemyTemplate(effectiveLevel, slot, elite, session.bossHistory?.length || 0).templateId;
+      return cloneRunStack(templateId, `enemy-${session.id}-${index}-${slot}`);
+    }),
+    {
+      bossesDefeated: session.bossHistory?.length || 0,
+      effectiveLevel,
+      battleIndex: index,
+      boss,
+    },
+  );
 
   return {
     id: `${session.mode}-run-enemy-${session.id}-${index}`,
     bossId: runBoss?.id,
     name: runBoss?.name || (boss ? 'Run Warden' : elite ? 'Oathbound Captain' : `Road Adversary ${index}`),
-    subtitle: runBoss?.subtitle || (boss ? 'Final commander' : elite ? 'Elite chamber guard' : 'Run encounter'),
+    subtitle: runBoss?.subtitle || (finalBoss ? 'Final commander' : boss ? 'Road boss' : elite ? 'Elite chamber guard' : 'Run encounter'),
     story: runBoss?.story,
     intro: runBoss?.intro,
     artworkPath: runBoss?.artworkPath,
@@ -4330,9 +4446,9 @@ function makeRunEnemy({
     y: 0,
     level: effectiveLevel,
     modelNumber: (runBoss?.modelNumber as PlayerModelNumber | undefined) || modelNumbers[index % modelNumbers.length],
-    personality: boss ? 'boss' : personalities[index % personalities.length],
+    personality: finalBoss ? 'boss' : boss ? (bossProfile?.personality || 'balanced') : personalities[index % personalities.length],
     minions,
-    lootMultiplier: runBoss ? 2.2 : boss ? 1.7 : elite ? 1.35 : 1,
+    lootMultiplier: finalBoss ? 2.2 : boss ? 1.45 : elite ? 1.35 : 1,
   };
 }
 
@@ -4346,21 +4462,106 @@ function getRunBattleNodeNumber(session: RunSession, nodeIndex: number): number 
   );
 }
 
-function pickEnemyTemplate(level: number, slot: number, elite: boolean): MinionTemplate {
-  const targetTier = elite && level >= 10 && slot % 3 === 0
+function pickEnemyTemplate(level: number, slot: number, elite: boolean, bossesDefeated = 0): MinionTemplate {
+  const postBossTierBoost = bossesDefeated >= 2
     ? 'tier3'
-    : level >= 6 && slot % 2 === 0
+    : bossesDefeated >= 1 && slot % 2 === 0
       ? 'tier2'
-      : 'tier1';
+      : null;
+  const targetTier = postBossTierBoost
+    || (elite && level >= 10 && slot % 3 === 0
+      ? 'tier3'
+      : level >= 6 && slot % 2 === 0
+        ? 'tier2'
+        : 'tier1');
   const candidates = MINION_TEMPLATES.filter(template => template.tier === targetTier);
   return candidates[(level + slot) % candidates.length] || MINION_TEMPLATES[0];
 }
 
-function pickBossEscortTemplate(level: number, slot: number, bossTemplateIds: string[] = []): MinionTemplate {
-  const sourceTemplate = bossTemplateIds.length > 0
-    ? getMinionTemplate(bossTemplateIds[slot % bossTemplateIds.length])
+function enforcePostBossMinionTiers(
+  minions: MinionStack[],
+  {
+    bossesDefeated,
+    effectiveLevel,
+    battleIndex,
+    boss,
+  }: {
+    bossesDefeated: number;
+    effectiveLevel: number;
+    battleIndex: number;
+    boss: boolean;
+  },
+): MinionStack[] {
+  if (boss || bossesDefeated <= 0 || minions.length === 0) return minions;
+
+  const result = minions.map(stack => ({ ...stack }));
+  const countTier = (tier: MinionTemplate['tier']) => (
+    result.filter(stack => getMinionTemplate(stack.templateId)?.tier === tier).length
+  );
+
+  const forceSlotToTier = (slot: number, tier: MinionTemplate['tier']) => {
+    const pool = MINION_TEMPLATES.filter(template => template.tier === tier);
+    const template = pool[(effectiveLevel + battleIndex + slot) % pool.length] || pool[0];
+    if (!template) return;
+    result[slot] = cloneRunStack(template.templateId, result[slot].id);
+  };
+
+  let slot = 0;
+  while (countTier('tier1') < 1 && bossesDefeated >= 1 && slot < result.length) {
+    if (getMinionTemplate(result[slot].templateId)?.tier !== 'tier1') {
+      forceSlotToTier(slot, 'tier1');
+    }
+    slot += 1;
+  }
+
+  slot = 0;
+  while (countTier('tier3') < 2 && bossesDefeated >= 2 && slot < result.length) {
+    if (getMinionTemplate(result[slot].templateId)?.tier !== 'tier3') {
+      forceSlotToTier(slot, 'tier3');
+    }
+    slot += 1;
+  }
+
+  return result;
+}
+
+function downgradeBossEscortTemplateIds(templateIds: string[]): string[] {
+  const preservedTier3Id = templateIds.find(templateId => getMinionTemplate(templateId)?.tier === 'tier3');
+
+  return templateIds.map(templateId => {
+    const template = getMinionTemplate(templateId);
+    if (!template) return templateId;
+    if (template.tier === 'tier3') {
+      if (templateId === preservedTier3Id) return templateId;
+      const tier2 = MINION_TEMPLATES.find(candidate => candidate.class === template.class && candidate.tier === 'tier2');
+      return tier2?.templateId || templateId;
+    }
+    if (template.tier === 'tier2') {
+      const tier1 = MINION_TEMPLATES.find(candidate => candidate.class === template.class && candidate.tier === 'tier1');
+      return tier1?.templateId || templateId;
+    }
+    return templateId;
+  });
+}
+
+function isFinalRunBossFight(session: RunSession, battleNumber: number, boss: boolean): boolean {
+  if (!boss) return false;
+  if (battleNumber >= session.targetBattles) return true;
+
+  const activeNode = session.nodes[session.currentNodeIndex];
+  return activeNode?.type === 'boss' && activeNode.battleNumber === session.targetBattles;
+}
+
+function pickBossEscortTemplate(level: number, slot: number, bossTemplateIds: string[] = [], finalBoss = true): MinionTemplate {
+  const escortTemplateIds = finalBoss ? bossTemplateIds : downgradeBossEscortTemplateIds(bossTemplateIds);
+  const sourceTemplate = escortTemplateIds.length > 0
+    ? getMinionTemplate(escortTemplateIds[slot % escortTemplateIds.length])
     : undefined;
-  const targetTier = slot % 4 === 1 ? 'tier2' : 'tier3';
+  const targetTier = finalBoss
+    ? (slot % 4 === 1 ? 'tier2' : 'tier3')
+    : slot === 0
+      ? 'tier3'
+      : (slot % 3 === 1 ? 'tier2' : 'tier1');
   const sameClassCandidates = sourceTemplate
     ? MINION_TEMPLATES.filter(template => template.tier === targetTier && template.class === sourceTemplate.class)
     : [];
@@ -4369,7 +4570,7 @@ function pickBossEscortTemplate(level: number, slot: number, bossTemplateIds: st
 
   return candidates[(level + slot) % candidates.length]
     || sourceTemplate
-    || pickEnemyTemplate(level + 4, slot, true);
+    || pickEnemyTemplate(finalBoss ? level + 4 : level, slot, finalBoss);
 }
 
 function getRandomRunBossBattleNumbers(battleCount: number): number[] {
@@ -4483,7 +4684,7 @@ function createDailyRunNodes(challenge: DailyRunChallenge, playerLevel: number):
         type: 'boss',
         label: boss.name,
         description: `${boss.subtitle}. ${boss.intro}`,
-        level: getRandomRunScaledBattleLevel(playerLevel, battleNumber, battleCount, 2 + bossIndex + (challenge.enemyLevelOffset || 0)),
+        level: getRandomRunScaledBattleLevel(playerLevel, battleNumber, battleCount, bossIndex + (challenge.enemyLevelOffset || 0)),
         battleNumber,
         bossId: boss.id,
       }]);

@@ -21,7 +21,16 @@ import {
   castBattleSpell,
   createNpcBattleState,
   getBattleSpellLogStyle,
+  BATTLE_DEATH_DISSOLVE_MS,
+  BATTLE_DEATH_HIT_MS,
+  BATTLE_DEFAULT_PRESENTATION_MS,
+  BOSS_LAST_STAND_PRESENTATION_MS,
+  BOSS_LAST_STAND_RESPAWN_REVEAL_MS,
+  BOSS_SPECIAL_PRESENTATION_MS,
+  BOSS_SPECIAL_SUMMON_REVEAL_MS,
+  getBattleLogPresentationMs,
   getRecentPresentationLogEntry,
+  hasDefeatedLogTarget,
   pickFreshPresentationLogEntry,
   focusCommanderMana,
   getActiveUnit,
@@ -168,6 +177,7 @@ type BattlePieceAnimation =
   | 'morale'
   | 'commander-spell'
   | 'spell-hit'
+  | 'rise'
   | null;
 
 interface BattleSpeedConfig {
@@ -263,6 +273,7 @@ const BATTLE_PRELOAD_SOUND_IDS: GameSoundId[] = [
   'combat.wait',
   'combat.guard',
   'combat.heal',
+  'combat.blessing',
   'combat.manaFocus',
   'combat.ranged',
   'combat.rangedRelease',
@@ -312,6 +323,21 @@ export default function BattleModal({
   const [presentationPin, setPresentationPin] = useState<PresentationPin | null>(null);
   const [resultReport, setResultReport] = useState<BattleResultReportData | null>(null);
   const [now, setNow] = useState(() => Date.now());
+  const [bossLastStandCue, setBossLastStandCue] = useState<{
+    id: string;
+    commanderName: string;
+    assetPath: string;
+    subtitle?: string;
+    resurrectedUnits: Array<{ id: string; assetPath: string; x: number; y: number }>;
+  } | null>(null);
+  const [bossSpecialCue, setBossSpecialCue] = useState<{
+    id: string;
+    commanderName: string;
+    assetPath: string;
+    subtitle?: string;
+    spellName: string;
+    summonedUnits: Array<{ id: string; assetPath: string; x: number; y: number }>;
+  } | null>(null);
   const [isResolvingAction, setIsResolvingAction] = useState(false);
   const [battleCue, setBattleCue] = useState<BattleCue | null>(null);
   const [turnBanner, setTurnBanner] = useState<BattleTurnBannerData | null>(null);
@@ -331,6 +357,11 @@ export default function BattleModal({
   const defeatExitTimer = useRef<number | null>(null);
   const combatTutorialCompleteTimerRef = useRef<number | null>(null);
   const battleSoundTimers = useRef<number[]>([]);
+  const bossLastStandTimer = useRef<number | null>(null);
+  const bossLastStandCueRef = useRef<typeof bossLastStandCue>(null);
+  const bossSpecialTimer = useRef<number | null>(null);
+  const bossSpecialCueRef = useRef<typeof bossSpecialCue>(null);
+  const queuedBossSpecialCue = useRef<typeof bossSpecialCue>(null);
   const spellNoticeTimer = useRef<number | null>(null);
   const turnBannerTimer = useRef<number | null>(null);
   const activeSpellNoticeRef = useRef<BattleSpellCastNoticeData | null>(null);
@@ -366,6 +397,8 @@ export default function BattleModal({
     if (enemyTimer.current) window.clearTimeout(enemyTimer.current);
     if (enemyActionHoldTimer.current) window.clearTimeout(enemyActionHoldTimer.current);
     if (playerActionTimer.current) window.clearTimeout(playerActionTimer.current);
+    if (bossLastStandTimer.current) window.clearTimeout(bossLastStandTimer.current);
+    if (bossSpecialTimer.current) window.clearTimeout(bossSpecialTimer.current);
     if (defeatExitTimer.current) window.clearTimeout(defeatExitTimer.current);
     if (combatTutorialCompleteTimerRef.current) window.clearTimeout(combatTutorialCompleteTimerRef.current);
     if (spellNoticeTimer.current) window.clearTimeout(spellNoticeTimer.current);
@@ -389,8 +422,37 @@ export default function BattleModal({
     }, banner.side === 'enemy' ? 1450 : 1250);
   }, []);
 
+  const flushQueuedTurnBanner = useCallback(() => {
+    if (queuedTurnBanner.current && !activeSpellNoticeRef.current && !bossLastStandCueRef.current && !bossSpecialCueRef.current) {
+      const banner = queuedTurnBanner.current;
+      queuedTurnBanner.current = null;
+      showTurnBanner(banner);
+    }
+  }, [showTurnBanner]);
+
+  const flushQueuedBossSpecialCue = useCallback(() => {
+    if (queuedBossSpecialCue.current && !bossLastStandCueRef.current && !bossSpecialCueRef.current) {
+      const cue = queuedBossSpecialCue.current;
+      queuedBossSpecialCue.current = null;
+      bossSpecialCueRef.current = cue;
+      setBossSpecialCue(cue);
+      setIsResolvingAction(true);
+      setTurnBanner(null);
+      playGameSound('combat.spellCast', { volumeScale: 0.82, throttleMs: 900 });
+      emitFxEvent({ type: 'spell', tone: 'red', intensity: 0.84 });
+      bossSpecialTimer.current = window.setTimeout(() => {
+        bossSpecialTimer.current = null;
+        bossSpecialCueRef.current = null;
+        setBossSpecialCue(null);
+        setIsResolvingAction(false);
+        setBattleCue(null);
+        flushQueuedTurnBanner();
+      }, BOSS_SPECIAL_PRESENTATION_MS);
+    }
+  }, [flushQueuedTurnBanner]);
+
   const queueOrShowTurnBanner = useCallback((banner: BattleTurnBannerData) => {
-    if (activeSpellNoticeRef.current) {
+    if (activeSpellNoticeRef.current || bossLastStandCueRef.current || bossSpecialCueRef.current) {
       queuedTurnBanner.current = banner;
       return;
     }
@@ -399,9 +461,17 @@ export default function BattleModal({
   }, [showTurnBanner]);
 
   useEffect(() => {
+    bossLastStandCueRef.current = bossLastStandCue;
+  }, [bossLastStandCue]);
+
+  useEffect(() => {
+    bossSpecialCueRef.current = bossSpecialCue;
+  }, [bossSpecialCue]);
+
+  useEffect(() => {
     activeSpellNoticeRef.current = spellCastNotice;
 
-    if (!spellCastNotice && queuedTurnBanner.current) {
+    if (!spellCastNotice && queuedTurnBanner.current && !bossLastStandCueRef.current && !bossSpecialCueRef.current) {
       const banner = queuedTurnBanner.current;
       queuedTurnBanner.current = null;
       showTurnBanner(banner);
@@ -437,7 +507,7 @@ export default function BattleModal({
       detail: active.side === 'enemy' ? `${active.name} advances.` : `${active.name} is ready.`,
     };
     scheduleTimer = window.setTimeout(() => {
-      if (spellCastNotice || activeSpellNoticeRef.current) {
+      if (spellCastNotice || activeSpellNoticeRef.current || bossLastStandCueRef.current || bossSpecialCueRef.current) {
         queuedTurnBanner.current = banner;
         return;
       }
@@ -460,6 +530,98 @@ export default function BattleModal({
 
     const freshEntries = battle.log.filter(entry => !processedBattleLogIds.current.has(entry.id));
     freshEntries.forEach(entry => processedBattleLogIds.current.add(entry.id));
+
+    const bossStandEntry = freshEntries.find(item => item.style === 'boss-phase');
+    if (bossStandEntry) {
+      queuedBossSpecialCue.current = null;
+      const commander = battle.units.find(unit => unit.id === bossStandEntry.actorId);
+      if (commander) {
+        if (bossLastStandTimer.current) window.clearTimeout(bossLastStandTimer.current);
+        if (playerActionTimer.current) window.clearTimeout(playerActionTimer.current);
+        if (enemyActionHoldTimer.current) window.clearTimeout(enemyActionHoldTimer.current);
+        if (enemyTimer.current) window.clearTimeout(enemyTimer.current);
+
+        const resurrectedUnits = (bossStandEntry.resurrectedUnitIds || [])
+          .map(id => battle.units.find(unit => unit.id === id))
+          .filter((unit): unit is BattleUnit => Boolean(unit))
+          .map(unit => ({ id: unit.id, assetPath: unit.assetPath, x: unit.x, y: unit.y }));
+
+        const cue = {
+          id: bossStandEntry.id,
+          commanderName: commander.name,
+          assetPath: commander.assetPath,
+          subtitle: battle.enemy.subtitle,
+          resurrectedUnits,
+        };
+        bossLastStandCueRef.current = cue;
+        setBossLastStandCue(cue);
+        setIsResolvingAction(true);
+        setTurnBanner(null);
+        playGameSound('combat.spellHoly', { volumeScale: 0.88, throttleMs: 1200 });
+        emitFxEvent({ type: 'spell', tone: 'gold', intensity: 0.92 });
+        bossLastStandTimer.current = window.setTimeout(() => {
+          bossLastStandTimer.current = null;
+          bossLastStandCueRef.current = null;
+          setBossLastStandCue(null);
+          setIsResolvingAction(false);
+          setBattleCue(null);
+          flushQueuedBossSpecialCue();
+          flushQueuedTurnBanner();
+        }, BOSS_LAST_STAND_PRESENTATION_MS);
+      }
+    }
+
+    const bossSpecialEntry = freshEntries.find(item => item.style === 'boss-special');
+    if (bossSpecialEntry) {
+      const commander = battle.units.find(unit => unit.id === bossSpecialEntry.actorId);
+      if (commander) {
+        const spell = getBattleSpellFromLogEntry(bossSpecialEntry);
+        const summonedUnits = (bossSpecialEntry.summonedUnitIds || [])
+          .map(id => battle.units.find(unit => unit.id === id))
+          .filter((unit): unit is BattleUnit => Boolean(unit))
+          .map(unit => ({ id: unit.id, assetPath: unit.assetPath, x: unit.x, y: unit.y }));
+
+        const cue = {
+          id: bossSpecialEntry.id,
+          commanderName: commander.name,
+          assetPath: commander.assetPath,
+          subtitle: battle.enemy.subtitle,
+          spellName: spell?.name || 'Boss Rite',
+          summonedUnits,
+        };
+
+        const startBossSpecialCue = () => {
+          if (bossSpecialTimer.current) window.clearTimeout(bossSpecialTimer.current);
+          if (playerActionTimer.current) window.clearTimeout(playerActionTimer.current);
+          if (enemyActionHoldTimer.current) window.clearTimeout(enemyActionHoldTimer.current);
+          if (enemyTimer.current) window.clearTimeout(enemyTimer.current);
+          if (spellNoticeTimer.current) window.clearTimeout(spellNoticeTimer.current);
+          setSpellCastNotice(null);
+          activeSpellNoticeRef.current = null;
+          bossSpecialCueRef.current = cue;
+          setBossSpecialCue(cue);
+          setIsResolvingAction(true);
+          setTurnBanner(null);
+          playGameSound('combat.spellCast', { volumeScale: 0.82, throttleMs: 900 });
+          emitFxEvent({ type: 'spell', tone: 'red', intensity: 0.84 });
+          bossSpecialTimer.current = window.setTimeout(() => {
+            bossSpecialTimer.current = null;
+            bossSpecialCueRef.current = null;
+            setBossSpecialCue(null);
+            setIsResolvingAction(false);
+            setBattleCue(null);
+            flushQueuedTurnBanner();
+          }, BOSS_SPECIAL_PRESENTATION_MS);
+        };
+
+        if (bossStandEntry || bossLastStandCueRef.current) {
+          queuedBossSpecialCue.current = cue;
+        } else {
+          startBossSpecialCue();
+        }
+      }
+    }
+
     const entry = pickFreshPresentationLogEntry(freshEntries);
     if (!entry || lastSoundLogEntryId.current === entry.id) return;
     lastSoundLogEntryId.current = entry.id;
@@ -471,7 +633,7 @@ export default function BattleModal({
       }, sound.delayMs)
     ));
 
-    if (entry.action === 'spell') {
+    if (entry.action === 'spell' && entry.style !== 'boss-phase' && entry.style !== 'boss-special') {
       const spell = getBattleSpellFromLogEntry(entry);
       if (spell) {
         if (spellNoticeTimer.current) window.clearTimeout(spellNoticeTimer.current);
@@ -484,13 +646,13 @@ export default function BattleModal({
         }, entry.side === 'enemy' ? 180 : 0);
       }
     }
-  }, [battle, battleSpeed]);
+  }, [battle, battleSpeed, flushQueuedBossSpecialCue, flushQueuedTurnBanner]);
 
   useEffect(() => {
     const entry = battle ? getRecentPresentationLogEntry(battle, Date.now()) : undefined;
     if (!entry) return;
 
-    const expiresAt = entry.createdAt + getBattleActionPresentationMs(entry);
+    const expiresAt = entry.createdAt + getBattleLogPresentationMs(entry, battle ?? undefined);
     const pinTimer = window.setTimeout(() => {
       setPresentationPin({ entry, expiresAt });
     }, 0);
@@ -508,7 +670,7 @@ export default function BattleModal({
 
   useEffect(() => {
     if (!battle || battle.status !== 'active') return;
-    if (isResolvingAction) return;
+    if (isResolvingAction || bossLastStandCue || bossSpecialCue) return;
     if (battle.recruitOffer && !battle.recruitOffer.declined && !battle.recruitOffer.accepted) return;
 
     const activeUnit = getActiveUnit(battle);
@@ -530,16 +692,20 @@ export default function BattleModal({
         if (!current) return current;
 
         const next = runEnemyBattleTurn(current);
-        const holdMs = getRecentPresentationLogEntry(next, Date.now())?.action === 'spell'
-          ? ENEMY_BATTLE_PACE.spellPresentationMs
+        const presentationEntry = getRecentPresentationLogEntry(next, Date.now());
+        const isCinematicOverlay = presentationEntry?.style === 'boss-phase' || presentationEntry?.style === 'boss-special';
+        const holdMs = presentationEntry
+          ? getBattleLogPresentationMs(presentationEntry, next)
           : enemyHoldMs;
 
-        if (enemyActionHoldTimer.current) window.clearTimeout(enemyActionHoldTimer.current);
-        enemyActionHoldTimer.current = window.setTimeout(() => {
-          enemyActionHoldTimer.current = null;
-          setIsResolvingAction(false);
-          setBattleCue(null);
-        }, holdMs);
+        if (!isCinematicOverlay) {
+          if (enemyActionHoldTimer.current) window.clearTimeout(enemyActionHoldTimer.current);
+          enemyActionHoldTimer.current = window.setTimeout(() => {
+            enemyActionHoldTimer.current = null;
+            setIsResolvingAction(false);
+            setBattleCue(null);
+          }, holdMs);
+        }
 
         return next;
       });
@@ -548,7 +714,7 @@ export default function BattleModal({
     return () => {
       if (enemyTimer.current) window.clearTimeout(enemyTimer.current);
     };
-  }, [battle, isResolvingAction]);
+  }, [battle, isResolvingAction, bossLastStandCue, bossSpecialCue]);
 
   useEffect(() => {
     if (!battle || battle.status !== 'active') return;
@@ -813,34 +979,47 @@ export default function BattleModal({
     const isSpellAction = Boolean(getRecentPresentationLogEntry(nextBattle, now)?.action === 'spell');
     const applyDelayMs = speedConfig.playerDelayMs;
 
+    const finishPlayerAction = (appliedBattle: BattleState) => {
+      const stampedBattle = refreshPresentationLogTimestamp(appliedBattle);
+      const entry = getRecentPresentationLogEntry(stampedBattle, Date.now());
+      const holdMs = entry ? getRemainingPresentationMs(entry, stampedBattle) : 0;
+      setBattle(stampedBattle);
+
+      if (getPendingCinematicEntry(stampedBattle)) {
+        return;
+      }
+
+      if (holdMs <= 0) {
+        setIsResolvingAction(false);
+        setBattleCue(null);
+        return;
+      }
+      playerActionTimer.current = window.setTimeout(() => {
+        setIsResolvingAction(false);
+        setBattleCue(null);
+      }, holdMs);
+    };
+
     if (isSpellAction) {
       const spellApplyDelayMs = applyDelayMs <= 0 ? 0 : Math.min(applyDelayMs, 320);
       playerActionTimer.current = window.setTimeout(() => {
-        setBattle(nextBattle);
-        playerActionTimer.current = window.setTimeout(() => {
-          setIsResolvingAction(false);
-          setBattleCue(null);
-        }, SPELL_PRESENTATION_MS);
+        finishPlayerAction(nextBattle);
       }, spellApplyDelayMs);
       return;
     }
 
     if (applyDelayMs <= 0) {
-      setBattle(nextBattle);
-      setIsResolvingAction(false);
-      setBattleCue(null);
+      finishPlayerAction(nextBattle);
       return;
     }
 
     playerActionTimer.current = window.setTimeout(() => {
-      setBattle(nextBattle);
-      setIsResolvingAction(false);
-      setBattleCue(null);
+      finishPlayerAction(nextBattle);
     }, applyDelayMs);
   };
 
   const handleCellClick = (x: number, y: number) => {
-    if (!battle || !activeUnit || !isPlayerTurn || isResolvingAction) return;
+    if (!battle || !activeUnit || !isPlayerTurn || isResolvingAction || bossLastStandCue || bossSpecialCue) return;
 
     const unitAtCell = getUnitAt(battle, x, y);
     if (selectedSpell) {
@@ -1295,6 +1474,16 @@ export default function BattleModal({
                   '--battle-rows': battle.boardHeight,
                   '--battle-ratio': battle.boardWidth / battle.boardHeight,
                   '--battle-move-transit-ms': `${BATTLE_MOVE_TRANSIT_MS}ms`,
+                  ...(bossLastStandCue ? {
+                    '--boss-last-stand-ms': `${BOSS_LAST_STAND_PRESENTATION_MS}ms`,
+                    '--boss-respawn-reveal-ms': `${BOSS_LAST_STAND_RESPAWN_REVEAL_MS}ms`,
+                  } : {}),
+                  ...(bossSpecialCue ? {
+                    '--boss-special-ms': `${BOSS_SPECIAL_PRESENTATION_MS}ms`,
+                    '--boss-special-summon-reveal-ms': `${BOSS_SPECIAL_SUMMON_REVEAL_MS}ms`,
+                    '--boss-last-stand-ms': `${BOSS_SPECIAL_PRESENTATION_MS}ms`,
+                    '--boss-respawn-reveal-ms': `${BOSS_SPECIAL_SUMMON_REVEAL_MS}ms`,
+                  } : {}),
                   gridTemplateColumns: `repeat(${battle.boardWidth}, minmax(0, 1fr))`,
                   gridTemplateRows: `repeat(${battle.boardHeight}, minmax(0, 1fr))`,
                 } as CSSProperties}
@@ -1304,7 +1493,12 @@ export default function BattleModal({
                 const y = Math.floor(index / battle.boardWidth);
                 const unit = getUnitAt(battle, x, y);
                 const displayUnit = unit && unit.id === unitMoveTransit?.unit.id ? undefined : unit;
-                const defeatedUnit = displayUnit ? undefined : getRecentlyDefeatedUnitAt(battle, x, y, presentationEntry, now);
+                const defeatedPresentation = displayUnit
+                  ? undefined
+                  : getDefeatedUnitPresentation(battle, x, y, presentationEntry, now);
+                const dyingHitUnit = defeatedPresentation?.phase === 'hit' ? defeatedPresentation.unit : undefined;
+                const dissolvingUnit = defeatedPresentation?.phase === 'dissolve' ? defeatedPresentation.unit : undefined;
+                const pieceUnit = displayUnit ?? dyingHitUnit;
                 const obstacle = isObstacle(battle, x, y);
                 const terrain = getTerrainAt(battle, x, y);
                 const terrainLabel = BATTLE_TERRAIN_LABELS[terrain];
@@ -1363,9 +1557,15 @@ export default function BattleModal({
                       : canDamageSpellTarget
                         ? 'battle-cell-target-strike'
                         : '';
-                const floatingText = getFloatingBattleText(battle, unit || defeatedUnit, presentationEntry, now);
-                const spellImpact = getBattleSpellImpact(battle, unit || defeatedUnit, presentationEntry, now);
-                const stanceImpact = getBattleStanceIconImpact(unit || defeatedUnit, presentationEntry, now);
+                const resurrectingUnit = bossLastStandCue?.resurrectedUnits.find(unit => unit.x === x && unit.y === y)
+                  ?? bossSpecialCue?.summonedUnits.find(unit => unit.x === x && unit.y === y);
+                const isRisingUnit = Boolean(pieceUnit && (
+                  bossLastStandCue?.resurrectedUnits.some(unit => unit.id === pieceUnit.id)
+                  || bossSpecialCue?.summonedUnits.some(unit => unit.id === pieceUnit.id)
+                ));
+                const floatingText = getFloatingBattleText(battle, pieceUnit || dissolvingUnit, presentationEntry, now);
+                const spellImpact = getBattleSpellImpact(battle, pieceUnit || dissolvingUnit, presentationEntry, now);
+                const stanceImpact = getBattleStanceIconImpact(pieceUnit || dissolvingUnit, presentationEntry, now, battle);
 
                 return (
                   <div
@@ -1393,7 +1593,7 @@ export default function BattleModal({
                       setHoverCursor(null);
                     }}
                     aria-label={`${cellPreview.title}. ${cellPreview.detail}`}
-                    aria-disabled={isResolvingAction || obstacle || (!canMove && !canStrike && !canMend && !canSpellTarget && !isActiveCell)}
+                    aria-disabled={isResolvingAction || Boolean(bossLastStandCue) || Boolean(bossSpecialCue) || obstacle || (!canMove && !canStrike && !canMend && !canSpellTarget && !isActiveCell)}
                     className={`battle-cell ${getBattleTerrainClassName(terrain)} relative overflow-hidden text-left transition ${
                       obstacle
                         ? 'battle-cell-obstacle'
@@ -1406,11 +1606,26 @@ export default function BattleModal({
                       <span className="battle-terrain-chip">{terrainLabel}</span>
                     )}
                     {obstacle && <span className="battle-obstacle-shape" />}
-                    {displayUnit && (
+                    {resurrectingUnit && (
+                      <BattleBossResurrectionPulse
+                        unit={resurrectingUnit}
+                        presentationMs={bossSpecialCue ? BOSS_SPECIAL_PRESENTATION_MS : BOSS_LAST_STAND_PRESENTATION_MS}
+                        revealMs={bossSpecialCue ? BOSS_SPECIAL_SUMMON_REVEAL_MS : BOSS_LAST_STAND_RESPAWN_REVEAL_MS}
+                        tone={bossSpecialCue ? 'raid' : 'holy'}
+                      />
+                    )}
+                    {pieceUnit && (
                       <BattlePiece
-                        unit={displayUnit}
-                        active={isActiveCell}
-                        animation={getBattlePieceAnimation(battle, displayUnit, presentationEntry, now)}
+                        unit={pieceUnit}
+                        active={isActiveCell && !dyingHitUnit}
+                        rising={isRisingUnit}
+                        animation={
+                          dyingHitUnit
+                            ? getBattleDeathHitAnimation(presentationEntry)
+                            : isRisingUnit
+                              ? 'rise'
+                              : getBattlePieceAnimation(battle, pieceUnit, presentationEntry, now)
+                        }
                         targetGlow={unitTargetGlow}
                         tutorialFocus={isActiveCell && Boolean(combatTutorialStage)}
                       />
@@ -1444,13 +1659,13 @@ export default function BattleModal({
                         onWait={handleEndTurn}
                       />
                     )}
-                    {defeatedUnit && <BattleDeathMarker unit={defeatedUnit} />}
+                    {dissolvingUnit && <BattleDeathMarker unit={dissolvingUnit} />}
                     {stanceImpact ? (
                       <BattleStanceIconImpact impact={stanceImpact} />
                     ) : spellImpact ? (
                       <BattleSpellIconImpact
                         impact={spellImpact}
-                        delayMs={Math.max(0, (presentationEntry?.targetIds?.indexOf((unit || defeatedUnit)?.id || '') ?? 0) * 90)}
+                        delayMs={Math.max(0, (presentationEntry?.targetIds?.indexOf((pieceUnit || dissolvingUnit)?.id || '') ?? 0) * 90)}
                       />
                     ) : null}
                     {floatingText && <BattleFloatingText text={floatingText.text} tone={floatingText.tone} />}
@@ -1467,6 +1682,12 @@ export default function BattleModal({
                 />
               )}
               <CombatThreeFxLayer battle={battle} />
+              {bossLastStandCue && (
+                <BattleBossLastStandOverlay cue={bossLastStandCue} />
+              )}
+              {bossSpecialCue && (
+                <BattleBossSpecialOverlay cue={bossSpecialCue} />
+              )}
               </div>
             </div>
 
@@ -2219,6 +2440,7 @@ function BattleTurnTimeline({
               fill
               className="object-contain p-0.5"
               style={{ imageRendering: 'pixelated' }}
+              unoptimized
             />
           </span>
         ))}
@@ -2237,12 +2459,14 @@ function BattlePiece({
   unit,
   active,
   animation,
+  rising = false,
   targetGlow,
   tutorialFocus,
 }: {
   unit: BattleUnit;
   active: boolean;
   animation: BattlePieceAnimation;
+  rising?: boolean;
   targetGlow?: BattlePieceTargetGlow;
   tutorialFocus?: boolean;
 }) {
@@ -2253,7 +2477,7 @@ function BattlePiece({
 
   return (
     <span
-      className={`battle-piece-wrap battle-piece-wrap-${unit.side} ${active ? 'battle-piece-wrap-active' : ''} ${tutorialFocus ? 'battle-piece-wrap-tutorial-focus' : ''}`}
+      className={`battle-piece-wrap battle-piece-wrap-${unit.side} ${active ? 'battle-piece-wrap-active' : ''} ${rising ? 'battle-piece-wrap-rising' : ''} ${tutorialFocus ? 'battle-piece-wrap-tutorial-focus' : ''}`}
       data-battle-target={targetGlow || undefined}
     >
       <span className="battle-piece-health">
@@ -2272,6 +2496,7 @@ function BattlePiece({
           fill
           sizes="(max-width: 768px) 12vw, 8vw"
           className="battle-piece-image object-contain object-center"
+          unoptimized
         />
       </span>
       <span className={`battle-piece-role ${unit.side === 'player' ? 'battle-piece-role-player' : 'battle-piece-role-enemy'}`}>
@@ -2281,21 +2506,167 @@ function BattlePiece({
   );
 }
 
+function BattleBossResurrectionPulse({
+  unit,
+  presentationMs = BOSS_LAST_STAND_PRESENTATION_MS,
+  revealMs = BOSS_LAST_STAND_RESPAWN_REVEAL_MS,
+  tone = 'holy',
+}: {
+  unit: { assetPath: string; x: number; y: number };
+  presentationMs?: number;
+  revealMs?: number;
+  tone?: 'holy' | 'raid';
+}) {
+  return (
+    <span
+      className={`battle-boss-resurrection-pulse ${tone === 'raid' ? 'battle-boss-resurrection-pulse-raid' : ''}`}
+      style={{
+        '--boss-respawn-reveal-ms': `${revealMs}ms`,
+        '--boss-last-stand-ms': `${presentationMs}ms`,
+      } as CSSProperties}
+      aria-hidden="true"
+    >
+      <span className="battle-boss-resurrection-ground" />
+      <span className="battle-boss-resurrection-beam" />
+      <span className="battle-boss-resurrection-sprite">
+        <Image
+          src={unit.assetPath}
+          alt=""
+          fill
+          sizes="(max-width: 768px) 12vw, 8vw"
+          className="battle-boss-resurrection-image object-contain object-center"
+          unoptimized
+        />
+      </span>
+      <span className="battle-boss-resurrection-spark battle-boss-resurrection-spark-1" />
+      <span className="battle-boss-resurrection-spark battle-boss-resurrection-spark-2" />
+    </span>
+  );
+}
+
+function BattleBossLastStandOverlay({
+  cue,
+}: {
+  cue: {
+    id: string;
+    commanderName: string;
+    assetPath: string;
+    subtitle?: string;
+    resurrectedUnits: Array<{ id: string; assetPath: string; x: number; y: number }>;
+  };
+}) {
+  return (
+    <div
+      key={cue.id}
+      className="battle-boss-cinematic-overlay battle-boss-last-stand-overlay"
+      style={{
+        '--boss-last-stand-ms': `${BOSS_LAST_STAND_PRESENTATION_MS}ms`,
+        '--boss-respawn-reveal-ms': `${BOSS_LAST_STAND_RESPAWN_REVEAL_MS}ms`,
+      } as CSSProperties}
+      aria-hidden="true"
+    >
+      <span className="battle-boss-cinematic-veil battle-boss-last-stand-veil" />
+      <span className="battle-boss-cinematic-ring battle-boss-cinematic-ring-1" />
+      <span className="battle-boss-cinematic-ring battle-boss-cinematic-ring-2" />
+      <span className="battle-boss-cinematic-burst battle-boss-last-stand-burst" />
+      <span className="battle-boss-cinematic-sprite-wrap">
+        <span className="battle-boss-cinematic-sprite-glow battle-boss-last-stand-sprite-glow" />
+        <Image
+          src={cue.assetPath}
+          alt=""
+          width={280}
+          height={340}
+          className="battle-boss-cinematic-sprite battle-boss-last-stand-sprite object-contain object-center"
+          unoptimized
+        />
+      </span>
+      <span className="battle-boss-cinematic-copy">
+        <span className="battle-boss-cinematic-phase fantasy-heading">Phase II</span>
+        <span className="battle-boss-cinematic-title fantasy-heading">{cue.commanderName}</span>
+        {cue.subtitle ? <span className="battle-boss-cinematic-subtitle">{cue.subtitle}</span> : null}
+        <span className="battle-boss-cinematic-detail">
+          {cue.resurrectedUnits.length > 0
+            ? `${cue.resurrectedUnits.length} servant${cue.resurrectedUnits.length === 1 ? '' : 's'} rise from the ash.`
+            : 'The oath reignites. The boss endures.'}
+        </span>
+      </span>
+    </div>
+  );
+}
+
+function BattleBossSpecialOverlay({
+  cue,
+}: {
+  cue: {
+    id: string;
+    commanderName: string;
+    assetPath: string;
+    subtitle?: string;
+    spellName: string;
+    summonedUnits: Array<{ id: string; assetPath: string; x: number; y: number }>;
+  };
+}) {
+  return (
+    <div
+      key={cue.id}
+      className="battle-boss-cinematic-overlay battle-boss-special-overlay"
+      style={{
+        '--boss-special-ms': `${BOSS_SPECIAL_PRESENTATION_MS}ms`,
+        '--boss-special-summon-reveal-ms': `${BOSS_SPECIAL_SUMMON_REVEAL_MS}ms`,
+      } as CSSProperties}
+      aria-hidden="true"
+    >
+      <span className="battle-boss-cinematic-veil battle-boss-special-veil" />
+      <span className="battle-boss-cinematic-ring battle-boss-cinematic-ring-1 battle-boss-special-ring" />
+      <span className="battle-boss-cinematic-ring battle-boss-cinematic-ring-2 battle-boss-special-ring" />
+      <span className="battle-boss-cinematic-burst battle-boss-special-burst" />
+      <span className="battle-boss-cinematic-sprite-wrap">
+        <span className="battle-boss-cinematic-sprite-glow battle-boss-special-sprite-glow" />
+        <Image
+          src={cue.assetPath}
+          alt=""
+          width={260}
+          height={320}
+          className="battle-boss-cinematic-sprite battle-boss-special-sprite object-contain object-center"
+          unoptimized
+        />
+      </span>
+      <span className="battle-boss-cinematic-copy">
+        <span className="battle-boss-cinematic-phase fantasy-heading">Boss Rite</span>
+        <span className="battle-boss-cinematic-title fantasy-heading">{cue.spellName}</span>
+        <span className="battle-boss-cinematic-subtitle">{cue.commanderName}</span>
+        <span className="battle-boss-cinematic-detail">
+          {cue.summonedUnits.length > 0
+            ? `${cue.summonedUnits.length} servant${cue.summonedUnits.length === 1 ? '' : 's'} answer the call.`
+            : cue.subtitle || 'The boss bends the field to their will.'}
+        </span>
+      </span>
+    </div>
+  );
+}
+
 function BattleDeathMarker({ unit }: { unit: BattleUnit }) {
   const isCommander = unit.kind === 'commander';
 
   return (
-    <span className="battle-death-marker">
+    <span
+      className="battle-death-marker"
+      style={{ '--battle-death-dissolve-ms': `${BATTLE_DEATH_DISSOLVE_MS}ms` } as CSSProperties}
+    >
       <span className={`battle-piece-body battle-death-body battle-piece-anim-death ${isCommander ? 'battle-piece-body-commander' : 'battle-piece-body-minion'}`}>
         <Image
           src={unit.assetPath}
           alt=""
           fill
           sizes="(max-width: 768px) 12vw, 8vw"
-          className="battle-piece-image object-contain object-center"
+          className="battle-piece-image battle-death-sprite object-contain object-center"
+          unoptimized
         />
       </span>
-      <span className="battle-death-ash" />
+      <span className="battle-death-ash battle-death-ash-core" />
+      <span className="battle-death-ash battle-death-ash-puff battle-death-ash-puff-1" />
+      <span className="battle-death-ash battle-death-ash-puff battle-death-ash-puff-2" />
+      <span className="battle-death-ash battle-death-ash-puff battle-death-ash-puff-3" />
     </span>
   );
 }
@@ -2331,6 +2702,7 @@ function BattleUnitTransit({
             fill
             sizes="(max-width: 768px) 12vw, 8vw"
             className="battle-piece-image object-contain object-center"
+            unoptimized
           />
         </span>
       </span>
@@ -2413,11 +2785,72 @@ function getPresentationEntry(
   return getRecentPresentationLogEntry(battle, now) ?? battle.log[0];
 }
 
-function getBattleActionPresentationMs(entry: BattleLogEntry | undefined): number {
-  if (!entry) return 1500;
-  if (entry.action === 'spell') return SPELL_PRESENTATION_MS;
-  if (entry.side === 'enemy') return ENEMY_BATTLE_PACE.presentationMs;
-  return 1500;
+function getBattleActionPresentationMs(entry: BattleLogEntry | undefined, battle?: BattleState): number {
+  if (!entry) return BATTLE_DEFAULT_PRESENTATION_MS;
+  return getBattleLogPresentationMs(entry, battle);
+}
+
+function getPendingCinematicEntry(battle: BattleState, now = Date.now()): BattleLogEntry | undefined {
+  return battle.log.slice(0, 2).find(entry => (
+    (entry.style === 'boss-phase' || entry.style === 'boss-special')
+    && now - entry.createdAt < getBattleLogPresentationMs(entry, battle) + 320
+  ));
+}
+
+function refreshPresentationLogTimestamp(battle: BattleState): BattleState {
+  const entry = battle.log[0];
+  if (
+    !entry
+    || entry.action === 'round'
+    || entry.action === 'system'
+    || entry.action === 'move'
+  ) {
+    return battle;
+  }
+  return {
+    ...battle,
+    log: [{ ...entry, createdAt: Date.now() }, ...battle.log.slice(1)],
+  };
+}
+
+function getRemainingPresentationMs(
+  entry: BattleLogEntry,
+  battle: BattleState,
+  now = Date.now(),
+): number {
+  return Math.max(0, getBattleLogPresentationMs(entry, battle) - (now - entry.createdAt));
+}
+
+function getBattleDeathHitAnimation(entry: BattleLogEntry | undefined): BattlePieceAnimation {
+  if (!entry) return 'hit-melee';
+  if (entry.action === 'spell') return 'spell-hit';
+  return entry.style === 'ranged' ? 'hit-ranged' : 'hit-melee';
+}
+
+type DefeatedUnitPresentation = { unit: BattleUnit; phase: 'hit' | 'dissolve' };
+
+function getDefeatedUnitPresentation(
+  battle: BattleState,
+  x: number,
+  y: number,
+  entry: BattleLogEntry | undefined,
+  now: number,
+): DefeatedUnitPresentation | undefined {
+  if (!entry || (entry.action !== 'attack' && entry.action !== 'spell')) return undefined;
+  if (now - entry.createdAt > getBattleActionPresentationMs(entry, battle)) return undefined;
+
+  const unit = battle.units.find(candidate => (
+    candidate.currentHealth <= 0 &&
+    candidate.x === x &&
+    candidate.y === y &&
+    Boolean(entry.targetIds?.includes(candidate.id))
+  ));
+  if (!unit) return undefined;
+
+  const elapsed = now - entry.createdAt;
+  if (elapsed < BATTLE_DEATH_HIT_MS) return { unit, phase: 'hit' };
+  if (elapsed < BATTLE_DEATH_HIT_MS + BATTLE_DEATH_DISSOLVE_MS) return { unit, phase: 'dissolve' };
+  return undefined;
 }
 
 function getBattleSpellFromLogEntry(entry: BattleLogEntry): BattleSpell | undefined {
@@ -2432,7 +2865,7 @@ function getBattleSpellImpact(
   now: number
 ): BattleSpellImpactData | null {
   if (!unit || !entry) return null;
-  if (entry.action !== 'spell' || now - entry.createdAt > getBattleActionPresentationMs(entry)) return null;
+  if (entry.action !== 'spell' || now - entry.createdAt > getBattleActionPresentationMs(entry, battle)) return null;
 
   const spell = getBattleSpellFromLogEntry(entry);
   if (!spell) return null;
@@ -2452,9 +2885,10 @@ function getBattleStanceIconImpact(
   unit: BattleUnit | undefined,
   entry: BattleLogEntry | undefined,
   now: number,
+  battle?: BattleState,
 ): BattleStanceIconImpactData | null {
   if (!unit || !entry || entry.actorId !== unit.id) return null;
-  if (now - entry.createdAt > getBattleActionPresentationMs(entry)) return null;
+  if (now - entry.createdAt > getBattleActionPresentationMs(entry, battle)) return null;
 
   if (entry.action === 'wait') {
     return {
@@ -2482,7 +2916,7 @@ function getFloatingBattleText(
   now: number
 ): { text: string; tone: 'damage' | 'heal' | 'mana' | 'neutral' } | null {
   if (!unit || !entry) return null;
-  if (now - entry.createdAt > getBattleActionPresentationMs(entry)) return null;
+  if (now - entry.createdAt > getBattleActionPresentationMs(entry, battle)) return null;
 
   const isTarget = Boolean(entry.targetIds?.includes(unit.id));
   const isActor = entry.actorId === unit.id;
@@ -2514,7 +2948,7 @@ function getBattlePieceAnimation(
   entry: BattleLogEntry | undefined,
   now: number,
 ): BattlePieceAnimation {
-  if (!entry || now - entry.createdAt > getBattleActionPresentationMs(entry)) return null;
+  if (!entry || now - entry.createdAt > getBattleActionPresentationMs(entry, battle)) return null;
 
   const isActor = entry.actorId === unit.id;
   const isTarget = Boolean(entry.targetIds?.includes(unit.id));
@@ -2546,24 +2980,6 @@ function getBattlePieceAnimation(
   }
 
   return null;
-}
-
-function getRecentlyDefeatedUnitAt(
-  battle: BattleState,
-  x: number,
-  y: number,
-  entry: BattleLogEntry | undefined,
-  now: number,
-): BattleUnit | undefined {
-  if (!entry || now - entry.createdAt > getBattleActionPresentationMs(entry)) return undefined;
-  if (entry.action !== 'attack' && entry.action !== 'spell') return undefined;
-
-  return battle.units.find(unit => (
-    unit.currentHealth <= 0 &&
-    unit.x === x &&
-    unit.y === y &&
-    Boolean(entry.targetIds?.includes(unit.id))
-  ));
 }
 
 function getBattleTerrainClassName(terrain: BattleTerrainType): string {
@@ -2812,13 +3228,6 @@ function getBattleSoundDelay(speed: CombatSpeed, phase: 'start' | 'impact' | 'de
   return 560;
 }
 
-function hasDefeatedLogTarget(battle: BattleState, entry: BattleLogEntry): boolean {
-  return Boolean(entry.targetIds?.some(targetId => {
-    const unit = battle.units.find(candidate => candidate.id === targetId);
-    return unit && unit.currentHealth <= 0;
-  }));
-}
-
 function getBattleLogNumericAmount(entry: BattleLogEntry): number {
   const amountMatch =
     entry.message.match(/\b(?:for|restoring|draining|up to)\s+(\d+)\b/i) ||
@@ -2847,10 +3256,11 @@ function getSpellImpactSound(entry: BattleLogEntry): GameSoundId {
       return 'combat.spellFlame';
     case 'chain-spark':
       return 'combat.spellLightning';
-    case 'judgement':
     case 'sanctified-mend':
-    case 'rallying-hymn':
     case 'soul-tether':
+      return 'combat.blessing';
+    case 'judgement':
+    case 'rallying-hymn':
     case 'saint-king-aegis':
       return 'combat.spellHoly';
     case 'gravity-snare':
@@ -2867,7 +3277,7 @@ function getSpellImpactSound(entry: BattleLogEntry): GameSoundId {
     case 'ashen-step':
     case 'thorn-ward':
     case 'warding-prayer':
-      return 'combat.spellBuff';
+      return 'combat.blessing';
     case 'arcane-bolt':
       return 'combat.spellHit';
   }
@@ -2875,7 +3285,7 @@ function getSpellImpactSound(entry: BattleLogEntry): GameSoundId {
   switch (entry.style) {
     case 'spell-support':
     case 'heal':
-      return 'combat.spellHoly';
+      return 'combat.blessing';
     case 'buff':
     case 'morale':
       return 'combat.spellBuff';
@@ -2914,12 +3324,20 @@ function getBattleLogSoundPlan(battle: BattleState, entry: BattleLogEntry, speed
   }
 
   if (entry.action === 'heal') {
-    plan.push({ id: 'combat.spellHoly', delayMs: impactDelay, throttleMs: 140, volumeScale: 0.82 });
+    plan.push({ id: 'combat.spellCast', delayMs: startDelay + 10, throttleMs: 120, volumeScale: 0.28 });
+    plan.push({ id: 'combat.blessing', delayMs: startDelay + 85, throttleMs: 120, volumeScale: 0.78 });
   }
 
   if (entry.action === 'spell') {
     plan.push({ id: 'combat.spellCast', delayMs: startDelay, throttleMs: 140, volumeScale: 0.75 });
-    plan.push({ id: getSpellImpactSound(entry), delayMs: impactDelay + 70, throttleMs: 140 });
+    const impactSound = getSpellImpactSound(entry);
+    const isBlessingImpact = impactSound === 'combat.blessing';
+    plan.push({
+      id: impactSound,
+      delayMs: isBlessingImpact ? startDelay + 90 : impactDelay + 70,
+      throttleMs: 140,
+      volumeScale: isBlessingImpact ? 0.76 : undefined,
+    });
   }
 
   if (entry.action === 'mana') {
@@ -2931,13 +3349,14 @@ function getBattleLogSoundPlan(battle: BattleState, entry: BattleLogEntry, speed
   }
 
   if (entry.action === 'wait' && entry.style === 'buff') {
-    plan.push({ id: 'combat.spellHoly', delayMs: impactDelay, throttleMs: 150, volumeScale: 0.7 });
+    plan.push({ id: 'combat.spellCast', delayMs: startDelay + 10, throttleMs: 130, volumeScale: 0.24 });
+    plan.push({ id: 'combat.blessing', delayMs: startDelay + 80, throttleMs: 130, volumeScale: 0.72 });
   } else if (entry.action === 'wait') {
     plan.push({ id: 'combat.wait', delayMs: startDelay, throttleMs: 120, volumeScale: 0.68 });
   }
 
   if ((entry.action === 'attack' || entry.action === 'spell') && hasDefeatedLogTarget(battle, entry)) {
-    plan.push({ id: 'combat.unitDeath', delayMs: deathDelay, throttleMs: 180 });
+    plan.push({ id: 'combat.unitDeath', delayMs: deathDelay + 80, throttleMs: 220, volumeScale: 0.92 });
   }
 
   return plan;

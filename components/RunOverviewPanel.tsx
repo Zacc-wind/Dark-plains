@@ -9,6 +9,9 @@ import {
   getDailyRunStatus,
   getRandomRunExpNeeded,
   RANDOM_RUN_BALANCE,
+  spendRunUpgradePoint,
+  updateCurrentUser,
+  type RandomRunUpgradeStat,
 } from '@/lib/auth';
 import {
   getMilestonesByCategory,
@@ -38,6 +41,16 @@ const LOBBY_UPGRADE_ICONS: Record<string, string> = {
   'Unit Ward': '/assets/icons/defense.png',
 };
 
+const UPGRADE_STAT_BY_LABEL: Record<string, RandomRunUpgradeStat> = {
+  Army: 'armyPower',
+  Ward: 'defensivePower',
+  Morale: 'morale',
+  Spell: 'spellPower',
+  Health: 'maxHealth',
+  'Unit Hit': 'unitPower',
+  'Unit Ward': 'unitWard',
+};
+
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
@@ -61,7 +74,37 @@ function RunStatTile({ icon, label, value, hint }: { icon: string; label: string
   );
 }
 
-function RunBonusTile({ icon, label, value, hint }: { icon: string; label: string; value: string; hint: string }) {
+function RunBonusTile({
+  icon,
+  label,
+  value,
+  hint,
+  canSpend,
+  onSpend,
+}: {
+  icon: string;
+  label: string;
+  value: string;
+  hint: string;
+  canSpend?: boolean;
+  onSpend?: () => void;
+}) {
+  if (canSpend && onSpend) {
+    return (
+      <button
+        type="button"
+        className="sp-hub-bonus-tile sp-hub-bonus-tile-spendable"
+        title={`${hint} — click to spend 1 upgrade point`}
+        onClick={onSpend}
+      >
+        <Image src={icon} alt="" width={28} height={28} className="sp-hub-bonus-tile-icon" unoptimized />
+        <span className="sp-hub-bonus-tile-value">{value}</span>
+        <span className="sp-hub-bonus-tile-label">{label}</span>
+        <span className="sp-hub-bonus-tile-action">+1</span>
+      </button>
+    );
+  }
+
   return (
     <div className="sp-hub-bonus-tile" title={hint}>
       <Image src={icon} alt="" width={28} height={28} className="sp-hub-bonus-tile-icon" unoptimized />
@@ -77,6 +120,7 @@ interface RunOverviewPanelProps {
 
 export default function RunOverviewPanel({ onOpenMilestones }: RunOverviewPanelProps) {
   const [tick, setTick] = useState(0);
+  const [upgradeNotice, setUpgradeNotice] = useState<string | null>(null);
 
   useEffect(() => {
     const timer = window.setInterval(() => setTick(value => value + 1), 1000);
@@ -100,6 +144,7 @@ export default function RunOverviewPanel({ onOpenMilestones }: RunOverviewPanelP
   const lastRunCleared = Boolean(lastRun && lastRun.wins >= lastRun.targetBattles);
   const categorySummaries = getRunMilestoneCategorySummaries(runState);
   const milestoneCounts = getRunMilestoneUnlockCounts(runState);
+  const canSpendUpgradePoints = runState.runUpgradePoints > 0;
   const upgradeRows = [
     { label: 'Army', value: `+${permanent.armyPower}`, hint: 'Bonus damage for your warband' },
     { label: 'Ward', value: `+${permanent.defensivePower}`, hint: 'Extra protection across runs' },
@@ -109,6 +154,21 @@ export default function RunOverviewPanel({ onOpenMilestones }: RunOverviewPanelP
     { label: 'Unit Hit', value: `+${permanent.unitPower}`, hint: 'Minion attack bonus' },
     { label: 'Unit Ward', value: `+${permanent.unitWard}`, hint: 'Minion defense bonus' },
   ];
+
+  const handleSpendUpgrade = (label: string) => {
+    const stat = UPGRADE_STAT_BY_LABEL[label];
+    if (!stat) return;
+
+    const result = spendRunUpgradePoint(player, stat);
+    if (!result.ok) {
+      setUpgradeNotice(result.message);
+      return;
+    }
+
+    updateCurrentUser({ dailyRun: result.dailyRun });
+    setUpgradeNotice(result.message);
+    setTick(value => value + 1);
+  };
 
   return (
     <div className="sp-hub-dashboard">
@@ -155,7 +215,12 @@ export default function RunOverviewPanel({ onOpenMilestones }: RunOverviewPanelP
         <div className="sp-hub-bonus-section">
           <div>
             <span className="arcane-label sp-hub-arcane-label">Permanent Bonuses</span>
-            <p className="sp-hub-section-hint">Stack forever — applied at the start of each run.</p>
+            <p className="sp-hub-section-hint">
+              {canSpendUpgradePoints
+                ? 'Click a bonus tile to spend 1 upgrade point.'
+                : 'Stack forever — applied at the start of each run.'}
+            </p>
+            {upgradeNotice ? <p className="sp-hub-section-hint ui-value mt-1">{upgradeNotice}</p> : null}
           </div>
           <div className="sp-hub-bonus-grid">
             {upgradeRows.map(row => (
@@ -165,6 +230,8 @@ export default function RunOverviewPanel({ onOpenMilestones }: RunOverviewPanelP
                 label={row.label}
                 value={row.value}
                 hint={row.hint}
+                canSpend={canSpendUpgradePoints}
+                onSpend={() => handleSpendUpgrade(row.label)}
               />
             ))}
           </div>

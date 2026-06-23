@@ -108,9 +108,22 @@ export function rollRunEquipmentRarity(wins: number, targetBattles: number): Equ
   const progress = targetBattles > 0 ? Math.min(1, wins / targetBattles) : 0;
   const roll = Math.random();
 
-  const legendaryChance = progress >= 0.78 ? 0.04 : progress >= 0.55 ? 0.015 : 0;
-  const epicChance = progress >= 0.62 ? 0.09 : progress >= 0.38 ? 0.055 : 0.028;
-  const rareChance = progress >= 0.48 ? 0.3 : progress >= 0.22 ? 0.22 : 0.13;
+  const legendaryChance = progress >= 0.78 ? 0.06 : progress >= 0.55 ? 0.025 : 0.01;
+  const epicChance = progress >= 0.62 ? 0.12 : progress >= 0.38 ? 0.08 : 0.045;
+  const rareChance = progress >= 0.48 ? 0.34 : progress >= 0.22 ? 0.26 : 0.18;
+
+  if (roll < legendaryChance) return 'legendary';
+  if (roll < legendaryChance + epicChance) return 'epic';
+  if (roll < legendaryChance + epicChance + rareChance) return 'rare';
+  return 'decent';
+}
+
+export function rollRunOfferEquipmentRarity(wins: number, targetBattles: number): EquipmentRarity {
+  const progress = targetBattles > 0 ? Math.min(1, wins / targetBattles) : 0;
+  const roll = Math.random();
+  const legendaryChance = 0.02 + progress * 0.03;
+  const epicChance = 0.08 + progress * 0.05;
+  const rareChance = 0.28 + progress * 0.08;
 
   if (roll < legendaryChance) return 'legendary';
   if (roll < legendaryChance + epicChance) return 'epic';
@@ -122,8 +135,13 @@ export function generateRunLootEquipment(
   wins: number,
   targetBattles: number,
   forcedRarity?: EquipmentRarity,
+  options?: { offer?: boolean },
 ): Equipment {
-  const rarity = forcedRarity || rollRunEquipmentRarity(wins, targetBattles);
+  const rarity = forcedRarity || (
+    options?.offer
+      ? rollRunOfferEquipmentRarity(wins, targetBattles)
+      : rollRunEquipmentRarity(wins, targetBattles)
+  );
   return generateEquipment(0, rarity) || generateEquipment(0, 'decent')!;
 }
 

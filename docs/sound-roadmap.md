@@ -19,11 +19,12 @@ This is the current interaction sound checklist for the game. Starter CC0 files 
 - `combat/blade_hit.ogg` - weapon contact.
 - `combat/armor_hit.ogg` - weapon impact against better-armored targets.
 - `combat/unit_hurt.ogg` - damage taken.
-- `combat/unit_death.ogg` - normal unit death.
+- `combat/unit_death.wav` - normal unit death. Default is a restrained male exhale (`death-candidates/02_male_soft_exhale.wav`). See `combat/death-candidates/` for alternates.
 - `combat/move_dust.ogg` - unit movement on the combat grid.
 - `combat/wait.ogg` - wait/hold turn.
 - `combat/guard.ogg` - guard or defensive response.
-- `combat/heal.ogg` - healing lands on a unit.
+- `combat/blessing.ogg` - short holy spell ping (same clip as `spell_holy.ogg`). Priest mend and blessing charge play a whispered cast + this impact in ~90ms.
+- `combat/heal.ogg` - legacy heal asset kept for reference; combat routes healing through `combat.blessing`.
 - `combat/mana_focus.ogg` - commander focus mana.
 - `combat/ranged.ogg` - ranged physical release cue.
 - `combat/ranged_release.ogg` - ranged attack release.
