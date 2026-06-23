@@ -85,18 +85,14 @@ export default function AuthPage() {
           <p className="arcane-label mb-2">Enter the road</p>
           <h1 className="auth-title fantasy-heading text-center">Dark Plains</h1>
         </div>
-        <p className="arcane-label mb-2 text-center">
-          {isLogin ? 'Login to continue' : 'Create your account'}
-        </p>
-        {onlineAuth ? (
-          <p className="ui-faint mb-6 text-center text-[11px] font-bold">
-            Online save enabled — progress syncs to your account.
-          </p>
-        ) : (
+        {!isLogin ? (
+          <p className="arcane-label mb-6 text-center">Create your account</p>
+        ) : null}
+        {!onlineAuth ? (
           <p className="ui-faint mb-6 text-center text-[11px] font-bold">
             Local prototype — saves stay in this browser only.
           </p>
-        )}
+        ) : null}
 
         <form onSubmit={handleSubmit} className="space-y-6">
           <div>
