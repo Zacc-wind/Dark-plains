@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Pirate Game",
+  title: "Dark Plains",
   description: "A real-time tile-based browser RPG prototype.",
 };
 

@@ -252,7 +252,14 @@ $musicAssets = @(
   @{ source = 'background-track\808 - In the tavern.mp3'; target = 'audio\music\in-the-tavern.mp3' },
   @{ source = 'background-track\Guards are cleaning the tavern !.mp3'; target = 'audio\music\guards-cleaning-tavern.mp3' },
   @{ source = 'background-track\Burning them wiches.mp3'; target = 'audio\music\burning-them-witches.mp3' },
-  @{ source = 'background-track\Mason of the Crown.mp3'; target = 'audio\music\mason-of-the-crown.mp3' }
+  @{ source = 'background-track\Mason of the Crown.mp3'; target = 'audio\music\mason-of-the-crown.mp3' },
+  @{ source = 'background-track\Tavern Trap.mp3'; target = 'audio\music\tavern-trap.mp3' },
+  @{ source = 'background-track\Tavern Trap (1).mp3'; target = 'audio\music\tavern-trap-2.mp3' },
+  @{ source = 'background-track\Tavern Trap (2).mp3'; target = 'audio\music\tavern-trap-3.mp3' },
+  @{ source = 'background-track\Royal Pursuit.mp3'; target = 'audio\music\royal-pursuit.mp3' },
+  @{ source = 'background-track\banger1.mp3'; target = 'audio\music\banger-1.mp3' },
+  @{ source = 'background-track\banger2.mp3'; target = 'audio\music\banger-2.mp3' },
+  @{ source = 'background-track\nextone.mp3'; target = 'audio\music\next-one.mp3' }
 )
 
 foreach ($asset in $musicAssets) {

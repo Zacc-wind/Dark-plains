@@ -7,6 +7,13 @@ export const BACKGROUND_MUSIC_TRACKS = [
   { id: 'guards-cleaning-tavern', file: '/assets/audio/music/guards-cleaning-tavern.mp3', label: 'Guards Cleaning the Tavern' },
   { id: 'burning-them-witches', file: '/assets/audio/music/burning-them-witches.mp3', label: 'Burning Them Witches' },
   { id: 'mason-of-the-crown', file: '/assets/audio/music/mason-of-the-crown.mp3', label: 'Mason of the Crown' },
+  { id: 'tavern-trap', file: '/assets/audio/music/tavern-trap.mp3', label: 'Tavern Trap' },
+  { id: 'tavern-trap-2', file: '/assets/audio/music/tavern-trap-2.mp3', label: 'Tavern Trap II' },
+  { id: 'tavern-trap-3', file: '/assets/audio/music/tavern-trap-3.mp3', label: 'Tavern Trap III' },
+  { id: 'royal-pursuit', file: '/assets/audio/music/royal-pursuit.mp3', label: 'Royal Pursuit' },
+  { id: 'banger-1', file: '/assets/audio/music/banger-1.mp3', label: 'Banger 1' },
+  { id: 'banger-2', file: '/assets/audio/music/banger-2.mp3', label: 'Banger 2' },
+  { id: 'next-one', file: '/assets/audio/music/next-one.mp3', label: 'Next One' },
 ] as const;
 
 export type BackgroundMusicTrackId = (typeof BACKGROUND_MUSIC_TRACKS)[number]['id'];
@@ -15,6 +22,7 @@ export const AUDIO_SETTINGS_EVENT = 'wizardy:audio-settings';
 
 const MUSIC_VOLUME_KEY = 'wizardy_music_volume';
 const MUSIC_MUTED_KEY = 'wizardy_music_muted';
+const LAST_TRACK_KEY = 'wizardy_last_music_track';
 const TRACK_BASE_VOLUME = 0.38;
 const MUSIC_CROSSFADE_MS = 2600;
 const MUSIC_VOLUME_FADE_MS = 420;
@@ -80,6 +88,20 @@ export function getActiveBackgroundMusicTrackId(): BackgroundMusicTrackId | null
 
 function getEffectiveMusicVolume(): number {
   return Math.max(0, Math.min(1, TRACK_BASE_VOLUME * (getMusicVolumePercent() / 100)));
+}
+
+function getLastSessionTrackId(): BackgroundMusicTrackId | null {
+  if (typeof window === 'undefined') return null;
+  const value = window.sessionStorage.getItem(LAST_TRACK_KEY);
+  if (!value) return null;
+  return BACKGROUND_MUSIC_TRACKS.some(track => track.id === value)
+    ? value as BackgroundMusicTrackId
+    : null;
+}
+
+function rememberTrackId(trackId: BackgroundMusicTrackId): void {
+  if (typeof window === 'undefined') return;
+  window.sessionStorage.setItem(LAST_TRACK_KEY, trackId);
 }
 
 function shuffleTrackIds(avoidFirstId?: BackgroundMusicTrackId | null): BackgroundMusicTrackId[] {
@@ -235,6 +257,7 @@ function playTrack(trackId: BackgroundMusicTrackId, crossfade = true): void {
   attachEndedHandler(audio);
   activeAudio = audio;
   activeTrackId = trackId;
+  rememberTrackId(trackId);
 
   void audio.play().catch(() => {
     // Browsers can block audio before the first user gesture.
@@ -243,12 +266,15 @@ function playTrack(trackId: BackgroundMusicTrackId, crossfade = true): void {
 }
 
 export function authorizeBackgroundMusic(): void {
-  if (!canUseAudio() || unlocked) return;
+  if (!canUseAudio()) return;
   unlocked = true;
+  if (!activeAudio) {
+    rebuildShufflePlaylist(getLastSessionTrackId());
+  }
 }
 
 export function unlockBackgroundMusic(): void {
-  if (!canUseAudio() || unlocked) return;
+  if (!canUseAudio()) return;
   unlocked = true;
   syncBackgroundMusic();
 }
@@ -271,10 +297,7 @@ export function syncBackgroundMusic(): void {
     return;
   }
 
-  if (shufflePlaylist.length === 0) {
-    rebuildShufflePlaylist();
-  }
-
+  rebuildShufflePlaylist(getLastSessionTrackId());
   playTrack(takeNextTrackId());
 }
 
