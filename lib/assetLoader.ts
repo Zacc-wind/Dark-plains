@@ -12,6 +12,14 @@ export class AssetLoader {
   private static loadingPromises: Map<string, Promise<HTMLImageElement>> = new Map();
   private static devCacheBust = process.env.NODE_ENV === 'development' ? `?v=${Date.now()}` : '';
 
+  private static getCacheKey(path: string): string {
+    const basePath = path.split('?')[0];
+    if (!basePath.startsWith('/assets/')) {
+      return path;
+    }
+    return getVersionedAssetPath(basePath);
+  }
+
   private static resolveSrc(path: string): string {
     if (!this.devCacheBust) return path;
     return `${path}${path.includes('?') ? '&' : '?'}${this.devCacheBust.slice(1)}`;
@@ -19,8 +27,9 @@ export class AssetLoader {
 
   static clearCache(path?: string): void {
     if (path) {
-      this.imageCache.delete(path);
-      this.loadingPromises.delete(path);
+      const cacheKey = this.getCacheKey(path);
+      this.imageCache.delete(cacheKey);
+      this.loadingPromises.delete(cacheKey);
       return;
     }
     this.imageCache.clear();
@@ -28,37 +37,39 @@ export class AssetLoader {
   }
 
   static async loadImage(path: string): Promise<HTMLImageElement> {
+    const cacheKey = this.getCacheKey(path);
+
     // Return cached image if available
-    if (this.imageCache.has(path)) {
-      return this.imageCache.get(path)!;
+    if (this.imageCache.has(cacheKey)) {
+      return this.imageCache.get(cacheKey)!;
     }
 
     // Return existing loading promise if already loading
-    if (this.loadingPromises.has(path)) {
-      return this.loadingPromises.get(path)!;
+    if (this.loadingPromises.has(cacheKey)) {
+      return this.loadingPromises.get(cacheKey)!;
     }
 
     // Create new loading promise
     const loadPromise = new Promise<HTMLImageElement>((resolve, reject) => {
       const img = new Image();
       img.onload = () => {
-        this.imageCache.set(path, img);
-        this.loadingPromises.delete(path);
+        this.imageCache.set(cacheKey, img);
+        this.loadingPromises.delete(cacheKey);
         resolve(img);
       };
       img.onerror = () => {
-        this.loadingPromises.delete(path);
-        reject(new Error(`Failed to load image: ${path}`));
+        this.loadingPromises.delete(cacheKey);
+        reject(new Error(`Failed to load image: ${cacheKey}`));
       };
-      img.src = this.resolveSrc(path);
+      img.src = this.resolveSrc(cacheKey);
     });
 
-    this.loadingPromises.set(path, loadPromise);
+    this.loadingPromises.set(cacheKey, loadPromise);
     return loadPromise;
   }
 
   static getImage(path: string): HTMLImageElement | null {
-    return this.imageCache.get(path) || null;
+    return this.imageCache.get(this.getCacheKey(path)) || null;
   }
 }
 
