@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth';
+import { bootstrapSupabaseSession, isSupabaseAuthEnabled } from '@/lib/supabase/auth';
 import BackgroundMusic from '@/components/BackgroundMusic';
 import MapRenderer from '@/components/MapRenderer';
 import GameCommandCenter from '@/components/GameCommandCenter';
@@ -19,15 +20,27 @@ export default function GamePage() {
   const [showAvatar, setShowAvatar] = useState(false);
 
   useEffect(() => {
-    const frameId = window.requestAnimationFrame(() => {
+    let cancelled = false;
+
+    const boot = async () => {
+      if (isSupabaseAuthEnabled()) {
+        await bootstrapSupabaseSession();
+      }
+
+      if (cancelled) return;
+
       const user = getCurrentUser();
       setHasUser(Boolean(user));
       setAuthChecked(true);
       if (!user) router.replace('/');
       else writeGameMode('multiplayer');
-    });
+    };
 
-    return () => window.cancelAnimationFrame(frameId);
+    void boot();
+
+    return () => {
+      cancelled = true;
+    };
   }, [router]);
 
   if (!authChecked || !hasUser) {

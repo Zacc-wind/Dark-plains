@@ -5,12 +5,16 @@ export interface ApiEnvelope<T> {
   deploymentMode?: 'local-prototype' | 'database';
 }
 
-export function apiOk<T>(data: T, init?: ResponseInit): Response {
+export function apiOk<T>(
+  data: T,
+  init?: ResponseInit,
+  deploymentMode: ApiEnvelope<T>['deploymentMode'] = 'local-prototype',
+): Response {
   return Response.json(
     {
       ok: true,
       data,
-      deploymentMode: 'local-prototype',
+      deploymentMode,
     } satisfies ApiEnvelope<T>,
     init
   );

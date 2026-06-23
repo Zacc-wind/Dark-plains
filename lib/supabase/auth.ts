@@ -1,0 +1,127 @@
+import { getCurrentUser, type User } from '@/lib/auth';
+import { writeGameJson, removeGameStorageItem } from '@/lib/gameStore';
+import { createClient } from '@/lib/supabase/client';
+import { isSupabaseConfigured } from '@/lib/supabase/config';
+import {
+  fetchRemotePlayer,
+  playerStateRowToUser,
+  saveRemotePlayer,
+} from '@/lib/supabase/playerRepository';
+import { isValidGameUsername, usernameToAuthEmail } from '@/lib/supabase/username';
+
+const CURRENT_USER_KEY = 'pirate_game_current_user';
+
+export function isSupabaseAuthEnabled(): boolean {
+  return isSupabaseConfigured();
+}
+
+export async function registerWithSupabase(
+  username: string,
+  password: string,
+): Promise<{ success: boolean; error?: string; needsEmailConfirmation?: boolean }> {
+  if (!isSupabaseConfigured()) {
+    return { success: false, error: 'Supabase is not configured.' };
+  }
+
+  if (!isValidGameUsername(username)) {
+    return { success: false, error: 'Username must be 3-20 characters (letters, numbers, underscore).' };
+  }
+
+  if (password.length < 6) {
+    return { success: false, error: 'Password must be at least 6 characters for online accounts.' };
+  }
+
+  const supabase = createClient();
+  const email = usernameToAuthEmail(username);
+
+  const { data, error } = await supabase.auth.signUp({
+    email,
+    password,
+    options: {
+      data: { username: username.trim() },
+    },
+  });
+
+  if (error) {
+    return { success: false, error: error.message };
+  }
+
+  if (!data.session) {
+    return {
+      success: true,
+      needsEmailConfirmation: true,
+    };
+  }
+
+  const hydrated = await hydrateLocalUserFromSession();
+  if (!hydrated) {
+    return { success: false, error: 'Account created, but player state failed to load.' };
+  }
+
+  return { success: true };
+}
+
+export async function loginWithSupabase(
+  username: string,
+  password: string,
+): Promise<{ success: boolean; error?: string; user?: User }> {
+  if (!isSupabaseConfigured()) {
+    return { success: false, error: 'Supabase is not configured.' };
+  }
+
+  const supabase = createClient();
+  const email = usernameToAuthEmail(username);
+
+  const { error } = await supabase.auth.signInWithPassword({ email, password });
+  if (error) {
+    return { success: false, error: error.message };
+  }
+
+  const user = await hydrateLocalUserFromSession();
+  if (!user) {
+    return { success: false, error: 'Logged in, but save data was not found.' };
+  }
+
+  return { success: true, user };
+}
+
+export async function logoutSupabase(): Promise<void> {
+  removeGameStorageItem(CURRENT_USER_KEY);
+  if (!isSupabaseConfigured()) return;
+  const supabase = createClient();
+  await supabase.auth.signOut();
+}
+
+export async function hydrateLocalUserFromSession(): Promise<User | null> {
+  if (!isSupabaseConfigured()) return getCurrentUser();
+
+  const supabase = createClient();
+  const { data: { user }, error } = await supabase.auth.getUser();
+  if (error || !user) return null;
+
+  const remote = await fetchRemotePlayer(user.id);
+  if (!remote) return null;
+
+  const sessionUser = playerStateRowToUser(remote.state, remote.profile);
+  writeGameJson(CURRENT_USER_KEY, sessionUser);
+  return sessionUser;
+}
+
+export async function persistCurrentUserToSupabase(): Promise<void> {
+  if (!isSupabaseConfigured()) return;
+
+  const localUser = getCurrentUser();
+  if (!localUser) return;
+
+  const supabase = createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return;
+
+  await saveRemotePlayer(localUser, user.id);
+}
+
+export async function bootstrapSupabaseSession(): Promise<boolean> {
+  if (!isSupabaseConfigured()) return false;
+  const user = await hydrateLocalUserFromSession();
+  return Boolean(user);
+}

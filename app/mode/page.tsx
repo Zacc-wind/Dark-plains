@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth';
 import { emitFxEvent } from '@/lib/fxEvents';
+import { bootstrapSupabaseSession, isSupabaseAuthEnabled } from '@/lib/supabase/auth';
 import { writeGameMode, type GameMode } from '@/lib/gameMode';
 import {
   completeModeTutorial,
@@ -23,16 +24,29 @@ export default function ModePage() {
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    const frameId = window.requestAnimationFrame(() => {
+    let cancelled = false;
+
+    const boot = async () => {
+      if (isSupabaseAuthEnabled()) {
+        await bootstrapSupabaseSession();
+      }
+
+      if (cancelled) return;
+
       const user = getCurrentUser();
       if (!user) {
         router.replace('/');
         return;
       }
-      setReady(true);
-    });
 
-    return () => window.cancelAnimationFrame(frameId);
+      setReady(true);
+    };
+
+    void boot();
+
+    return () => {
+      cancelled = true;
+    };
   }, [router]);
 
   if (!ready) {

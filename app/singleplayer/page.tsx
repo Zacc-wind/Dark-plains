@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth';
+import { bootstrapSupabaseSession, isSupabaseAuthEnabled } from '@/lib/supabase/auth';
 import { writeGameMode } from '@/lib/gameMode';
 import SingleplayerHub from '@/components/SingleplayerHub';
 
@@ -11,17 +12,30 @@ export default function SingleplayerPage() {
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    const frameId = window.requestAnimationFrame(() => {
+    let cancelled = false;
+
+    const boot = async () => {
+      if (isSupabaseAuthEnabled()) {
+        await bootstrapSupabaseSession();
+      }
+
+      if (cancelled) return;
+
       const user = getCurrentUser();
       if (!user) {
         router.replace('/');
         return;
       }
+
       writeGameMode('singleplayer');
       setReady(true);
-    });
+    };
 
-    return () => window.cancelAnimationFrame(frameId);
+    void boot();
+
+    return () => {
+      cancelled = true;
+    };
   }, [router]);
 
   if (!ready) {

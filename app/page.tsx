@@ -2,9 +2,14 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { register, login } from '@/lib/auth';
+import { login, register } from '@/lib/auth';
 import { authorizeBackgroundMusic } from '@/lib/backgroundMusic';
 import { emitFxEvent } from '@/lib/fxEvents';
+import {
+  isSupabaseAuthEnabled,
+  loginWithSupabase,
+  registerWithSupabase,
+} from '@/lib/supabase/auth';
 import ThreeFxOverlay from '@/components/ThreeFxOverlay';
 
 export default function AuthPage() {
@@ -13,35 +18,62 @@ export default function AuthPage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [submitting, setSubmitting] = useState(false);
   const router = useRouter();
+  const onlineAuth = isSupabaseAuthEnabled();
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setSuccess('');
+    setSubmitting(true);
 
-    if (isLogin) {
-      const result = login(username, password);
-      if (result.success) {
-        authorizeBackgroundMusic();
-        emitFxEvent({ type: 'spell', tone: 'violet', intensity: 0.7 });
-        router.push('/mode');
+    try {
+      if (isLogin) {
+        const result = onlineAuth
+          ? await loginWithSupabase(username, password)
+          : login(username, password);
+
+        if (result.success) {
+          authorizeBackgroundMusic();
+          emitFxEvent({ type: 'spell', tone: 'violet', intensity: 0.7 });
+          router.push('/mode');
+        } else {
+          setError(result.error || 'Login failed');
+          emitFxEvent({ type: 'status', tone: 'red', intensity: 0.42 });
+        }
       } else {
-        setError(result.error || 'Login failed');
-        emitFxEvent({ type: 'status', tone: 'red', intensity: 0.42 });
+        const result = onlineAuth
+          ? await registerWithSupabase(username, password)
+          : register(username, password);
+
+        if (result.success) {
+          emitFxEvent({ type: 'recruit', tone: 'green', intensity: 0.72 });
+
+          if (onlineAuth && 'needsEmailConfirmation' in result && result.needsEmailConfirmation) {
+            setIsLogin(true);
+            setPassword('');
+            setSuccess('Account created. Check your email to confirm, then log in.');
+            return;
+          }
+
+          if (onlineAuth) {
+            authorizeBackgroundMusic();
+            router.push('/mode');
+            return;
+          }
+
+          setError('');
+          setIsLogin(true);
+          setPassword('');
+          setSuccess('Account created. Please log in.');
+        } else {
+          setError(result.error || 'Registration failed');
+          emitFxEvent({ type: 'status', tone: 'red', intensity: 0.42 });
+        }
       }
-    } else {
-      const result = register(username, password);
-      if (result.success) {
-        emitFxEvent({ type: 'recruit', tone: 'green', intensity: 0.72 });
-        setError('');
-        setIsLogin(true);
-        setPassword('');
-        setSuccess('Account created. Please log in.');
-      } else {
-        setError(result.error || 'Registration failed');
-        emitFxEvent({ type: 'status', tone: 'red', intensity: 0.42 });
-      }
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -53,9 +85,18 @@ export default function AuthPage() {
           <p className="arcane-label mb-2">Enter the road</p>
           <h1 className="auth-title fantasy-heading text-center">Dark Plains</h1>
         </div>
-        <p className="arcane-label mb-8 text-center">
+        <p className="arcane-label mb-2 text-center">
           {isLogin ? 'Login to continue' : 'Create your account'}
         </p>
+        {onlineAuth ? (
+          <p className="ui-faint mb-6 text-center text-[11px] font-bold">
+            Online save enabled — progress syncs to your account.
+          </p>
+        ) : (
+          <p className="ui-faint mb-6 text-center text-[11px] font-bold">
+            Local prototype — saves stay in this browser only.
+          </p>
+        )}
 
         <form onSubmit={handleSubmit} className="space-y-6">
           <div>
@@ -68,6 +109,7 @@ export default function AuthPage() {
               style={{ imageRendering: 'pixelated' }}
               placeholder="Enter username"
               required
+              disabled={submitting}
             />
           </div>
 
@@ -81,6 +123,7 @@ export default function AuthPage() {
               style={{ imageRendering: 'pixelated' }}
               placeholder="Enter password"
               required
+              disabled={submitting}
             />
           </div>
 
@@ -98,9 +141,10 @@ export default function AuthPage() {
 
           <button
             type="submit"
-            className="ui-button-primary w-full rounded-lg px-6 py-4 font-semibold transition-all"
+            disabled={submitting}
+            className="ui-button-primary w-full rounded-lg px-6 py-4 font-semibold transition-all disabled:opacity-60"
           >
-            {isLogin ? 'Login' : 'Register'}
+            {submitting ? 'Please wait…' : isLogin ? 'Login' : 'Register'}
           </button>
         </form>
 

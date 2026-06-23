@@ -16,6 +16,7 @@ import {
   type TravelEventTemplate,
 } from './travelEvents';
 import { readGameJson, removeGameStorageItem, writeGameJson } from './gameStore';
+import { isSupabaseAuthEnabled, logoutSupabase, persistCurrentUserToSupabase } from './supabase/auth';
 import { getStaticPOIs, MAP_CONFIG, POIType } from './mapData';
 import { BOSS_PROFILES, type BossProfile } from './bosses';
 
@@ -3835,9 +3836,18 @@ export function updateCurrentUser(updates: Partial<User>): void {
     users[userIndex] = mergeUserForStorage(users[userIndex], updatedUser);
     saveUsers(users);
   }
+
+  if (isSupabaseAuthEnabled()) {
+    void persistCurrentUserToSupabase();
+  }
 }
 
 export function logout(): void {
+  if (isSupabaseAuthEnabled()) {
+    void logoutSupabase();
+    return;
+  }
+
   removeGameStorageItem(CURRENT_USER_KEY);
 }
 
