@@ -54,6 +54,7 @@ import {
   MinionTemplate,
   RANDOM_RUN_BALANCE,
   User,
+  addEquipmentWithLimit,
   addInventoryItemsWithLimit,
   generateEquipment,
   getCurrentUser,
@@ -6282,6 +6283,12 @@ function grantCompletionReward(session: RunSession): string {
     ...rollInventoryBonusDrops(user.stats.level || 1, 'dungeonRun'),
   ];
   const itemResult = addInventoryItemsWithLimit(user.inventory || [], rewardItems, slots);
+  const gearResult = addEquipmentWithLimit(
+    user.equipment || [],
+    user.equippedSlots || {},
+    equipment,
+    slots,
+  );
   const acceptedGems = itemResult.acceptedItems
     .filter(item => item.id === 'rare-gem')
     .reduce((total, item) => total + item.quantity, 0);
@@ -6295,7 +6302,7 @@ function grantCompletionReward(session: RunSession): string {
     ...itemResult.acceptedItems
       .filter(item => item.id !== 'rare-gem')
       .map(item => item.quantity > 1 ? `${item.quantity} ${item.name}` : item.name),
-    ...equipment.map(item => item.name),
+    ...gearResult.acceptedEquipment.map(item => item.name),
   ].filter(Boolean);
 
   const activity: ActivityEntry = {
@@ -6309,7 +6316,7 @@ function grantCompletionReward(session: RunSession): string {
       exp,
       rareGems: acceptedGems || undefined,
       items: itemResult.acceptedItems.length > 0 ? itemResult.acceptedItems : undefined,
-      equipment: equipment.length > 0 ? equipment : undefined,
+      equipment: gearResult.acceptedEquipment.length > 0 ? gearResult.acceptedEquipment : undefined,
     },
     description: `${session.wins} battles won with ${getAliveRunRoster(session).length} units standing. Route: ${clearedNodes.join(' -> ')}. Rewards: ${rewardSummary.join(', ')}.`,
   };
@@ -6318,13 +6325,13 @@ function grantCompletionReward(session: RunSession): string {
     gold: user.gold + gold,
     exp: user.exp + exp,
     inventory: itemResult.inventory,
-    equipment: [...(user.equipment || []), ...equipment],
+    equipment: gearResult.equipment,
     activityLog: [activity, ...(user.activityLog || [])].slice(0, 30),
   });
   levelUp();
 
-  return itemResult.rejectedItems.length > 0
-    ? `Claimed ${gold} gold and ${exp} XP. Satchel was full for some items.`
+  return gearResult.rejectedEquipment.length > 0
+    ? `Claimed ${gold} gold and ${exp} XP. Gear storage was full for some loot.`
     : `Claimed ${gold} gold, ${exp} XP, ${acceptedGems} gem, bonus items, and ${rarity} gear.`;
 }
 
@@ -6421,7 +6428,14 @@ function grantEncounterCompletionReward(session: RunSession, user: User, complet
     ...(rareGems > 0 ? [makeInventoryItem('rare-gem', rareGems)] : []),
     ...rollInventoryBonusDrops(enemy.level, enemy.spawnKind === 'nearby' ? 'nearbyBattle' : 'battle'),
   ];
-  const itemResult = addInventoryItemsWithLimit(user.inventory || [], rewardItems, user.inventorySlots || 20);
+  const slots = user.inventorySlots || 20;
+  const itemResult = addInventoryItemsWithLimit(user.inventory || [], rewardItems, slots);
+  const gearResult = addEquipmentWithLimit(
+    user.equipment || [],
+    user.equippedSlots || {},
+    equipment,
+    slots,
+  );
   const acceptedGems = itemResult.acceptedItems
     .filter(item => item.id === 'rare-gem')
     .reduce((total, item) => total + item.quantity, 0);
@@ -6432,7 +6446,7 @@ function grantEncounterCompletionReward(session: RunSession, user: User, complet
     ...itemResult.acceptedItems
       .filter(item => item.id !== 'rare-gem')
       .map(item => item.quantity > 1 ? `${item.quantity} ${item.name}` : item.name),
-    ...equipment.map(item => item.name),
+    ...gearResult.acceptedEquipment.map(item => item.name),
   ].filter(Boolean);
   const clearedNodes = session.nodes
     .filter(node => node.completed)
@@ -6440,7 +6454,7 @@ function grantEncounterCompletionReward(session: RunSession, user: User, complet
   const activity: ActivityEntry = {
     id: `activity-encounter-run-${enemy.id}-${completedAt}`,
     type: 'battle',
-    title: itemResult.rejectedItems.length > 0 ? `Defeated ${enemy.name} (satchel full)` : `Defeated ${enemy.name}`,
+    title: gearResult.rejectedEquipment.length > 0 ? `Defeated ${enemy.name} (gear storage full)` : `Defeated ${enemy.name}`,
     source: enemy.spawnKind === 'world-boss' ? 'World Boss Road' : 'Enemy Road',
     completedAt,
     rewards: {
@@ -6448,7 +6462,7 @@ function grantEncounterCompletionReward(session: RunSession, user: User, complet
       exp,
       rareGems: acceptedGems || undefined,
       items: itemResult.acceptedItems.length > 0 ? itemResult.acceptedItems : undefined,
-      equipment: equipment.length > 0 ? equipment : undefined,
+      equipment: gearResult.acceptedEquipment.length > 0 ? gearResult.acceptedEquipment : undefined,
     },
     description: `${session.wins} fights won before defeating ${enemy.name}${enemy.bossId ? ` (${enemy.bossId})` : ''}. Route: ${clearedNodes.join(' -> ')}. Rewards: ${rewardSummary.join(', ')}.`,
   };
@@ -6458,13 +6472,13 @@ function grantEncounterCompletionReward(session: RunSession, user: User, complet
     gold: user.gold + gold,
     exp: user.exp + exp,
     inventory: itemResult.inventory,
-    equipment: [...(user.equipment || []), ...equipment],
+    equipment: gearResult.equipment,
     activityLog: [activity, ...(user.activityLog || [])].slice(0, 30),
   });
   levelUp();
 
-  return itemResult.rejectedItems.length > 0
-    ? `Claimed ${gold} gold and ${exp} XP from ${enemy.name}. Satchel was full for some items.`
+  return gearResult.rejectedEquipment.length > 0
+    ? `Claimed ${gold} gold and ${exp} XP from ${enemy.name}. Gear storage was full for some loot.`
     : `Claimed ${gold} gold, ${exp} XP${acceptedGems > 0 ? `, ${acceptedGems} gem${acceptedGems === 1 ? '' : 's'}` : ''}${rarity ? `, and ${rarity} gear` : ''} from ${enemy.name}.`;
 }
 

@@ -182,7 +182,6 @@ export default function RunOverviewPanel({ onOpenMilestones }: RunOverviewPanelP
             <div>
               <span className="arcane-label sp-hub-arcane-label">Run Progression</span>
               <h2 className="fantasy-heading sp-hub-card-title">Level {runState.runLevel}</h2>
-              <p className="sp-hub-section-hint">Permanent meta — carries over every run.</p>
             </div>
           </div>
           {runState.runUpgradePoints > 0 ? (
@@ -202,7 +201,6 @@ export default function RunOverviewPanel({ onOpenMilestones }: RunOverviewPanelP
           <div className="random-run-xp-track sp-hub-xp-track" aria-hidden>
             <div className="random-run-xp-fill" style={{ width: `${expPercent}%` }} />
           </div>
-          <p className="sp-hub-section-hint">Earn XP by winning battles and clearing roads.</p>
         </div>
 
         <div className="sp-hub-stat-grid">
@@ -249,7 +247,7 @@ export default function RunOverviewPanel({ onOpenMilestones }: RunOverviewPanelP
           <div className="sp-hub-card-head">
             <div>
               <span className="arcane-label sp-hub-arcane-label">Achievements & Unlocks</span>
-              <h2 className="fantasy-heading sp-hub-card-title">Run Milestones</h2>
+              
               <p className="sp-hub-section-hint">Boss trophies, spells, and feats — unlock by playing runs.</p>
             </div>
             <span className="sp-hub-pill ui-pill rounded border px-3 py-1.5 text-xs font-black uppercase">

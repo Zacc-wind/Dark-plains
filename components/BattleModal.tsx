@@ -61,6 +61,7 @@ import {
   MinionStack,
   User,
   applyMinionBattleCasualties,
+  addEquipmentWithLimit,
   addInventoryItemsWithLimit,
   generateEquipment,
   getCurrentUser,
@@ -3784,7 +3785,14 @@ function applyVictoryReward(enemy: WorldEnemy): VictoryRewardReport | null {
   ];
   const inventorySlots = user.inventorySlots || 20;
   const itemAddResult = addInventoryItemsWithLimit(user.inventory || [], rewardItems, inventorySlots);
+  const gearAddResult = addEquipmentWithLimit(
+    user.equipment || [],
+    user.equippedSlots || {},
+    rewardEquipment,
+    inventorySlots,
+  );
   const acceptedItems = itemAddResult.acceptedItems;
+  const acceptedEquipment = gearAddResult.acceptedEquipment;
   const acceptedRareGems = acceptedItems
     .filter(item => item.id === 'rare-gem')
     .reduce((total, item) => total + item.quantity, 0);
@@ -3792,7 +3800,7 @@ function applyVictoryReward(enemy: WorldEnemy): VictoryRewardReport | null {
   const battleActivity: ActivityEntry = {
     id: `activity-battle-${enemy.id}-${completedAt}`,
     type: 'battle',
-    title: itemAddResult.rejectedItems.length > 0 ? `Defeated ${enemy.name} (satchel full)` : `Defeated ${enemy.name}`,
+    title: gearAddResult.rejectedEquipment.length > 0 ? `Defeated ${enemy.name} (gear storage full)` : `Defeated ${enemy.name}`,
     source: enemy.id.startsWith('dungeon-') ? 'Dungeon Battle' : 'Battle',
     completedAt,
     rewards: {
@@ -3800,7 +3808,7 @@ function applyVictoryReward(enemy: WorldEnemy): VictoryRewardReport | null {
       exp: reward.exp,
       rareGems: acceptedRareGems || undefined,
       items: acceptedItems.length > 0 ? acceptedItems : undefined,
-      equipment: rewardEquipment.length > 0 ? rewardEquipment : undefined,
+      equipment: acceptedEquipment.length > 0 ? acceptedEquipment : undefined,
     },
   };
   const rareGemsAccepted = acceptedRareGems || undefined;
@@ -3810,7 +3818,7 @@ function applyVictoryReward(enemy: WorldEnemy): VictoryRewardReport | null {
     gold: user.gold + reward.gold,
     exp: user.exp + reward.exp,
     inventory: itemAddResult.inventory,
-    equipment: [...(user.equipment || []), ...rewardEquipment],
+    equipment: gearAddResult.equipment,
     activityLog: [battleActivity, ...(user.activityLog || [])].slice(0, 30),
   };
   const questProgress = getBattleQuestProgressDeltas(questProgressBefore, getBattleQuestSnapshots(nextUser));
@@ -3820,7 +3828,7 @@ function applyVictoryReward(enemy: WorldEnemy): VictoryRewardReport | null {
   return {
     ...reward,
     rareGemsAccepted,
-    equipmentNames: rewardEquipment.map(item => item.name),
+    equipmentNames: acceptedEquipment.map(item => item.name),
     itemNames: acceptedItems.map(item => item.quantity > 1 ? `${item.quantity} ${item.name}` : item.name),
     questProgress,
     inventoryFull: itemAddResult.rejectedItems.length > 0,

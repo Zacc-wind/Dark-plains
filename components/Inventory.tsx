@@ -10,7 +10,7 @@ import {
   MinionTier,
   equipItem,
   getCurrentUser,
-  getInventoryUsedSlots,
+  getGearUsedSlots,
   getMinionTemplate,
   unequipItem,
 } from '@/lib/auth';
@@ -73,7 +73,7 @@ export default function Inventory({ isOpen, onClose }: InventoryProps) {
   const equippedSlots = user.equippedSlots || {};
   const minions = user.minions || [];
   const inventorySlots = user.inventorySlots || 20;
-  const inventoryUsed = getInventoryUsedSlots(inventory);
+  const gearUsed = getGearUsedSlots(user);
 
   const getEquippedItem = (slot: EquipmentSlot) => {
     const equipmentId = equippedSlots[slot];
@@ -119,7 +119,7 @@ export default function Inventory({ isOpen, onClose }: InventoryProps) {
         <div className="panel-header flex items-center justify-between border-b px-5 py-4">
           <div>
             <h3 className="fantasy-heading text-xl">Inventory</h3>
-            <p className="arcane-label">{inventoryUsed}/{inventorySlots} carried item slots</p>
+            <p className="arcane-label">{gearUsed}/{inventorySlots} gear storage slots</p>
           </div>
           <button onClick={onClose} className="ui-button rounded px-3 py-1 text-xs font-bold">
             Close
@@ -169,7 +169,7 @@ export default function Inventory({ isOpen, onClose }: InventoryProps) {
           </section>
 
           <section>
-            <SectionTitle title="Items" action={`${inventoryUsed}/${inventorySlots}`} />
+            <SectionTitle title="Items" action="Unlimited carry" />
             {inventory.length === 0 ? (
               <EmptyState text="No carried items." />
             ) : (
@@ -186,7 +186,7 @@ export default function Inventory({ isOpen, onClose }: InventoryProps) {
           </section>
 
           <section className="lg:col-span-2">
-            <SectionTitle title="Available Gear" action={`${unequippedItems.length} pieces`} />
+            <SectionTitle title="Available Gear" action={`${gearUsed}/${inventorySlots} gear slots`} />
             {unequippedItems.length === 0 ? (
               <EmptyState text="No unequipped gear." />
             ) : (

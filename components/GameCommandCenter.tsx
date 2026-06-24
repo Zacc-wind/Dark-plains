@@ -41,7 +41,7 @@ import {
   getExpNeeded,
   getEquipmentSocketBonusValue,
   getFieldedMinions,
-  getInventoryUsedSlots,
+  getGearUsedSlots,
   getInventoryUpgradeQuote,
   getInventoryItemDefinition,
   getJobProgress,
@@ -636,7 +636,7 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
   const quests = player.dailyQuests?.quests || [];
   const activeJobs = player.jobQueue || [];
   const inventorySlots = player.inventorySlots || 20;
-  const inventoryUsed = getInventoryUsedSlots(inventory);
+  const gearUsed = getGearUsedSlots(player);
   const inventoryUpgradeQuote = getInventoryUpgradeQuote(player);
   const rareGemCount = getRareGemCount(player);
   const hudRunState = getDailyRunState(player);
@@ -917,7 +917,7 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
     switch (panelId) {
       case 'overview': return '';
       case 'character': return `Lv ${player.stats.level}`;
-      case 'inventory': return `${inventoryUsed}/${inventorySlots}`;
+      case 'inventory': return `${gearUsed}/${inventorySlots}`;
       case 'minions': return `${fieldedMinions.length}/${minions.length}`;
       case 'spells': return '';
       case 'jobs': return `${activeJobs.length}/4`;
@@ -1216,7 +1216,7 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
             <span className="map-action-label">Menu</span>
             <span className="map-action-detail">Gear, army, quests</span>
           </span>
-          <span className="map-action-badge">{inventoryUsed}/{inventorySlots}</span>
+          <span className="map-action-badge">{gearUsed}/{inventorySlots}</span>
         </button>
 
         <button
@@ -1806,7 +1806,7 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
         </section>
 
         <section>
-          <SectionTitle title="Items" action={`${inventoryUsed}/${inventorySlots} slots`} />
+          <SectionTitle title="Items" action="Unlimited carry" />
           {inventory.length === 0 ? (
             <EmptyState text="No carried items." />
           ) : (
@@ -1858,7 +1858,7 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
         </section>
 
         <section>
-          <SectionTitle title="Available Gear" action={`${unequippedItems.length} pieces`} />
+          <SectionTitle title="Available Gear" action={`${gearUsed}/${inventorySlots} gear slots`} />
           {unequippedItems.length === 0 ? (
             <EmptyState text="No unequipped gear." />
           ) : (
@@ -1892,6 +1892,33 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
                   </button>
                 </CommandGearHoverTip>
               ))}
+            </div>
+          )}
+        </section>
+
+        <section className="ui-card rounded border p-4">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h3 className="fantasy-heading text-base">Gear Storage Upgrade</h3>
+              <p className="ui-muted text-xs font-bold">
+                {inventoryUpgradeQuote.maxed
+                  ? 'Gear storage is fully expanded.'
+                  : `Level ${inventoryUpgradeQuote.nextLevel}/10 - ${inventoryUpgradeQuote.successChance}% chance`}
+              </p>
+            </div>
+            <button
+              onClick={handleInventoryUpgrade}
+              disabled={inventoryUpgradeQuote.maxed || player.gold < inventoryUpgradeQuote.goldCost || rareGemCount < inventoryUpgradeQuote.gemCost}
+              className="ui-button-primary rounded px-3 py-2 text-xs font-bold disabled:opacity-40"
+            >
+              Upgrade
+            </button>
+          </div>
+          {!inventoryUpgradeQuote.maxed && (
+            <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+              <StatusPill label="Gold" value={`${inventoryUpgradeQuote.goldCost}`} />
+              <StatusPill label="Gems" value={`${inventoryUpgradeQuote.gemCost}/${rareGemCount}`} />
+              <StatusPill label="Next" value={`${inventorySlots + 1} slots`} />
             </div>
           )}
         </section>
@@ -1947,33 +1974,6 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
           ) : (
             <div className="minion-roster-grid">
               {minions.map((minion) => renderRosterMinionCard(minion))}
-            </div>
-          )}
-        </section>
-
-        <section className="ui-card rounded border p-4">
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <h3 className="fantasy-heading text-base">Inventory Upgrade</h3>
-              <p className="ui-muted text-xs font-bold">
-                {inventoryUpgradeQuote.maxed
-                  ? 'The satchel is fully expanded.'
-                  : `Level ${inventoryUpgradeQuote.nextLevel}/10 - ${inventoryUpgradeQuote.successChance}% chance`}
-              </p>
-            </div>
-            <button
-              onClick={handleInventoryUpgrade}
-              disabled={inventoryUpgradeQuote.maxed || player.gold < inventoryUpgradeQuote.goldCost || rareGemCount < inventoryUpgradeQuote.gemCost}
-              className="ui-button-primary rounded px-3 py-2 text-xs font-bold disabled:opacity-40"
-            >
-              Upgrade
-            </button>
-          </div>
-          {!inventoryUpgradeQuote.maxed && (
-            <div className="mt-3 grid grid-cols-3 gap-2 text-center">
-              <StatusPill label="Gold" value={`${inventoryUpgradeQuote.goldCost}`} />
-              <StatusPill label="Gems" value={`${inventoryUpgradeQuote.gemCost}/${rareGemCount}`} />
-              <StatusPill label="Next" value={`${inventorySlots + 1} slots`} />
             </div>
           )}
         </section>

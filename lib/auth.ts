@@ -521,7 +521,7 @@ export const INVENTORY_ITEM_DEFINITIONS: Record<string, InventoryItemDefinition>
     name: 'Rare Gem',
     kind: 'material',
     rarity: 'rare',
-    description: 'A violet upgrade gem used for satchel expansion and later crafting.',
+    description: 'A violet upgrade gem used for gear storage expansion and later crafting.',
     icon: 'gem',
     imagePath: '/assets/icons/rare-gem.png',
   },
@@ -1275,14 +1275,21 @@ export function claimCityQuestReward(questId: string): {
 
   const reward = buildQuestRewardSummary(quest.rewards);
   const spellUnlock = applySpellUnlocks(currentUser, reward.spellIds);
+  if (reward.equipment.length > 0 && !canAcceptGearReward(currentUser, reward.equipment.length)) {
+    return { success: false, error: 'Gear storage is full. Sell or equip gear before claiming this reward.' };
+  }
+
   const itemResult = addInventoryItemsWithLimit(
     currentUser.inventory || [],
     reward.items,
-    currentUser.inventorySlots || BASE_INVENTORY_SLOTS
+    getInventorySlotCapacity(currentUser)
   );
-  if (itemResult.rejectedItems.length > 0) {
-    return { success: false, error: 'Inventory is full. Make room before claiming this reward.' };
-  }
+  const gearResult = addEquipmentWithLimit(
+    currentUser.equipment || [],
+    currentUser.equippedSlots || {},
+    reward.equipment,
+    getInventorySlotCapacity(currentUser),
+  );
 
   const completedAt = Date.now();
   const updatedStats = { ...currentUser.stats };
@@ -1302,7 +1309,7 @@ export function claimCityQuestReward(questId: string): {
     healthRestore: reward.healthRestore || undefined,
     items: itemResult.acceptedItems.length > 0 ? itemResult.acceptedItems : undefined,
     rareGems: quest.rewards.rareGems,
-    equipment: reward.equipment.length > 0 ? reward.equipment : undefined,
+    equipment: gearResult.acceptedEquipment.length > 0 ? gearResult.acceptedEquipment : undefined,
     minions: reward.minions.length > 0 ? reward.minions : undefined,
     spellIds: spellUnlock.unlockedSpellIds.length > 0 ? spellUnlock.unlockedSpellIds : undefined,
   };
@@ -1312,7 +1319,7 @@ export function claimCityQuestReward(questId: string): {
     exp: currentUser.exp + reward.exp,
     stats: updatedStats,
     inventory: itemResult.inventory,
-    equipment: [...(currentUser.equipment || []), ...reward.equipment],
+    equipment: gearResult.equipment,
     minions: mergeMinionStacks(currentUser.minions || [], reward.minions),
     knownSpellIds: spellUnlock.knownSpellIds,
     cityQuests: updatedCityQuests,
@@ -1369,14 +1376,21 @@ export function claimQuestNpcReward(npcId: string): {
 
   const reward = buildQuestRewardSummary(npc.rewards);
   const spellUnlock = applySpellUnlocks(currentUser, reward.spellIds);
+  if (reward.equipment.length > 0 && !canAcceptGearReward(currentUser, reward.equipment.length)) {
+    return { success: false, error: 'Gear storage is full. Sell or equip gear before claiming this counsel.' };
+  }
+
   const itemResult = addInventoryItemsWithLimit(
     currentUser.inventory || [],
     reward.items,
-    currentUser.inventorySlots || BASE_INVENTORY_SLOTS
+    getInventorySlotCapacity(currentUser)
   );
-  if (itemResult.rejectedItems.length > 0) {
-    return { success: false, error: 'Inventory is full. Make room before claiming this counsel.' };
-  }
+  const gearResult = addEquipmentWithLimit(
+    currentUser.equipment || [],
+    currentUser.equippedSlots || {},
+    reward.equipment,
+    getInventorySlotCapacity(currentUser),
+  );
 
   const completedAt = Date.now();
   const updatedStats = { ...currentUser.stats };
@@ -1390,7 +1404,7 @@ export function claimQuestNpcReward(npcId: string): {
     healthRestore: reward.healthRestore || undefined,
     items: itemResult.acceptedItems.length > 0 ? itemResult.acceptedItems : undefined,
     rareGems: npc.rewards.rareGems,
-    equipment: reward.equipment.length > 0 ? reward.equipment : undefined,
+    equipment: gearResult.acceptedEquipment.length > 0 ? gearResult.acceptedEquipment : undefined,
     minions: reward.minions.length > 0 ? reward.minions : undefined,
     spellIds: spellUnlock.unlockedSpellIds.length > 0 ? spellUnlock.unlockedSpellIds : undefined,
   };
@@ -1400,7 +1414,7 @@ export function claimQuestNpcReward(npcId: string): {
     exp: currentUser.exp + reward.exp,
     stats: updatedStats,
     inventory: itemResult.inventory,
-    equipment: [...(currentUser.equipment || []), ...reward.equipment],
+    equipment: gearResult.equipment,
     minions: mergeMinionStacks(currentUser.minions || [], reward.minions),
     knownSpellIds: spellUnlock.knownSpellIds,
     activityLog: pushActivityEntry(currentUser.activityLog, {
@@ -1439,14 +1453,21 @@ export function claimStoryQuestReward(questId: string): {
 
   const reward = buildQuestRewardSummary(quest.rewards);
   const spellUnlock = applySpellUnlocks(currentUser, reward.spellIds);
+  if (reward.equipment.length > 0 && !canAcceptGearReward(currentUser, reward.equipment.length)) {
+    return { success: false, error: 'Gear storage is full. Sell or equip gear before claiming this reward.' };
+  }
+
   const itemResult = addInventoryItemsWithLimit(
     currentUser.inventory || [],
     reward.items,
-    currentUser.inventorySlots || BASE_INVENTORY_SLOTS
+    getInventorySlotCapacity(currentUser)
   );
-  if (itemResult.rejectedItems.length > 0) {
-    return { success: false, error: 'Inventory is full. Make room before claiming this reward.' };
-  }
+  const gearResult = addEquipmentWithLimit(
+    currentUser.equipment || [],
+    currentUser.equippedSlots || {},
+    reward.equipment,
+    getInventorySlotCapacity(currentUser),
+  );
 
   const completedAt = Date.now();
   const updatedStats = { ...currentUser.stats };
@@ -1460,7 +1481,7 @@ export function claimStoryQuestReward(questId: string): {
     healthRestore: reward.healthRestore || undefined,
     items: itemResult.acceptedItems.length > 0 ? itemResult.acceptedItems : undefined,
     rareGems: quest.rewards.rareGems,
-    equipment: reward.equipment.length > 0 ? reward.equipment : undefined,
+    equipment: gearResult.acceptedEquipment.length > 0 ? gearResult.acceptedEquipment : undefined,
     minions: reward.minions.length > 0 ? reward.minions : undefined,
     spellIds: spellUnlock.unlockedSpellIds.length > 0 ? spellUnlock.unlockedSpellIds : undefined,
   };
@@ -1470,7 +1491,7 @@ export function claimStoryQuestReward(questId: string): {
     exp: currentUser.exp + reward.exp,
     stats: updatedStats,
     inventory: itemResult.inventory,
-    equipment: [...(currentUser.equipment || []), ...reward.equipment],
+    equipment: gearResult.equipment,
     minions: mergeMinionStacks(currentUser.minions || [], reward.minions),
     knownSpellIds: spellUnlock.knownSpellIds,
     storyQuests: [
@@ -2350,38 +2371,64 @@ function addInventoryItems(currentInventory: InventoryItem[], incomingItems: Inv
   return updatedInventory.map(normalizeInventoryItem).filter(item => item.quantity > 0);
 }
 
+export function getInventorySlotCapacity(user: Pick<User, 'inventorySlots'> | null | undefined): number {
+  return user?.inventorySlots || BASE_INVENTORY_SLOTS;
+}
+
+export function getGearUsedSlots(user: Pick<User, 'equipment' | 'equippedSlots'>): number {
+  const equippedIds = new Set(Object.values(user.equippedSlots || {}).filter(Boolean));
+  return (user.equipment || []).filter(item => !equippedIds.has(item.id)).length;
+}
+
+/** @deprecated Stackable items are unlimited; use getGearUsedSlots for satchel limits. */
 export function getInventoryUsedSlots(inventory: InventoryItem[] = []): number {
   return inventory.reduce((sum, item) => sum + Math.max(0, item.quantity || 0), 0);
+}
+
+export function canAcceptGearReward(
+  user: Pick<User, 'equipment' | 'equippedSlots' | 'inventorySlots'>,
+  incomingCount = 1,
+): boolean {
+  return getGearUsedSlots(user) + incomingCount <= getInventorySlotCapacity(user);
+}
+
+export function addEquipmentWithLimit(
+  currentEquipment: Equipment[],
+  equippedSlots: User['equippedSlots'],
+  incomingEquipment: Equipment[],
+  capacity: number,
+): { equipment: Equipment[]; acceptedEquipment: Equipment[]; rejectedEquipment: Equipment[] } {
+  const equippedIds = new Set(Object.values(equippedSlots || {}).filter(Boolean));
+  const used = currentEquipment.filter(item => !equippedIds.has(item.id)).length;
+  const available = Math.max(0, capacity - used);
+  const acceptedEquipment = incomingEquipment.slice(0, available);
+  const rejectedEquipment = incomingEquipment.slice(available);
+
+  return {
+    equipment: [...currentEquipment, ...acceptedEquipment],
+    acceptedEquipment,
+    rejectedEquipment,
+  };
 }
 
 export function addInventoryItemsWithLimit(
   currentInventory: InventoryItem[],
   incomingItems: InventoryItem[],
-  capacity: number
+  _capacity: number
 ): { inventory: InventoryItem[]; acceptedItems: InventoryItem[]; rejectedItems: InventoryItem[] } {
   const acceptedItems: InventoryItem[] = [];
-  const rejectedItems: InventoryItem[] = [];
-  let usedSlots = getInventoryUsedSlots(currentInventory);
 
   incomingItems.forEach(item => {
     const requestedQuantity = Math.max(0, item.quantity || 0);
-    const availableQuantity = Math.max(0, capacity - usedSlots);
-    const acceptedQuantity = Math.min(requestedQuantity, availableQuantity);
-
-    if (acceptedQuantity > 0) {
-      acceptedItems.push(normalizeInventoryItem({ ...item, quantity: acceptedQuantity }));
-      usedSlots += acceptedQuantity;
-    }
-
-    if (acceptedQuantity < requestedQuantity) {
-      rejectedItems.push(normalizeInventoryItem({ ...item, quantity: requestedQuantity - acceptedQuantity }));
+    if (requestedQuantity > 0) {
+      acceptedItems.push(normalizeInventoryItem({ ...item, quantity: requestedQuantity }));
     }
   });
 
   return {
     inventory: addInventoryItems(currentInventory, acceptedItems),
     acceptedItems,
-    rejectedItems,
+    rejectedItems: [],
   };
 }
 
@@ -2593,18 +2640,24 @@ export function activateInventoryItem(itemId: string): InventoryActionResult {
   } else {
     rewards = getContainerRewards(itemId, currentUser);
     const incomingItems = rewards.items || [];
-    const itemCapacity = currentUser.inventorySlots || BASE_INVENTORY_SLOTS;
-    const requiredSlots = incomingItems.reduce((total, rewardItem) => total + rewardItem.quantity, 0);
+    const incomingEquipment = rewards.equipment || [];
+    const itemCapacity = getInventorySlotCapacity(currentUser);
 
-    if (getInventoryUsedSlots(inventoryAfterUse) + requiredSlots > itemCapacity) {
-      return { success: false, error: 'Make more satchel room before opening this.' };
+    if (incomingEquipment.length > 0 && !canAcceptGearReward(currentUser, incomingEquipment.length)) {
+      return { success: false, error: 'Gear storage is full. Sell or equip gear before opening this.' };
     }
 
     const itemResult = addInventoryItemsWithLimit(inventoryAfterUse, incomingItems, itemCapacity);
     inventoryAfterUse = itemResult.inventory;
     gold += rewards.gold || 0;
     exp += rewards.exp || 0;
-    equipment = [...equipment, ...(rewards.equipment || [])];
+    const gearResult = addEquipmentWithLimit(
+      equipment,
+      currentUser.equippedSlots || {},
+      incomingEquipment,
+      itemCapacity,
+    );
+    equipment = gearResult.equipment;
     if (rewards.spellIds?.length) {
       const spellUnlock = applySpellUnlocks({ ...currentUser, knownSpellIds }, rewards.spellIds);
       knownSpellIds = spellUnlock.knownSpellIds;
@@ -2777,12 +2830,7 @@ export function performTradeExchange(exchangeId: string): InventoryActionResult 
   });
 
   const incomingItems = offer.rewardItems.map(item => makeInventoryItem(item.itemId, item.quantity));
-  const itemCapacity = currentUser.inventorySlots || BASE_INVENTORY_SLOTS;
-  const itemResult = addInventoryItemsWithLimit(inventoryAfterCost, incomingItems, itemCapacity);
-
-  if (itemResult.rejectedItems.length > 0) {
-    return { success: false, error: 'Make more satchel room before exchanging.' };
-  }
+  const itemResult = addInventoryItemsWithLimit(inventoryAfterCost, incomingItems, getInventorySlotCapacity(currentUser));
 
   const rareGems = itemResult.acceptedItems
     .filter(item => item.id === 'rare-gem')
@@ -2997,7 +3045,13 @@ function resolveTravelEvents(
     gold = Math.max(0, gold + reward.goldDelta);
     stats.health = Math.max(1, Math.min(stats.maxHealth, stats.health + reward.healthDelta));
     inventory = itemResult.inventory;
-    equipment = [...equipment, ...reward.equipment];
+    const gearResult = addEquipmentWithLimit(
+      equipment,
+      user.equippedSlots || {},
+      reward.equipment,
+      getInventorySlotCapacity(user),
+    );
+    equipment = gearResult.equipment;
     minions = mergeMinionStacks(minions, reward.minions);
 
     const summary = { ...reward.summary };
@@ -3069,7 +3123,7 @@ export function upgradeInventoryCapacity(): { success: boolean; upgraded?: boole
     activityLog: pushActivityEntry(currentUser.activityLog, {
       id: `activity-upgrade-inventory-${completedAt}`,
       type: 'upgrade',
-      title: upgraded ? `Inventory expanded to ${BASE_INVENTORY_SLOTS + nextLevel} slots` : 'Inventory upgrade failed',
+      title: upgraded ? `Gear storage expanded to ${BASE_INVENTORY_SLOTS + nextLevel} slots` : 'Gear storage upgrade failed',
       source: 'Arcane Ledger',
       completedAt,
       rewards: {},
@@ -3502,16 +3556,15 @@ export function buyShopOffer(offerId: string, townName: string): { success: bool
 
   if (offer.kind === 'gem') {
     const gem = makeInventoryItem('rare-gem', offer.value || 1);
-    const itemCapacity = currentUser.inventorySlots || BASE_INVENTORY_SLOTS;
-    if (getInventoryUsedSlots(nextInventory) + gem.quantity > itemCapacity) {
-      return { success: false, error: 'Inventory is full. Upgrade your satchel or spend some gems first.' };
-    }
     rewards.items = [gem];
   }
 
   if (offer.kind === 'equipment') {
     const item = generateEquipment(0, offer.rarity || 'decent');
     if (item) {
+      if (!canAcceptGearReward(currentUser, 1)) {
+        return { success: false, error: 'Gear storage is full. Upgrade storage or sell gear first.' };
+      }
       nextEquipment = [...nextEquipment, item];
       rewards.equipment = [item];
     }
@@ -4496,15 +4549,20 @@ export function checkJobsComplete(): void {
       updatedStats.health = Math.min(updatedStats.maxHealth, updatedStats.health + healthRestored);
     }
     
-    const itemCapacity = currentUser.inventorySlots || BASE_INVENTORY_SLOTS;
+    const itemCapacity = getInventorySlotCapacity(currentUser);
     const itemAddResult = addInventoryItemsWithLimit(currentUser.inventory || [], itemsEarned, itemCapacity);
     const acceptedRareGems = itemAddResult.acceptedItems
       .filter(item => item.id === 'rare-gem')
       .reduce((total, item) => total + item.quantity, 0);
-    const inventoryOverflowed = itemAddResult.rejectedItems.length > 0;
+    const gearAddResult = addEquipmentWithLimit(
+      currentUser.equipment || [],
+      currentUser.equippedSlots || {},
+      equipmentEarned,
+      itemCapacity,
+    );
+    const inventoryOverflowed = gearAddResult.rejectedEquipment.length > 0;
     
-    // Add equipment to equipment collection
-    const updatedEquipment = [...currentUser.equipment, ...equipmentEarned];
+    const updatedEquipment = gearAddResult.equipment;
     const updatedMinions = mergeMinionStacks(currentUser.minions || [], minionsEarned);
     const updatedCityQuests = firstJob
       ? updateCityQuestProgressForJob(currentUser.cityQuests || [], firstJob.duration)
@@ -4513,14 +4571,14 @@ export function checkJobsComplete(): void {
       ? pushActivityEntry(currentUser.activityLog, {
           id: `activity-job-${firstJob.id}-${now}`,
           type: 'job',
-          title: inventoryOverflowed ? `${firstJob.jobName} (satchel full)` : firstJob.jobName,
+          title: inventoryOverflowed ? `${firstJob.jobName} (gear storage full)` : firstJob.jobName,
           source: firstJob.poiName,
           completedAt: now,
           rewards: {
             gold: goldEarned || undefined,
             exp: expEarned || undefined,
             items: itemAddResult.acceptedItems.length > 0 ? itemAddResult.acceptedItems : undefined,
-            equipment: equipmentEarned.length > 0 ? equipmentEarned : undefined,
+            equipment: gearAddResult.acceptedEquipment.length > 0 ? gearAddResult.acceptedEquipment : undefined,
             minions: minionsEarned.length > 0 ? minionsEarned : undefined,
             rareGems: acceptedRareGems || undefined,
             healthRestore: healthRestored || undefined,
