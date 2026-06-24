@@ -1224,7 +1224,7 @@ function RunController({
       const hardRouteCleared = clearedNode?.type === 'elite';
       const withHardRouteBonus = hardRouteCleared ? applyHardRouteVictoryBonus(withLosses) : withLosses;
       const isBossFight = clearedNode?.type === 'boss';
-      const bonusGearDrop = !isBossFight && Math.random() < 0.33
+      const bonusGearDrop = !isWorldMapRun(withLosses) && !isBossFight && Math.random() < 0.33
         ? generateRunLootEquipment(nextWins, withHardRouteBonus.targetBattles)
         : null;
       const withBonusGear = bonusGearDrop
@@ -5372,6 +5372,154 @@ function getRunRewardChoiceById(choiceId: string, equipmentOffer?: Equipment): R
   return undefined;
 }
 
+function isWorldMapRun(session: RunSession): boolean {
+  return session.mode === 'dungeon' || session.mode === 'encounter';
+}
+
+const WORLD_MAP_BLESSING_BLOCKED_CATEGORIES = new Set([
+  'learn-spell',
+  'equipment',
+  'recruit',
+  'upgrade',
+  'revive',
+  'gold',
+  'economy',
+]);
+
+const RUN_BLESSING_POWER_TIER_BY_ID: Record<string, 1 | 2 | 3> = {
+  'balanced-training': 1,
+  'candle-tactician': 1,
+  'field-surgeon-prayer': 1,
+  'omen-candle': 1,
+  'army-drill': 2,
+  'iron-ward': 2,
+  'candle-liturgy': 2,
+  'banner-song': 2,
+  'blooded-constitution': 2,
+  'frontline-drill': 2,
+  'shield-wall-vow': 2,
+  'oath-captain': 2,
+  'weapon-rites': 3,
+  'relic-armor': 3,
+  'moonwell-focus': 3,
+  'war-chorus': 3,
+  'saint-bone-vigor': 3,
+  'saint-triage': 3,
+};
+
+const WORLD_MAP_BLESSING_TIER_WEIGHT: Record<1 | 2 | 3, number> = {
+  1: 1,
+  2: 0.2,
+  3: 0.05,
+};
+
+const WORLD_MAP_BLESSING_MAX_TIER2_PER_SCREEN = 1;
+const WORLD_MAP_BLESSING_MAX_TIER3_PER_SCREEN = 1;
+
+function getRunBlessingPowerTier(choice: RunRewardChoice): 1 | 2 | 3 {
+  const mapped = RUN_BLESSING_POWER_TIER_BY_ID[choice.id];
+  if (mapped) return mapped;
+
+  const normalized = `${choice.id} ${choice.name} ${choice.description}`.toLowerCase();
+  if (normalized.includes('+4') || normalized.includes('+35') || normalized.includes('heavily heal')) return 3;
+  if (normalized.includes('+2') || normalized.includes('+20') || normalized.includes('recover 18')) return 2;
+  return 1;
+}
+
+function getWorldMapBlessingPickWeight(choice: RunRewardChoice): number {
+  return WORLD_MAP_BLESSING_TIER_WEIGHT[getRunBlessingPowerTier(choice)];
+}
+
+function pickWeightedRunRewardChoice<T extends { weight: number }>(items: T[]): T | null {
+  const total = items.reduce((sum, item) => sum + item.weight, 0);
+  if (total <= 0 || items.length === 0) return null;
+
+  let roll = Math.random() * total;
+  for (const item of items) {
+    roll -= item.weight;
+    if (roll <= 0) return item;
+  }
+
+  return items[items.length - 1] || null;
+}
+
+function pickWorldMapRunRewardChoices(
+  session: RunSession,
+  count: number,
+  excluded: (choice: RunRewardChoice) => boolean,
+): RunRewardChoice[] {
+  const buffPool = RUN_BUFFS.filter(choice => (!choice.isAvailable || choice.isAvailable(session)) && !excluded(choice));
+  const buffFallback = RUN_BUFFS.filter(choice => !choice.isAvailable && !excluded(choice));
+  const workingBuffPool = buffPool.length >= count ? buffPool : buffFallback;
+
+  const selected: RunRewardChoice[] = [];
+  const usedCategories = new Set<string>();
+  let tier2Count = 0;
+  let tier3Count = 0;
+
+  const canOfferTier = (tier: 1 | 2 | 3) => (
+    tier === 3
+      ? tier3Count < WORLD_MAP_BLESSING_MAX_TIER3_PER_SCREEN
+      : tier === 2
+        ? tier2Count < WORLD_MAP_BLESSING_MAX_TIER2_PER_SCREEN
+        : true
+  );
+
+  const tryAdd = (choice: RunRewardChoice): boolean => {
+    if (selected.length >= count) return false;
+    if (excluded(choice)) return false;
+    if (selected.some(item => item.id === choice.id)) return false;
+
+    const tier = getRunBlessingPowerTier(choice);
+    if (!canOfferTier(tier)) return false;
+
+    const category = getRunRewardCategory(choice);
+    if (usedCategories.has(category)) return false;
+
+    selected.push(choice);
+    usedCategories.add(category);
+    if (tier === 2) tier2Count += 1;
+    if (tier === 3) tier3Count += 1;
+    return true;
+  };
+
+  while (selected.length < count) {
+    const candidates = workingBuffPool.filter(choice => {
+      if (excluded(choice)) return false;
+      if (selected.some(item => item.id === choice.id)) return false;
+      if (usedCategories.has(getRunRewardCategory(choice))) return false;
+      return canOfferTier(getRunBlessingPowerTier(choice));
+    });
+
+    if (candidates.length === 0) break;
+
+    const picked = pickWeightedRunRewardChoice(
+      candidates.map(choice => ({ choice, weight: getWorldMapBlessingPickWeight(choice) })),
+    );
+    if (!picked || !tryAdd(picked.choice)) break;
+  }
+
+  shuffle(workingBuffPool.filter(choice => getRunBlessingPowerTier(choice) === 1)).forEach(choice => {
+    if (selected.length >= count) return;
+    tryAdd(choice);
+  });
+
+  shuffle(workingBuffPool).forEach(choice => {
+    if (selected.length >= count) return;
+    tryAdd(choice);
+  });
+
+  return shuffle(selected).slice(0, count);
+}
+
+function isWorldMapBlessingBlocked(choice: RunRewardChoice): boolean {
+  return WORLD_MAP_BLESSING_BLOCKED_CATEGORIES.has(getRunRewardCategory(choice));
+}
+
+function isWorldMapShopRewardBlocked(choice: RunRewardChoice): boolean {
+  return isWorldMapBlessingBlocked(choice) || isRunShopRewardBlocked(choice);
+}
+
 function getRunRewardCategory(choice: RunRewardChoice): string {
   if (choice.category) return choice.category;
   const id = choice.id;
@@ -5396,9 +5544,19 @@ function pickRunRewardChoices(
   count = RUN_REWARD_CHOICE_COUNT,
   options?: { spellChance?: number; equipmentChance?: number; excludeChoice?: (choice: RunRewardChoice) => boolean },
 ): RunRewardChoice[] {
-  const spellChance = options?.spellChance ?? RUN_BLESSING_SPELL_OFFER_CHANCE;
-  const equipmentChance = options?.equipmentChance ?? RUN_BLESSING_EQUIPMENT_OFFER_CHANCE;
-  const excluded = options?.excludeChoice || (() => false);
+  const worldMapRun = isWorldMapRun(session);
+  const spellChance = worldMapRun ? 0 : (options?.spellChance ?? RUN_BLESSING_SPELL_OFFER_CHANCE);
+  const equipmentChance = worldMapRun ? 0 : (options?.equipmentChance ?? RUN_BLESSING_EQUIPMENT_OFFER_CHANCE);
+  const excluded = (choice: RunRewardChoice) => {
+    if (options?.excludeChoice?.(choice)) return true;
+    if (worldMapRun && isWorldMapBlessingBlocked(choice)) return true;
+    return false;
+  };
+
+  if (worldMapRun) {
+    return pickWorldMapRunRewardChoices(session, count, excluded);
+  }
+
   const buffPool = RUN_BUFFS.filter(choice => (!choice.isAvailable || choice.isAvailable(session)) && !excluded(choice));
   const spellPool = RUN_SPELL_REWARDS.filter(choice => (!choice.isAvailable || choice.isAvailable(session)) && !excluded(choice));
   const buffFallback = RUN_BUFFS.filter(choice => !choice.isAvailable && !excluded(choice));
@@ -5441,10 +5599,11 @@ function pickRunRewardChoices(
 }
 
 function makeShopOffers(session: RunSession, count = RUN_SHOP_CHOICE_COUNT): RunShopOffer[] {
+  const worldMapRun = isWorldMapRun(session);
   return pickRunRewardChoices(session, count, {
-    spellChance: RUN_SHOP_SPELL_OFFER_CHANCE,
-    equipmentChance: RUN_SHOP_EQUIPMENT_OFFER_CHANCE,
-    excludeChoice: isRunShopRewardBlocked,
+    spellChance: worldMapRun ? 0 : RUN_SHOP_SPELL_OFFER_CHANCE,
+    equipmentChance: worldMapRun ? 0 : RUN_SHOP_EQUIPMENT_OFFER_CHANCE,
+    excludeChoice: worldMapRun ? isWorldMapShopRewardBlocked : isRunShopRewardBlocked,
   }).map((choice, index) => ({
     choiceId: choice.id,
     cost: getRunShopOfferCost(session, index, choice),
@@ -5478,8 +5637,15 @@ function getRunShopOfferCost(session: RunSession, index: number, choice: RunRewa
   const base = session.mode === 'daily'
     ? 32 + index * 22 + Math.round(routeProgress * 30) + Math.floor((level - 1) * 2.5)
     : 35 + index * 20 + Math.floor(level * 1.5);
+  const worldMapTierMultiplier = isWorldMapRun(session)
+    ? getRunBlessingPowerTier(choice) === 3
+      ? 1.5
+      : getRunBlessingPowerTier(choice) === 2
+        ? 1.25
+        : 1
+    : 1;
 
-  return Math.max(20, Math.round((base * categoryMultiplier) / 5) * 5);
+  return Math.max(20, Math.round((base * categoryMultiplier * worldMapTierMultiplier) / 5) * 5);
 }
 
 function getShopNodeOfferKey(session: RunSession): string {
@@ -5571,16 +5737,25 @@ function rerollOmen(session: RunSession): RunSession {
 }
 
 function applyHardRouteVictoryBonus(session: RunSession): RunSession {
+  const worldMapRun = isWorldMapRun(session);
   const routeProgress = session.targetBattles > 0 ? clamp(session.wins / session.targetBattles, 0, 1) : 0;
-  const goldBonus = 25 + Math.round(routeProgress * 25);
+  const goldBonus = worldMapRun
+    ? 10 + Math.round(routeProgress * 10)
+    : 25 + Math.round(routeProgress * 25);
   const bonuses: Array<{
     stats: Partial<Pick<CharacterStats, 'armyPower' | 'defensivePower' | 'morale' | 'spellPower' | 'maxHealth' | 'health'>>;
     detail: string;
-  }> = [
-    { stats: { armyPower: 1, morale: 1 }, detail: '+1 Army and +1 Morale' },
-    { stats: { defensivePower: 1, maxHealth: 8, health: 8 }, detail: '+1 Ward and +8 commander health' },
-    { stats: { spellPower: 1, morale: 1 }, detail: '+1 Spell and +1 Morale' },
-  ];
+  }> = worldMapRun
+    ? [
+        { stats: { armyPower: 1 }, detail: '+1 Army Power' },
+        { stats: { defensivePower: 1 }, detail: '+1 Defensive Power' },
+        { stats: { morale: 1 }, detail: '+1 Morale' },
+      ]
+    : [
+        { stats: { armyPower: 1, morale: 1 }, detail: '+1 Army and +1 Morale' },
+        { stats: { defensivePower: 1, maxHealth: 8, health: 8 }, detail: '+1 Ward and +8 commander health' },
+        { stats: { spellPower: 1, morale: 1 }, detail: '+1 Spell and +1 Morale' },
+      ];
   const bonus = shuffle(bonuses)[0] || bonuses[0];
   const stats = {
     ...session.stats,
@@ -5599,9 +5774,13 @@ function applyHardRouteVictoryBonus(session: RunSession): RunSession {
     ...session,
     stats,
     runGold: session.runGold + goldBonus,
-    blessingRerollsRemaining: (session.blessingRerollsRemaining ?? RUN_BLESSING_REROLL_COUNT) + 1,
+    blessingRerollsRemaining: worldMapRun
+      ? (session.blessingRerollsRemaining ?? RUN_BLESSING_REROLL_COUNT)
+      : (session.blessingRerollsRemaining ?? RUN_BLESSING_REROLL_COUNT) + 1,
     pendingPositiveOmen: true,
-    notice: `Hard route bonus claimed: ${bonus.detail}, +${goldBonus} run gold, and +1 blessing reroll.`,
+    notice: worldMapRun
+      ? `Hard route bonus claimed: ${bonus.detail} and +${goldBonus} run gold. A modest omen waits after the reward.`
+      : `Hard route bonus claimed: ${bonus.detail}, +${goldBonus} run gold, and +1 blessing reroll.`,
   };
 }
 
@@ -5614,7 +5793,51 @@ function getScaledRunOmenGold(session: RunSession, base: number): number {
   return Math.max(10, Math.round((base + routeProgress * 24 + (level - 1) * 1.8) / 5) * 5);
 }
 
+function rollPositiveWorldMapEventOutcome(session: RunSession): OmenOutcome {
+  const outcomes: OmenOutcome[] = [
+    {
+      id: 'hard-route-ward',
+      title: 'Clear Ward',
+      flavor: 'The hard road answers with a clean bell tone and settles over your armor.',
+      detail: '+1 Defensive Power for the rest of this run.',
+      tone: 'ward',
+      apply: current => makeStatBuff('hard-route-ward', 'Clear Ward', '+1 Defensive Power from the hard road.', { defensivePower: 1 }).apply(current),
+    },
+    {
+      id: 'hard-route-training',
+      title: 'Road Tempering',
+      flavor: 'The warband breathes together and the hard route feels earned.',
+      detail: '+1 Army Power and +1 Morale for this run.',
+      tone: 'blessing',
+      apply: current => makeStatBuff('hard-route-training', 'Road Tempering', '+1 Army Power and +1 Morale.', { armyPower: 1, morale: 1 }).apply(current),
+    },
+    {
+      id: 'hard-route-morale',
+      title: 'Banner Echo',
+      flavor: 'A second wind rolls through the ranks without asking for coin or recruits.',
+      detail: '+2 Morale for this run.',
+      tone: 'blessing',
+      apply: current => makeStatBuff('hard-route-morale', 'Banner Echo', '+2 Morale from the hard road.', { morale: 2 }).apply(current),
+    },
+  ];
+
+  if (hasWoundedRunMinions(session)) {
+    outcomes.push({
+      id: 'hard-route-salve',
+      title: 'Mercy After Iron',
+      flavor: 'Warm wax seals the worst cuts before the next chamber.',
+      detail: 'Living minions recover 12 health.',
+      tone: 'blessing',
+      apply: current => healLivingRunMinions(current, 12, 'Mercy After Iron restored the wounded.'),
+    });
+  }
+
+  return shuffle(outcomes)[0] || outcomes[0];
+}
+
 function rollPositiveDungeonEventOutcome(session: RunSession): OmenOutcome {
+  if (isWorldMapRun(session)) return rollPositiveWorldMapEventOutcome(session);
+
   const goldReward = getScaledRunOmenGold(session, 70);
   const outcomes: OmenOutcome[] = [
     {
@@ -5667,8 +5890,131 @@ function rollPositiveDungeonEventOutcome(session: RunSession): OmenOutcome {
   return shuffle(outcomes)[0] || outcomes[0];
 }
 
+function rollWorldMapEventOutcome(session: RunSession): OmenOutcome {
+  const roll = Math.random();
+
+  if (roll < 0.22) {
+    const alive = session.minions
+      .map((unit, index) => ({ unit, index }))
+      .filter(item => item.unit.alive);
+    const chosen = shuffle(alive)[0];
+
+    if (!chosen) {
+      return {
+        id: 'curse-morale',
+        title: 'Hollow Sigil',
+        flavor: 'The omen finds no living target and saps the warband spirit instead.',
+        detail: '-2 Morale for the rest of this run.',
+        tone: 'curse',
+        apply: current => makeStatBuff('curse-morale', 'Hollow Sigil', '-2 Morale from a dark omen.', { morale: -2 }).apply(current),
+      };
+    }
+
+    const name = getMinionTemplate(chosen.unit.stack.templateId)?.name || 'A minion';
+    return {
+      id: 'curse',
+      title: 'Black Sigil',
+      flavor: 'A curse bites the chamber and the warband recoils.',
+      detail: `${name} is struck down by the omen.`,
+      tone: 'curse',
+      apply: current => woundSpecificMinion(current, chosen.index),
+    };
+  }
+
+  if (roll < 0.4) {
+    if (hasWoundedRunMinions(session)) {
+      return {
+        id: 'candle-salve',
+        title: 'Candle Salve',
+        flavor: 'A small flame walks along the battle cuts and leaves warm wax in its path.',
+        detail: 'Living minions recover 12 health.',
+        tone: 'blessing',
+        apply: current => healLivingRunMinions(current, 12, 'Candle Salve restored the wounded.'),
+      };
+    }
+
+    return {
+      id: 'ward',
+      title: 'Event Ward',
+      flavor: 'Moonlit water clings to your armor like a blessing.',
+      detail: '+1 Defensive Power for the rest of this run.',
+      tone: 'ward',
+      apply: current => makeStatBuff('event-ward', 'Event Ward', '+1 Defensive Power from the pool.', { defensivePower: 1 }).apply(current),
+    };
+  }
+
+  if (roll < 0.52) {
+    return {
+      id: 'ward',
+      title: 'Event Ward',
+      flavor: 'Moonlit water clings to your armor like a blessing.',
+      detail: '+1 Defensive Power for the rest of this run.',
+      tone: 'ward',
+      apply: current => makeStatBuff('event-ward', 'Event Ward', '+1 Defensive Power from the pool.', { defensivePower: 1 }).apply(current),
+    };
+  }
+
+  if (roll < 0.64) {
+    return {
+      id: 'ash-march',
+      title: 'Ash March',
+      flavor: 'The road dust lifts into marching lines, then settles beneath every boot.',
+      detail: '+1 Army Power and +1 Morale for the rest of this run.',
+      tone: 'blessing',
+      apply: current => makeStatBuff('omen-ash-march', 'Ash March', '+1 Army Power and +1 Morale from an omen.', { armyPower: 1, morale: 1 }).apply(current),
+    };
+  }
+
+  if (roll < 0.76) {
+    return {
+      id: 'omen-liturgy',
+      title: 'Rune Liturgy',
+      flavor: 'A spell sigil brands itself into the warband memory without teaching a new rite.',
+      detail: '+1 Spell Power for the rest of this run.',
+      tone: 'blessing',
+      apply: current => makeStatBuff('omen-liturgy', 'Rune Liturgy', '+1 Spell Power from an omen.', { spellPower: 1 }).apply(current),
+    };
+  }
+
+  if (roll < 0.88) {
+    if (hasWoundedRunMinions(session)) {
+      return {
+        id: 'saint-triage-omen',
+        title: 'Pool Revival',
+        flavor: 'Cold water surges and knits the worst wounds still standing.',
+        detail: 'Living minions recover 18 health.',
+        tone: 'blessing',
+        apply: current => healLivingRunMinions(current, 18, 'Pool Revival restored the wounded.'),
+      };
+    }
+
+    return {
+      id: 'omen-reroll-gift',
+      title: 'Moonlit Reconsideration',
+      flavor: 'The sign refuses to settle and leaves you one more chance to question fate.',
+      detail: '+1 omen reroll for this run.',
+      tone: 'ward',
+      apply: current => ({
+        ...current,
+        omenRerollsRemaining: (current.omenRerollsRemaining ?? RUN_OMEN_REROLL_COUNT) + 1,
+        notice: 'The omen grants one extra omen reroll.',
+      }),
+    };
+  }
+
+  return {
+    id: 'omen-war-chorus',
+    title: 'War Chorus',
+    flavor: 'Distant voices answer your banner and the line steadies.',
+    detail: '+1 Army Power and +1 Morale for the rest of this run.',
+    tone: 'blessing',
+    apply: current => makeStatBuff('omen-war-chorus', 'War Chorus', '+1 Army Power and +1 Morale from an omen.', { armyPower: 1, morale: 1 }).apply(current),
+  };
+}
+
 function rollDungeonEventOutcome(session: RunSession): OmenOutcome {
   if (session.pendingPositiveOmen) return rollPositiveDungeonEventOutcome(session);
+  if (isWorldMapRun(session)) return rollWorldMapEventOutcome(session);
 
   const roll = Math.random();
   const quietGold = getScaledRunOmenGold(session, 35);
