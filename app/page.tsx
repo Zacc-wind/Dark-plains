@@ -160,7 +160,7 @@ export default function AuthPage() {
           </button>
         </div>
 
-        <section className="auth-feedback mt-8 border-t border-[rgba(250,239,211,0.14)] pt-6 text-center">
+        <section className="auth-feedback mt-8 border-t border-[rgba(250,239,211,0.14)] pt-6 text-center style={{position: 'absolute',bottom: '20vh',left: '60vh',width: '16vh'}}">
           <p className="arcane-label mb-1">Share your feedback</p>
           <p className="ui-faint mb-4 text-[11px] font-bold">
             Scan the code and tell us what you think while you play.
