@@ -83,7 +83,7 @@ export default function AuthPage() {
       <ThreeFxOverlay />
       <div className="auth-card command-panel vine-frame relative z-[100] w-full max-w-md rounded border p-8">
         <div className="mb-8 text-center">
-          <p className="arcane-label mb-2">Enter the road</p>
+          <p className="arcane-label mb-2">Helo</p>
           <h1 className="auth-title fantasy-heading text-center">Dark Plains</h1>
         </div>
         {!isLogin ? (
@@ -160,10 +160,12 @@ export default function AuthPage() {
           </button>
         </div>
 
-        <section className="auth-feedback mt-8 border-t border-[rgba(250,239,211,0.14)] pt-6 text-center position-absolute bottom-20vh left-60vh width-16vh">
+        <section className="auth-feedback mt-8 border-t border-[rgba(250,239,211,0.14)] pt-6 text-center "
+        style={{ position: "absolute", bottom: "20vh", left: "60vh", width: "16vh" }}
+        >
           <p className="arcane-label mb-1">Share your feedback</p>
           <p className="ui-faint mb-4 text-[11px] font-bold">
-            Scan the code and tell us what you think while you play.
+            Just gimme feedback on discord. 
           </p>
           <div className="auth-feedback-qr mx-auto w-fit rounded-lg border border-[rgba(250,239,211,0.22)] bg-white p-2 shadow-[0_8px_24px_rgba(0,0,0,0.35)]">
             <Image
