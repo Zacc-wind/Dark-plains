@@ -231,6 +231,8 @@ foreach ($asset in $largeAssets) {
   Copy-Asset $asset (Join-Path $publicAssets $targetName)
 }
 
+Copy-Asset 'qrcode.png' (Join-Path $publicAssets 'qrcode.png')
+
 $runBackgroundJpg = Join-Path $sourceRoot 'run-bg.jpg'
 $runBackgroundPng = Join-Path $sourceRoot 'run-bg.png'
 $runBackgroundLegacy = Join-Path $sourceRoot 'run-bakground.png'

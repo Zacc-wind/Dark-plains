@@ -114,7 +114,20 @@ export async function fetchRemotePlayer(userId: string): Promise<{ profile: Prof
 
 export async function saveRemotePlayer(user: User, userId: string): Promise<void> {
   const supabase = createClient();
+
+  const { data: existingState, error: readError } = await supabase
+    .from('player_states')
+    .select('game_sessions')
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (readError) throw readError;
+
   const row = userToPlayerStateRow(user, userId);
+  row.game_sessions = {
+    ...((existingState?.game_sessions as Record<string, unknown> | null) || {}),
+    ...row.game_sessions,
+  };
 
   const { error: profileError } = await supabase
     .from('profiles')

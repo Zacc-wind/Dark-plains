@@ -28,6 +28,8 @@ import {
   updateJobTravelProgress,
   isPartyMember as isSocialPartyMember,
 } from '@/lib/auth';
+import { isSupabaseConfigured } from '@/lib/supabase/config';
+import { getCachedWorldPlayers, refreshWorldPlayers, worldMapPlayerToUser } from '@/lib/worldPlayers';
 import { BATTLE_SPELLS, WorldEnemy, getBattleRatingPreview, getNpcEnemiesForUser, getPlayerModelAsset } from '@/lib/battle';
 import { emitCompletionNotice, type CompletionRewardLine } from '@/lib/completionEvents';
 import { emitFxEvent } from '@/lib/fxEvents';
@@ -986,6 +988,7 @@ export default function MapRenderer({
   const [showPlayerList, setShowPlayerList] = useState(false);
   const [playerListLocation, setPlayerListLocation] = useState<{ x: number; y: number } | null>(null);
   const [currentUser, setCurrentUser] = useState(getCurrentUser());
+  const [worldPlayersTick, setWorldPlayersTick] = useState(0);
   const [worldNow, setWorldNow] = useState(() => Date.now());
   const [mapAnimNow, setMapAnimNow] = useState(() => Date.now());
   const [pendingTravel, setPendingTravel] = useState<PendingTravelIntent | null>(null);
@@ -1021,6 +1024,26 @@ export default function MapRenderer({
       setAssetsLoaded(true);
     });
   }, []);
+
+  useEffect(() => {
+    if (!isSupabaseConfigured() || !currentUser) return;
+
+    let cancelled = false;
+    const syncWorldPlayers = async () => {
+      await refreshWorldPlayers();
+      if (!cancelled) setWorldPlayersTick(tick => tick + 1);
+    };
+
+    void syncWorldPlayers();
+    const interval = window.setInterval(() => {
+      void syncWorldPlayers();
+    }, 5000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [currentUser?.username]);
 
   // Update current user periodically
   useEffect(() => {
@@ -1140,8 +1163,15 @@ export default function MapRenderer({
   );
   const otherPlayers = useMemo(() => {
     if (!currentUser) return [];
+
+    if (isSupabaseConfigured()) {
+      return getCachedWorldPlayers()
+        .filter(player => player.username.toLowerCase() !== currentUser.username.toLowerCase())
+        .map(worldMapPlayerToUser);
+    }
+
     return getUsers().filter(player => player.username !== currentUser.username);
-  }, [currentUser]);
+  }, [currentUser, worldPlayersTick]);
   const renderedUserPosition = useMemo(
     () => getRenderedUserPosition(currentUser, worldNow),
     [currentUser, worldNow]

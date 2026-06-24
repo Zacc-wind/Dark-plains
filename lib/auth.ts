@@ -17,6 +17,8 @@ import {
 } from './travelEvents';
 import { readGameJson, removeGameStorageItem, writeGameJson } from './gameStore';
 import { isSupabaseAuthEnabled, logoutSupabase, persistCurrentUserToSupabase } from './supabase/auth';
+import { getCachedWorldPlayers, worldMapPlayerToUser } from './worldPlayers';
+import { isSupabaseConfigured } from './supabase/config';
 import { getStaticPOIs, MAP_CONFIG, POIType } from './mapData';
 import { BOSS_PROFILES, type BossProfile } from './bosses';
 
@@ -3852,8 +3854,24 @@ export function logout(): void {
 }
 
 export function getPlayersAtLocation(x: number, y: number): User[] {
-  const users = getUsers();
-  return users.filter(u => u.x === x && u.y === y);
+  const usersByName = new Map<string, User>();
+
+  getUsers()
+    .filter(user => user.x === x && user.y === y)
+    .forEach(user => usersByName.set(user.username.toLowerCase(), user));
+
+  if (isSupabaseConfigured()) {
+    getCachedWorldPlayers()
+      .filter(player => player.x === x && player.y === y)
+      .forEach(player => {
+        const key = player.username.toLowerCase();
+        if (!usersByName.has(key)) {
+          usersByName.set(key, worldMapPlayerToUser(player));
+        }
+      });
+  }
+
+  return Array.from(usersByName.values());
 }
 
 function makeJobQueueCanceledActivity(

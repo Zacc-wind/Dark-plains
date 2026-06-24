@@ -1,4 +1,5 @@
-import { readGameJson, writeGameJson } from '@/lib/gameStore';
+import { readAccountTutorials, writeAccountTutorials } from '@/lib/accountTutorial';
+import { readGameJson } from '@/lib/gameStore';
 import type { SingleplayerRunTutorialCard, SingleplayerRunTutorialStep } from '@/lib/singleplayerTutorial';
 import { SINGLEPLAYER_RUN_TUTORIAL_GUIDE_ASSET } from '@/lib/singleplayerTutorial';
 
@@ -34,9 +35,19 @@ function normalizeModeTutorialProgress(progress: Partial<ModeTutorialProgress> |
 
 export function readModeTutorialProgress(username?: string | null): ModeTutorialProgress {
   if (!username) return normalizeModeTutorialProgress(null);
-  return normalizeModeTutorialProgress(readGameJson<ModeTutorialProgress | null>(getProgressKey(username), null));
-}
 
+  const accountProgress = readAccountTutorials(username).mode;
+  if (accountProgress?.completed) return normalizeModeTutorialProgress(accountProgress);
+
+  // Legacy local-only progress from before account sync.
+  const legacyProgress = readGameJson<ModeTutorialProgress | null>(getProgressKey(username), null);
+  if (legacyProgress?.completed) {
+    writeAccountTutorials(username, { ...readAccountTutorials(username), mode: normalizeModeTutorialProgress(legacyProgress) });
+    return normalizeModeTutorialProgress(legacyProgress);
+  }
+
+  return normalizeModeTutorialProgress(accountProgress ?? legacyProgress);
+}
 export function shouldShowModeTutorial(username?: string | null): boolean {
   if (!username) return false;
   return !readModeTutorialProgress(username).completed;
@@ -44,13 +55,19 @@ export function shouldShowModeTutorial(username?: string | null): boolean {
 
 export function completeModeTutorial(username?: string | null): ModeTutorialProgress {
   const next = normalizeModeTutorialProgress({ completed: true, updatedAt: Date.now() });
-  if (username) writeGameJson(getProgressKey(username), next);
+  if (username) {
+    const account = readAccountTutorials(username);
+    writeAccountTutorials(username, { ...account, mode: next });
+  }
   return next;
 }
 
 export function skipModeTutorial(username?: string | null): ModeTutorialProgress {
   const next = normalizeModeTutorialProgress({ completed: true, skipped: true, updatedAt: Date.now() });
-  if (username) writeGameJson(getProgressKey(username), next);
+  if (username) {
+    const account = readAccountTutorials(username);
+    writeAccountTutorials(username, { ...account, mode: next });
+  }
   return next;
 }
 

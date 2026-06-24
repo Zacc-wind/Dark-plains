@@ -1,3 +1,4 @@
+import { readAccountTutorials, writeAccountTutorials } from '@/lib/accountTutorial';
 import { readGameJson, writeGameJson } from '@/lib/gameStore';
 
 export type SingleplayerRunTutorialStepId =
@@ -77,9 +78,20 @@ export function writeSingleplayerRunTutorialEnabled(enabled: boolean): void {
 
 export function readSingleplayerRunTutorialProgress(username?: string | null): SingleplayerRunTutorialProgress {
   if (!username) return normalizeProgress(null);
-  return normalizeProgress(readGameJson<SingleplayerRunTutorialProgress | null>(getProgressKey(username), null));
-}
 
+  const accountProgress = readAccountTutorials(username).singleplayerRun;
+  if (accountProgress?.completed || (accountProgress?.seenStepIds?.length || 0) > 0) {
+    return normalizeProgress(accountProgress);
+  }
+
+  const legacyProgress = readGameJson<SingleplayerRunTutorialProgress | null>(getProgressKey(username), null);
+  if (legacyProgress?.completed || (legacyProgress?.seenStepIds?.length || 0) > 0) {
+    writeAccountTutorials(username, { ...readAccountTutorials(username), singleplayerRun: normalizeProgress(legacyProgress) });
+    return normalizeProgress(legacyProgress);
+  }
+
+  return normalizeProgress(accountProgress ?? legacyProgress);
+}
 export function markSingleplayerRunTutorialStepSeen(username: string | null | undefined, stepId: SingleplayerRunTutorialStepId): SingleplayerRunTutorialProgress {
   if (!username) return normalizeProgress(null);
   const current = readSingleplayerRunTutorialProgress(username);
@@ -90,7 +102,8 @@ export function markSingleplayerRunTutorialStepSeen(username: string | null | un
     completed: seenStepIds.length >= SINGLEPLAYER_RUN_TUTORIAL_STEP_IDS.length,
     updatedAt: Date.now(),
   });
-  writeGameJson(getProgressKey(username), next);
+  const account = readAccountTutorials(username);
+  writeAccountTutorials(username, { ...account, singleplayerRun: next });
   return next;
 }
 
@@ -102,13 +115,18 @@ export function skipSingleplayerRunTutorial(username: string | null | undefined)
     skipped: true,
     updatedAt: Date.now(),
   });
-  writeGameJson(getProgressKey(username), next);
+  const account = readAccountTutorials(username);
+  writeAccountTutorials(username, { ...account, singleplayerRun: next });
+  writeSingleplayerRunTutorialEnabled(true);
   return next;
 }
 
 export function resetSingleplayerRunTutorial(username: string | null | undefined): SingleplayerRunTutorialProgress {
   const next = normalizeProgress({ seenStepIds: [], completed: false, updatedAt: Date.now() });
-  if (username) writeGameJson(getProgressKey(username), next);
+  if (username) {
+    const account = readAccountTutorials(username);
+    writeAccountTutorials(username, { ...account, singleplayerRun: next });
+  }
   writeSingleplayerRunTutorialEnabled(true);
   return next;
 }

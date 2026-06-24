@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { login, register } from '@/lib/auth';
 import { authorizeBackgroundMusic } from '@/lib/backgroundMusic';
@@ -158,6 +159,23 @@ export default function AuthPage() {
             {isLogin ? "Don't have an account? Register" : 'Already have an account? Login'}
           </button>
         </div>
+
+        <section className="auth-feedback mt-8 border-t border-[rgba(250,239,211,0.14)] pt-6 text-center">
+          <p className="arcane-label mb-1">Share your feedback</p>
+          <p className="ui-faint mb-4 text-[11px] font-bold">
+            Scan the code and tell us what you think while you play.
+          </p>
+          <div className="auth-feedback-qr mx-auto w-fit rounded-lg border border-[rgba(250,239,211,0.22)] bg-white p-2 shadow-[0_8px_24px_rgba(0,0,0,0.35)]">
+            <Image
+              src="/assets/qrcode.png"
+              alt="QR code to submit feedback"
+              width={152}
+              height={152}
+              className="h-auto w-[152px]"
+              unoptimized
+            />
+          </div>
+        </section>
       </div>
     </div>
   );

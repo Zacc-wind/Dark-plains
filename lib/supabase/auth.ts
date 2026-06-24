@@ -1,4 +1,5 @@
 import { getCurrentUser, type User } from '@/lib/auth';
+import { applyRemoteAccountTutorials, readRemoteTutorialsFromGameSessions } from '@/lib/accountTutorial';
 import { writeGameJson, removeGameStorageItem } from '@/lib/gameStore';
 import { createClient } from '@/lib/supabase/client';
 import { isSupabaseConfigured } from '@/lib/supabase/config';
@@ -98,6 +99,8 @@ export async function hydrateLocalUserFromSession(): Promise<User | null> {
   if (!remote) return null;
 
   const sessionUser = playerStateRowToUser(remote.state, remote.profile);
+  const remoteTutorials = readRemoteTutorialsFromGameSessions(remote.state.game_sessions);
+  applyRemoteAccountTutorials(sessionUser.username, remoteTutorials);
   writeGameJson(CURRENT_USER_KEY, sessionUser);
   return sessionUser;
 }
