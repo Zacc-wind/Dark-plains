@@ -1040,6 +1040,12 @@ function RunController({
   };
 
   useEffect(() => {
+    document.body.classList.add('daily-run-open');
+    window.dispatchEvent(new Event('wizardy:force-main-screen'));
+    return () => document.body.classList.remove('daily-run-open');
+  }, []);
+
+  useEffect(() => {
     if (previousPhaseRef.current === session.phase) return;
     previousPhaseRef.current = session.phase;
 

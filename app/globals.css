@@ -4773,6 +4773,20 @@ button.vine-frame::before,
   display: none;
 }
 
+.daily-run-open .game-hud,
+.daily-run-open .daily-run-launch,
+.daily-run-open .map-action-rail,
+.daily-run-open .world-action-chips,
+.daily-run-open .main-menu-launch,
+.daily-run-open .social-chat-dock,
+.daily-run-open .first-session-guide,
+.daily-run-open .map-fog-layer,
+.daily-run-open .main-quest-tracker,
+.daily-run-open .main-quest-reopen,
+.daily-run-open .command-center-shell {
+  display: none;
+}
+
 .command-center-open .main-quest-tracker,
 .command-center-open .main-quest-reopen {
   display: none;
