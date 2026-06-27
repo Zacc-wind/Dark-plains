@@ -421,13 +421,21 @@ function RunLobbyBonusPill({ icon, label, value }: { icon: string; label: string
   );
 }
 
-function getRunRosterSpriteLayout(rosterCount: number) {
-  const spriteWidth = rosterCount <= 1
-    ? 54
-    : Math.max(24, 54 - (rosterCount - 1) * 4.2);
-  const spriteStep = rosterCount <= 1
-    ? 0
-    : Math.max(5.5, 13.5 - rosterCount * 0.85);
+function getRunRosterSpriteLayout(rosterCount: number, variant: 'showcase' | 'compact' = 'showcase') {
+  const spriteWidth = variant === 'compact'
+    ? rosterCount <= 1
+      ? 30
+      : Math.max(16, 30 - (rosterCount - 1) * 2.2)
+    : rosterCount <= 1
+      ? 54
+      : Math.max(24, 54 - (rosterCount - 1) * 4.2);
+  const spriteStep = variant === 'compact'
+    ? rosterCount <= 1
+      ? 0
+      : Math.max(6.2, 10.5 - rosterCount * 0.42)
+    : rosterCount <= 1
+      ? 0
+      : Math.max(5.5, 13.5 - rosterCount * 0.85);
 
   return { spriteWidth, spriteStep };
 }
@@ -1555,7 +1563,7 @@ function RunController({
 function DailyDraftPanel({ session, onPick }: { session: RunSession; onPick: (template: MinionTemplate) => void }) {
   const rosterCount = session.minions.length;
   const remaining = Math.max(0, MAX_FIELD_MINIONS - rosterCount);
-  const { spriteWidth: rosterSpriteWidth, spriteStep: rosterSpriteStep } = getRunRosterSpriteLayout(rosterCount);
+  const { spriteWidth: rosterSpriteWidth, spriteStep: rosterSpriteStep } = getRunRosterSpriteLayout(rosterCount, 'compact');
 
   return (
     <div className="run-draft-stage min-h-0">
@@ -1577,7 +1585,7 @@ function DailyDraftPanel({ session, onPick }: { session: RunSession; onPick: (te
         </div>
 
         <div
-          className="run-draft-hero-roster"
+          className="run-draft-hero-roster run-draft-hero-roster-compact"
           data-count={rosterCount}
           aria-label={`Warband ${rosterCount} of ${MAX_FIELD_MINIONS}`}
         >
