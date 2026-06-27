@@ -22,7 +22,7 @@ export const BOSS_PROFILES: BossProfile[] = [
     assetPath: '/assets/bosses/boss1.png',
     modelNumber: 4,
     personality: 'arcane',
-    minionTemplates: ['priest-cleric', 'priest-acolyte', 'templar-initiate'],
+    minionTemplates: ['darkpriest', 'witchdoc', 'bell', 'knight-squire'],
   },
   {
     id: 'ser-kael-duskplate',
@@ -33,7 +33,7 @@ export const BOSS_PROFILES: BossProfile[] = [
     assetPath: '/assets/bosses/boss2.png',
     modelNumber: 2,
     personality: 'defensive',
-    minionTemplates: ['templar-crusader', 'templar-initiate', 'knight-man-at-arms'],
+    minionTemplates: ['bell', 'crossbow', 'firelord', 'mercenary'],
   },
   {
     id: 'prior-moon-voss',
@@ -44,7 +44,7 @@ export const BOSS_PROFILES: BossProfile[] = [
     assetPath: '/assets/bosses/boss3.png',
     modelNumber: 5,
     personality: 'arcane',
-    minionTemplates: ['priest-cleric', 'wizard-magus', 'templar-crusader'],
+    minionTemplates: ['witchdoc', 'enchanter', 'plaugedoc', 'darkpriest'],
   },
   {
     id: 'key-saint-ardan',
@@ -55,7 +55,7 @@ export const BOSS_PROFILES: BossProfile[] = [
     assetPath: '/assets/bosses/boss4.png',
     modelNumber: 1,
     personality: 'balanced',
-    minionTemplates: ['templar-paragon', 'knight-champion', 'priest-cleric'],
+    minionTemplates: ['fallen', 'mercenary', 'bell', 'crossbow'],
   },
   {
     id: 'blackroot-vessel',
@@ -66,7 +66,7 @@ export const BOSS_PROFILES: BossProfile[] = [
     assetPath: '/assets/bosses/boss5.png',
     modelNumber: 6,
     personality: 'boss',
-    minionTemplates: ['templar-crusader', 'priest-high-priest', 'wizard-magus'],
+    minionTemplates: ['plaugedoc', 'fallen', 'enchanter', 'mercenary'],
   },
   {
     id: 'lady-mirror-veyra',
@@ -77,7 +77,7 @@ export const BOSS_PROFILES: BossProfile[] = [
     assetPath: '/assets/bosses/boss6.png',
     modelNumber: 5,
     personality: 'arcane',
-    minionTemplates: ['wizard-archmage', 'wizard-magus', 'priest-cleric'],
+    minionTemplates: ['enchanter', 'plaugedoc', 'witchdoc', 'crow'],
   },
   {
     id: 'scarlet-matron-yvane',
@@ -88,7 +88,7 @@ export const BOSS_PROFILES: BossProfile[] = [
     assetPath: '/assets/bosses/boss7.png',
     modelNumber: 6,
     personality: 'aggressive',
-    minionTemplates: ['wizard-magus', 'priest-high-priest', 'knight-champion'],
+    minionTemplates: ['crow', 'plaugedoc', 'firelord', 'witchdoc'],
   },
   {
     id: 'emperor-grave-aurel',
@@ -99,7 +99,7 @@ export const BOSS_PROFILES: BossProfile[] = [
     assetPath: '/assets/bosses/boss8.png',
     modelNumber: 6,
     personality: 'boss',
-    minionTemplates: ['templar-paragon', 'knight-champion', 'priest-high-priest', 'wizard-archmage'],
+    minionTemplates: ['mercenary', 'fallen', 'crow', 'plaugedoc', 'bell'],
   },
 ];
 

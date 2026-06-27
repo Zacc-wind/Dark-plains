@@ -105,7 +105,7 @@ export const DUNGEON_TEMPLATES: DungeonTemplate[] = [
     levelBonus: 0,
     bossModelNumber: 5,
     bossPersonality: 'defensive',
-    bossMinionTemplates: ['templar-initiate', 'priest-acolyte', 'knight-squire'],
+    bossMinionTemplates: ['darkpriest', 'witchdoc', 'bell', 'knight-squire'],
     description: 'A cellar under collapsed chapel stones where candle vows keep the dead obedient.',
   },
   {
@@ -119,7 +119,7 @@ export const DUNGEON_TEMPLATES: DungeonTemplate[] = [
     levelBonus: 2,
     bossModelNumber: 5,
     bossPersonality: 'arcane',
-    bossMinionTemplates: ['wizard-apprentice', 'priest-acolyte', 'templar-initiate'],
+    bossMinionTemplates: ['witchdoc', 'enchanter', 'darkpriest', 'knight-squire'],
     description: 'An old well stair where silver water repeats every oath spoken above it.',
   },
   {
@@ -133,7 +133,7 @@ export const DUNGEON_TEMPLATES: DungeonTemplate[] = [
     levelBonus: 3,
     bossModelNumber: 5,
     bossPersonality: 'defensive',
-    bossMinionTemplates: ['templar-initiate', 'knight-man-at-arms', 'priest-cleric'],
+    bossMinionTemplates: ['bell', 'crossbow', 'firelord', 'darkpriest'],
     description: 'A forest shrine swallowed by roots, votive bells, and half-buried saint masks.',
   },
   {
@@ -147,7 +147,7 @@ export const DUNGEON_TEMPLATES: DungeonTemplate[] = [
     levelBonus: 5,
     bossModelNumber: 5,
     bossPersonality: 'balanced',
-    bossMinionTemplates: ['knight-man-at-arms', 'templar-crusader', 'priest-cleric'],
+    bossMinionTemplates: ['fallen', 'bell', 'crossbow', 'darkpriest'],
     description: 'A flooded reliquary where old coins, icons, and bones glitter below dark water.',
   },
   {
@@ -161,7 +161,7 @@ export const DUNGEON_TEMPLATES: DungeonTemplate[] = [
     levelBonus: 6,
     bossModelNumber: 5,
     bossPersonality: 'arcane',
-    bossMinionTemplates: ['wizard-magus', 'templar-crusader', 'priest-cleric'],
+    bossMinionTemplates: ['enchanter', 'plaugedoc', 'witchdoc', 'crow'],
     description: 'A sealed vault of cold fire where stolen spellbooks burn without ash.',
   },
   {
@@ -175,7 +175,7 @@ export const DUNGEON_TEMPLATES: DungeonTemplate[] = [
     levelBonus: 8,
     bossModelNumber: 6,
     bossPersonality: 'boss',
-    bossMinionTemplates: ['templar-crusader', 'knight-champion', 'priest-cleric', 'wizard-magus'],
+    bossMinionTemplates: ['crow', 'plaugedoc', 'firelord', 'witchdoc'],
     description: 'A leaning tower that holds trials for commanders who never arrive innocent.',
   },
   {
@@ -189,7 +189,7 @@ export const DUNGEON_TEMPLATES: DungeonTemplate[] = [
     levelBonus: 10,
     bossModelNumber: 6,
     bossPersonality: 'aggressive',
-    bossMinionTemplates: ['knight-champion', 'templar-paragon', 'wizard-magus', 'priest-cleric'],
+    bossMinionTemplates: ['bell', 'crossbow', 'firelord', 'mercenary'],
     description: 'A sunken drill ground where armored voices chant under cracked bell metal.',
   },
   {
@@ -203,7 +203,7 @@ export const DUNGEON_TEMPLATES: DungeonTemplate[] = [
     levelBonus: 12,
     bossModelNumber: 6,
     bossPersonality: 'boss',
-    bossMinionTemplates: ['knight-champion', 'templar-paragon', 'wizard-archmage', 'priest-high-priest'],
+    bossMinionTemplates: ['mercenary', 'fallen', 'crow', 'plaugedoc', 'bell'],
     description: 'A sealed war tomb in boss country, still issuing commands through cracked stone.',
   },
 ];

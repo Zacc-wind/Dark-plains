@@ -16,7 +16,7 @@ values
       'name', 'Witch Doctor',
       'role', 'Standalone poison caster',
       'assetName', 'witchdoc.png',
-      'stats', jsonb_build_object('attack', 3, 'defense', 2, 'magic', 5, 'healing', 0, 'health', 20, 'movement', 3, 'range', 4),
+      'stats', jsonb_build_object('attack', 1, 'defense', 2, 'magic', 5, 'healing', 0, 'health', 20, 'movement', 3, 'range', 4),
       'mechanics', jsonb_build_array('poison-shot')
     ),
     now()
@@ -152,7 +152,7 @@ values
       'name', 'Plague Doctor',
       'role', 'Standalone poison marksman',
       'assetName', 'plaugedoc.png',
-      'stats', jsonb_build_object('attack', 7, 'defense', 6, 'magic', 11, 'healing', 0, 'health', 44, 'movement', 3, 'range', 4),
+      'stats', jsonb_build_object('attack', 5, 'defense', 6, 'magic', 11, 'healing', 0, 'health', 44, 'movement', 3, 'range', 4),
       'mechanics', jsonb_build_array('poison-shot')
     ),
     now()
@@ -246,7 +246,15 @@ values
     'combat-mechanic',
     1,
     true,
-    jsonb_build_object('unitTemplateIds', jsonb_build_array('crow', 'thief'), 'trigger', 'after attack resolution if alive', 'effect', 'may move one adjacent empty cell away from target; no extra attack/heal/cast'),
+    jsonb_build_object('unitTemplateIds', jsonb_build_array('crow', 'thief'), 'trigger', 'adjacent melee attack hit', 'effect', 'avoids melee retaliation, then may move one adjacent empty cell away from target; no extra attack/heal/cast'),
+    now()
+  ),
+  (
+    'combat-mechanic:healing-cleanse',
+    'combat-mechanic',
+    1,
+    true,
+    jsonb_build_object('unitClasses', jsonb_build_array('priest'), 'trigger', 'valid heal target', 'effect', 'healing removes poison and bleeding, and can target wounded or status-afflicted allies'),
     now()
   ),
   (

@@ -604,7 +604,7 @@ const ENEMY_ARCHETYPES: EnemyArchetype[] = [
     subtitle: 'Rogue commander',
     modelNumber: 1,
     personality: 'aggressive',
-    templates: ['thief', 'crossbow', 'witchdoc', 'darkpriest'],
+    templates: ['thief', 'crossbow', 'witchdoc', 'darkpriest', 'knight-squire'],
   },
   {
     id: 'black-pike-raider',
@@ -612,7 +612,7 @@ const ENEMY_ARCHETYPES: EnemyArchetype[] = [
     subtitle: 'Roadside warband',
     modelNumber: 2,
     personality: 'defensive',
-    templates: ['bell', 'crossbow', 'darkpriest', 'mercenary'],
+    templates: ['bell', 'crossbow', 'darkpriest', 'mercenary', 'knight-squire'],
   },
   {
     id: 'gravebound-magus',
@@ -636,7 +636,7 @@ const ENEMY_ARCHETYPES: EnemyArchetype[] = [
     subtitle: 'Relic oathbreaker',
     modelNumber: 4,
     personality: 'defensive',
-    templates: ['bell', 'darkpriest', 'crossbow', 'templar-initiate'],
+    templates: ['bell', 'darkpriest', 'crossbow', 'templar-initiate', 'knight-squire'],
   },
   {
     id: 'moonfen-witch',
@@ -1911,11 +1911,13 @@ export function canAttack(attacker: BattleUnit, target: BattleUnit): boolean {
 }
 
 export function canHeal(healer: BattleUnit, target: BattleUnit): boolean {
+  const cleansable = hasCleansableStatusEffect(target);
+
   return (
     isPriestHealer(healer) &&
     healer.side === target.side &&
     target.currentHealth > 0 &&
-    target.currentHealth < target.maxHealth &&
+    (target.currentHealth < target.maxHealth || cleansable) &&
     isInRangedReach(healer, target, getHealRange(healer))
   );
 }
@@ -2056,6 +2058,12 @@ function getTerrainDamageModifier(state: BattleState, attacker: BattleUnit, targ
   return modifier;
 }
 
+function getPoisonDirectDamagePenalty(attacker: BattleUnit): number {
+  if (attacker.templateId === 'witchdoc') return 5;
+  if (attacker.templateId === 'plaugedoc') return 4;
+  return 0;
+}
+
 export function getAttackDamage(attacker: BattleUnit, target: BattleUnit, state?: BattleState): number {
   const magicBonus = attacker.range > 1 ? Math.floor(attacker.magic / 2) : 0;
   const auraBonus = state ? getCommanderAuraBonus(state, attacker) : 0;
@@ -2064,8 +2072,9 @@ export function getAttackDamage(attacker: BattleUnit, target: BattleUnit, state?
   const guardPenalty = state && getGuardingAlly(state, target) ? 1 : 0;
   const commanderDuelBonus = attacker.kind === 'commander' && target.kind === 'commander' ? 3 : 0;
   const baseDamage = attacker.kind === 'commander' ? 6 : 5;
-  const rawDamage = attacker.attack + magicBonus + auraBonus + flankingBonus + terrainModifier + commanderDuelBonus + baseDamage;
-  const minimumDamage = attacker.kind === 'commander' ? 3 : 2;
+  const poisonDirectPenalty = getPoisonDirectDamagePenalty(attacker);
+  const rawDamage = attacker.attack + magicBonus + auraBonus + flankingBonus + terrainModifier + commanderDuelBonus + baseDamage - poisonDirectPenalty;
+  const minimumDamage = poisonDirectPenalty > 0 ? 1 : attacker.kind === 'commander' ? 3 : 2;
   return Math.max(minimumDamage, rawDamage - Math.ceil(target.defense / 3) - guardPenalty);
 }
 
@@ -2099,6 +2108,13 @@ function normalizeStatusEffects(effects?: BattleUnitStatusEffects): BattleUnitSt
   }
 
   return Object.keys(next).length > 0 ? next : undefined;
+}
+
+function hasCleansableStatusEffect(unit: BattleUnit): boolean {
+  return Boolean(
+    (unit.statusEffects?.bleedStacks || 0) > 0 ||
+    (unit.statusEffects?.poisonTurns || 0) > 0
+  );
 }
 
 function getBleedDamage(unit: BattleUnit): number {
@@ -2416,6 +2432,7 @@ export function attackBattleUnit(state: BattleState, attackerId: string, targetI
   const flanking = getFlankingBonus(state, attacker, target) > 0;
   const appliesBleed = isBleedStrikeUnit(attacker) && !defeated && !lastStand && Boolean(targetAfterHit && targetAfterHit.currentHealth > 0);
   const appliesPoison = isPoisonShotUnit(attacker) && !defeated && !lastStand && Boolean(targetAfterHit && targetAfterHit.currentHealth > 0);
+  const skirmishRetreatAttack = isSkirmishStepUnit(attacker) && attacker.range <= 1 && getDistance(attacker, target) <= 1;
   const statusState = appliesPoison
     ? applyPoisonToUnit(attackedState, target.id, getPoisonAttackDamage(attacker))
     : appliesBleed
@@ -2435,7 +2452,12 @@ export function attackBattleUnit(state: BattleState, attackerId: string, targetI
 
   const defenderAfterHit = resolvedState.units.find(unit => unit.id === targetId && unit.currentHealth > 0);
   const attackerAfterHit = resolvedState.units.find(unit => unit.id === attackerId && unit.currentHealth > 0);
-  const canRetaliate = Boolean(defenderAfterHit && attackerAfterHit && canRetaliateAfterAttack(resolvedState, attackerAfterHit, defenderAfterHit));
+  const canRetaliate = Boolean(
+    !skirmishRetreatAttack &&
+    defenderAfterHit &&
+    attackerAfterHit &&
+    canRetaliateAfterAttack(resolvedState, attackerAfterHit, defenderAfterHit)
+  );
 
   if (canRetaliate && defenderAfterHit && attackerAfterHit) {
     const retaliationDamage = getRetaliationDamage(resolvedState, attackerAfterHit, defenderAfterHit);
@@ -2483,20 +2505,22 @@ export function healBattleUnit(state: BattleState, healerId: string, targetId: s
 
   const healing = getHealAmount(healer, target, state);
   const nextHealth = Math.min(target.maxHealth, target.currentHealth + healing);
+  const cleansed = hasCleansableStatusEffect(target);
   const healedState = {
     ...state,
     units: state.units.map(unit => {
       let nextUnit = unit;
-      if (unit.id === targetId) nextUnit = { ...nextUnit, currentHealth: nextHealth };
+      if (unit.id === targetId) nextUnit = { ...nextUnit, currentHealth: nextHealth, statusEffects: undefined };
       if (unit.id === healerId) nextUnit = { ...nextUnit, chargedHeal: false };
       return nextUnit;
     }),
   };
   const chargedText = healer.chargedHeal ? ' with a stored blessing' : '';
+  const cleanseText = cleansed ? ' and cleanses poison and bleeding' : '';
 
   return withBattleLog(
     healedState,
-    `${healer.name} heals ${target.name}${chargedText} for ${nextHealth - target.currentHealth}.`,
+    `${healer.name} heals ${target.name}${chargedText} for ${nextHealth - target.currentHealth}${cleanseText}.`,
     { side: healer.side, actor: healer.name, actorId: healer.id, targetIds: [target.id], action: 'heal', style: 'heal' }
   );
 }
@@ -2697,7 +2721,11 @@ function healUnit(state: BattleState, targetId: string, amount: number): BattleS
     ...state,
     units: state.units.map(unit => {
       if (unit.id !== targetId || unit.currentHealth <= 0) return unit;
-      return { ...unit, currentHealth: Math.min(unit.maxHealth, unit.currentHealth + Math.max(1, amount)) };
+      return {
+        ...unit,
+        currentHealth: Math.min(unit.maxHealth, unit.currentHealth + Math.max(1, amount)),
+        statusEffects: undefined,
+      };
     }),
   };
 }
@@ -2895,6 +2923,7 @@ export function castBattleSpell(state: BattleState, spellId: string, targetId?: 
         nextState = mutateUnits(nextState, caster.side, unit => ({
           ...unit,
           currentHealth: Math.min(unit.maxHealth, unit.currentHealth + healing),
+          statusEffects: undefined,
           speed: unit.speed + 1,
         }));
         logMessage = `${caster.name} sings ${spell.name}, restoring up to ${healing} to all allies.`;
@@ -3000,6 +3029,7 @@ export function castBattleSpell(state: BattleState, spellId: string, targetId?: 
         nextState = mutateUnits(nextState, caster.side, unit => ({
           ...unit,
           currentHealth: Math.min(unit.maxHealth, unit.currentHealth + healing),
+          statusEffects: undefined,
           defense: unit.defense + 4,
         }));
         logMessage = `${caster.name} casts ${spell.name}, restoring up to ${healing} and shielding all allies.`;
@@ -3174,7 +3204,7 @@ function runBossSpecialAbility(state: BattleState, commander: BattleUnit): Battl
     ...incoming,
     units: incoming.units.map(unit => (
       unit.side === 'enemy' && unit.currentHealth > 0
-        ? { ...unit, currentHealth: Math.min(unit.maxHealth, unit.currentHealth + amount) }
+        ? { ...unit, currentHealth: Math.min(unit.maxHealth, unit.currentHealth + amount), statusEffects: undefined }
         : unit
     )),
   });

@@ -1628,9 +1628,9 @@ function DailyDraftPanel({ session, onPick }: { session: RunSession; onPick: (te
         </div>
 
         <div className="run-draft-grid grid min-h-0 gap-2 sm:grid-cols-2 xl:grid-cols-4">
-        {session.draftChoices.map(template => (
+        {session.draftChoices.map((template, index) => (
           <button
-            key={template.templateId}
+            key={`${template.templateId}-${index}`}
             onClick={() => onPick(template)}
               className={`run-draft-card run-draft-card-${template.tier} h-full text-left transition`}
               aria-label={`Pick ${template.name}. ${MINION_TIER_LABELS[template.tier]} ${MINION_CLASS_LABELS[template.class]}.`}
@@ -1642,7 +1642,7 @@ function DailyDraftPanel({ session, onPick }: { session: RunSession; onPick: (te
                     alt=""
                     fill
                     sizes="512px"
-                    className="run-draft-recruit-sprite object-contain object-center"
+                    className="run-draft-recruit-sprite object-contain object-bottom"
                     unoptimized
                   />
                 </span>
@@ -3079,7 +3079,7 @@ function CompletionPanel({
                         alt=""
                         fill
                         sizes="256px"
-                        className="run-draft-recruit-sprite object-contain object-center"
+                        className="run-draft-recruit-sprite object-contain object-bottom"
                         unoptimized
                       />
                     </span>
@@ -4308,10 +4308,15 @@ function getEnemyRunTemplatePool(tier: MinionTemplate['tier']): MinionTemplate[]
   const tierTemplates = MINION_TEMPLATES.filter(template => template.tier === tier);
   const standalone = tierTemplates.filter(template => isStandaloneMinionTemplate(template.templateId));
   const standard = tierTemplates.filter(template => !isStandaloneMinionTemplate(template.templateId));
+  const tierOneTank = tier === 'tier1'
+    ? tierTemplates.filter(template => template.templateId === 'knight-squire')
+    : [];
   const weighted = [
     ...standalone,
     ...standalone,
     ...standalone,
+    ...tierOneTank,
+    ...tierOneTank,
     ...standard,
   ];
 
@@ -4331,7 +4336,19 @@ function getDraftChoices(picksMade: number): MinionTemplate[] {
       ? ['tier1', 'tier2']
       : ['tier2', 'tier3'];
   const candidates = getPlayerRunTemplatePool(allowedTiers);
-  return shuffle(candidates).slice(0, 4);
+  const choices: MinionTemplate[] = [];
+  const seen = new Set<string>();
+  const addChoice = (template: MinionTemplate) => {
+    if (choices.length >= 4 || seen.has(template.templateId)) return;
+    seen.add(template.templateId);
+    choices.push(template);
+  };
+
+  shuffle(candidates).forEach(addChoice);
+  shuffle(MINION_TEMPLATES.filter(template => allowedTiers.includes(template.tier))).forEach(addChoice);
+  if (choices.length < 4) shuffle(MINION_TEMPLATES).forEach(addChoice);
+
+  return choices.slice(0, 4);
 }
 
 function addDraftMinion(session: RunSession, template: MinionTemplate): RunSession {
@@ -4609,6 +4626,7 @@ function downgradeBossEscortTemplateIds(templateIds: string[]): string[] {
 
   return templateIds.map(templateId => {
     const template = getMinionTemplate(templateId);
+    if (isStandaloneMinionTemplate(templateId)) return templateId;
     if (!template) return templateId;
     if (template.tier === 'tier3') {
       if (templateId === preservedTier3Id) return templateId;
@@ -4636,6 +4654,9 @@ function pickBossEscortTemplate(level: number, slot: number, bossTemplateIds: st
   const sourceTemplate = escortTemplateIds.length > 0
     ? getMinionTemplate(escortTemplateIds[slot % escortTemplateIds.length])
     : undefined;
+  if (sourceTemplate && (isStandaloneMinionTemplate(sourceTemplate.templateId) || sourceTemplate.templateId === 'knight-squire')) {
+    return sourceTemplate;
+  }
   const targetTier = finalBoss
     ? (slot % 4 === 1 ? 'tier2' : 'tier3')
     : slot === 0

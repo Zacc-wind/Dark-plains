@@ -12529,6 +12529,8 @@ button.vine-frame::before,
   border: none;
   background: transparent;
   overflow: hidden;
+  contain: paint;
+  clip-path: inset(0 round 0.25rem);
 }
 
 .run-draft-recruit-frame {
@@ -12538,6 +12540,8 @@ button.vine-frame::before,
   height: auto;
   max-width: none;
   overflow: hidden;
+  contain: paint;
+  clip-path: inset(0 round 0.2rem);
 }
 
 .run-draft-recruit-sprite {
