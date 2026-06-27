@@ -22,6 +22,12 @@ import {
   sendFriendRequest,
 } from '@/lib/auth';
 import { getPlayerModelPath } from '@/lib/assetLoader';
+import {
+  createOnlineBattleChallenge,
+  fetchOnlineBattleChallenges,
+  shouldUseOnlineChallenges,
+  updateOnlineBattleChallenge,
+} from '@/lib/pvpChallengeClient';
 
 interface PlayerListModalProps {
   isOpen: boolean;
@@ -56,6 +62,7 @@ export default function PlayerListModal({ isOpen, location, onClose }: PlayerLis
   const [socialNotice, setSocialNotice] = useState<string | null>(null);
   const currentUser = getCurrentUser();
   const socialState = getSocialState(currentUser);
+  const onlineChallengesEnabled = shouldUseOnlineChallenges();
   const players = useMemo(() => {
     if (!isOpen || !location) return [];
     return getPlayersAtLocation(location.x, location.y);
@@ -63,22 +70,51 @@ export default function PlayerListModal({ isOpen, location, onClose }: PlayerLis
 
   useEffect(() => {
     if (!isOpen) return;
+    let cancelled = false;
 
-    const refresh = () => {
+    const refresh = async () => {
       setNow(Date.now());
-      setChallenges(getBattleChallenges());
+      if (!onlineChallengesEnabled) {
+        setChallenges(getBattleChallenges());
+        return;
+      }
+
+      try {
+        const onlineChallenges = await fetchOnlineBattleChallenges();
+        if (!cancelled) setChallenges(onlineChallenges);
+      } catch (error) {
+        if (!cancelled) {
+          setChallenges(getBattleChallenges());
+          setSocialNotice(error instanceof Error ? error.message : 'Online challenges failed to load.');
+        }
+      }
     };
 
-    refresh();
+    void refresh();
     const interval = window.setInterval(refresh, 1000);
-    return () => window.clearInterval(interval);
-  }, [isOpen]);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [isOpen, onlineChallengesEnabled]);
 
   if (!isOpen || !location) return null;
 
-  const refreshChallenges = () => setChallenges(getBattleChallenges());
+  const refreshChallenges = async () => {
+    if (!onlineChallengesEnabled) {
+      setChallenges(getBattleChallenges());
+      return;
+    }
 
-  const handleChallenge = (targetUsername: string) => {
+    try {
+      setChallenges(await fetchOnlineBattleChallenges());
+    } catch (error) {
+      setChallenges(getBattleChallenges());
+      setSocialNotice(error instanceof Error ? error.message : 'Online challenges failed to load.');
+    }
+  };
+
+  const handleChallenge = async (targetUsername: string) => {
     const targetPlayer = players.find(player => player.username === targetUsername) || null;
     const challengeRule = canChallengePlayer(currentUser, targetPlayer);
     if (!challengeRule.allowed) {
@@ -87,29 +123,61 @@ export default function PlayerListModal({ isOpen, location, onClose }: PlayerLis
       return;
     }
 
-    const challenge = createBattleChallenge(targetUsername);
-    if (challengeRule.warning) {
+    try {
+      const challenge = onlineChallengesEnabled
+        ? await createOnlineBattleChallenge(targetUsername)
+        : createBattleChallenge(targetUsername);
+
+      if (challengeRule.warning) {
+        setExpandedPlayer(targetUsername);
+        setSocialNotice(challengeRule.warning);
+      } else {
+        setSocialNotice(challenge ? null : 'Challenge could not be created.');
+      }
+      await refreshChallenges();
+    } catch (error) {
       setExpandedPlayer(targetUsername);
-      setSocialNotice(challengeRule.warning);
-    } else {
-      setSocialNotice(challenge ? null : 'Challenge could not be created.');
+      setSocialNotice(error instanceof Error ? error.message : 'Challenge could not be created.');
     }
-    refreshChallenges();
   };
 
-  const handleConfirm = (challengeId: string) => {
-    confirmBattleChallenge(challengeId);
-    refreshChallenges();
+  const handleConfirm = async (challengeId: string) => {
+    try {
+      if (onlineChallengesEnabled) {
+        await updateOnlineBattleChallenge(challengeId, 'confirm');
+      } else {
+        confirmBattleChallenge(challengeId);
+      }
+      await refreshChallenges();
+    } catch (error) {
+      setSocialNotice(error instanceof Error ? error.message : 'Challenge could not be confirmed.');
+    }
   };
 
-  const handleDecline = (challengeId: string) => {
-    declineBattleChallenge(challengeId);
-    refreshChallenges();
+  const handleDecline = async (challengeId: string) => {
+    try {
+      if (onlineChallengesEnabled) {
+        await updateOnlineBattleChallenge(challengeId, 'decline');
+      } else {
+        declineBattleChallenge(challengeId);
+      }
+      await refreshChallenges();
+    } catch (error) {
+      setSocialNotice(error instanceof Error ? error.message : 'Challenge could not be declined.');
+    }
   };
 
-  const handleCancel = (challengeId: string) => {
-    cancelBattleChallenge(challengeId);
-    refreshChallenges();
+  const handleCancel = async (challengeId: string) => {
+    try {
+      if (onlineChallengesEnabled) {
+        await updateOnlineBattleChallenge(challengeId, 'cancel');
+      } else {
+        cancelBattleChallenge(challengeId);
+      }
+      await refreshChallenges();
+    } catch (error) {
+      setSocialNotice(error instanceof Error ? error.message : 'Challenge could not be cancelled.');
+    }
   };
 
   const handleInspect = (username: string) => {

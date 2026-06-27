@@ -22,6 +22,12 @@ interface RuntimeContext {
   dispose: () => void;
 }
 
+interface CombatFxRenderQuality {
+  renderScale: number;
+  pixelRatio: number;
+  maxEffects: number;
+}
+
 interface ParticleRuntime {
   points: THREE.Points<THREE.BufferGeometry, THREE.PointsMaterial>;
   velocity: Float32Array;
@@ -37,7 +43,24 @@ const COLORS = {
   shield: new THREE.Color(0x8fd8ff),
   gold: new THREE.Color(0xffcc45),
   debuff: new THREE.Color(0x9b5cff),
+  bleed: new THREE.Color(0x7f1d1d),
+  poison: new THREE.Color(0x4ade80),
 };
+
+function getCombatFxRenderQuality(width: number, height: number): CombatFxRenderQuality {
+  const area = width * height;
+  const deviceRatio = window.devicePixelRatio || 1;
+
+  if (area >= 4_200_000) {
+    return { renderScale: 0.5, pixelRatio: 1, maxEffects: 12 };
+  }
+
+  if (area >= 2_200_000) {
+    return { renderScale: 0.68, pixelRatio: Math.min(deviceRatio, 1.05), maxEffects: 16 };
+  }
+
+  return { renderScale: 1, pixelRatio: Math.min(deviceRatio, 1.25), maxEffects: 22 };
+}
 
 function disposeObject(object: THREE.Object3D): void {
   object.traverse(child => {
@@ -142,7 +165,7 @@ function updateParticles(runtime: ParticleRuntime, delta: number, progress: numb
 
 function makeRing(color: THREE.Color, inner: number, outer: number, opacity: number): THREE.Mesh<THREE.RingGeometry, THREE.MeshBasicMaterial> {
   const ring = new THREE.Mesh(
-    new THREE.RingGeometry(inner, outer, 64),
+    new THREE.RingGeometry(inner, outer, 40),
     makeMaterial(color, opacity)
   );
   return ring;
@@ -395,6 +418,7 @@ function createMoralePulse(origin: THREE.Vector3): RuntimeCombatEffect {
 function createRuntime(mount: HTMLDivElement): RuntimeContext {
   let width = Math.max(1, mount.clientWidth);
   let height = Math.max(1, mount.clientHeight);
+  let renderQuality = getCombatFxRenderQuality(width, height);
   let animationFrame = 0;
   let lastTime = performance.now();
   const effects: RuntimeCombatEffect[] = [];
@@ -404,33 +428,54 @@ function createRuntime(mount: HTMLDivElement): RuntimeContext {
 
   const renderer = new THREE.WebGLRenderer({
     alpha: true,
-    antialias: true,
+    antialias: false,
     powerPreference: 'high-performance',
-    preserveDrawingBuffer: true,
   });
   renderer.setClearColor(0x000000, 0);
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+  renderer.setPixelRatio(renderQuality.pixelRatio);
   renderer.domElement.className = 'combat-three-fx-canvas';
+  renderer.domElement.style.width = '100%';
+  renderer.domElement.style.height = '100%';
   mount.appendChild(renderer.domElement);
 
   const setSize = () => {
     width = Math.max(1, mount.clientWidth);
     height = Math.max(1, mount.clientHeight);
+    renderQuality = getCombatFxRenderQuality(width, height);
     camera.left = -width / 2;
     camera.right = width / 2;
     camera.top = height / 2;
     camera.bottom = -height / 2;
     camera.updateProjectionMatrix();
-    renderer.setSize(width, height, false);
+    renderer.setPixelRatio(renderQuality.pixelRatio);
+    renderer.setSize(
+      Math.max(1, Math.floor(width * renderQuality.renderScale)),
+      Math.max(1, Math.floor(height * renderQuality.renderScale)),
+      false
+    );
+    renderer.render(scene, camera);
   };
 
   setSize();
   const resizeObserver = new ResizeObserver(setSize);
   resizeObserver.observe(mount);
 
+  const requestAnimation = () => {
+    if (animationFrame) return;
+    lastTime = performance.now();
+    animationFrame = window.requestAnimationFrame(animate);
+  };
+
   const addEffect = (effect: RuntimeCombatEffect) => {
+    while (effects.length >= renderQuality.maxEffects) {
+      const staleEffect = effects.shift();
+      if (!staleEffect) break;
+      scene.remove(staleEffect.root);
+      disposeObject(staleEffect.root);
+    }
     effects.push(effect);
     scene.add(effect.root);
+    requestAnimation();
   };
 
   const spawnAtTargets = (
@@ -458,8 +503,6 @@ function createRuntime(mount: HTMLDivElement): RuntimeContext {
       addEffect(createMoveDust(actorCenter));
       return;
     }
-
-    const resolvedTargets = targets.length > 0 ? targets : actor ? [actor] : [];
 
     if (style === 'melee') {
       spawnAtTargets(targets, battle, origin => {
@@ -501,6 +544,16 @@ function createRuntime(mount: HTMLDivElement): RuntimeContext {
       return;
     }
 
+    if (style === 'bleed') {
+      spawnAtTargets(targets.length > 0 ? targets : actor ? [actor] : [], battle, origin => createSpellParticleBurst(origin, COLORS.bleed, COLORS.damage, 12));
+      return;
+    }
+
+    if (style === 'poison') {
+      spawnAtTargets(targets.length > 0 ? targets : actor ? [actor] : [], battle, origin => createSpellParticleBurst(origin, COLORS.poison, COLORS.debuff, 4));
+      return;
+    }
+
     if (style === 'heal' || style === 'spell-support') {
       spawnAtTargets(targets.length > 0 ? targets : actor ? [actor] : [], battle, origin => createHealPulse(origin));
       return;
@@ -531,7 +584,7 @@ function createRuntime(mount: HTMLDivElement): RuntimeContext {
     }
   };
 
-  const animate = (time: number) => {
+  function animate(time: number) {
     const delta = Math.min(0.04, (time - lastTime) / 1000);
     lastTime = time;
 
@@ -548,16 +601,14 @@ function createRuntime(mount: HTMLDivElement): RuntimeContext {
     }
 
     renderer.render(scene, camera);
-    animationFrame = window.requestAnimationFrame(animate);
-  };
-
-  animationFrame = window.requestAnimationFrame(animate);
+    animationFrame = effects.length > 0 ? window.requestAnimationFrame(animate) : 0;
+  }
 
   return {
     scene,
     spawnBattleLog,
     dispose: () => {
-      window.cancelAnimationFrame(animationFrame);
+      if (animationFrame) window.cancelAnimationFrame(animationFrame);
       resizeObserver.disconnect();
       effects.forEach(effect => {
         scene.remove(effect.root);

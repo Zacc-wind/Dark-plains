@@ -15,6 +15,14 @@ interface RuntimeBurst {
   ring?: THREE.Mesh<THREE.RingGeometry, THREE.MeshBasicMaterial>;
 }
 
+interface FxRenderQuality {
+  renderScale: number;
+  pixelRatio: number;
+  ambientCount: number;
+  burstScale: number;
+  ringSegments: number;
+}
+
 const EVENT_TONES: Record<FxEventType, FxTone> = {
   victory: 'gold',
   defeat: 'red',
@@ -58,6 +66,49 @@ function getBurstCount(type: FxEventType, intensity = 1): number {
             : type === 'attack' || type === 'status' ? 28
               : 44;
   return Math.round(base * Math.max(0.45, Math.min(1.65, intensity)));
+}
+
+function getFxRenderQuality(width: number, height: number): FxRenderQuality {
+  const area = width * height;
+  const deviceRatio = window.devicePixelRatio || 1;
+
+  if (area >= 7_000_000) {
+    return {
+      renderScale: 0.48,
+      pixelRatio: 1,
+      ambientCount: 34,
+      burstScale: 0.46,
+      ringSegments: 32,
+    };
+  }
+
+  if (area >= 3_600_000) {
+    return {
+      renderScale: 0.64,
+      pixelRatio: Math.min(deviceRatio, 1.05),
+      ambientCount: 52,
+      burstScale: 0.66,
+      ringSegments: 40,
+    };
+  }
+
+  if (area >= 2_400_000) {
+    return {
+      renderScale: 0.82,
+      pixelRatio: Math.min(deviceRatio, 1.15),
+      ambientCount: 68,
+      burstScale: 0.82,
+      ringSegments: 48,
+    };
+  }
+
+  return {
+    renderScale: 1,
+    pixelRatio: Math.min(deviceRatio, 1.35),
+    ambientCount: 85,
+    burstScale: 1,
+    ringSegments: 64,
+  };
 }
 
 function isRestrainedCombatFx(type: FxEventType): boolean {
@@ -107,6 +158,7 @@ export default function ThreeFxOverlay() {
 
     let width = Math.ceil(window.visualViewport?.width || window.innerWidth || 1);
     let height = Math.ceil(window.visualViewport?.height || window.innerHeight || 1);
+    let renderQuality = getFxRenderQuality(width, height);
     let animationFrame = 0;
     let lastTime = performance.now();
     const bursts: RuntimeBurst[] = [];
@@ -118,16 +170,22 @@ export default function ThreeFxOverlay() {
 
     const renderer = new THREE.WebGLRenderer({
       alpha: true,
-      antialias: true,
+      antialias: false,
       powerPreference: 'high-performance',
     });
     renderer.setClearColor(0x000000, 0);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
-    renderer.setSize(width, height, false);
+    renderer.setPixelRatio(renderQuality.pixelRatio);
+    renderer.setSize(
+      Math.max(1, Math.floor(width * renderQuality.renderScale)),
+      Math.max(1, Math.floor(height * renderQuality.renderScale)),
+      false
+    );
     renderer.domElement.className = 'three-fx-canvas';
+    renderer.domElement.style.width = '100%';
+    renderer.domElement.style.height = '100%';
     mount.appendChild(renderer.domElement);
 
-    const ambientCount = 85;
+    const ambientCount = renderQuality.ambientCount;
     const ambientPositions = new Float32Array(ambientCount * 3);
     const ambientColors = new Float32Array(ambientCount * 3);
     for (let index = 0; index < ambientCount; index += 1) {
@@ -157,7 +215,7 @@ export default function ThreeFxOverlay() {
     const spawnBurst = (event: FxEvent) => {
       const tone = getTone(event);
       const color = TONE_COLORS[tone];
-      const count = getBurstCount(event.type, event.intensity);
+      const count = Math.max(4, Math.round(getBurstCount(event.type, event.intensity) * renderQuality.burstScale));
       if (count <= 0) return;
       const positions = new Float32Array(count * 3);
       const velocities = new Float32Array(count * 3);
@@ -203,7 +261,7 @@ export default function ThreeFxOverlay() {
 
       let ring: RuntimeBurst['ring'];
       if (major || event.type === 'spell') {
-        const ringGeometry = new THREE.RingGeometry(18, major ? 26 : 22, 64);
+        const ringGeometry = new THREE.RingGeometry(18, major ? 26 : 22, renderQuality.ringSegments);
         const ringMaterial = new THREE.MeshBasicMaterial({
           color: new THREE.Color(color[0], color[1], color[2]),
           transparent: true,
@@ -238,7 +296,13 @@ export default function ThreeFxOverlay() {
     const handleResize = () => {
       width = Math.ceil(window.visualViewport?.width || window.innerWidth || 1);
       height = Math.ceil(window.visualViewport?.height || window.innerHeight || 1);
-      renderer.setSize(width, height, false);
+      renderQuality = getFxRenderQuality(width, height);
+      renderer.setPixelRatio(renderQuality.pixelRatio);
+      renderer.setSize(
+        Math.max(1, Math.floor(width * renderQuality.renderScale)),
+        Math.max(1, Math.floor(height * renderQuality.renderScale)),
+        false
+      );
       setCameraSize(camera, width, height);
 
       const positions = ambientGeometry.getAttribute('position') as THREE.BufferAttribute;

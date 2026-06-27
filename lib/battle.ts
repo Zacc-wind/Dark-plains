@@ -9,6 +9,7 @@ import {
   getCurrentUser,
   getUsers,
   getMinionTemplate,
+  isStandaloneMinionTemplate,
 } from './auth';
 import { getMinionAssetPath, getPlayerModelPath } from './assetLoader';
 import { readGameJson, removeGameStorageItem, writeGameJson } from './gameStore';
@@ -37,6 +38,8 @@ export type BattleLogStyle =
   | 'spell-drain'
   | 'spell-support'
   | 'spell-control'
+  | 'bleed'
+  | 'poison'
   | 'boss-phase'
   | 'boss-special';
 export type BattleChallengeStatus = 'pending' | 'ready' | 'declined' | 'expired' | 'cancelled';
@@ -51,6 +54,13 @@ export type BattleMapTag = 'open' | 'mountain' | 'water' | 'ruin' | 'forest' | '
 
 export interface BattleTerrainCell extends BoardCell {
   type: BattleTerrainType;
+}
+
+export interface BattleUnitStatusEffects {
+  bleedStacks?: number;
+  bleedTurns?: number;
+  poisonTurns?: number;
+  poisonDamage?: number;
 }
 
 export interface BattleMapTemplate {
@@ -123,10 +133,19 @@ export interface BattleUnit {
   y: number;
   retaliatedRound?: number;
   chargedHeal?: boolean;
+  supportAbilityUsed?: boolean;
+  statusEffects?: BattleUnitStatusEffects;
   slowDebuff?: {
     movementPenalty: number;
     speedPenalty: number;
   };
+}
+
+export type MinionSupportAbilityId = 'bell-march' | 'void-ward';
+
+export interface BattleSupportAura {
+  abilityId: MinionSupportAbilityId;
+  targetIds: string[];
 }
 
 export interface BattleSpell {
@@ -176,6 +195,7 @@ export interface BattleState {
   obstacles: BoardCell[];
   units: BattleUnit[];
   activeUnitId: string;
+  turnQueue?: string[];
   round: number;
   status: BattleStatus;
   mana: Record<BattleSide, number>;
@@ -186,6 +206,9 @@ export interface BattleState {
   bossPhase?: 1 | 2;
   bossSpecialRounds?: Record<string, number>;
   bossSpecialUses?: Record<string, number>;
+  bonusMoveUnitId?: string;
+  bonusMoveAwayFrom?: BoardCell;
+  supportAuras?: Record<string, BattleSupportAura>;
   createdAt: number;
 }
 
@@ -225,6 +248,11 @@ export const BATTLE_CONFIRM_WINDOW_MS = 60 * 1000;
 export const TURN_TIME_LIMIT_MS = 2 * 60 * 1000;
 export const MAX_PVP_DOWNCHALLENGE_LEVEL_GAP = 5;
 export const WORLD_ENEMY_CAP = 30;
+const BLEED_BASE_DAMAGE = 2;
+const BLEED_STACK_EXTRA_DAMAGE = 1;
+const BLEED_TURNS = 1;
+const POISON_TURNS = 2;
+const POISON_BASE_DAMAGE = 3;
 export const WORLD_ENEMY_CYCLE_MS = 24 * 60 * 60 * 1000;
 const WORLD_BOSS_CYCLE_MS = 60 * 60 * 1000;
 const WORLD_ENEMY_MOVE_STEP_MS = 8 * 60 * 1000;
@@ -576,7 +604,7 @@ const ENEMY_ARCHETYPES: EnemyArchetype[] = [
     subtitle: 'Rogue commander',
     modelNumber: 1,
     personality: 'aggressive',
-    templates: ['knight-squire', 'wizard-apprentice', 'priest-acolyte'],
+    templates: ['thief', 'crossbow', 'witchdoc', 'darkpriest'],
   },
   {
     id: 'black-pike-raider',
@@ -584,7 +612,7 @@ const ENEMY_ARCHETYPES: EnemyArchetype[] = [
     subtitle: 'Roadside warband',
     modelNumber: 2,
     personality: 'defensive',
-    templates: ['templar-initiate', 'knight-man-at-arms', 'priest-cleric'],
+    templates: ['bell', 'crossbow', 'darkpriest', 'mercenary'],
   },
   {
     id: 'gravebound-magus',
@@ -592,7 +620,7 @@ const ENEMY_ARCHETYPES: EnemyArchetype[] = [
     subtitle: 'Arcane patrol',
     modelNumber: 5,
     personality: 'arcane',
-    templates: ['wizard-magus', 'templar-crusader', 'priest-cleric'],
+    templates: ['enchanter', 'witchdoc', 'plaugedoc', 'firelord'],
   },
   {
     id: 'eclipsed-warlord',
@@ -600,7 +628,7 @@ const ENEMY_ARCHETYPES: EnemyArchetype[] = [
     subtitle: 'Southeastern boss',
     modelNumber: 6,
     personality: 'boss',
-    templates: ['knight-champion', 'templar-paragon', 'wizard-archmage', 'priest-high-priest'],
+    templates: ['mercenary', 'fallen', 'crow', 'plaugedoc', 'priest-high-priest'],
   },
   {
     id: 'candle-vow-zealot',
@@ -608,7 +636,7 @@ const ENEMY_ARCHETYPES: EnemyArchetype[] = [
     subtitle: 'Relic oathbreaker',
     modelNumber: 4,
     personality: 'defensive',
-    templates: ['templar-initiate', 'priest-acolyte', 'knight-squire'],
+    templates: ['bell', 'darkpriest', 'crossbow', 'templar-initiate'],
   },
   {
     id: 'moonfen-witch',
@@ -616,7 +644,7 @@ const ENEMY_ARCHETYPES: EnemyArchetype[] = [
     subtitle: 'Bog spellkeeper',
     modelNumber: 5,
     personality: 'arcane',
-    templates: ['wizard-apprentice', 'priest-cleric', 'templar-initiate'],
+    templates: ['witchdoc', 'enchanter', 'plaugedoc', 'darkpriest'],
   },
   {
     id: 'iron-choir-marshal',
@@ -624,7 +652,7 @@ const ENEMY_ARCHETYPES: EnemyArchetype[] = [
     subtitle: 'Bell-armored captain',
     modelNumber: 6,
     personality: 'balanced',
-    templates: ['knight-man-at-arms', 'templar-crusader', 'priest-cleric'],
+    templates: ['bell', 'archer', 'firelord', 'mercenary'],
   },
   {
     id: 'blackwater-reaver',
@@ -632,7 +660,7 @@ const ENEMY_ARCHETYPES: EnemyArchetype[] = [
     subtitle: 'Drowned road hunter',
     modelNumber: 2,
     personality: 'aggressive',
-    templates: ['knight-man-at-arms', 'wizard-magus', 'priest-cleric'],
+    templates: ['thief', 'crow', 'witchdoc', 'archer'],
   },
   {
     id: 'veil-captain',
@@ -640,7 +668,7 @@ const ENEMY_ARCHETYPES: EnemyArchetype[] = [
     subtitle: 'Masked field officer',
     modelNumber: 3,
     personality: 'balanced',
-    templates: ['knight-squire', 'templar-crusader', 'wizard-apprentice'],
+    templates: ['crossbow', 'enchanter', 'fallen', 'darkpriest'],
   },
   {
     id: 'saintless-adjudicator',
@@ -648,7 +676,7 @@ const ENEMY_ARCHETYPES: EnemyArchetype[] = [
     subtitle: 'High-road tyrant',
     modelNumber: 6,
     personality: 'boss',
-    templates: ['templar-paragon', 'knight-champion', 'priest-high-priest'],
+    templates: ['fallen', 'mercenary', 'crow', 'plaugedoc', 'templar-paragon'],
   },
 ];
 
@@ -1541,7 +1569,8 @@ export function createNpcBattleState(user: User, enemy: WorldEnemy, options: Cre
   ];
 
   const units = [...playerUnits, ...enemyUnits];
-  const firstUnit = getTurnOrder(units)[0];
+  const openingTurnOrder = getTurnOrder(units);
+  const firstUnit = openingTurnOrder[0];
   const openingLog = [
     createBattleLogEntry(
       { round: 1 },
@@ -1569,6 +1598,7 @@ export function createNpcBattleState(user: User, enemy: WorldEnemy, options: Cre
     obstacles: battleMap.obstacles,
     units,
     activeUnitId: firstUnit.id,
+    turnQueue: openingTurnOrder.slice(1).map(unit => unit.id),
     round: 1,
     status: 'active',
     mana: { player: 0, enemy: 0 },
@@ -1636,6 +1666,32 @@ export function getTurnOrder(units: BattleUnit[]): BattleUnit[] {
   return units
     .filter(unit => unit.currentHealth > 0)
     .sort((a, b) => getEffectiveSpeed(b) - getEffectiveSpeed(a) || a.id.localeCompare(b.id));
+}
+
+function getDerivedTurnQueue(state: BattleState): string[] {
+  const order = getTurnOrder(state.units);
+  const activeIndex = order.findIndex(unit => unit.id === state.activeUnitId);
+
+  if (activeIndex === -1) {
+    return order.map(unit => unit.id);
+  }
+
+  return order.slice(activeIndex + 1).map(unit => unit.id);
+}
+
+function getSanitizedTurnQueue(state: BattleState): string[] {
+  const liveIds = new Set(state.units.filter(unit => unit.currentHealth > 0).map(unit => unit.id));
+  const seenIds = new Set<string>(state.activeUnitId ? [state.activeUnitId] : []);
+  const sourceQueue = Array.isArray(state.turnQueue) ? state.turnQueue : getDerivedTurnQueue(state);
+  const queue: string[] = [];
+
+  sourceQueue.forEach(unitId => {
+    if (!liveIds.has(unitId) || seenIds.has(unitId)) return;
+    seenIds.add(unitId);
+    queue.push(unitId);
+  });
+
+  return queue;
 }
 
 export function getActiveUnit(state: BattleState): BattleUnit | undefined {
@@ -1741,6 +1797,99 @@ export function canMoveTo(state: BattleState, unit: BattleUnit, x: number, y: nu
   return cost !== undefined && cost > 0 && cost <= getMoveRange(unit);
 }
 
+function isSkirmishStepUnit(unit: BattleUnit | undefined): boolean {
+  return unit?.templateId === 'crow' || unit?.templateId === 'thief';
+}
+
+function isBleedStrikeUnit(unit: BattleUnit | undefined): boolean {
+  return unit?.templateId === 'crow' || unit?.templateId === 'thief';
+}
+
+function isPoisonShotUnit(unit: BattleUnit | undefined): boolean {
+  return unit?.templateId === 'plaugedoc' || unit?.templateId === 'witchdoc';
+}
+
+function canRawBonusMoveTo(state: BattleState, unit: BattleUnit, x: number, y: number): boolean {
+  return getDistance(unit, { x, y }) === 1 && canMoveTo(state, unit, x, y);
+}
+
+export function isBonusMovePending(state: BattleState, unit: BattleUnit | undefined): boolean {
+  return Boolean(
+    unit &&
+    state.status === 'active' &&
+    state.bonusMoveUnitId === unit.id &&
+    state.activeUnitId === unit.id &&
+    unit.currentHealth > 0 &&
+    isSkirmishStepUnit(unit)
+  );
+}
+
+export function getBonusMoveCells(state: BattleState, unit: BattleUnit): BoardCell[] {
+  if (!isBonusMovePending(state, unit)) return [];
+
+  const candidates: BoardCell[] = [];
+  for (let y = unit.y - 1; y <= unit.y + 1; y += 1) {
+    for (let x = unit.x - 1; x <= unit.x + 1; x += 1) {
+      if (getDistance(unit, { x, y }) !== 1) continue;
+      if (canRawBonusMoveTo(state, unit, x, y)) candidates.push({ x, y });
+    }
+  }
+
+  const awayFrom = state.bonusMoveAwayFrom;
+  if (!awayFrom) return candidates;
+
+  const currentDistance = getDistance(unit, awayFrom);
+  const awayCandidates = candidates.filter(cell => getDistance(cell, awayFrom) > currentDistance);
+  return awayCandidates.length > 0 ? awayCandidates : candidates;
+}
+
+export function canBonusMoveTo(state: BattleState, unit: BattleUnit, x: number, y: number): boolean {
+  return getBonusMoveCells(state, unit).some(cell => cell.x === x && cell.y === y);
+}
+
+export function moveBonusBattleUnit(state: BattleState, unitId: string, x: number, y: number): BattleState {
+  const unit = state.units.find(item => item.id === unitId && item.currentHealth > 0);
+  if (!unit || !canBonusMoveTo(state, unit, x, y)) return state;
+
+  const movedState = {
+    ...state,
+    bonusMoveUnitId: undefined,
+    bonusMoveAwayFrom: undefined,
+    units: state.units.map(item => item.id === unitId ? { ...item, x, y } : item),
+  };
+
+  return advanceBattleTurn(withBattleLog(movedState, `${unit.name} slips away after the strike.`, {
+    side: unit.side,
+    actor: unit.name,
+    actorId: unit.id,
+    targetIds: [unit.id],
+    action: 'move',
+    style: 'move',
+    fromX: unit.x,
+    fromY: unit.y,
+    toX: x,
+    toY: y,
+  }));
+}
+
+export function skipBonusBattleMove(state: BattleState, unitId: string): BattleState {
+  const unit = state.units.find(item => item.id === unitId && item.currentHealth > 0);
+  if (!unit || !isBonusMovePending(state, unit)) return state;
+
+  return advanceBattleTurn(withBattleLog({
+    ...state,
+    bonusMoveUnitId: undefined,
+    bonusMoveAwayFrom: undefined,
+  }, `${unit.name} holds after the strike.`, {
+    side: unit.side,
+    actor: unit.name,
+    actorId: unit.id,
+    targetIds: [unit.id],
+    action: 'wait',
+    style: 'guard',
+  }));
+}
+
 export function isInRangedReach(origin: BoardCell, target: BoardCell, range: number): boolean {
   // Terrain, mud, and intervening units do not block ranged attacks or heals.
   return getDistance(origin, target) <= range;
@@ -1773,6 +1922,89 @@ export function canHeal(healer: BattleUnit, target: BattleUnit): boolean {
 
 function canChargePriestHeal(unit: BattleUnit): boolean {
   return isPriestHealer(unit);
+}
+
+export interface MinionSupportAbility {
+  id: MinionSupportAbilityId;
+  name: string;
+  shortLabel: string;
+  description: string;
+}
+
+export function getMinionSupportAbility(unit: BattleUnit | undefined): MinionSupportAbility | null {
+  if (!unit || unit.kind !== 'minion' || unit.currentHealth <= 0 || unit.supportAbilityUsed) return null;
+
+  switch (unit.templateId) {
+    case 'bell':
+      return {
+        id: 'bell-march',
+        name: 'Bell March',
+        shortLabel: 'B',
+        description: 'Pass turn to give all living allies +1 movement until this Bell Warden acts again.',
+      };
+    case 'enchanter':
+      return {
+        id: 'void-ward',
+        name: 'Void Ward',
+        shortLabel: 'V',
+        description: 'Pass turn to give all living allies +3 defense until this Enchanter acts again.',
+      };
+    default:
+      return null;
+  }
+}
+
+function applySupportAuraDelta(unit: BattleUnit, abilityId: MinionSupportAbilityId, direction: 1 | -1): BattleUnit {
+  if (abilityId === 'bell-march') {
+    return {
+      ...unit,
+      movement: Math.max(1, unit.movement + direction),
+      speed: Math.max(1, unit.speed + direction),
+    };
+  }
+
+  if (abilityId === 'void-ward') {
+    return {
+      ...unit,
+      defense: Math.max(0, unit.defense + direction * 3),
+    };
+  }
+
+  return unit;
+}
+
+function clearSupportAura(state: BattleState, casterId: string): BattleState {
+  const aura = state.supportAuras?.[casterId];
+
+  if (!aura) {
+    if (!state.units.some(unit => unit.id === casterId && unit.supportAbilityUsed)) return state;
+    return {
+      ...state,
+      units: state.units.map(unit => (
+        unit.id === casterId ? { ...unit, supportAbilityUsed: false } : unit
+      )),
+    };
+  }
+
+  const nextAuras = { ...(state.supportAuras || {}) };
+  delete nextAuras[casterId];
+  const targetIds = new Set(aura.targetIds);
+
+  return {
+    ...state,
+    supportAuras: Object.keys(nextAuras).length > 0 ? nextAuras : undefined,
+    units: state.units.map(unit => {
+      let nextUnit = targetIds.has(unit.id)
+        ? applySupportAuraDelta(unit, aura.abilityId, -1)
+        : unit;
+
+      if (unit.id === casterId) {
+        nextUnit = { ...nextUnit, supportAbilityUsed: false };
+      }
+
+      return nextUnit;
+    }),
+  };
 }
 
 function getAdjacentAllies(state: BattleState, unit: BattleUnit): BattleUnit[] {
@@ -1848,7 +2080,123 @@ export function canRetaliateAfterAttack(state: BattleState, attacker: BattleUnit
 }
 
 export function getRetaliationDamage(state: BattleState, attacker: BattleUnit, defender: BattleUnit): number {
-  return Math.max(1, Math.floor(getAttackDamage(defender, attacker, state) * 0.45));
+  const multiplier = defender.templateId === 'mercenary' ? 0.85 : 0.45;
+  const bonus = defender.templateId === 'mercenary' ? 3 : 0;
+  return Math.max(1, Math.floor(getAttackDamage(defender, attacker, state) * multiplier) + bonus);
+}
+
+function normalizeStatusEffects(effects?: BattleUnitStatusEffects): BattleUnitStatusEffects | undefined {
+  if (!effects) return undefined;
+
+  const next: BattleUnitStatusEffects = {};
+  if ((effects.bleedStacks ?? 0) > 0 && (effects.bleedTurns ?? 0) > 0) {
+    next.bleedStacks = Math.max(1, Math.floor(effects.bleedStacks || 1));
+    next.bleedTurns = Math.max(1, Math.floor(effects.bleedTurns || 1));
+  }
+  if ((effects.poisonTurns ?? 0) > 0 && (effects.poisonDamage ?? 0) > 0) {
+    next.poisonTurns = Math.max(1, Math.floor(effects.poisonTurns || 1));
+    next.poisonDamage = Math.max(1, Math.floor(effects.poisonDamage || POISON_BASE_DAMAGE));
+  }
+
+  return Object.keys(next).length > 0 ? next : undefined;
+}
+
+function getBleedDamage(unit: BattleUnit): number {
+  const stacks = Math.max(0, Math.floor(unit.statusEffects?.bleedStacks || 0));
+  if (stacks <= 0) return 0;
+  return stacks * BLEED_BASE_DAMAGE + Math.max(0, stacks - 1) * BLEED_STACK_EXTRA_DAMAGE;
+}
+
+function getPoisonAttackDamage(attacker: BattleUnit): number {
+  return Math.max(POISON_BASE_DAMAGE, Math.floor(attacker.magic / 3) + 2);
+}
+
+function applyBleedToUnit(state: BattleState, targetId: string): BattleState {
+  return {
+    ...state,
+    units: state.units.map(unit => {
+      if (unit.id !== targetId || unit.currentHealth <= 0) return unit;
+      const effects = unit.statusEffects || {};
+      return {
+        ...unit,
+        statusEffects: normalizeStatusEffects({
+          ...effects,
+          bleedStacks: Math.max(0, effects.bleedStacks || 0) + 1,
+          bleedTurns: BLEED_TURNS,
+        }),
+      };
+    }),
+  };
+}
+
+function applyPoisonToUnit(state: BattleState, targetId: string, damage: number): BattleState {
+  return {
+    ...state,
+    units: state.units.map(unit => {
+      if (unit.id !== targetId || unit.currentHealth <= 0) return unit;
+      const effects = unit.statusEffects || {};
+      return {
+        ...unit,
+        statusEffects: normalizeStatusEffects({
+          ...effects,
+          poisonTurns: POISON_TURNS,
+          poisonDamage: Math.max(effects.poisonDamage || 0, damage),
+        }),
+      };
+    }),
+  };
+}
+
+function updateUnitStatusEffects(state: BattleState, unitId: string, update: (effects: BattleUnitStatusEffects) => BattleUnitStatusEffects | undefined): BattleState {
+  return {
+    ...state,
+    units: state.units.map(unit => (
+      unit.id === unitId
+        ? { ...unit, statusEffects: normalizeStatusEffects(update(unit.statusEffects || {})) }
+        : unit
+    )),
+  };
+}
+
+function applyStartOfTurnStatusEffects(state: BattleState, unitId: string): BattleState {
+  let nextState = state;
+  let unit = nextState.units.find(item => item.id === unitId && item.currentHealth > 0);
+  if (!unit) return nextState;
+
+  const bleedDamage = getBleedDamage(unit);
+  if (bleedDamage > 0) {
+    const { state: damagedState, lastStand } = applyDamageToUnit(nextState, unit.id, bleedDamage);
+    nextState = updateUnitStatusEffects(damagedState, unit.id, effects => ({
+      ...effects,
+      bleedStacks: undefined,
+      bleedTurns: Math.max(0, (effects.bleedTurns || 0) - 1),
+    }));
+    nextState = withBattleLog(
+      nextState,
+      `${unit.name} bleeds for ${bleedDamage}${lastStand ? ', but the boss endures' : ''}.`,
+      { side: unit.side, actor: unit.name, actorId: unit.id, targetIds: [unit.id], action: 'spell', style: 'bleed', spellId: 'bleed' }
+    );
+  }
+
+  nextState = updateBattleStatus(nextState);
+  unit = nextState.units.find(item => item.id === unitId && item.currentHealth > 0);
+  if (!unit || nextState.status !== 'active') return nextState;
+
+  const poisonDamage = Math.max(0, Math.floor(unit.statusEffects?.poisonDamage || 0));
+  if (poisonDamage > 0 && (unit.statusEffects?.poisonTurns || 0) > 0) {
+    const { state: damagedState, lastStand } = applyDamageToUnit(nextState, unit.id, poisonDamage);
+    nextState = updateUnitStatusEffects(damagedState, unit.id, effects => ({
+      ...effects,
+      poisonTurns: Math.max(0, (effects.poisonTurns || 0) - 1),
+    }));
+    nextState = withBattleLog(
+      nextState,
+      `${unit.name} suffers ${poisonDamage} poison${lastStand ? ', but the boss endures' : ''}.`,
+      { side: unit.side, actor: unit.name, actorId: unit.id, targetIds: [unit.id], action: 'spell', style: 'poison', spellId: 'poison' }
+    );
+  }
+
+  return updateBattleStatus(nextState);
 }
 
 export function getHealAmount(healer: BattleUnit, target: BattleUnit, state?: BattleState): number {
@@ -1900,6 +2248,25 @@ function applyRoundMoraleEvents(state: BattleState): BattleState {
   }, state);
 }
 
+function activateNextBattleUnit(state: BattleState, unit: BattleUnit, turnQueue: string[]): BattleState {
+  const activatedState = {
+    ...state,
+    activeUnitId: unit.id,
+    turnQueue,
+    turnStartedAt: Date.now(),
+    bonusMoveUnitId: undefined,
+    bonusMoveAwayFrom: undefined,
+  };
+  const auraExpiredState = clearSupportAura(activatedState, unit.id);
+  const statusTickState = applyStartOfTurnStatusEffects(auraExpiredState, unit.id);
+  const updatedState = updateBattleStatus(statusTickState);
+  if (updatedState.status !== 'active') return updatedState;
+
+  const activeUnit = updatedState.units.find(item => item.id === unit.id && item.currentHealth > 0);
+  if (!activeUnit) return advanceBattleTurn(updatedState);
+  return grantCommanderMana(updatedState, activeUnit);
+}
+
 export function advanceBattleTurn(state: BattleState): BattleState {
   const updatedState = updateBattleStatus(state);
   if (updatedState.status !== 'active') return updatedState;
@@ -1914,26 +2281,32 @@ export function advanceBattleTurn(state: BattleState): BattleState {
     }
     : updatedState;
 
-  const order = getTurnOrder(stateWithClearedSlow.units);
-  const currentIndex = order.findIndex(unit => unit.id === stateWithClearedSlow.activeUnitId);
-  const nextIndex = currentIndex === -1 ? 0 : (currentIndex + 1) % order.length;
-  const nextRound = nextIndex === 0 ? stateWithClearedSlow.round + 1 : stateWithClearedSlow.round;
-  const nextState = {
-    ...stateWithClearedSlow,
-    activeUnitId: order[nextIndex].id,
-    round: nextRound,
-    turnStartedAt: Date.now(),
-  };
-  const nextStateWithMana = grantCommanderMana(nextState, order[nextIndex]);
-  const nextStateWithMorale = nextRound !== updatedState.round
-    ? applyRoundMoraleEvents(nextStateWithMana)
-    : nextStateWithMana;
+  const queue = getSanitizedTurnQueue(stateWithClearedSlow);
+  const queuedNextUnit = queue.length > 0
+    ? stateWithClearedSlow.units.find(unit => unit.id === queue[0] && unit.currentHealth > 0)
+    : undefined;
 
-  if (nextRound !== updatedState.round) {
-    return withBattleLog(nextStateWithMorale, `Round ${nextRound} begins.`, { action: 'round' });
+  if (queuedNextUnit) {
+    return activateNextBattleUnit(stateWithClearedSlow, queuedNextUnit, queue.slice(1));
   }
 
-  return nextStateWithMorale;
+  const nextRound = stateWithClearedSlow.round + 1;
+  const roundState = applyRoundMoraleEvents({
+    ...stateWithClearedSlow,
+    round: nextRound,
+    turnQueue: [],
+    turnStartedAt: Date.now(),
+  });
+  const nextRoundOrder = getTurnOrder(roundState.units);
+  const nextActiveUnit = nextRoundOrder[0];
+
+  if (!nextActiveUnit) return updateBattleStatus(roundState);
+
+  return activateNextBattleUnit(
+    withBattleLog(roundState, `Round ${nextRound} begins.`, { action: 'round' }),
+    nextActiveUnit,
+    nextRoundOrder.slice(1).map(unit => unit.id)
+  );
 }
 
 export function waitBattleUnit(state: BattleState, unitId: string, message?: string, action: BattleLogAction = 'wait'): BattleState {
@@ -1958,6 +2331,43 @@ export function waitBattleUnit(state: BattleState, unitId: string, message?: str
     nextState,
     logMessage,
     { side: unit.side, actor: unit.name, actorId: unit.id, targetIds: [unit.id], action, style }
+  ));
+}
+
+export function applyMinionSupportAbility(state: BattleState, unitId: string): BattleState {
+  const unit = state.units.find(item => item.id === unitId && item.currentHealth > 0);
+  const ability = getMinionSupportAbility(unit);
+  if (!unit || !ability) return waitBattleUnit(state, unitId);
+
+  const targetIds = state.units
+    .filter(item => item.side === unit.side && item.currentHealth > 0)
+    .map(item => item.id);
+
+  const supportedState = {
+    ...state,
+    supportAuras: {
+      ...(state.supportAuras || {}),
+      [unit.id]: { abilityId: ability.id, targetIds },
+    },
+    units: state.units.map(item => {
+      if (item.id === unit.id) {
+        const nextUnit = { ...item, supportAbilityUsed: true };
+        return applySupportAuraDelta(nextUnit, ability.id, 1);
+      }
+
+      if (item.side !== unit.side || item.currentHealth <= 0) return item;
+      return applySupportAuraDelta(item, ability.id, 1);
+    }),
+  };
+
+  const message = ability.id === 'bell-march'
+    ? `${unit.name} tolls the march bell. Allied movement rises.`
+    : `${unit.name} casts a void ward. Allied defense rises.`;
+
+  return advanceBattleTurn(withBattleLog(
+    supportedState,
+    message,
+    { side: unit.side, actor: unit.name, actorId: unit.id, targetIds, action: 'wait', style: 'buff' }
   ));
 }
 
@@ -2004,10 +2414,22 @@ export function attackBattleUnit(state: BattleState, attackerId: string, targetI
   const defeated = !lastStand && (!targetAfterHit || targetAfterHit.currentHealth <= 0);
   const guard = getGuardingAlly(state, target);
   const flanking = getFlankingBonus(state, attacker, target) > 0;
+  const appliesBleed = isBleedStrikeUnit(attacker) && !defeated && !lastStand && Boolean(targetAfterHit && targetAfterHit.currentHealth > 0);
+  const appliesPoison = isPoisonShotUnit(attacker) && !defeated && !lastStand && Boolean(targetAfterHit && targetAfterHit.currentHealth > 0);
+  const statusState = appliesPoison
+    ? applyPoisonToUnit(attackedState, target.id, getPoisonAttackDamage(attacker))
+    : appliesBleed
+      ? applyBleedToUnit(attackedState, target.id)
+      : attackedState;
+  const statusText = appliesPoison
+    ? ' and leaves poison in the wound'
+    : appliesBleed
+      ? ' and opens a bleeding wound'
+      : '';
 
   let resolvedState = withBattleLog(
-    attackedState,
-    `${attacker.name} hits ${target.name} for ${damage}${flanking ? ' with a flank' : ''}${guard ? ` through ${guard.name}'s guard` : ''}${defeated ? ' and defeats it' : ''}${lastStand ? ', but the boss endures.' : ''}.`,
+    statusState,
+    `${attacker.name} hits ${target.name} for ${damage}${flanking ? ' with a flank' : ''}${guard ? ` through ${guard.name}'s guard` : ''}${statusText}${defeated ? ' and defeats it' : ''}${lastStand ? ', but the boss endures.' : ''}.`,
     { side: attacker.side, actor: attacker.name, actorId: attacker.id, targetIds: [target.id], action: 'attack', style: attacker.range > 1 ? 'ranged' : 'melee' }
   );
 
@@ -2035,7 +2457,22 @@ export function attackBattleUnit(state: BattleState, attackerId: string, targetI
     );
   }
 
-  return updateBattleStatus(resolvedState);
+  const updatedState = updateBattleStatus(resolvedState);
+  const attackerAfterResolution = updatedState.units.find(unit => unit.id === attackerId && unit.currentHealth > 0);
+  if (
+    updatedState.status === 'active' &&
+    isSkirmishStepUnit(attackerAfterResolution) &&
+    attackerAfterResolution?.side === attacker.side
+  ) {
+    return {
+      ...updatedState,
+      activeUnitId: attackerAfterResolution.id,
+      bonusMoveUnitId: attackerAfterResolution.id,
+      bonusMoveAwayFrom: { x: target.x, y: target.y },
+    };
+  }
+
+  return updatedState;
 }
 
 export function healBattleUnit(state: BattleState, healerId: string, targetId: string): BattleState {
@@ -2075,6 +2512,7 @@ function isBossCommanderLethalTrigger(unit: BattleUnit, state: BattleState): boo
 
 function upgradeMinionTemplateId(templateId: string): string {
   const template = getMinionTemplate(templateId);
+  if (isStandaloneMinionTemplate(templateId)) return templateId;
   if (!template || template.tier === 'tier3') return templateId;
 
   const nextTier: MinionTier = template.tier === 'tier1' ? 'tier2' : 'tier3';
@@ -2231,15 +2669,21 @@ function applyDamageToUnit(state: BattleState, targetId: string, damage: number)
     return { state: applyBossLastStand(state, target), lastStand: true };
   }
 
+  const damagedState = {
+    ...state,
+    units: state.units.map(unit => {
+      if (unit.id !== targetId) return unit;
+      const currentHealth = Math.max(0, nextHealth);
+      return {
+        ...unit,
+        currentHealth,
+        statusEffects: currentHealth > 0 ? unit.statusEffects : undefined,
+      };
+    }),
+  };
+
   return {
-    state: {
-      ...state,
-      units: state.units.map(unit => (
-        unit.id === targetId
-          ? { ...unit, currentHealth: Math.max(0, nextHealth) }
-          : unit
-      )),
-    },
+    state: nextHealth <= 0 ? clearSupportAura(damagedState, targetId) : damagedState,
     lastStand: false,
   };
 }
@@ -3003,8 +3447,8 @@ function scoreEnemyMoveCell(
 }
 
 export function runEnemyBattleTurn(state: BattleState): BattleState {
-  let currentState = state;
-  let activeUnit = getActiveUnit(currentState);
+  const currentState = state;
+  const activeUnit = getActiveUnit(currentState);
   if (!activeUnit || activeUnit.side !== 'enemy' || currentState.status !== 'active') return currentState;
   const personality = currentState.enemy.personality || 'balanced';
 
@@ -3014,6 +3458,15 @@ export function runEnemyBattleTurn(state: BattleState): BattleState {
 
     const spellState = runEnemyCommanderSpell(currentState, activeUnit, personality);
     if (spellState) return spellState;
+  }
+
+  const supportAbility = getMinionSupportAbility(activeUnit);
+  const livingAllies = supportAbility
+    ? currentState.units.filter(unit => unit.side === activeUnit.side && unit.currentHealth > 0)
+    : [];
+  const supportChance = personality === 'defensive' || personality === 'boss' ? 0.68 : 0.48;
+  if (supportAbility && livingAllies.length > 1 && Math.random() < supportChance) {
+    return applyMinionSupportAbility(currentState, activeUnit.id);
   }
 
   const healTargets = getHealTargets(currentState, activeUnit);
@@ -3026,7 +3479,17 @@ export function runEnemyBattleTurn(state: BattleState): BattleState {
   if (attackTargets.length > 0) {
     const rankedTargets = sortTargetsForPersonality(personality, activeUnit, attackTargets, currentState);
     const target = personality === 'balanced' ? getRandomItem(rankedTargets) || rankedTargets[0] : rankedTargets[0];
-    return advanceBattleTurn(attackBattleUnit(currentState, activeUnit.id, target.id));
+    const attackedState = attackBattleUnit(currentState, activeUnit.id, target.id);
+    const attackerAfterAttack = attackedState.units.find(unit => unit.id === activeUnit.id && unit.currentHealth > 0);
+    if (attackerAfterAttack && isBonusMovePending(attackedState, attackerAfterAttack)) {
+      const bonusCells = getBonusMoveCells(attackedState, attackerAfterAttack)
+        .sort((a, b) => scoreEnemyMoveCell(attackedState, attackerAfterAttack, a, target, personality) - scoreEnemyMoveCell(attackedState, attackerAfterAttack, b, target, personality));
+      const bestBonusCell = bonusCells[0];
+      return bestBonusCell
+        ? moveBonusBattleUnit(attackedState, attackerAfterAttack.id, bestBonusCell.x, bestBonusCell.y)
+        : skipBonusBattleMove(attackedState, attackerAfterAttack.id);
+    }
+    return advanceBattleTurn(attackedState);
   }
 
   const playerTargets = currentState.units.filter(unit => unit.side === 'player' && unit.currentHealth > 0);

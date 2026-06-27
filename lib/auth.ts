@@ -1523,6 +1523,15 @@ export const MINION_TEMPLATES: MinionTemplate[] = [
     stats: { attack: 3, defense: 1, magic: 6, healing: 0, health: 16, movement: 3, range: 4 },
   },
   {
+    templateId: 'witchdoc',
+    class: 'wizard',
+    tier: 'tier1',
+    name: 'Witch Doctor',
+    role: 'Standalone poison caster',
+    assetName: 'witchdoc.png',
+    stats: { attack: 3, defense: 2, magic: 5, healing: 0, health: 20, movement: 3, range: 4 },
+  },
+  {
     templateId: 'wizard-magus',
     class: 'wizard',
     tier: 'tier2',
@@ -1530,6 +1539,15 @@ export const MINION_TEMPLATES: MinionTemplate[] = [
     role: 'Mid-tier spellcaster',
     assetName: 'wizard-magus.png',
     stats: { attack: 5, defense: 2, magic: 10, healing: 0, health: 24, movement: 3, range: 4 },
+  },
+  {
+    templateId: 'enchanter',
+    class: 'wizard',
+    tier: 'tier2',
+    name: 'Void Enchanter',
+    role: 'Standalone ward support',
+    assetName: 'enchanter.png',
+    stats: { attack: 3, defense: 4, magic: 9, healing: 0, health: 28, movement: 3, range: 3 },
   },
   {
     templateId: 'wizard-archmage',
@@ -1541,6 +1559,15 @@ export const MINION_TEMPLATES: MinionTemplate[] = [
     stats: { attack: 7, defense: 4, magic: 16, healing: 0, health: 34, movement: 3, range: 5 },
   },
   {
+    templateId: 'plaugedoc',
+    class: 'wizard',
+    tier: 'tier3',
+    name: 'Plague Doctor',
+    role: 'Standalone poison marksman',
+    assetName: 'plaugedoc.png',
+    stats: { attack: 7, defense: 6, magic: 11, healing: 0, health: 44, movement: 3, range: 4 },
+  },
+  {
     templateId: 'knight-squire',
     class: 'knight',
     tier: 'tier1',
@@ -1548,6 +1575,24 @@ export const MINION_TEMPLATES: MinionTemplate[] = [
     role: 'Low-tier melee guard',
     assetName: 'knight-squire.png',
     stats: { attack: 5, defense: 5, magic: 0, healing: 0, health: 30, movement: 2, range: 1 },
+  },
+  {
+    templateId: 'crossbow',
+    class: 'knight',
+    tier: 'tier1',
+    name: 'Crossbowman',
+    role: 'Standalone ranged guard',
+    assetName: 'crossbow.png',
+    stats: { attack: 4, defense: 3, magic: 0, healing: 0, health: 26, movement: 2, range: 4 },
+  },
+  {
+    templateId: 'thief',
+    class: 'knight',
+    tier: 'tier1',
+    name: 'Road Thief',
+    role: 'Standalone skirmisher',
+    assetName: 'thief.png',
+    stats: { attack: 6, defense: 2, magic: 0, healing: 0, health: 22, movement: 4, range: 1 },
   },
   {
     templateId: 'knight-man-at-arms',
@@ -1559,6 +1604,24 @@ export const MINION_TEMPLATES: MinionTemplate[] = [
     stats: { attack: 8, defense: 8, magic: 0, healing: 0, health: 46, movement: 2, range: 1 },
   },
   {
+    templateId: 'firelord',
+    class: 'knight',
+    tier: 'tier2',
+    name: 'Firelord',
+    role: 'Standalone melee assassin',
+    assetName: 'firelord.png',
+    stats: { attack: 11, defense: 4, magic: 4, healing: 0, health: 34, movement: 3, range: 1 },
+  },
+  {
+    templateId: 'archer',
+    class: 'knight',
+    tier: 'tier2',
+    name: 'Road Archer',
+    role: 'Standalone ranged striker',
+    assetName: 'archer.png',
+    stats: { attack: 8, defense: 4, magic: 0, healing: 0, health: 32, movement: 3, range: 4 },
+  },
+  {
     templateId: 'knight-champion',
     class: 'knight',
     tier: 'tier3',
@@ -1566,6 +1629,33 @@ export const MINION_TEMPLATES: MinionTemplate[] = [
     role: 'High-tier melee guard',
     assetName: 'knight-champion.png',
     stats: { attack: 12, defense: 12, magic: 0, healing: 0, health: 70, movement: 2, range: 1 },
+  },
+  {
+    templateId: 'fallen',
+    class: 'knight',
+    tier: 'tier3',
+    name: 'Fallen Wing Knight',
+    role: 'Standalone mobile tank',
+    assetName: 'fallen.png',
+    stats: { attack: 10, defense: 13, magic: 2, healing: 0, health: 76, movement: 4, range: 1 },
+  },
+  {
+    templateId: 'mercenary',
+    class: 'knight',
+    tier: 'tier3',
+    name: 'Grave Mercenary',
+    role: 'Standalone retaliation tank',
+    assetName: 'mercenary.png',
+    stats: { attack: 9, defense: 16, magic: 0, healing: 0, health: 92, movement: 1, range: 1 },
+  },
+  {
+    templateId: 'crow',
+    class: 'knight',
+    tier: 'tier3',
+    name: 'Crowblade Assassin',
+    role: 'Standalone bleed skirmisher',
+    assetName: 'crow.png',
+    stats: { attack: 11, defense: 6, magic: 2, healing: 0, health: 48, movement: 4, range: 1 },
   },
   {
     templateId: 'templar-initiate',
@@ -1586,6 +1676,15 @@ export const MINION_TEMPLATES: MinionTemplate[] = [
     stats: { attack: 7, defense: 10, magic: 3, healing: 0, health: 52, movement: 2, range: 1 },
   },
   {
+    templateId: 'bell',
+    class: 'templar',
+    tier: 'tier2',
+    name: 'Bell Warden',
+    role: 'Standalone tank support',
+    assetName: 'bell.png',
+    stats: { attack: 5, defense: 13, magic: 3, healing: 0, health: 62, movement: 2, range: 1 },
+  },
+  {
     templateId: 'templar-paragon',
     class: 'templar',
     tier: 'tier3',
@@ -1602,6 +1701,15 @@ export const MINION_TEMPLATES: MinionTemplate[] = [
     role: 'Low-tier healer',
     assetName: 'priest-acolyte.png',
     stats: { attack: 2, defense: 3, magic: 3, healing: 7, health: 20, movement: 3, range: 3 },
+  },
+  {
+    templateId: 'darkpriest',
+    class: 'priest',
+    tier: 'tier1',
+    name: 'Dark Priest',
+    role: 'Standalone shadow healer',
+    assetName: 'darkpriest.png',
+    stats: { attack: 3, defense: 2, magic: 4, healing: 6, health: 22, movement: 3, range: 3 },
   },
   {
     templateId: 'priest-cleric',
@@ -1622,6 +1730,31 @@ export const MINION_TEMPLATES: MinionTemplate[] = [
     stats: { attack: 5, defense: 7, magic: 8, healing: 17, health: 44, movement: 3, range: 4 },
   },
 ];
+
+export const STANDALONE_TIER1_MINION_TEMPLATE_IDS = ['witchdoc', 'crossbow', 'thief', 'darkpriest'] as const;
+export const STANDALONE_TIER2_MINION_TEMPLATE_IDS = ['enchanter', 'firelord', 'archer', 'bell'] as const;
+export const STANDALONE_TIER3_MINION_TEMPLATE_IDS = ['plaugedoc', 'fallen', 'mercenary', 'crow'] as const;
+export const STANDALONE_MINION_TEMPLATE_IDS = [
+  ...STANDALONE_TIER1_MINION_TEMPLATE_IDS,
+  ...STANDALONE_TIER2_MINION_TEMPLATE_IDS,
+  ...STANDALONE_TIER3_MINION_TEMPLATE_IDS,
+] as const;
+
+export function isStandaloneTier1MinionTemplate(templateId: string): boolean {
+  return (STANDALONE_TIER1_MINION_TEMPLATE_IDS as readonly string[]).includes(templateId);
+}
+
+export function isStandaloneTier2MinionTemplate(templateId: string): boolean {
+  return (STANDALONE_TIER2_MINION_TEMPLATE_IDS as readonly string[]).includes(templateId);
+}
+
+export function isStandaloneTier3MinionTemplate(templateId: string): boolean {
+  return (STANDALONE_TIER3_MINION_TEMPLATE_IDS as readonly string[]).includes(templateId);
+}
+
+export function isStandaloneMinionTemplate(templateId: string): boolean {
+  return (STANDALONE_MINION_TEMPLATE_IDS as readonly string[]).includes(templateId);
+}
 
 const USERS_KEY = 'pirate_game_users';
 const CURRENT_USER_KEY = 'pirate_game_current_user';

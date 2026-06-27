@@ -15,6 +15,7 @@ import {
   advanceBattleTurn,
   attackBattleUnit,
   canAttack,
+  canBonusMoveTo,
   canHeal,
   canMoveTo,
   canRetaliateAfterAttack,
@@ -38,16 +39,21 @@ import {
   getBattleMana,
   getDistance,
   getHealAmount,
+  getMinionSupportAbility,
   getRetaliationDamage,
   getTerrainAt,
   getTurnTimeRemaining,
   getTurnOrder,
   getUnitAt,
   healBattleUnit,
+  isBonusMovePending,
   isObstacle,
   markWorldEnemyDefeated,
   moveBattleUnit,
+  moveBonusBattleUnit,
   runEnemyBattleTurn,
+  applyMinionSupportAbility,
+  skipBonusBattleMove,
   waitBattleUnit,
 } from '@/lib/battle';
 import {
@@ -256,7 +262,7 @@ interface BattleSpellImpactData {
 interface BattleStanceIconImpactData {
   iconPath: string;
   tone: 'support' | 'field';
-  sizeClass: 'wait' | 'mana-focus';
+  sizeClass: 'wait' | 'mana-focus' | 'support';
 }
 
 const BATTLE_WAIT_SHIELD_ICON = '/assets/icons/defense.png';
@@ -732,6 +738,9 @@ export default function BattleModal({
         if (!current || !currentActiveUnit || currentActiveUnit.side !== 'player') return current;
         setSelectedSpellId(null);
         setIsSpellMenuOpen(false);
+        if (isBonusMovePending(current, currentActiveUnit)) {
+          return skipBonusBattleMove(current, currentActiveUnit.id);
+        }
         return waitBattleUnit(current, currentActiveUnit.id, `${currentActiveUnit.name}'s turn timed out.`);
       });
     }, remaining);
@@ -851,7 +860,14 @@ export default function BattleModal({
         setSelectedSpellId(null);
         setIsSpellMenuOpen(false);
         setPendingMoveUndo(null);
-        setBattle(waitBattleUnit(battle, keyboardActiveUnit.id));
+        if (isBonusMovePending(battle, keyboardActiveUnit)) {
+          setBattle(skipBonusBattleMove(battle, keyboardActiveUnit.id));
+          return;
+        }
+        const supportAbility = getMinionSupportAbility(keyboardActiveUnit);
+        setBattle(supportAbility
+          ? applyMinionSupportAbility(battle, keyboardActiveUnit.id)
+          : waitBattleUnit(battle, keyboardActiveUnit.id));
       }
 
       if (event.key.toLowerCase() === 'f' && keyboardActiveUnit.kind === 'commander') {
@@ -1023,6 +1039,18 @@ export default function BattleModal({
     if (!battle || !activeUnit || !isPlayerTurn || isResolvingAction || bossLastStandCue || bossSpecialCue) return;
 
     const unitAtCell = getUnitAt(battle, x, y);
+    const bonusMoveActive = isBonusMovePending(battle, activeUnit);
+    if (bonusMoveActive) {
+      if (!unitAtCell && canBonusMoveTo(battle, activeUnit, x, y)) {
+        queuePlayerAction(moveBonusBattleUnit(battle, activeUnit.id, x, y), {
+          headline: 'Step Away',
+          detail: '',
+          tone: 'player',
+        });
+      }
+      return;
+    }
+
     if (selectedSpell) {
       if (selectedSpell.target === 'none') return;
       if (!unitAtCell) return;
@@ -1068,11 +1096,18 @@ export default function BattleModal({
     }
 
     if (unitAtCell && canAttack(activeUnit, unitAtCell)) {
-      queuePlayerAction(advanceBattleTurn(attackBattleUnit(battle, activeUnit.id, unitAtCell.id)), {
+      const attackedBattle = attackBattleUnit(battle, activeUnit.id, unitAtCell.id);
+      const attackerAfterAttack = attackedBattle.units.find(unit => unit.id === activeUnit.id && unit.currentHealth > 0);
+      queuePlayerAction(
+        attackerAfterAttack && isBonusMovePending(attackedBattle, attackerAfterAttack)
+          ? attackedBattle
+          : advanceBattleTurn(attackedBattle),
+        {
         headline: 'Strike',
         detail: '',
         tone: 'danger',
-      });
+        }
+      );
       return;
     }
 
@@ -1128,11 +1163,22 @@ export default function BattleModal({
     if (!battle || !isPlayerTurn || isResolvingAction) return;
     if (shouldBlockCommanderTutorialNonSpell('wait')) return;
     setSelectedSpellId(null);
+    if (activeUnit && isBonusMovePending(battle, activeUnit)) {
+      queuePlayerAction(skipBonusBattleMove(battle, activeUnit.id), {
+        headline: 'Hold',
+        detail: '',
+        tone: 'neutral',
+      });
+      return;
+    }
+    const supportAbility = getMinionSupportAbility(activeUnit);
     const priestCharge = Boolean(activeUnit && activeUnit.kind === 'minion' && activeUnit.healing > 0);
-    queuePlayerAction(waitBattleUnit(battle, activeUnit?.id || ''), {
-      headline: priestCharge ? 'Blessing Charged' : 'Hold',
+    queuePlayerAction(supportAbility && activeUnit
+      ? applyMinionSupportAbility(battle, activeUnit.id)
+      : waitBattleUnit(battle, activeUnit?.id || ''), {
+      headline: supportAbility ? supportAbility.name : priestCharge ? 'Blessing Charged' : 'Hold',
       detail: '',
-      tone: priestCharge ? 'player' : 'neutral',
+      tone: supportAbility || priestCharge ? 'player' : 'neutral',
     });
   };
 
@@ -1331,7 +1377,7 @@ export default function BattleModal({
   const hoveredEnemyUnit = hoveredThreatUnit?.side === 'enemy' && hoveredThreatUnit.currentHealth > 0 ? hoveredThreatUnit : undefined;
 
   return (
-    <div className="fixed inset-0 z-[70] overflow-hidden bg-black/78 p-1 backdrop-blur-sm">
+    <div className="battle-modal-layer fixed inset-0 z-[70] overflow-hidden bg-black/78 p-1 backdrop-blur-sm">
       {tutorialStep && onTutorialContinue && onTutorialSkip && (tutorialStep.id !== 'combat' || !combatTutorialIntroDismissed) && (
         <SingleplayerTutorialOverlay
           step={tutorialStep}
@@ -1437,7 +1483,7 @@ export default function BattleModal({
                   hoveredCell &&
                   hoverCursor &&
                   !(isCommanderTurn && isSpellMenuOpen && !selectedSpell) &&
-                  (!isPlayerTurn || hasActionForecast)
+                  (!isPlayerTurn || hasActionForecast || hoverForecast)
                 )}
                 cursor={hoverCursor}
               />
@@ -1514,10 +1560,19 @@ export default function BattleModal({
                   movementAnimating: isMoveAnimating,
                 });
                 const isActiveCell = unit?.id === battle.activeUnitId;
-                const canMove = Boolean(isPlayerTurn && activeUnit && !canUndoMove && !isMoveAnimating && !unit && canMoveTo(battle, activeUnit, x, y));
-                const canStrike = Boolean(isPlayerTurn && unit && playerActionTargetIds.strikeIds.has(unit.id));
-                const canMend = Boolean(isPlayerTurn && unit && playerActionTargetIds.healIds.has(unit.id));
+                const bonusMoveActive = Boolean(activeUnit && isBonusMovePending(battle, activeUnit));
+                const canMove = Boolean(
+                  isPlayerTurn &&
+                  activeUnit &&
+                  !canUndoMove &&
+                  !isMoveAnimating &&
+                  !unit &&
+                  (bonusMoveActive ? canBonusMoveTo(battle, activeUnit, x, y) : canMoveTo(battle, activeUnit, x, y))
+                );
+                const canStrike = Boolean(!bonusMoveActive && isPlayerTurn && unit && playerActionTargetIds.strikeIds.has(unit.id));
+                const canMend = Boolean(!bonusMoveActive && isPlayerTurn && unit && playerActionTargetIds.healIds.has(unit.id));
                 const canSpellTarget = Boolean(
+                  !bonusMoveActive &&
                   selectedSpell &&
                   unit &&
                   (
@@ -1657,6 +1712,8 @@ export default function BattleModal({
                         mode="wait"
                         isResolvingAction={isResolvingAction}
                         tutorialFocus={combatTutorialOrbFocus}
+                        waitLabel={getMinionSupportAbility(activeUnit)?.shortLabel}
+                        waitTitle={getMinionSupportAbility(activeUnit)?.description}
                         onWait={handleEndTurn}
                       />
                     )}
@@ -1868,6 +1925,8 @@ function BattleUnitActionOrbs({
   onUndoMove,
   onCommitMove,
   onWait,
+  waitLabel,
+  waitTitle,
 }: {
   mode: 'commander' | 'move' | 'wait';
   isResolvingAction: boolean;
@@ -1877,6 +1936,8 @@ function BattleUnitActionOrbs({
   onUndoMove?: () => void;
   onCommitMove?: () => void;
   onWait?: () => void;
+  waitLabel?: string;
+  waitTitle?: string;
 }) {
   const stopCellAction = (event: MouseEvent<HTMLButtonElement>, action?: () => void) => {
     event.preventDefault();
@@ -1917,9 +1978,9 @@ function BattleUnitActionOrbs({
           disabled={isResolvingAction}
           onClick={(event) => stopCellAction(event, onWait)}
           className={`battle-unit-orb battle-unit-orb-wait ${tutorialFocus === 'wait' ? 'battle-unit-orb-tutorial-focus' : ''}`}
-          title="Pass turn"
+          title={waitTitle || 'Pass turn'}
         >
-          W
+          {waitLabel || 'W'}
         </button>
       </div>
     );
@@ -2369,6 +2430,32 @@ function getHealthPercent(current: number, max: number): number {
   return Math.max(0, Math.min(100, (current / max) * 100));
 }
 
+function getUpcomingTurnOrder(battle: BattleState): BattleUnit[] {
+  const sortedLiveUnits = getTurnOrder(battle.units);
+  const activeUnit = sortedLiveUnits.find(unit => unit.id === battle.activeUnitId);
+
+  if (!activeUnit) return sortedLiveUnits;
+
+  if (Array.isArray(battle.turnQueue)) {
+    const liveUnitsById = new Map(sortedLiveUnits.map(unit => [unit.id, unit]));
+    const seenIds = new Set([activeUnit.id]);
+    const queuedUnits = battle.turnQueue
+      .map(unitId => liveUnitsById.get(unitId))
+      .filter((unit): unit is BattleUnit => {
+        if (!unit || seenIds.has(unit.id)) return false;
+        seenIds.add(unit.id);
+        return true;
+      });
+    const nextRoundPreview = sortedLiveUnits.filter(unit => !seenIds.has(unit.id));
+
+    return [activeUnit, ...queuedUnits, ...nextRoundPreview];
+  }
+
+  const activeIndex = sortedLiveUnits.findIndex(unit => unit.id === battle.activeUnitId);
+  if (activeIndex <= 0) return sortedLiveUnits;
+  return [...sortedLiveUnits.slice(activeIndex), ...sortedLiveUnits.slice(0, activeIndex)];
+}
+
 function BattleTurnTimeline({
   battle,
   vertical = false,
@@ -2378,7 +2465,7 @@ function BattleTurnTimeline({
   vertical?: boolean;
   rail?: boolean;
 }) {
-  const order = getTurnOrder(battle.units);
+  const order = getUpcomingTurnOrder(battle);
 
   if (rail) {
     return (
@@ -2475,10 +2562,12 @@ function BattlePiece({
   const animationClass = animation ? `battle-piece-anim-${animation}` : '';
   const isCommander = unit.kind === 'commander';
   const idleClass = animation ? '' : active ? 'battle-piece-body-idle battle-piece-body-idle-alert' : 'battle-piece-body-idle';
+  const isBleeding = Boolean((unit.statusEffects?.bleedStacks || 0) > 0);
+  const isPoisoned = Boolean((unit.statusEffects?.poisonTurns || 0) > 0);
 
   return (
     <span
-      className={`battle-piece-wrap battle-piece-wrap-${unit.side} ${active ? 'battle-piece-wrap-active' : ''} ${rising ? 'battle-piece-wrap-rising' : ''} ${tutorialFocus ? 'battle-piece-wrap-tutorial-focus' : ''}`}
+      className={`battle-piece-wrap battle-piece-wrap-${unit.side} ${active ? 'battle-piece-wrap-active' : ''} ${rising ? 'battle-piece-wrap-rising' : ''} ${tutorialFocus ? 'battle-piece-wrap-tutorial-focus' : ''} ${isBleeding ? 'battle-piece-wrap-bleeding' : ''} ${isPoisoned ? 'battle-piece-wrap-poisoned' : ''}`}
       data-battle-target={targetGlow || undefined}
     >
       <span className="battle-piece-health">
@@ -2489,6 +2578,18 @@ function BattlePiece({
           +
         </span>
       )}
+      {isBleeding && (
+        <span className="battle-piece-status battle-piece-status-bleed" title={`Bleeding: ${unit.statusEffects?.bleedStacks || 1} stack${(unit.statusEffects?.bleedStacks || 1) === 1 ? '' : 's'}`}>
+          B
+        </span>
+      )}
+      {isPoisoned && (
+        <span className="battle-piece-status battle-piece-status-poison" title={`Poisoned: ${unit.statusEffects?.poisonTurns || 1} turn${(unit.statusEffects?.poisonTurns || 1) === 1 ? '' : 's'} left`}>
+          P
+        </span>
+      )}
+      {isBleeding && <span className="battle-status-particles battle-status-particles-bleed" aria-hidden="true" />}
+      {isPoisoned && <span className="battle-status-particles battle-status-particles-poison" aria-hidden="true" />}
       <span className={`battle-piece-body ${isCommander ? 'battle-piece-body-commander' : 'battle-piece-body-minion'} ${idleClass} ${animationClass}`}>
         <span className={`battle-piece-base ${unit.side === 'player' ? 'battle-piece-base-player' : 'battle-piece-base-enemy'} ${isCommander ? 'battle-piece-base-commander' : ''}`} />
         <Image
@@ -2892,6 +2993,14 @@ function getBattleStanceIconImpact(
   if (now - entry.createdAt > getBattleActionPresentationMs(entry, battle)) return null;
 
   if (entry.action === 'wait') {
+    if (entry.style === 'buff' && (unit.templateId === 'bell' || unit.templateId === 'enchanter')) {
+      return {
+        iconPath: unit.assetPath,
+        tone: unit.templateId === 'bell' ? 'field' : 'support',
+        sizeClass: 'support',
+      };
+    }
+
     return {
       iconPath: BATTLE_WAIT_SHIELD_ICON,
       tone: 'support',
@@ -2921,6 +3030,7 @@ function getFloatingBattleText(
 
   const isTarget = Boolean(entry.targetIds?.includes(unit.id));
   const isActor = entry.actorId === unit.id;
+  const actor = entry.actorId ? battle.units.find(item => item.id === entry.actorId) : undefined;
   const numberMatch = entry.message.match(/\b(\d+)\b/);
   const value = numberMatch?.[1];
 
@@ -2934,6 +3044,14 @@ function getFloatingBattleText(
 
   if (entry.action === 'mana' && isActor) {
     return { text: '+M', tone: 'mana' };
+  }
+
+  if (entry.action === 'wait' && entry.style === 'buff' && isTarget && actor?.templateId === 'bell') {
+    return { text: '+Move', tone: 'mana' };
+  }
+
+  if (entry.action === 'wait' && entry.style === 'buff' && isTarget && actor?.templateId === 'enchanter') {
+    return { text: '+Ward', tone: 'mana' };
   }
 
   if (entry.action === 'wait' && entry.style === 'buff' && isActor) {
@@ -2972,6 +3090,8 @@ function getBattlePieceAnimation(
       if (style === 'buff') {
         return entry.spellId && ARMY_BUFF_SPELL_IDS.has(entry.spellId) ? 'morale' : 'buff';
       }
+      if (style === 'bleed') return 'hit-melee';
+      if (style === 'poison') return 'debuff';
       if (style === 'debuff' || style === 'spell-control') return 'debuff';
       if (style === 'morale') return 'morale';
       return 'spell-hit';
@@ -3253,6 +3373,10 @@ function getAttackImpactSound(battle: BattleState, entry: BattleLogEntry): GameS
 
 function getSpellImpactSound(entry: BattleLogEntry): GameSoundId {
   switch (entry.spellId) {
+    case 'bleed':
+      return 'combat.armorHit';
+    case 'poison':
+      return 'combat.spellShadow';
     case 'ember-dart':
       return 'combat.spellFlame';
     case 'chain-spark':
@@ -3329,7 +3453,14 @@ function getBattleLogSoundPlan(battle: BattleState, entry: BattleLogEntry, speed
     plan.push({ id: 'combat.blessing', delayMs: startDelay + 85, throttleMs: 120, volumeScale: 0.78 });
   }
 
-  if (entry.action === 'spell') {
+  if (entry.action === 'spell' && (entry.style === 'bleed' || entry.style === 'poison')) {
+    plan.push({
+      id: entry.style === 'bleed' ? 'combat.armorHit' : 'combat.spellShadow',
+      delayMs: impactDelay,
+      throttleMs: 160,
+      volumeScale: 0.58,
+    });
+  } else if (entry.action === 'spell') {
     plan.push({ id: 'combat.spellCast', delayMs: startDelay, throttleMs: 140, volumeScale: 0.75 });
     const impactSound = getSpellImpactSound(entry);
     const isBlessingImpact = impactSound === 'combat.blessing';
@@ -3540,7 +3671,16 @@ function getBattleHoverPreview({
   }
 
   const unitAtCell = getUnitAt(battle, hoveredCell.x, hoveredCell.y);
+  const bonusMoveActive = isBonusMovePending(battle, activeUnit);
   if (unitAtCell) {
+    if (bonusMoveActive) {
+      return {
+        title: 'Step Away',
+        detail: 'Crowblade can only move one empty adjacent cell after striking.',
+        tone: 'neutral',
+      };
+    }
+
     if (selectedSpell) {
       const validTarget =
         (selectedSpell.target === 'enemy' && unitAtCell.side !== activeUnit.side) ||
@@ -3581,6 +3721,12 @@ function getBattleHoverPreview({
       detail: '',
       tone: unitAtCell.side === 'player' ? 'good' : 'danger',
     };
+  }
+
+  if (bonusMoveActive) {
+    return canBonusMoveTo(battle, activeUnit, hoveredCell.x, hoveredCell.y)
+      ? { title: 'Step Away', detail: 'Use the extra step to leave melee pressure.', tone: 'good' }
+      : { title: 'No Step', detail: 'Crowblade can only move one adjacent cell after striking.', tone: 'neutral' };
   }
 
   if (isPlayerTurn && !movementLocked && !movementAnimating && canMoveTo(battle, activeUnit, hoveredCell.x, hoveredCell.y)) {

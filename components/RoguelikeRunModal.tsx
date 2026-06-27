@@ -65,6 +65,9 @@ import {
   getRandomRunEffectiveLevel,
   getRandomRunExpNeeded,
   getRandomRunProgressRatio,
+  isStandaloneMinionTemplate,
+  isStandaloneTier1MinionTemplate,
+  isStandaloneTier2MinionTemplate,
   levelUp,
   makeInventoryItem,
   recordDailyRunCompletionState,
@@ -448,6 +451,27 @@ const RUN_DEFEAT_BURST_MS = 3200;
 const RUN_FORMATION_INTRO_MS = 2800;
 const RUN_MAX_ROSTER = 10;
 const RANDOM_REWARD_ANIMATION_ICON = '/assets/icons/dice.png';
+const MERCENARY_TEMPLATE_ID = 'mercenary';
+const MERCENARY_SHOP_REWARD_ID = 'mercenary-contract';
+
+function makeMercenaryShopReward(): RunRewardChoice {
+  const template = getMinionTemplate(MERCENARY_TEMPLATE_ID);
+  return {
+    id: MERCENARY_SHOP_REWARD_ID,
+    name: 'Mercenary Contract',
+    description: template
+      ? `${template.name} joins this run. Slow, hard to kill, and deadly when enemies strike back.`
+      : 'A hardened mercenary joins this run.',
+    category: 'recruit',
+    isAvailable: canAddRunMinion,
+    apply: session => {
+      const nextTemplate = getMinionTemplate(MERCENARY_TEMPLATE_ID);
+      return nextTemplate
+        ? addRunMinionFromTemplate(session, nextTemplate, `${nextTemplate.name} joins the run under contract.`)
+        : session;
+    },
+  };
+}
 
 const RUN_BUFFS: RunRewardChoice[] = [
   makeStatBuff('army-drill', 'Army Drill', '+2 Army Power for this run.', { armyPower: 2 }),
@@ -2570,7 +2594,8 @@ function ShopPanel({
           {offers.map((offer, offerIndex) => {
             const choice = getRunRewardChoiceById(offer.choiceId, offer.equipmentOffer);
             if (!choice) return null;
-            const canAfford = !offer.purchased && session.runGold >= offer.cost;
+            const isAvailable = !choice.isAvailable || choice.isAvailable(session);
+            const canAfford = !offer.purchased && isAvailable && session.runGold >= offer.cost;
 
             if (offer.purchased) {
               return (
@@ -4252,13 +4277,52 @@ function applyDailyChallengeStats(stats: CharacterStats, challenge: DailyRunChal
   };
 }
 
+function getPlayerRunTemplatePool(allowedTiers: MinionTemplate['tier'][]): MinionTemplate[] {
+  const standard = MINION_TEMPLATES.filter(template => allowedTiers.includes(template.tier) && !isStandaloneMinionTemplate(template.templateId));
+  const standalone = MINION_TEMPLATES.filter(template => allowedTiers.includes(template.tier) && isStandaloneMinionTemplate(template.templateId));
+  const weighted = [
+    ...standard,
+    ...standard,
+    ...standard,
+    ...standalone,
+  ];
+
+  return weighted.length > 0 ? weighted : MINION_TEMPLATES.filter(template => allowedTiers.includes(template.tier));
+}
+
+function pickPlayerRunTemplate(tier: MinionTemplate['tier']): MinionTemplate {
+  return shuffle(getPlayerRunTemplatePool([tier]))[0]
+    || MINION_TEMPLATES.find(template => template.tier === tier)
+    || MINION_TEMPLATES[0];
+}
+
+function getEnemyRunTemplatePool(tier: MinionTemplate['tier']): MinionTemplate[] {
+  const tierTemplates = MINION_TEMPLATES.filter(template => template.tier === tier);
+  const standalone = tierTemplates.filter(template => isStandaloneMinionTemplate(template.templateId));
+  const standard = tierTemplates.filter(template => !isStandaloneMinionTemplate(template.templateId));
+  const weighted = [
+    ...standalone,
+    ...standalone,
+    ...standalone,
+    ...standard,
+  ];
+
+  return weighted.length > 0 ? weighted : tierTemplates;
+}
+
+function getStandaloneFirstTemplatePool(templates: MinionTemplate[]): MinionTemplate[] {
+  const standalone = templates.filter(template => isStandaloneMinionTemplate(template.templateId));
+  const standard = templates.filter(template => !isStandaloneMinionTemplate(template.templateId));
+  return standalone.length > 0 ? [...standalone, ...standalone, ...standard] : templates;
+}
+
 function getDraftChoices(picksMade: number): MinionTemplate[] {
-  const allowedTiers = picksMade < 3
+  const allowedTiers: MinionTemplate['tier'][] = picksMade < 3
     ? ['tier1']
     : picksMade < 6
       ? ['tier1', 'tier2']
       : ['tier2', 'tier3'];
-  const candidates = MINION_TEMPLATES.filter(template => allowedTiers.includes(template.tier));
+  const candidates = getPlayerRunTemplatePool(allowedTiers);
   return shuffle(candidates).slice(0, 4);
 }
 
@@ -4481,7 +4545,7 @@ function pickEnemyTemplate(level: number, slot: number, elite: boolean, bossesDe
       : level >= 6 && slot % 2 === 0
         ? 'tier2'
         : 'tier1');
-  const candidates = MINION_TEMPLATES.filter(template => template.tier === targetTier);
+  const candidates = getEnemyRunTemplatePool(targetTier);
   return candidates[(level + slot) % candidates.length] || MINION_TEMPLATES[0];
 }
 
@@ -4507,7 +4571,7 @@ function enforcePostBossMinionTiers(
   );
 
   const forceSlotToTier = (slot: number, tier: MinionTemplate['tier']) => {
-    const pool = MINION_TEMPLATES.filter(template => template.tier === tier);
+    const pool = getEnemyRunTemplatePool(tier);
     const template = pool[(effectiveLevel + battleIndex + slot) % pool.length] || pool[0];
     if (!template) return;
     result[slot] = cloneRunStack(template.templateId, result[slot].id);
@@ -4572,8 +4636,8 @@ function pickBossEscortTemplate(level: number, slot: number, bossTemplateIds: st
   const sameClassCandidates = sourceTemplate
     ? MINION_TEMPLATES.filter(template => template.tier === targetTier && template.class === sourceTemplate.class)
     : [];
-  const tierCandidates = MINION_TEMPLATES.filter(template => template.tier === targetTier);
-  const candidates = sameClassCandidates.length > 0 ? sameClassCandidates : tierCandidates;
+  const tierCandidates = getEnemyRunTemplatePool(targetTier);
+  const candidates = sameClassCandidates.length > 0 ? getStandaloneFirstTemplatePool(sameClassCandidates) : tierCandidates;
 
   return candidates[(level + slot) % candidates.length]
     || sourceTemplate
@@ -5365,6 +5429,7 @@ function formatRunDuration(durationMs: number): string {
 }
 
 function getRunRewardChoiceById(choiceId: string, equipmentOffer?: Equipment): RunRewardChoice | undefined {
+  if (choiceId === MERCENARY_SHOP_REWARD_ID) return makeMercenaryShopReward();
   const staticChoice = RUN_REWARD_POOL.find(choice => choice.id === choiceId);
   if (staticChoice) return staticChoice;
   if (choiceId.startsWith('gear-offer-') && equipmentOffer) {
@@ -5601,7 +5666,7 @@ function pickRunRewardChoices(
 
 function makeShopOffers(session: RunSession, count = RUN_SHOP_CHOICE_COUNT): RunShopOffer[] {
   const worldMapRun = isWorldMapRun(session);
-  return pickRunRewardChoices(session, count, {
+  const offers: RunShopOffer[] = pickRunRewardChoices(session, count, {
     spellChance: worldMapRun ? 0 : RUN_SHOP_SPELL_OFFER_CHANCE,
     equipmentChance: worldMapRun ? 0 : RUN_SHOP_EQUIPMENT_OFFER_CHANCE,
     excludeChoice: worldMapRun ? isWorldMapShopRewardBlocked : isRunShopRewardBlocked,
@@ -5610,6 +5675,47 @@ function makeShopOffers(session: RunSession, count = RUN_SHOP_CHOICE_COUNT): Run
     cost: getRunShopOfferCost(session, index, choice),
     equipmentOffer: choice.equipmentOffer,
   }));
+
+  return injectMercenaryShopOffer(session, offers, count).slice(0, count);
+}
+
+function makeMercenaryShopOffer(session: RunSession): RunShopOffer | null {
+  if (isWorldMapRun(session) || !canAddRunMinion(session) || !getMinionTemplate(MERCENARY_TEMPLATE_ID)) {
+    return null;
+  }
+
+  return {
+    choiceId: MERCENARY_SHOP_REWARD_ID,
+    cost: getMercenaryShopCost(session),
+  };
+}
+
+function injectMercenaryShopOffer(session: RunSession, offers: RunShopOffer[], count = RUN_SHOP_CHOICE_COUNT): RunShopOffer[] {
+  const mercenaryOffer = makeMercenaryShopOffer(session);
+  if (!mercenaryOffer || offers.some(offer => offer.choiceId === MERCENARY_SHOP_REWARD_ID)) return offers;
+
+  const nextOffers = [...offers];
+  const replaceableIndex = nextOffers.findIndex(offer => !offer.purchased && !offer.equipmentOffer);
+  const replaceIndex = nextOffers.length >= count
+    ? replaceableIndex >= 0 ? replaceableIndex : nextOffers.length - 1
+    : nextOffers.length;
+  nextOffers[replaceIndex] = mercenaryOffer;
+  return nextOffers;
+}
+
+function getStableShopRoll(label: string, modulo: number): number {
+  let hash = 0;
+  for (let index = 0; index < label.length; index += 1) {
+    hash = (hash * 31 + label.charCodeAt(index)) >>> 0;
+  }
+  return modulo > 0 ? hash % modulo : 0;
+}
+
+function getMercenaryShopCost(session: RunSession): number {
+  const routeProgress = session.targetBattles > 0 ? clamp(session.wins / session.targetBattles, 0, 1) : 0;
+  const level = getRandomRunEffectiveLevel(session.stats.level || 1);
+  const rolledPremium = getStableShopRoll(`${session.id}:${getShopNodeOfferKey(session)}:${session.wins}:mercenary`, 90);
+  return Math.max(150, Math.round((150 + level * 6 + routeProgress * 65 + rolledPremium) / 5) * 5);
 }
 
 function isRunShopRewardBlocked(choice: RunRewardChoice): boolean {
@@ -5655,10 +5761,11 @@ function getShopNodeOfferKey(session: RunSession): string {
 
 function getShopOffersForSession(session: RunSession): RunShopOffer[] {
   const key = getShopNodeOfferKey(session);
-  return (session.shopOffers?.[key] || []).filter(offer => {
+  const offers = (session.shopOffers?.[key] || []).filter(offer => {
     const choice = getRunRewardChoiceById(offer.choiceId, offer.equipmentOffer);
     return Boolean(choice && !isRunShopRewardBlocked(choice));
   });
+  return injectMercenaryShopOffer(session, offers);
 }
 
 function ensureShopOffers(session: RunSession): RunSession {
@@ -5877,7 +5984,7 @@ function rollPositiveDungeonEventOutcome(session: RunSession): OmenOutcome {
       apply: current => resurrectMinions(current, 1),
     });
   } else if (canAddRunMinion(session)) {
-    const template = shuffle(MINION_TEMPLATES.filter(item => item.tier === 'tier2'))[0] || MINION_TEMPLATES[0];
+    const template = pickPlayerRunTemplate('tier2');
     outcomes.push({
       id: 'hard-route-recruit',
       title: 'Oathbound Straggler',
@@ -6063,7 +6170,7 @@ function rollDungeonEventOutcome(session: RunSession): OmenOutcome {
       };
     }
 
-    const template = shuffle(MINION_TEMPLATES.filter(item => item.tier === 'tier1'))[0] || MINION_TEMPLATES[0];
+    const template = pickPlayerRunTemplate('tier1');
     return {
       id: 'recruit',
       title: 'Lost Pilgrim',
@@ -6168,7 +6275,7 @@ function rollDungeonEventOutcome(session: RunSession): OmenOutcome {
     }
 
     if (deepRoad && canAddRunMinion(session)) {
-      const template = shuffle(MINION_TEMPLATES.filter(item => item.tier === 'tier2'))[0] || MINION_TEMPLATES[0];
+      const template = pickPlayerRunTemplate('tier2');
       return {
         id: 'veteran-at-crossroads',
         title: 'Veteran at the Crossroads',
@@ -6191,6 +6298,48 @@ function rollDungeonEventOutcome(session: RunSession): OmenOutcome {
         notice: 'The omen grants one extra omen reroll.',
       }),
     };
+  }
+
+  if (roll < 0.945 && canAddRunMinion(session)) {
+    const template = pickStandaloneTier1RunTemplate();
+    if (template) {
+      return {
+        id: `omen-standalone-tier1-${template.templateId}`,
+        title: 'Strange Road Ally',
+        flavor: 'A rare fighter answers the omen instead of the usual reward.',
+        detail: `${template.name} joins the run.`,
+        tone: 'recruit',
+        apply: current => addRunMinionFromTemplate(current, template, `${template.name} joins the run.`),
+      };
+    }
+  }
+
+  if (roll < 0.975 && canAddRunMinion(session)) {
+    const template = pickStandaloneTier2RunTemplate();
+    if (template) {
+      return {
+        id: `omen-standalone-${template.templateId}`,
+        title: 'Strange Road Ally',
+        flavor: 'A rare fighter answers the omen instead of the usual reward.',
+        detail: `${template.name} joins the run.`,
+        tone: 'recruit',
+        apply: current => addRunMinionFromTemplate(current, template, `${template.name} joins the run.`),
+      };
+    }
+  }
+
+  if (roll < 0.992 && deepRoad && canAddRunMinion(session)) {
+    const template = pickStandaloneTier3RunTemplate();
+    if (template) {
+      return {
+        id: `omen-standalone-tier3-${template.templateId}`,
+        title: 'Grim Road Ally',
+        flavor: 'A dangerous fighter answers from deeper on the road.',
+        detail: `${template.name} joins the run.`,
+        tone: 'recruit',
+        apply: current => addRunMinionFromTemplate(current, template, `${template.name} joins the run.`),
+      };
+    }
   }
 
   return {
@@ -6671,7 +6820,7 @@ function resurrectAllMinions(session: RunSession): RunSession {
 }
 
 function addRandomRunMinion(session: RunSession, tier: MinionTemplate['tier'], notice?: string): RunSession {
-  const template = shuffle(MINION_TEMPLATES.filter(item => item.tier === tier))[0] || MINION_TEMPLATES[0];
+  const template = pickPlayerRunTemplate(tier);
   const replacementIndex = session.minions.findIndex(unit => !unit.alive);
   const newUnit: RunUnit = {
     stack: cloneRunStack(template.templateId, `loaned-reward-${session.id}-${Date.now()}`),
@@ -6696,6 +6845,27 @@ function addRandomRunMinion(session: RunSession, tier: MinionTemplate['tier'], n
   };
 }
 
+function pickStandaloneTier2RunTemplate(): MinionTemplate | undefined {
+  return shuffle(MINION_TEMPLATES.filter(item => (
+    item.tier === 'tier2' &&
+    isStandaloneTier2MinionTemplate(item.templateId)
+  )))[0];
+}
+
+function pickStandaloneTier1RunTemplate(): MinionTemplate | undefined {
+  return shuffle(MINION_TEMPLATES.filter(item => (
+    item.tier === 'tier1' &&
+    isStandaloneTier1MinionTemplate(item.templateId)
+  )))[0];
+}
+
+function pickStandaloneTier3RunTemplate(): MinionTemplate | undefined {
+  return shuffle(MINION_TEMPLATES.filter(item => (
+    item.tier === 'tier3' &&
+    isStandaloneMinionTemplate(item.templateId)
+  )))[0];
+}
+
 function upgradeRandomMinion(session: RunSession): RunSession {
   const candidates = session.minions
     .map((unit, index) => ({ unit, index, nextTemplate: unit.alive ? getNextTierTemplate(unit.stack.templateId) : undefined }))
@@ -6716,6 +6886,8 @@ function upgradeRandomMinion(session: RunSession): RunSession {
 }
 
 function getNextTierTemplate(templateId: string): MinionTemplate | undefined {
+  if (isStandaloneMinionTemplate(templateId)) return undefined;
+
   const template = getMinionTemplate(templateId);
   if (!template || template.tier === 'tier3') return undefined;
 

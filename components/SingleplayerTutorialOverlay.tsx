@@ -1,13 +1,26 @@
 'use client';
 
 import Image from 'next/image';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 import type { SingleplayerRunTutorialStep } from '@/lib/singleplayerTutorial';
 
 export type TutorialOverlayStep = Omit<SingleplayerRunTutorialStep, 'id'> & {
   id: string;
 };
+
+const MOBILE_TUTORIAL_QUERY = '(max-width: 820px), (pointer: coarse)';
+
+function subscribeToMobileTutorialSuppression(callback: () => void): () => void {
+  if (typeof window === 'undefined') return () => {};
+  const mediaQuery = window.matchMedia(MOBILE_TUTORIAL_QUERY);
+  mediaQuery.addEventListener('change', callback);
+  return () => mediaQuery.removeEventListener('change', callback);
+}
+
+function getMobileTutorialSuppressionSnapshot(): boolean {
+  return typeof window !== 'undefined' && window.matchMedia(MOBILE_TUTORIAL_QUERY).matches;
+}
 
 export default function SingleplayerTutorialOverlay({
   step,
@@ -19,16 +32,29 @@ export default function SingleplayerTutorialOverlay({
   onSkip: () => void;
 }) {
   const actionFiredRef = useRef(false);
+  const suppressOnMobile = useSyncExternalStore(
+    subscribeToMobileTutorialSuppression,
+    getMobileTutorialSuppressionSnapshot,
+    () => false
+  );
 
   useEffect(() => {
     actionFiredRef.current = false;
   }, [step.id]);
+
+  useEffect(() => {
+    if (!suppressOnMobile || actionFiredRef.current) return;
+    actionFiredRef.current = true;
+    onSkip();
+  }, [onSkip, suppressOnMobile]);
 
   const fireAction = (handler: () => void) => {
     if (actionFiredRef.current) return;
     actionFiredRef.current = true;
     handler();
   };
+
+  if (suppressOnMobile) return null;
 
   const overlay = (
     <div
