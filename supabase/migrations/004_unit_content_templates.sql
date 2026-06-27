@@ -167,10 +167,10 @@ values
       'class', 'knight',
       'tier', 'tier3',
       'name', 'Fallen Wing Knight',
-      'role', 'Standalone mobile tank',
+      'role', 'Standalone wing-step tank',
       'assetName', 'fallen.png',
       'stats', jsonb_build_object('attack', 10, 'defense', 13, 'magic', 2, 'healing', 0, 'health', 76, 'movement', 4, 'range', 1),
-      'mechanics', jsonb_build_array('long-move-tank')
+      'mechanics', jsonb_build_array('long-move-tank', 'wing-step')
     ),
     now()
   ),
@@ -255,6 +255,14 @@ values
     1,
     true,
     jsonb_build_object('unitClasses', jsonb_build_array('priest'), 'trigger', 'valid heal target', 'effect', 'healing removes poison and bleeding, and can target wounded or status-afflicted allies'),
+    now()
+  ),
+  (
+    'combat-mechanic:wing-step',
+    'combat-mechanic',
+    1,
+    true,
+    jsonb_build_object('unitTemplateId', 'fallen', 'trigger', 'adjacent melee attack hit', 'effect', 'avoids melee retaliation, then may move up to two cells away from the target; no extra attack/heal/cast'),
     now()
   ),
   (

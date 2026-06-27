@@ -1635,7 +1635,7 @@ export const MINION_TEMPLATES: MinionTemplate[] = [
     class: 'knight',
     tier: 'tier3',
     name: 'Fallen Wing Knight',
-    role: 'Standalone mobile tank',
+    role: 'Standalone wing-step tank',
     assetName: 'fallen.png',
     stats: { attack: 10, defense: 13, magic: 2, healing: 0, health: 76, movement: 4, range: 1 },
   },

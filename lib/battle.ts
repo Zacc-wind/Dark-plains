@@ -1797,8 +1797,14 @@ export function canMoveTo(state: BattleState, unit: BattleUnit, x: number, y: nu
   return cost !== undefined && cost > 0 && cost <= getMoveRange(unit);
 }
 
+function getSkirmishStepRange(unit: BattleUnit | undefined): number {
+  if (unit?.templateId === 'fallen') return 2;
+  if (unit?.templateId === 'crow' || unit?.templateId === 'thief') return 1;
+  return 0;
+}
+
 function isSkirmishStepUnit(unit: BattleUnit | undefined): boolean {
-  return unit?.templateId === 'crow' || unit?.templateId === 'thief';
+  return getSkirmishStepRange(unit) > 0;
 }
 
 function isBleedStrikeUnit(unit: BattleUnit | undefined): boolean {
@@ -1810,7 +1816,9 @@ function isPoisonShotUnit(unit: BattleUnit | undefined): boolean {
 }
 
 function canRawBonusMoveTo(state: BattleState, unit: BattleUnit, x: number, y: number): boolean {
-  return getDistance(unit, { x, y }) === 1 && canMoveTo(state, unit, x, y);
+  const stepRange = getSkirmishStepRange(unit);
+  const distance = getDistance(unit, { x, y });
+  return distance > 0 && distance <= stepRange && canMoveTo(state, unit, x, y);
 }
 
 export function isBonusMovePending(state: BattleState, unit: BattleUnit | undefined): boolean {
@@ -1828,9 +1836,11 @@ export function getBonusMoveCells(state: BattleState, unit: BattleUnit): BoardCe
   if (!isBonusMovePending(state, unit)) return [];
 
   const candidates: BoardCell[] = [];
-  for (let y = unit.y - 1; y <= unit.y + 1; y += 1) {
-    for (let x = unit.x - 1; x <= unit.x + 1; x += 1) {
-      if (getDistance(unit, { x, y }) !== 1) continue;
+  const stepRange = getSkirmishStepRange(unit);
+  for (let y = unit.y - stepRange; y <= unit.y + stepRange; y += 1) {
+    for (let x = unit.x - stepRange; x <= unit.x + stepRange; x += 1) {
+      const distance = getDistance(unit, { x, y });
+      if (distance <= 0 || distance > stepRange) continue;
       if (canRawBonusMoveTo(state, unit, x, y)) candidates.push({ x, y });
     }
   }
@@ -1850,6 +1860,9 @@ export function canBonusMoveTo(state: BattleState, unit: BattleUnit, x: number, 
 export function moveBonusBattleUnit(state: BattleState, unitId: string, x: number, y: number): BattleState {
   const unit = state.units.find(item => item.id === unitId && item.currentHealth > 0);
   if (!unit || !canBonusMoveTo(state, unit, x, y)) return state;
+  const message = unit.templateId === 'fallen'
+    ? `${unit.name} beats its wings and withdraws after the strike.`
+    : `${unit.name} slips away after the strike.`;
 
   const movedState = {
     ...state,
@@ -1858,7 +1871,7 @@ export function moveBonusBattleUnit(state: BattleState, unitId: string, x: numbe
     units: state.units.map(item => item.id === unitId ? { ...item, x, y } : item),
   };
 
-  return advanceBattleTurn(withBattleLog(movedState, `${unit.name} slips away after the strike.`, {
+  return advanceBattleTurn(withBattleLog(movedState, message, {
     side: unit.side,
     actor: unit.name,
     actorId: unit.id,
@@ -2489,6 +2502,7 @@ export function attackBattleUnit(state: BattleState, attackerId: string, targetI
     return {
       ...updatedState,
       activeUnitId: attackerAfterResolution.id,
+      turnStartedAt: Date.now(),
       bonusMoveUnitId: attackerAfterResolution.id,
       bonusMoveAwayFrom: { x: target.x, y: target.y },
     };
@@ -3482,6 +3496,25 @@ export function runEnemyBattleTurn(state: BattleState): BattleState {
   if (!activeUnit || activeUnit.side !== 'enemy' || currentState.status !== 'active') return currentState;
   const personality = currentState.enemy.personality || 'balanced';
 
+  if (isBonusMovePending(currentState, activeUnit)) {
+    const playerTargets = currentState.units.filter(unit => unit.side === 'player' && unit.currentHealth > 0);
+    const nearestTarget = playerTargets.sort((a, b) => getDistance(activeUnit, a) - getDistance(activeUnit, b))[0];
+    const awayFrom = currentState.bonusMoveAwayFrom;
+    const bonusCells = getBonusMoveCells(currentState, activeUnit).sort((a, b) => {
+      const awaySort = awayFrom ? getDistance(b, awayFrom) - getDistance(a, awayFrom) : 0;
+      if (awaySort !== 0) return awaySort;
+      if (nearestTarget) {
+        return scoreEnemyMoveCell(currentState, activeUnit, a, nearestTarget, personality)
+          - scoreEnemyMoveCell(currentState, activeUnit, b, nearestTarget, personality);
+      }
+      return 0;
+    });
+    const bestBonusCell = bonusCells[0];
+    return bestBonusCell
+      ? moveBonusBattleUnit(currentState, activeUnit.id, bestBonusCell.x, bestBonusCell.y)
+      : skipBonusBattleMove(currentState, activeUnit.id);
+  }
+
   if (activeUnit.kind === 'commander') {
     const bossSpecialState = runBossSpecialAbility(currentState, activeUnit);
     if (bossSpecialState) return bossSpecialState;
@@ -3512,12 +3545,7 @@ export function runEnemyBattleTurn(state: BattleState): BattleState {
     const attackedState = attackBattleUnit(currentState, activeUnit.id, target.id);
     const attackerAfterAttack = attackedState.units.find(unit => unit.id === activeUnit.id && unit.currentHealth > 0);
     if (attackerAfterAttack && isBonusMovePending(attackedState, attackerAfterAttack)) {
-      const bonusCells = getBonusMoveCells(attackedState, attackerAfterAttack)
-        .sort((a, b) => scoreEnemyMoveCell(attackedState, attackerAfterAttack, a, target, personality) - scoreEnemyMoveCell(attackedState, attackerAfterAttack, b, target, personality));
-      const bestBonusCell = bonusCells[0];
-      return bestBonusCell
-        ? moveBonusBattleUnit(attackedState, attackerAfterAttack.id, bestBonusCell.x, bestBonusCell.y)
-        : skipBonusBattleMove(attackedState, attackerAfterAttack.id);
+      return attackedState;
     }
     return advanceBattleTurn(attackedState);
   }

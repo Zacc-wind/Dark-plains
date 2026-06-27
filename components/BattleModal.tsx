@@ -3676,7 +3676,7 @@ function getBattleHoverPreview({
     if (bonusMoveActive) {
       return {
         title: 'Step Away',
-        detail: 'Crowblade can only move one empty adjacent cell after striking.',
+        detail: 'Choose an empty retreat cell after the strike, or wait to hold position.',
         tone: 'neutral',
       };
     }
@@ -3725,8 +3725,8 @@ function getBattleHoverPreview({
 
   if (bonusMoveActive) {
     return canBonusMoveTo(battle, activeUnit, hoveredCell.x, hoveredCell.y)
-      ? { title: 'Step Away', detail: 'Use the extra step to leave melee pressure.', tone: 'good' }
-      : { title: 'No Step', detail: 'Crowblade can only move one adjacent cell after striking.', tone: 'neutral' };
+      ? { title: 'Step Away', detail: 'Use the retreat move to leave melee pressure.', tone: 'good' }
+      : { title: 'No Step', detail: 'Pick a valid empty retreat cell, or wait to hold position.', tone: 'neutral' };
   }
 
   if (isPlayerTurn && !movementLocked && !movementAnimating && canMoveTo(battle, activeUnit, hoveredCell.x, hoveredCell.y)) {
