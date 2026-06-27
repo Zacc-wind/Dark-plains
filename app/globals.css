@@ -12507,10 +12507,11 @@ button.vine-frame::before,
 
 .run-draft-card:hover,
 .run-draft-card:focus-visible {
-  transform: translateY(-2px);
+  transform: none;
   border: none;
   background: transparent;
   box-shadow: none;
+  filter: brightness(1.08);
 }
 
 .run-draft-card-tier2,
@@ -12535,7 +12536,7 @@ button.vine-frame::before,
 
 .run-draft-recruit-frame {
   position: absolute;
-  inset: 0.15rem 0.35rem 0.1rem;
+  inset: 0.4rem 0.35rem 0.2rem;
   width: auto;
   height: auto;
   max-width: none;
@@ -12548,7 +12549,7 @@ button.vine-frame::before,
   object-fit: contain;
   object-position: center bottom;
   opacity: 0.98;
-  transform: scale(1.02);
+  transform: scale(0.98);
   transform-origin: center bottom;
   filter: drop-shadow(0 12px 24px rgba(0, 0, 0, 0.76));
   transition: transform 200ms ease, filter 200ms ease, opacity 200ms ease;
@@ -12556,7 +12557,7 @@ button.vine-frame::before,
 
 .run-draft-card:hover .run-draft-recruit-sprite,
 .run-draft-card:focus-visible .run-draft-recruit-sprite {
-  transform: scale(1.06);
+  transform: scale(0.98);
   filter: drop-shadow(0 16px 30px rgba(0, 0, 0, 0.82));
   opacity: 1;
 }
@@ -12722,11 +12723,11 @@ button.vine-frame::before,
   }
 
   .run-draft-recruit-frame {
-    inset: 0.25rem;
+    inset: 0.45rem 0.25rem 0.35rem;
   }
 
   .run-draft-recruit-sprite {
-    transform: scale(1.03);
+    transform: scale(0.96);
   }
 
   .run-draft-card-copy {
@@ -12838,11 +12839,11 @@ button.vine-frame::before,
   }
 
   .run-draft-recruit-frame {
-    inset: 0.25rem;
+    inset: 0.45rem 0.25rem 0.35rem;
   }
 
   .run-draft-recruit-sprite {
-    transform: scale(1.03);
+    transform: scale(0.96);
   }
 
   .run-draft-card-copy {
