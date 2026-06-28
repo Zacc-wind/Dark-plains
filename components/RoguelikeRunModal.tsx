@@ -87,6 +87,13 @@ import {
   getRegionForTile,
 } from '@/lib/worldEvents';
 import { readGameJson, removeGameStorageItem, writeGameJson } from '@/lib/gameStore';
+import { generateLootEquipment } from '@/lib/lootTables';
+import {
+  getMpDailyDungeonChallenge,
+  hasCompletedMpDailyDungeonToday,
+  recordMpDailyDungeonCompletion,
+  type MpDailyDungeonChallenge,
+} from '@/lib/mpDailyDungeon';
 import { BOSS_PROFILES, getBossProfileById, getBossProfileByIndex } from '@/lib/bosses';
 import {
   createSingleplayerRunTutorialStep,
@@ -98,7 +105,7 @@ import {
   type SingleplayerRunTutorialStepId,
 } from '@/lib/singleplayerTutorial';
 
-type RunMode = 'daily' | 'dungeon' | 'encounter';
+type RunMode = 'daily' | 'dungeon' | 'encounter' | 'mpDaily';
 export type RunPhase = 'draft' | 'map' | 'formation' | 'battle' | 'reward' | 'shop' | 'event' | 'complete';
 type RunOutcome = 'victory' | 'defeat' | 'abandoned' | null;
 type RewardDestination = 'daily-next' | 'dungeon-next' | 'complete' | null;
@@ -199,6 +206,7 @@ interface RunSession {
   battleReports: RunBattleReport[];
   outcome: RunOutcome;
   dailyChallenge?: DailyRunChallenge;
+  mpDailyChallenge?: MpDailyDungeonChallenge;
   dungeon?: WorldDungeon;
   encounterEnemy?: WorldEnemy;
   notice?: string;
@@ -424,15 +432,15 @@ function RunLobbyBonusPill({ icon, label, value }: { icon: string; label: string
 function getRunRosterSpriteLayout(rosterCount: number, variant: 'showcase' | 'compact' = 'showcase') {
   const spriteWidth = variant === 'compact'
     ? rosterCount <= 1
-      ? 30
-      : Math.max(16, 30 - (rosterCount - 1) * 2.2)
+      ? 38
+      : Math.max(22, 38 - (rosterCount - 1) * 2)
     : rosterCount <= 1
       ? 54
       : Math.max(24, 54 - (rosterCount - 1) * 4.2);
   const spriteStep = variant === 'compact'
     ? rosterCount <= 1
       ? 0
-      : Math.max(6.2, 10.5 - rosterCount * 0.42)
+      : Math.max(5.8, 9.6 - rosterCount * 0.36)
     : rosterCount <= 1
       ? 0
       : Math.max(5.5, 13.5 - rosterCount * 0.85);
@@ -461,6 +469,7 @@ const RUN_MAX_ROSTER = 10;
 const RANDOM_REWARD_ANIMATION_ICON = '/assets/icons/dice.png';
 const MERCENARY_TEMPLATE_ID = 'mercenary';
 const MERCENARY_SHOP_REWARD_ID = 'mercenary-contract';
+const PLAYER_RUN_EXCLUDED_TEMPLATE_IDS = new Set(['thief', 'darkpriest']);
 
 function makeMercenaryShopReward(): RunRewardChoice {
   const template = getMinionTemplate(MERCENARY_TEMPLATE_ID);
@@ -1020,6 +1029,38 @@ export function EncounterRunModal({ enemy, currentUser, onClose }: EncounterRunM
   );
 }
 
+interface MpDailyDungeonModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+}
+
+export function MpDailyDungeonModal({ isOpen, onClose }: MpDailyDungeonModalProps) {
+  const [session, setSession] = useState<RunSession | null>(null);
+  const user = getCurrentUser();
+
+  useEffect(() => {
+    if (!isOpen) {
+      setSession(null);
+      return;
+    }
+    if (!user || hasCompletedMpDailyDungeonToday(user)) {
+      setSession(null);
+      return;
+    }
+    setSession(createMpDailySession(user, getMpDailyDungeonChallenge()));
+  }, [isOpen, user?.username]);
+
+  if (!isOpen || !session) return null;
+
+  return (
+    <RunController
+      session={session}
+      setSession={setSession}
+      onClose={onClose}
+    />
+  );
+}
+
 function RunController({
   session,
   setSession,
@@ -1362,6 +1403,7 @@ function RunController({
     const completedAt = Date.now();
     const isDungeon = session.mode === 'dungeon';
     const isEncounter = session.mode === 'encounter';
+    const isMpDaily = session.mode === 'mpDaily';
     const rewards: CompletionRewardLine[] = [
       { label: 'Wins', value: `${session.wins}/${session.targetBattles}`, tone: 'blue' },
       { label: 'Standing', value: `${getAliveRunRoster(session).length}/${session.minions.length}`, tone: 'green' },
@@ -1375,8 +1417,8 @@ function RunController({
       emitCompletionNotice({
         id: `run-completion-${session.id}-${completedAt}`,
         kind: isEncounter ? 'victory' : 'run',
-        kicker: isEncounter ? 'Enemy Road Cleared' : isDungeon ? 'Dungeon Cleared' : 'Run Complete',
-        title: isEncounter ? `${session.title} Defeated` : isDungeon ? `${session.title} Cleared` : 'Run Complete',
+        kicker: isMpDaily ? 'Daily Gauntlet' : isEncounter ? 'Enemy Road Cleared' : isDungeon ? 'Dungeon Cleared' : 'Run Complete',
+        title: isMpDaily ? `${session.title} Cleared` : isEncounter ? `${session.title} Defeated` : isDungeon ? `${session.title} Cleared` : 'Run Complete',
         description: notice,
         artworkPath: session.encounterEnemy?.artworkPath,
         rewards,
@@ -1664,6 +1706,7 @@ function DailyDraftPanel({ session, onPick }: { session: RunSession; onPick: (te
 function getRunModeTitle(session: RunSession): string {
   if (session.mode === 'dungeon') return 'Dungeon Run';
   if (session.mode === 'encounter') return 'Enemy Road';
+  if (session.mode === 'mpDaily') return 'Daily Gauntlet';
   return 'Run';
 }
 
@@ -4253,6 +4296,70 @@ function createEncounterSession(user: User, enemy: WorldEnemy): RunSession {
   };
 }
 
+function createMpDailySession(user: User, challenge: MpDailyDungeonChallenge): RunSession {
+  const rosterMinions = getFieldedMinions(user).slice(0, MAX_FIELD_MINIONS);
+  const startingStacks = rosterMinions.length > 0
+    ? rosterMinions.map((stack, index) => ({
+      stack: cloneRunStack(stack.templateId, `loaned-mp-daily-${index}`),
+      alive: true,
+      origin: 'roster' as const,
+    }))
+    : ['knight-squire', 'priest-acolyte', 'wizard-apprentice'].map((templateId, index) => ({
+      stack: cloneRunStack(templateId, `loaned-mp-daily-${index}`),
+      alive: true,
+      origin: 'loaned' as const,
+    }));
+
+  const startLevel = Math.max(1, (user.stats.level || 1) + challenge.enemyLevelOffset - 2);
+  const nodes = createScaledRunNodes({
+    idPrefix: `mp-daily-${challenge.date}`,
+    battleCount: challenge.battleCount,
+    startLevel,
+    bossLevel: Math.max(startLevel + 2, (user.stats.level || 1) + challenge.enemyLevelOffset),
+    bossName: challenge.bossName,
+    bossSubtitle: challenge.bossSubtitle,
+    bossId: challenge.bossId,
+    theme: 'road',
+    labelOffset: challenge.battleCount,
+    includeShops: false,
+    includeEvents: challenge.battleCount >= 5,
+  });
+  const spellIds = (user.equippedSpellIds || ['arcane-bolt', 'sanctified-mend', 'ember-dart', 'warding-prayer']).slice(0, 4);
+
+  return {
+    id: `mp-daily-run-${challenge.date}-${Date.now()}`,
+    mode: 'mpDaily',
+    title: challenge.name,
+    phase: 'map',
+    stats: cloneRunStats(user.stats),
+    minions: startingStacks,
+    draftChoices: [],
+    wins: 0,
+    targetBattles: nodes.filter(node => ['battle', 'elite', 'boss'].includes(node.type)).length,
+    runGold: 35,
+    activeEnemy: null,
+    formation: makeDefaultFormation(startingStacks.map(unit => unit.stack)),
+    spellIds,
+    knownSpellIds: getRunStartingKnownSpellIds(spellIds, user),
+    rewardChoices: [],
+    rewardDestination: null,
+    nodes,
+    currentNodeIndex: 0,
+    battleReports: [],
+    outcome: null,
+    mpDailyChallenge: challenge,
+    shopOffers: {},
+    shopRerollsRemaining: RUN_SHOP_REROLL_COUNT,
+    blessingRerollsRemaining: RUN_BLESSING_REROLL_COUNT,
+    omenRerollsRemaining: RUN_OMEN_REROLL_COUNT,
+    pendingPositiveOmen: false,
+    pendingRunCelebrations: [],
+    startedAt: Date.now(),
+    notice: `${challenge.subtitle}. One clear per day.`,
+    ...createEmptyRunEquipmentState(),
+  };
+}
+
 function cloneRunStats(stats: CharacterStats): CharacterStats {
   return {
     ...stats,
@@ -4285,9 +4392,14 @@ function applyDailyChallengeStats(stats: CharacterStats, challenge: DailyRunChal
   };
 }
 
+function isPlayerRunEligibleTemplate(template: MinionTemplate): boolean {
+  return !PLAYER_RUN_EXCLUDED_TEMPLATE_IDS.has(template.templateId);
+}
+
 function getPlayerRunTemplatePool(allowedTiers: MinionTemplate['tier'][]): MinionTemplate[] {
-  const standard = MINION_TEMPLATES.filter(template => allowedTiers.includes(template.tier) && !isStandaloneMinionTemplate(template.templateId));
-  const standalone = MINION_TEMPLATES.filter(template => allowedTiers.includes(template.tier) && isStandaloneMinionTemplate(template.templateId));
+  const eligibleTemplates = MINION_TEMPLATES.filter(template => allowedTiers.includes(template.tier) && isPlayerRunEligibleTemplate(template));
+  const standard = eligibleTemplates.filter(template => !isStandaloneMinionTemplate(template.templateId));
+  const standalone = eligibleTemplates.filter(template => isStandaloneMinionTemplate(template.templateId));
   const weighted = [
     ...standard,
     ...standard,
@@ -4295,12 +4407,12 @@ function getPlayerRunTemplatePool(allowedTiers: MinionTemplate['tier'][]): Minio
     ...standalone,
   ];
 
-  return weighted.length > 0 ? weighted : MINION_TEMPLATES.filter(template => allowedTiers.includes(template.tier));
+  return weighted.length > 0 ? weighted : eligibleTemplates;
 }
 
 function pickPlayerRunTemplate(tier: MinionTemplate['tier']): MinionTemplate {
   return shuffle(getPlayerRunTemplatePool([tier]))[0]
-    || MINION_TEMPLATES.find(template => template.tier === tier)
+    || MINION_TEMPLATES.find(template => template.tier === tier && isPlayerRunEligibleTemplate(template))
     || MINION_TEMPLATES[0];
 }
 
@@ -4345,8 +4457,8 @@ function getDraftChoices(picksMade: number): MinionTemplate[] {
   };
 
   shuffle(candidates).forEach(addChoice);
-  shuffle(MINION_TEMPLATES.filter(template => allowedTiers.includes(template.tier))).forEach(addChoice);
-  if (choices.length < 4) shuffle(MINION_TEMPLATES).forEach(addChoice);
+  shuffle(MINION_TEMPLATES.filter(template => allowedTiers.includes(template.tier) && isPlayerRunEligibleTemplate(template))).forEach(addChoice);
+  if (choices.length < 4) shuffle(MINION_TEMPLATES.filter(isPlayerRunEligibleTemplate)).forEach(addChoice);
 
   return choices.slice(0, 4);
 }
@@ -5307,6 +5419,8 @@ function completeDungeonNode(session: RunSession): RunSession {
       outcome: 'victory',
       notice: session.mode === 'daily'
         ? 'The random road is complete.'
+        : session.mode === 'mpDaily'
+          ? 'The daily gauntlet is complete.'
         : session.mode === 'encounter'
           ? 'The enemy road is complete.'
           : 'The dungeon path is complete.',
@@ -6434,6 +6548,69 @@ function applyDungeonEventOutcome(session: RunSession, outcome: OmenOutcome): Ru
   );
 }
 
+function grantMpDailyCompletionReward(session: RunSession, user: User, completedAt: number): string {
+  const challenge = session.mpDailyChallenge || getMpDailyDungeonChallenge(completedAt);
+  const durationMs = Math.max(0, completedAt - (session.startedAt || completedAt));
+  const gold = challenge.rewardGold + Math.floor(session.runGold * 0.25);
+  const exp = challenge.rewardExp + session.wins * 8;
+  const lootRoll = generateLootEquipment({ source: 'mp-daily', forcedRarity: Math.random() < 0.22 ? 'legendary' : 'epic' });
+  const bonusLoot = Math.random() < 0.35
+    ? generateLootEquipment({ source: 'mp-daily', forcedRarity: 'rare' })
+    : null;
+  const equipment = [lootRoll, bonusLoot].filter(Boolean) as Equipment[];
+  const rewardItems: InventoryItem[] = [
+    makeInventoryItem('rare-gem', challenge.rewardRareGems),
+    ...rollInventoryBonusDrops(user.stats.level || 1, 'dungeonRun'),
+  ];
+  const slots = user.inventorySlots || 20;
+  const itemResult = addInventoryItemsWithLimit(user.inventory || [], rewardItems, slots);
+  const gearResult = addEquipmentWithLimit(
+    user.equipment || [],
+    user.equippedSlots || {},
+    equipment,
+    slots,
+  );
+  const acceptedGems = itemResult.acceptedItems
+    .filter(item => item.id === 'rare-gem')
+    .reduce((total, item) => total + item.quantity, 0);
+
+  const activity: ActivityEntry = {
+    id: `activity-mp-daily-${session.id}-${completedAt}`,
+    type: 'battle',
+    title: `${challenge.name} Cleared`,
+    source: 'Daily Gauntlet',
+    completedAt,
+    dungeonLevel: user.stats.level || 1,
+    rewards: {
+      gold,
+      exp,
+      rareGems: acceptedGems || undefined,
+      items: itemResult.acceptedItems.length > 0 ? itemResult.acceptedItems : undefined,
+      equipment: gearResult.acceptedEquipment.length > 0 ? gearResult.acceptedEquipment : undefined,
+    },
+    description: `${session.wins} battles won against ${challenge.bossName}.`,
+  };
+
+  updateCurrentUser({
+    gold: user.gold + gold,
+    exp: user.exp + exp,
+    inventory: itemResult.inventory,
+    equipment: gearResult.equipment,
+    mpDailyDungeon: recordMpDailyDungeonCompletion(user, {
+      wins: session.wins,
+      durationMs,
+      bossName: challenge.bossName,
+      completedAt,
+    }),
+    activityLog: [activity, ...(user.activityLog || [])].slice(0, 30),
+  });
+  levelUp();
+
+  return gearResult.rejectedEquipment.length > 0
+    ? `Daily gauntlet cleared for ${gold} gold and ${exp} XP. Gear storage was full for some loot.`
+    : `Daily gauntlet cleared: ${gold} gold, ${exp} XP, ${acceptedGems} gems, and set-eligible loot.`;
+}
+
 function grantCompletionReward(session: RunSession): string {
   const user = getCurrentUser();
   if (!user || session.outcome !== 'victory') return 'No reward was claimed.';
@@ -6441,6 +6618,10 @@ function grantCompletionReward(session: RunSession): string {
   const completedAt = Date.now();
   if (session.mode === 'encounter') {
     return grantEncounterCompletionReward(session, user, completedAt);
+  }
+
+  if (session.mode === 'mpDaily') {
+    return grantMpDailyCompletionReward(session, user, completedAt);
   }
 
   if (session.mode === 'daily') {
@@ -6454,7 +6635,11 @@ function grantCompletionReward(session: RunSession): string {
   const exp = Math.round(baseExp);
   const rareGems = Math.max(1, Math.floor(session.wins / 2));
   const rarity: EquipmentRarity = session.wins >= 5 ? 'epic' : 'rare';
-  const equipment = [generateEquipment(0, rarity)].filter(Boolean) as Equipment[];
+  const equipment = [generateLootEquipment({
+    source: session.dungeon ? 'dungeon-boss' : 'dungeon',
+    dungeonId: session.dungeon?.id,
+    forcedRarity: rarity,
+  })].filter(Boolean) as Equipment[];
   const slots = user.inventorySlots || 20;
   const rewardItems: InventoryItem[] = [
     makeInventoryItem('rare-gem', rareGems),
@@ -6489,6 +6674,7 @@ function grantCompletionReward(session: RunSession): string {
     title: `${session.title} Cleared`,
     source: 'Dungeon Run',
     completedAt,
+    dungeonLevel: Math.max(1, session.dungeon?.level || session.stats.level || 1),
     rewards: {
       gold,
       exp,
@@ -6877,21 +7063,24 @@ function addRandomRunMinion(session: RunSession, tier: MinionTemplate['tier'], n
 function pickStandaloneTier2RunTemplate(): MinionTemplate | undefined {
   return shuffle(MINION_TEMPLATES.filter(item => (
     item.tier === 'tier2' &&
-    isStandaloneTier2MinionTemplate(item.templateId)
+    isStandaloneTier2MinionTemplate(item.templateId) &&
+    isPlayerRunEligibleTemplate(item)
   )))[0];
 }
 
 function pickStandaloneTier1RunTemplate(): MinionTemplate | undefined {
   return shuffle(MINION_TEMPLATES.filter(item => (
     item.tier === 'tier1' &&
-    isStandaloneTier1MinionTemplate(item.templateId)
+    isStandaloneTier1MinionTemplate(item.templateId) &&
+    isPlayerRunEligibleTemplate(item)
   )))[0];
 }
 
 function pickStandaloneTier3RunTemplate(): MinionTemplate | undefined {
   return shuffle(MINION_TEMPLATES.filter(item => (
     item.tier === 'tier3' &&
-    isStandaloneMinionTemplate(item.templateId)
+    isStandaloneMinionTemplate(item.templateId) &&
+    isPlayerRunEligibleTemplate(item)
   )))[0];
 }
 

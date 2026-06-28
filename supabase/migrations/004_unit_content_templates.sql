@@ -51,6 +51,7 @@ values
       'role', 'Standalone skirmisher',
       'assetName', 'thief.png',
       'stats', jsonb_build_object('attack', 6, 'defense', 2, 'magic', 0, 'healing', 0, 'health', 22, 'movement', 4, 'range', 1),
+      'availability', jsonb_build_object('playerRun', false, 'enemyRun', true, 'bossEscort', true),
       'mechanics', jsonb_build_array('bleed-strike', 'skirmish-step')
     ),
     now()
@@ -68,6 +69,7 @@ values
       'role', 'Standalone shadow healer',
       'assetName', 'darkpriest.png',
       'stats', jsonb_build_object('attack', 3, 'defense', 2, 'magic', 4, 'healing', 6, 'health', 22, 'movement', 3, 'range', 3),
+      'availability', jsonb_build_object('playerRun', false, 'enemyRun', true, 'bossEscort', true),
       'mechanics', jsonb_build_array('priest-heal')
     ),
     now()

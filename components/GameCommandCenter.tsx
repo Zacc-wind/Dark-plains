@@ -1,12 +1,16 @@
 'use client';
 
-import { type CSSProperties, type DragEvent, type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { type CSSProperties, type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
+import { getActiveGearSetSummaries } from '@/lib/gearSets';
 import { getPlayerModelPath } from '@/lib/assetLoader';
 import { BATTLE_SPELLS, type BattleSpell } from '@/lib/battle';
-import { DailyRunModal, getSavedDailyRunSummary } from './RoguelikeRunModal';
+import { DailyRunModal, getSavedDailyRunSummary, MpDailyDungeonModal } from './RoguelikeRunModal';
+import MultiplayerHubModal from './MultiplayerHubModal';
+import PveHubModal from './PveHubModal';
+import ChatLiveFeed from './ChatLiveFeed';
 import GameSettingsPanel from './GameSettingsPanel';
 import {
   ActivityEntry,
@@ -48,6 +52,7 @@ import {
   getJobTimeRemaining,
   getLeaderboardBoards,
   getMinionTemplate,
+  getOrderedMinions,
   getPartyMembers,
   getRareGemCount,
   getSocialChatMessages,
@@ -58,11 +63,11 @@ import {
   isMinionInjured,
   leaveParty,
   logout,
-  moveMinionInRoster,
   MINION_CLASS_LABELS,
   MINION_TIER_LABELS,
   QUEST_NPCS,
   STORY_CHAPTERS,
+  getAllStoryQuestsSorted,
   claimCityQuestReward,
   claimStoryQuestReward,
   getCityQuestStatus,
@@ -72,13 +77,17 @@ import {
   removeFriend,
   sendFriendRequest,
   sendSocialChatMessage,
-  toggleMinionFielded,
   unequipItem,
   upgradeInventoryCapacity,
   activateInventoryItem,
 } from '@/lib/auth';
 import { emitCompletionNotice, type CompletionRewardLine } from '@/lib/completionEvents';
 import { emitFxEvent } from '@/lib/fxEvents';
+import {
+  getMpDailyDungeonChallenge,
+  hasCompletedMpDailyDungeonToday,
+} from '@/lib/mpDailyDungeon';
+import { getActivePveSpawnCount } from '@/lib/worldPveIntel';
 import {
   getMusicVolumePercent,
   isMusicMuted,
@@ -353,6 +362,54 @@ function CommandGearHoverTip({
   );
 }
 
+function MinionArmyHoverPopover({
+  template,
+  minion,
+  rosterIndex,
+  now,
+}: {
+  template: NonNullable<ReturnType<typeof getMinionTemplate>>;
+  minion: MinionStack;
+  rosterIndex: number;
+  now: number;
+}) {
+  const fielded = Boolean(minion.fielded);
+  const injured = isMinionInjured(minion, now);
+  const injuryTime = injured ? formatMinionInjuryTime(minion, now) : '';
+
+  return (
+    <div className="run-gear-tip">
+      <div className="run-gear-tip-title">{template.name}</div>
+      <div className="run-gear-tip-meta">
+        {MINION_TIER_LABELS[template.tier]} · {MINION_CLASS_LABELS[template.class]}
+      </div>
+      <div className="run-gear-tip-copy ui-muted">{template.role}</div>
+      <div className="command-icon-tooltip-stats mt-2">
+        {[
+          ['Attack', template.stats.attack],
+          ['Defense', template.stats.defense],
+          ['Health', template.stats.health],
+          ['Range', template.stats.range],
+          ['Magic', template.stats.magic],
+          ['Healing', template.stats.healing],
+        ].map(([label, value]) => (
+          <span key={label} className="command-icon-tooltip-stat">
+            <span className="command-icon-tooltip-stat-label">{label}</span>
+            <span className="command-icon-tooltip-stat-value">{value}</span>
+          </span>
+        ))}
+      </div>
+      <div className="run-gear-tip-hint mt-2">
+        {injured
+          ? `Injured · recovers in ${injuryTime}`
+          : fielded
+            ? `Battle slot ${rosterIndex + 1}`
+            : `Reserve · roster #${rosterIndex + 1}`}
+      </div>
+    </div>
+  );
+}
+
 function formatTime(ms: number): string {
   const totalSeconds = Math.max(0, Math.ceil(ms / 1000));
   const hours = Math.floor(totalSeconds / 3600);
@@ -454,8 +511,7 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
   const [hoveredSpellId, setHoveredSpellId] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [notice, setNotice] = useState('');
-  const [draggedMinionId, setDraggedMinionId] = useState<string | null>(null);
-  const [selectedMinionId, setSelectedMinionId] = useState<string | null>(null);
+  const [armySwapSourceId, setArmySwapSourceId] = useState<string | null>(null);
   const [selectedSpellSlot, setSelectedSpellSlot] = useState(0);
   const [expandedQuestId, setExpandedQuestId] = useState<string | null>(null);
   const [showDailyRun, setShowDailyRun] = useState(false);
@@ -464,6 +520,9 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
   const [chatChannel, setChatChannel] = useState<SocialChatChannel>('global');
   const [chatDraft, setChatDraft] = useState('');
   const [isChatDockOpen, setIsChatDockOpen] = useState(false);
+  const [showMultiplayerHub, setShowMultiplayerHub] = useState(false);
+  const [showPveHub, setShowPveHub] = useState(false);
+  const [showMpDailyRun, setShowMpDailyRun] = useState(false);
   const [isMapActionRailCompact, setIsMapActionRailCompact] = useState(true);
   const lastActivityNoticeId = useRef<string | null>(null);
   const router = useRouter();
@@ -560,7 +619,7 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
       setIsCommandOpen(false);
       setShowDailyRun(false);
       setActivePanel('overview');
-      setSelectedMinionId(null);
+      setArmySwapSourceId(null);
       setNotice('');
     };
 
@@ -617,6 +676,12 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
     }
   }, [user?.activityLog]);
 
+  useEffect(() => {
+    if (activePanel !== 'minions') {
+      setArmySwapSourceId(null);
+    }
+  }, [activePanel]);
+
   if (!user) return null;
 
   const player = user;
@@ -628,10 +693,6 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
   const equippedSlots = player.equippedSlots || {};
   const minions = player.minions || [];
   const fieldedMinions = getFieldedMinions(player);
-  const selectedMinion = selectedMinionId
-    ? minions.find(minion => minion.id === selectedMinionId) || null
-    : null;
-  const selectedTemplateId = selectedMinion?.templateId;
   const activityLog = player.activityLog || [];
   const quests = player.dailyQuests?.quests || [];
   const activeJobs = player.jobQueue || [];
@@ -655,6 +716,8 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
   const socialCandidates = getUsers()
     .filter(candidate => candidate.username.toLowerCase() !== player.username.toLowerCase())
     .sort((left, right) => left.username.localeCompare(right.username));
+  const activePveSpawns = getActivePveSpawnCount(player);
+  const gearSetSummaries = getActiveGearSetSummaries(player);
 
   const getEquippedItem = (slot: EquipmentSlot) => {
     const equipmentId = equippedSlots[slot];
@@ -864,41 +927,21 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
     setUser(getCurrentUser());
   };
 
-  const handleToggleMinionField = (minionId: string) => {
-    const result = toggleMinionFielded(minionId);
-    if (!result.success) {
-      setTemporaryNotice(result.error || 'Could not update roster.');
+  const handleArmyMinionClick = (minionId: string) => {
+    if (!armySwapSourceId) {
+      setArmySwapSourceId(minionId);
       return;
     }
 
-    setUser(getCurrentUser());
-  };
-
-  const handleMoveMinion = (minionId: string, direction: 'up' | 'down') => {
-    const result = moveMinionInRoster(minionId, direction);
-    if (!result.success) {
-      setTemporaryNotice(result.error || 'Could not move minion.');
+    if (armySwapSourceId === minionId) {
+      setArmySwapSourceId(null);
       return;
     }
 
-    setUser(getCurrentUser());
-  };
-
-  const handleMinionDragStart = (event: DragEvent<HTMLDivElement>, minionId: string) => {
-    event.dataTransfer.effectAllowed = 'move';
-    event.dataTransfer.setData('text/plain', minionId);
-    setDraggedMinionId(minionId);
-  };
-
-  const handleMinionDrop = (event: DragEvent<HTMLDivElement>, targetMinionId: string) => {
-    event.preventDefault();
-    const sourceMinionId = event.dataTransfer.getData('text/plain') || draggedMinionId;
-    setDraggedMinionId(null);
-    if (!sourceMinionId || sourceMinionId === targetMinionId) return;
-
-    const result = reorderMinionRoster(sourceMinionId, targetMinionId);
+    const result = reorderMinionRoster(armySwapSourceId, minionId);
+    setArmySwapSourceId(null);
     if (!result.success) {
-      setTemporaryNotice(result.error || 'Could not reorder roster.');
+      setTemporaryNotice(result.error || 'Could not swap units.');
       return;
     }
 
@@ -984,8 +1027,11 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
         </div>
       </header>
 
-      {!isCommandOpen && (!showRandomRun || !showDailyRun) && renderMapActionRail()}
-      {!isCommandOpen && (!showRandomRun || !showDailyRun) && renderChatDock()}
+      {!isCommandOpen && (!showRandomRun || !showDailyRun) && !showMultiplayerHub && !showPveHub && renderMapActionRail()}
+      {!isCommandOpen && (!showRandomRun || !showDailyRun) && !showMultiplayerHub && !showPveHub && renderChatDock()}
+      {!isCommandOpen && (!showRandomRun || !showDailyRun) && !showMultiplayerHub && !showPveHub && (
+        <ChatLiveFeed enabled />
+      )}
 
       {renderActionChips()}
 
@@ -1040,7 +1086,7 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
           )}
 
           <div
-            className={`command-center-content flex-1 px-6 ${
+            className={`command-center-content no-scrollbar flex-1 px-6 ${
               activePanel === 'spells' ? 'command-center-content-spells py-3' : 'overflow-y-auto py-6'
             }`}
           >
@@ -1067,9 +1113,25 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
       </aside>
       )}
 
-      {selectedTemplateId && selectedMinion && renderMinionDetailsModal(selectedTemplateId, selectedMinion)}
+
       {showRandomRun && (
         <DailyRunModal isOpen={showDailyRun} onClose={() => setShowDailyRun(false)} />
+      )}
+      {!showRandomRun && (
+        <>
+          <MultiplayerHubModal
+            isOpen={showMultiplayerHub}
+            onClose={() => setShowMultiplayerHub(false)}
+          />
+          <PveHubModal
+            isOpen={showPveHub}
+            onClose={() => setShowPveHub(false)}
+          />
+          <MpDailyDungeonModal
+            isOpen={showMpDailyRun}
+            onClose={() => setShowMpDailyRun(false)}
+          />
+        </>
       )}
     </>
   );
@@ -1235,6 +1297,52 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
           </span>
           <span className="map-action-badge">{chatMessages.length}</span>
         </button>
+
+        {!showRandomRun && (
+          <>
+            <button
+              type="button"
+              onClick={() => {
+                emitFxEvent({ type: 'attack', tone: 'gold', intensity: 0.62 });
+                setShowMultiplayerHub(true);
+              }}
+              className="map-action-button map-action-button-primary"
+              title="Open PVP hub"
+            >
+              <span className="map-action-icon">⚔</span>
+              <span className="map-action-copy">
+                <span className="map-action-label">PVP</span>
+                <span className="map-action-detail">Ranked duels</span>
+              </span>
+              <span className="map-action-badge">Live</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                emitFxEvent({ type: 'daily', tone: 'violet', intensity: 0.58 });
+                setShowPveHub(true);
+              }}
+              className="map-action-button"
+              title="Open PVE intel"
+            >
+              <span className="map-action-icon relative overflow-hidden">
+                <Image
+                  src="/assets/icons/loot-chest.png"
+                  alt=""
+                  fill
+                  className="object-contain p-1"
+                  style={{ imageRendering: 'pixelated' }}
+                />
+              </span>
+              <span className="map-action-copy">
+                <span className="map-action-label">PVE</span>
+                <span className="map-action-detail">Dungeons & bosses</span>
+              </span>
+              <span className="map-action-badge">{activePveSpawns}</span>
+            </button>
+          </>
+        )}
       </nav>
     );
   }
@@ -1245,16 +1353,16 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
     }
 
     return (
-      <aside className="social-chat-dock social-chat-panel command-panel vine-frame fixed right-4 top-[18.5rem] z-40 w-[min(24rem,calc(100vw-2rem))] overflow-hidden rounded border text-zinc-100">
-        <div className="panel-header flex items-center justify-between border-b px-3 py-2">
-          <div className="flex items-center gap-2">
+      <aside className="social-chat-dock social-chat-panel fixed right-4 top-[18.5rem] z-40 w-[min(22rem,calc(100vw-2rem))] overflow-hidden rounded-xl border text-zinc-100">
+        <div className="social-chat-header flex items-center justify-between px-3 py-2">
+          <div className="flex items-center gap-1.5">
             {(['global', 'party'] as SocialChatChannel[]).map(channel => (
               <button
                 key={channel}
                 type="button"
                 onClick={() => setChatChannel(channel)}
                 disabled={channel === 'party' && !socialState.party}
-                className={`rounded px-2 py-1 text-[10px] font-black uppercase ${chatChannel === channel ? 'ui-button-primary' : 'ui-button'} disabled:opacity-35`}
+                className={`rounded px-2.5 py-1 text-[10px] font-black uppercase ${chatChannel === channel ? 'social-chat-tab-active' : 'social-chat-tab'} disabled:opacity-35`}
               >
                 {channel}
               </button>
@@ -1263,27 +1371,27 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
           <button
             type="button"
             onClick={() => setIsChatDockOpen(false)}
-            className="ui-button rounded px-2 py-1 text-[10px] font-black"
+            className="social-chat-close rounded px-2 py-1 text-[10px] font-black"
           >
             X
           </button>
         </div>
-        <div className="max-h-52 space-y-2 overflow-y-auto p-3 text-xs font-bold">
+        <div className="social-chat-messages no-scrollbar max-h-56 space-y-1.5 overflow-y-auto px-3 py-2 text-sm font-bold">
           {chatMessages.length === 0 ? (
-            <div className="ui-empty rounded border border-dashed px-3 py-4 text-center">
-              No messages.
+            <div className="social-chat-empty rounded px-3 py-4 text-center text-xs">
+              No messages yet.
             </div>
           ) : (
             chatMessages.map(message => (
-              <div key={message.id} className="chat-line">
-                <span className="ui-accent font-black">{message.author}</span>
-                <span className="ml-2 text-zinc-100">{message.text}</span>
+              <div key={message.id} className="chat-line-modern">
+                <span className="chat-line-author">{message.author}</span>
+                <span className="chat-line-text">{message.text}</span>
               </div>
             ))
           )}
         </div>
         <form
-          className="flex gap-2 border-t border-[rgba(232,217,184,0.14)] p-3"
+          className="social-chat-compose flex gap-2 px-3 py-2.5"
           onSubmit={(event) => {
             event.preventDefault();
             handleSendChat();
@@ -1293,10 +1401,10 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
             value={chatDraft}
             onChange={(event) => setChatDraft(event.target.value)}
             maxLength={180}
-            className="ui-input min-w-0 flex-1 rounded px-3 py-2 text-xs font-bold"
+            className="social-chat-input min-w-0 flex-1 rounded-lg px-3 py-2 text-xs font-bold"
             placeholder={chatChannel === 'party' ? 'Party message' : 'Global message'}
           />
-          <button type="submit" className="ui-button-primary rounded px-3 py-2 text-xs font-black">
+          <button type="submit" className="social-chat-send rounded-lg px-3 py-2 text-xs font-black">
             Send
           </button>
         </form>
@@ -1552,12 +1660,10 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
 
   function renderSettings() {
     return (
-      <div className="settings-panel-grid">
-        <div className="settings-panel-primary">
-          <GameSettingsPanel compact showRunTutorial={showRandomRun} />
-        </div>
-        <section className="ui-card settings-mode-card rounded border p-3">
-          <SectionTitle title="Game Mode" action="Multiplayer" />
+      <div className="settings-panel-stack">
+        <GameSettingsPanel compact showRunTutorial={showRandomRun} />
+        <section className="ui-card settings-mode-card rounded border p-4">
+          <SectionTitle title="Game Mode" action="World Map" />
           <p className="ui-muted text-sm font-bold leading-relaxed">
             Switch between the shared world map and the singleplayer run hall.
           </p>
@@ -1574,7 +1680,8 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
   }
 
   function renderOverview() {
-    const latestActivity = activityLog.slice(0, 4);
+    const mpDailyChallenge = getMpDailyDungeonChallenge(Date.now());
+    const completedMpDailyToday = hasCompletedMpDailyDungeonToday(player, Date.now());
     const trackedCityQuest = (player.cityQuests || [])
       .map(progress => {
         const template = getCityQuestTemplate(progress.questId);
@@ -1582,77 +1689,31 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
         return { template, status: getCityQuestStatus(player, progress.questId) };
       })
       .find(item => item && !item.status.claimed) || null;
+    const openDailyQuests = quests.filter(quest => !quest.claimed);
 
     return (
-      <div className="overview-dashboard-grid overview-dashboard-slim">
+      <div className="overview-dashboard-grid overview-dashboard-modern">
         <section className="ui-card rounded border p-4">
-          <SectionTitle title="Quick Access" />
-          <div className="overview-quick-links">
-            <button type="button" onClick={() => setActivePanel('character')} className="overview-quick-link ui-button rounded px-3 py-2.5 text-sm font-black">
-              Commander
-            </button>
-            <button type="button" onClick={() => setActivePanel('inventory')} className="overview-quick-link ui-button rounded px-3 py-2.5 text-sm font-black">
-              Gear
-            </button>
-            <button type="button" onClick={() => setActivePanel('minions')} className="overview-quick-link ui-button rounded px-3 py-2.5 text-sm font-black">
-              Army
-            </button>
-            <button type="button" onClick={() => setActivePanel('quests')} className="overview-quick-link ui-button rounded px-3 py-2.5 text-sm font-black">
-              Quests
-            </button>
+          <SectionTitle title="Daily Gauntlet" action={completedMpDailyToday ? 'Done' : 'PVE'} />
+          <div className="fantasy-heading truncate text-xl">{mpDailyChallenge.name}</div>
+          <p className="ui-muted mt-1 text-sm font-bold">{mpDailyChallenge.subtitle}</p>
+          <div className="ui-faint mt-3 grid grid-cols-2 gap-2 text-xs font-bold">
+            <span>{mpDailyChallenge.battleCount} fights</span>
+            <span>Boss: {mpDailyChallenge.bossName}</span>
+            <span>{mpDailyChallenge.rewardGold} gold</span>
+            <span>{mpDailyChallenge.rewardRareGems} gems</span>
           </div>
-        </section>
-
-        {showRandomRun && (
-          <section className="ui-card rounded border p-4">
-            <SectionTitle
-              title="Run"
-              action={savedDailyRun ? 'Resume' : 'Open'}
-            />
-            <div className="fantasy-heading truncate text-lg">{savedDailyRun?.title || 'Roguelike Road'}</div>
-            <p className="ui-muted mt-1 line-clamp-2 text-xs font-bold">
-              {savedDailyRun
-                ? `${savedDailyRun.phaseLabel}: ${savedDailyRun.wins}/${savedDailyRun.targetBattles} wins, ${savedDailyRun.unitsStanding}/${savedDailyRun.totalUnits || 7} units standing.`
-                : `Draft seven temporary units and push through a fresh randomized road. Run level ${hudRunState.runLevel}.`}
-            </p>
-            <button
-              type="button"
-              onClick={() => setShowDailyRun(true)}
-              className="ui-button-primary mt-3 w-full rounded px-3 py-2 text-sm font-black"
-            >
-              {savedDailyRun ? 'Resume Run' : 'Start Run'}
-            </button>
-          </section>
-        )}
-
-        <section className="ui-card rounded border p-4">
-          <SectionTitle title="Quest" action={trackedCityQuest ? trackedCityQuest.template.town : 'None'} />
-          {trackedCityQuest ? (
-            <button
-              type="button"
-              onClick={() => setActivePanel('quests')}
-              className="quest-card ui-card w-full rounded border p-3 text-left transition hover:border-[rgba(232,217,184,0.34)]"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="fantasy-heading truncate text-base">{trackedCityQuest.template.name}</div>
-                  <p className="ui-muted mt-1 line-clamp-2 text-xs font-bold">{trackedCityQuest.template.description}</p>
-                </div>
-                <span className={`rounded px-2 py-1 text-[10px] font-black ${trackedCityQuest.status.complete ? 'bg-amber-900 text-amber-200' : 'bg-zinc-800 text-zinc-300'}`}>
-                  {trackedCityQuest.status.complete ? 'Ready' : 'Open'}
-                </span>
-              </div>
-              <div className="ui-progress-track mt-3 h-2 overflow-hidden rounded border">
-                <div className="ui-progress-fill h-full" style={{ width: `${Math.min(100, (trackedCityQuest.status.progress / trackedCityQuest.status.required) * 100)}%` }} />
-              </div>
-              <div className="ui-muted mt-2 flex justify-between text-xs font-bold">
-                <span>{trackedCityQuest.status.progress} / {trackedCityQuest.status.required}</span>
-                <span>{trackedCityQuest.template.rewards.exp ? `${getBalancedQuestExp(trackedCityQuest.template.rewards.exp)} XP` : 'Reward pending'}</span>
-              </div>
-            </button>
-          ) : (
-            <EmptyState text="No city contract tracked. Visit a town board." />
-          )}
+          <button
+            type="button"
+            disabled={completedMpDailyToday}
+            onClick={() => {
+              emitFxEvent({ type: 'daily', tone: 'violet', intensity: 0.85 });
+              setShowMpDailyRun(true);
+            }}
+            className="ui-button-primary mt-4 w-full rounded px-3 py-2.5 text-sm font-black disabled:opacity-40"
+          >
+            {completedMpDailyToday ? 'Completed Today' : 'Enter Daily Gauntlet'}
+          </button>
         </section>
 
         <section className="ui-card rounded border p-4">
@@ -1662,60 +1723,120 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
           ) : (
             <div className="space-y-2">
               {player.traveling && renderTravelCard(player.traveling, true)}
-              {activeJobs.slice(0, 2).map(job => renderJobCard(job.id, true))}
+              {activeJobs.slice(0, 3).map(job => renderJobCard(job.id, true))}
             </div>
           )}
         </section>
 
-        <section className="ui-card rounded border p-4">
-          <SectionTitle title="Recent Drops" action="Last 4" />
-          {latestActivity.length === 0 ? (
-            <EmptyState text="No completed jobs or claimed quests yet." />
-          ) : (
-            <div className="space-y-2">
-              {latestActivity.map(activity => renderActivityRow(activity))}
-            </div>
-          )}
+        <section className="ui-card overview-quests-panel rounded border p-4">
+          <SectionTitle title="Quests" action={`${openDailyQuests.length + (trackedCityQuest ? 1 : 0)} open`} />
+          <div className="space-y-3">
+            {trackedCityQuest ? (
+              <button
+                type="button"
+                onClick={() => setActivePanel('quests')}
+                className="quest-card ui-card w-full rounded border p-3 text-left transition hover:border-[rgba(232,217,184,0.34)]"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="arcane-label">{trackedCityQuest.template.town}</div>
+                    <div className="fantasy-heading truncate text-base">{trackedCityQuest.template.name}</div>
+                    <p className="ui-muted mt-1 line-clamp-2 text-sm font-bold">{trackedCityQuest.template.description}</p>
+                  </div>
+                  <span className={`rounded px-2 py-1 text-[10px] font-black ${trackedCityQuest.status.complete ? 'bg-amber-900 text-amber-200' : 'bg-zinc-800 text-zinc-300'}`}>
+                    {trackedCityQuest.status.complete ? 'Ready' : 'Open'}
+                  </span>
+                </div>
+                <div className="ui-progress-track mt-3 h-2 overflow-hidden rounded border">
+                  <div className="ui-progress-fill h-full" style={{ width: `${Math.min(100, (trackedCityQuest.status.progress / trackedCityQuest.status.required) * 100)}%` }} />
+                </div>
+              </button>
+            ) : (
+              <EmptyState text="No city contract tracked. Visit a town board." />
+            )}
+
+            {openDailyQuests.length > 0 && (
+              <div className="space-y-2">
+                {openDailyQuests.slice(0, 4).map(quest => {
+                  const complete = quest.progress >= quest.requirement.count;
+                  return (
+                  <button
+                    key={quest.id}
+                    type="button"
+                    onClick={() => setActivePanel('quests')}
+                    className="overview-daily-quest ui-card w-full rounded border px-3 py-2.5 text-left transition hover:border-[rgba(232,217,184,0.34)]"
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-black text-zinc-100">{quest.name}</div>
+                        <div className="ui-muted text-xs font-bold">{quest.progress}/{quest.requirement.count}</div>
+                      </div>
+                      <span className="ui-pill shrink-0 rounded border px-2 py-1 text-[10px] font-black">
+                        {complete ? 'Claim' : 'Daily'}
+                      </span>
+                    </div>
+                  </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </section>
       </div>
     );
   }
 
   function renderCharacter() {
-    const statButtons: Array<{ id: AllocatableStat; label: string; value: number | string }> = [
-      { id: 'armyPower', label: 'Army Power', value: player.stats.armyPower },
-      { id: 'defensivePower', label: 'Defensive Power', value: player.stats.defensivePower },
-      { id: 'morale', label: 'Morale', value: player.stats.morale },
-      { id: 'spellPower', label: 'Spell Power', value: player.stats.spellPower },
-      { id: 'health', label: 'Health', value: `${player.stats.health}/${player.stats.maxHealth}` },
+    const statButtons: Array<{ id: AllocatableStat; label: string; shortLabel: string; value: number | string }> = [
+      { id: 'armyPower', label: 'Army Power', shortLabel: 'Army', value: player.stats.armyPower },
+      { id: 'defensivePower', label: 'Defensive Power', shortLabel: 'Ward', value: player.stats.defensivePower },
+      { id: 'morale', label: 'Morale', shortLabel: 'Morale', value: player.stats.morale },
+      { id: 'spellPower', label: 'Spell Power', shortLabel: 'Spell', value: player.stats.spellPower },
+      { id: 'health', label: 'Health', shortLabel: 'Health', value: `${player.stats.health}/${player.stats.maxHealth}` },
     ];
 
     return (
-      <div className="character-layout-grid">
-        <section className="ui-card rounded border p-4">
-          <div className="flex items-start justify-between gap-4">
-            <span className="ui-avatar-frame relative h-28 w-28 shrink-0 overflow-hidden rounded border">
+      <div className="character-layout-grid character-layout-modern character-commander-panel">
+        <section className="ui-card character-hero-card rounded border p-5">
+          <div className="character-hero-banner">
+            <span className="ui-avatar-frame character-hero-avatar relative block overflow-hidden rounded-full border">
               <Image
                 src={getPlayerModelPath(currentModel)}
                 alt={player.username}
                 fill
                 className="player-model-art object-contain p-2"
-                sizes="112px"
+                sizes="128px"
                 unoptimized
               />
             </span>
-            <div className="min-w-0 flex-1">
-              <div className="arcane-label">Commander</div>
-              <div className="fantasy-heading truncate text-3xl">{player.username}</div>
-              <div className="mt-2 grid grid-cols-2 gap-2">
-                <StatusPill label="Level" value={String(player.stats.level)} />
-                <StatusPill label="Points" value={String(player.stats.unallocatedPoints)} />
-                <StatusPill label="Health" value={`${player.stats.health}/${player.stats.maxHealth}`} />
-                <StatusPill label="Gold" value={String(player.gold)} />
-              </div>
+            <div className="arcane-label mt-3">Commander</div>
+            <h3 className="fantasy-heading text-3xl">{player.username}</h3>
+            <div className="character-xp-bar ui-progress-track mt-3 h-2 overflow-hidden rounded border">
+              <div className="ui-progress-fill h-full" style={{ width: `${expProgress}%` }} />
+            </div>
+            <div className="ui-faint mt-1 text-[11px] font-bold">{player.exp} / {expNeeded} XP</div>
+          </div>
+
+          <div className="character-quick-stats mt-4">
+            <div className="character-quick-stat">
+              <span className="character-quick-stat-label">Level</span>
+              <span className="character-quick-stat-value">{player.stats.level}</span>
+            </div>
+            <div className="character-quick-stat">
+              <span className="character-quick-stat-label">Points</span>
+              <span className="character-quick-stat-value">{player.stats.unallocatedPoints}</span>
+            </div>
+            <div className="character-quick-stat">
+              <span className="character-quick-stat-label">Health</span>
+              <span className="character-quick-stat-value">{player.stats.health}/{player.stats.maxHealth}</span>
+            </div>
+            <div className="character-quick-stat">
+              <span className="character-quick-stat-label">Gold</span>
+              <span className="character-quick-stat-value">{player.gold}</span>
             </div>
           </div>
-          <div className="mt-4 flex gap-2">
+
+          <div className="mt-4 flex flex-wrap justify-center gap-2">
             <button
               onClick={onOpenAvatar}
               className="ui-button-primary rounded px-4 py-2 text-sm font-black"
@@ -1732,19 +1853,20 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
           </div>
         </section>
 
-        <section className="ui-card rounded border p-4">
+        <section className="ui-card character-stats-card rounded border p-5">
           <SectionTitle title="Stats" action={`${player.stats.unallocatedPoints} points`} />
-          <div className="grid gap-2 sm:grid-cols-2">
+          <div className="character-stat-grid character-stat-grid-modern">
             {statButtons.map(stat => (
-              <div key={stat.id} className="ui-pill flex items-center justify-between rounded border px-4 py-3">
-                <div>
-                  <div className="text-sm font-bold text-zinc-100">{stat.label}</div>
-                  <div className="ui-value text-xl font-black">{stat.value}</div>
+              <div key={stat.id} className="character-stat-row rounded border">
+                <div className="character-stat-copy">
+                  <span className="character-stat-label">{stat.label}</span>
+                  <span className="character-stat-value">{stat.value}</span>
                 </div>
                 <button
                   onClick={() => handleAllocate(stat.id)}
                   disabled={player.stats.unallocatedPoints === 0}
-                  className="ui-button-primary h-9 w-9 rounded text-xl font-black disabled:opacity-30"
+                  className="character-stat-add ui-button-primary rounded disabled:opacity-30"
+                  aria-label={`Increase ${stat.label}`}
                 >
                   +
                 </button>
@@ -1753,16 +1875,54 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
           </div>
         </section>
 
-        <section className="ui-card rounded border p-4">
+        <section className="ui-card character-gear-card rounded border p-5">
           <SectionTitle title="Gear Bonuses" action={`${Object.keys(equippedSlots).length}/${equipmentSlots.length}`} />
-          <div className="grid grid-cols-2 gap-2">
-            <StatusPill label="Army" value={`+${totalEquipmentStats.armyPower}`} />
-            <StatusPill label="Ward" value={`+${totalEquipmentStats.defensivePower}`} />
-            <StatusPill label="Morale" value={`+${totalEquipmentStats.morale}`} />
-            <StatusPill label="Spell" value={`+${totalEquipmentStats.spellPower}`} />
-            <StatusPill label="Max HP" value={`+${totalEquipmentStats.maxHealth}`} />
+          <div className="character-gear-grid character-gear-grid-modern">
+            <div className="character-gear-chip rounded border">
+              <span className="character-gear-chip-label">Army</span>
+              <span className="character-gear-chip-value">+{totalEquipmentStats.armyPower}</span>
+            </div>
+            <div className="character-gear-chip rounded border">
+              <span className="character-gear-chip-label">Ward</span>
+              <span className="character-gear-chip-value">+{totalEquipmentStats.defensivePower}</span>
+            </div>
+            <div className="character-gear-chip rounded border">
+              <span className="character-gear-chip-label">Morale</span>
+              <span className="character-gear-chip-value">+{totalEquipmentStats.morale}</span>
+            </div>
+            <div className="character-gear-chip rounded border">
+              <span className="character-gear-chip-label">Spell</span>
+              <span className="character-gear-chip-value">+{totalEquipmentStats.spellPower}</span>
+            </div>
+            <div className="character-gear-chip character-gear-chip-wide rounded border">
+              <span className="character-gear-chip-label">Max HP</span>
+              <span className="character-gear-chip-value">+{totalEquipmentStats.maxHealth}</span>
+            </div>
           </div>
         </section>
+
+        {gearSetSummaries.length > 0 && (
+          <section className="ui-card character-sets-card rounded border p-5">
+            <SectionTitle title="Active Gear Sets" action={`${gearSetSummaries.length} active`} />
+            <div className="character-sets-list space-y-2">
+              {gearSetSummaries.map(summary => (
+                <div key={summary.setId} className="character-set-row rounded border px-4 py-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="text-sm font-black text-zinc-100">{summary.name}</div>
+                    <span className="ui-accent text-xs font-black">{summary.pieces}/6 pieces</span>
+                  </div>
+                  <div className="ui-muted mt-2 space-y-1 text-xs font-bold">
+                    {summary.activeBonuses.map(bonus => (
+                      <div key={`${summary.setId}-${bonus.pieces}`}>
+                        {bonus.pieces}-piece: {bonus.effect}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
       </div>
     );
   }
@@ -1928,25 +2088,23 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
 
 
   function renderMinions() {
-    const totalMinions = minions.length;
+    const rosterMinions = getOrderedMinions(player);
 
     return (
-      <div className="minions-layout-grid">
-        <section className="ui-card minion-field-strip rounded p-4">
-          <SectionTitle title="Battle Slots" action={`${fieldedMinions.length}/${MAX_FIELD_MINIONS} fielded`} />
-          <p className="ui-muted mb-3 text-xs font-bold">These units fight with you in combat. Tap a slot to inspect.</p>
-          <div className="grid grid-cols-7 gap-1">
+      <div className="minions-layout-grid minions-layout-modern">
+        <section className="ui-card minion-field-strip rounded border p-4">
+          <SectionTitle title="Battle Lineup" action={`${fieldedMinions.length}/${MAX_FIELD_MINIONS} fielded`} />
+          <p className="ui-muted mb-3 text-xs font-bold">The first seven healthy roster positions fight with you.</p>
+          <div className="army-lineup-strip">
             {Array.from({ length: MAX_FIELD_MINIONS }, (_, index) => {
               const minion = fieldedMinions[index];
               const template = minion ? getMinionTemplate(minion.templateId) : undefined;
 
               return (
-                <button
+                <div
                   key={index}
-                  onClick={() => minion && setSelectedMinionId(minion.id)}
-                  disabled={!minion}
-                  className={`ui-icon-frame minion-field-slot relative aspect-square overflow-hidden rounded ${minion ? '' : 'opacity-35'}`}
-                  title={template?.name || 'Empty field slot'}
+                  className={`army-lineup-slot ui-icon-frame relative aspect-square overflow-hidden rounded ${minion ? 'army-lineup-slot-filled' : ''}`}
+                  title={template?.name || `Battle slot ${index + 1}`}
                 >
                   {template ? (
                     <Image
@@ -1960,20 +2118,68 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
                   ) : (
                     <span className="ui-faint text-xs font-black">{index + 1}</span>
                   )}
-                </button>
+                </div>
               );
             })}
           </div>
         </section>
 
-        <section>
-          <SectionTitle title="Recruited Units" action={`${totalMinions} total`} />
-          <p className="ui-muted mb-3 text-xs font-bold">Drag roster cards to reorder who fills empty battle slots first.</p>
-          {minions.length === 0 ? (
+        <section className="ui-card rounded border p-4">
+          <SectionTitle title="Army Roster" action={`${rosterMinions.length} recruited`} />
+          <p className="ui-muted mb-3 text-xs font-bold">
+            {armySwapSourceId
+              ? 'Select a second unit to swap positions.'
+              : 'Click one unit, then click another to swap roster order.'}
+          </p>
+          {rosterMinions.length === 0 ? (
             <EmptyState text="No recruited minions." />
           ) : (
-            <div className="minion-roster-grid">
-              {minions.map((minion) => renderRosterMinionCard(minion))}
+            <div className="army-roster-grid">
+              {rosterMinions.map((minion, index) => {
+                const template = getMinionTemplate(minion.templateId);
+                if (!template) return null;
+
+                const injured = isMinionInjured(minion, now);
+                const fielded = Boolean(minion.fielded);
+                const selected = armySwapSourceId === minion.id;
+                const isBattleSlot = index < MAX_FIELD_MINIONS;
+
+                return (
+                  <CommandGearHoverTip
+                    key={minion.id}
+                    popover={(
+                      <MinionArmyHoverPopover
+                        template={template}
+                        minion={minion}
+                        rosterIndex={index}
+                        now={now}
+                      />
+                    )}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => handleArmyMinionClick(minion.id)}
+                      className={`army-roster-tile command-icon-tile command-icon-tile-external-tip rounded border ${minionTierClasses(template.tier)} ${selected ? 'army-roster-tile-selected' : ''} ${fielded ? 'army-roster-tile-fielded' : ''} ${injured ? 'army-roster-tile-injured' : ''} ${isBattleSlot ? 'army-roster-tile-battle-slot' : ''}`}
+                      aria-label={`${template.name}, roster position ${index + 1}`}
+                      aria-pressed={selected}
+                    >
+                      <span className="command-icon-image overflow-hidden rounded">
+                        <Image
+                          src={`${MINION_ICON_BASE}/${template.assetName}`}
+                          alt={template.name}
+                          fill
+                          sizes="80px"
+                          className="sprite-soft-glow minion-menu-image object-contain p-1.5"
+                          unoptimized
+                        />
+                      </span>
+                      <span className="army-roster-tier">{MINION_TIER_LABELS[template.tier]}</span>
+                      <span className="army-roster-slot">{index + 1}</span>
+                      {injured && <span className="army-roster-status">Injured</span>}
+                    </button>
+                  </CommandGearHoverTip>
+                );
+              })}
             </div>
           )}
         </section>
@@ -1998,8 +2204,8 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
       inspectedSpell.target === 'enemy' ? 'Enemy' : inspectedSpell.target === 'ally' ? 'Ally' : 'Field';
 
     return (
-      <div className="spells-panel">
-        <section className={`spells-spotlight ui-card spell-card spell-card-${inspectedSpell.rarity} rounded border p-3`}>
+      <div className="spells-panel spells-panel-modern">
+        <section className={`spells-spotlight spells-spotlight-modern ui-card spell-card spell-card-${inspectedSpell.rarity} rounded border p-4`}>
           <div className="spells-spotlight-art">
             <SpellArt spell={inspectedSpell} variant="hero" dimmed={!inspectedKnown} />
           </div>
@@ -2025,12 +2231,12 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
                 </span>
               )}
             </div>
-            <h3 className="fantasy-heading mt-2 text-2xl leading-tight">{inspectedSpell.name}</h3>
-            <p className="ui-muted mt-1.5 text-sm font-bold leading-relaxed">{inspectedSpell.description}</p>
+            <h3 className="fantasy-heading mt-2 text-3xl leading-tight">{inspectedSpell.name}</h3>
+            <p className="ui-muted mt-2 text-base font-bold leading-relaxed">{inspectedSpell.description}</p>
           </div>
         </section>
 
-        <section className="spells-loadout-section ui-card rounded border p-3">
+        <section className="spells-loadout-section ui-card rounded border p-4">
           <SectionTitle title="Loadout" action={`Slot ${selectedSpellSlot + 1}`} compact />
           <div className="spells-loadout-slots">
             {equippedSpells.map((spell, index) => (
@@ -2053,7 +2259,7 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
           </div>
         </section>
 
-        <section className="spells-archive-section ui-card rounded border p-3">
+        <section className="spells-archive-section ui-card rounded border p-4">
           <SectionTitle title="Archive" action={`${knownSpellIds.size} / ${BATTLE_SPELLS.length}`} compact />
           <div className="spells-archive-grid">
             {BATTLE_SPELLS.map(spell => {
@@ -2305,12 +2511,14 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
         template: NonNullable<ReturnType<typeof getCityQuestTemplate>>;
         status: ReturnType<typeof getCityQuestStatus>;
       }>;
-    const storyChapter = STORY_CHAPTERS[0];
-    const storyPreview = storyChapter?.quests || [];
+    const storyPreview = getAllStoryQuestsSorted();
     const visibleStoryQuests = storyPreview.filter(story => {
       const status = getStoryQuestStatus(player, story.id);
       return status.unlocked && !status.claimed;
     });
+    const storyChapter = STORY_CHAPTERS.find(chapter => (
+      visibleStoryQuests.some(story => story.chapter === chapter.id)
+    )) || STORY_CHAPTERS[STORY_CHAPTERS.length - 1];
     const hiddenStoryCount = storyPreview.length - visibleStoryQuests.length;
     const visibleCityQuests = acceptedCityQuests.filter(item => !item.status.claimed);
     const visibleDailyQuests = quests.filter(quest => !quest.claimed);
@@ -2573,185 +2781,6 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
           <span>{Math.floor(progress)}%</span>
           <span>{formatTime(timeRemaining)}</span>
         </div>
-      </div>
-    );
-  }
-
-  function renderRosterMinionCard(minion: MinionStack) {
-    const template = getMinionTemplate(minion.templateId);
-    if (!template) return null;
-
-    const fielded = Boolean(minion.fielded);
-    const injured = isMinionInjured(minion, now);
-    const injuryTime = injured ? formatMinionInjuryTime(minion, now) : '';
-    const rosterIndex = typeof minion.rosterOrder === 'number' ? minion.rosterOrder : minions.findIndex(item => item.id === minion.id);
-
-    return (
-      <div
-        key={minion.id}
-        draggable
-        onDragStart={(event) => handleMinionDragStart(event, minion.id)}
-        onDragOver={(event) => event.preventDefault()}
-        onDragEnd={() => setDraggedMinionId(null)}
-        onDrop={(event) => handleMinionDrop(event, minion.id)}
-        className={`minion-frame minion-roster-card rounded px-3 py-3 transition ${
-          draggedMinionId === minion.id ? 'opacity-55' : ''
-        } ${
-          injured ? 'opacity-75 saturate-50' : ''
-        } ${minionTierClasses(template.tier)}`}
-      >
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => setSelectedMinionId(minion.id)}
-            className="ui-icon-frame relative h-16 w-16 shrink-0 overflow-hidden rounded"
-            title={template.name}
-          >
-            <Image
-              src={`${MINION_ICON_BASE}/${template.assetName}`}
-              alt={template.name}
-              fill
-              className="sprite-soft-glow minion-menu-image object-contain p-1"
-              sizes="64px"
-              unoptimized
-            />
-            <span className="absolute left-1 top-1 rounded bg-black/60 px-1 text-[8px] font-black">
-              {MINION_TIER_LABELS[template.tier]}
-            </span>
-          </button>
-
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <div className="truncate text-sm font-black">{template.name}</div>
-              <span className={`rounded border px-2 py-0.5 text-[9px] font-black uppercase ${injured ? 'ui-button-danger' : fielded ? 'ui-rarity-rare' : 'ui-pill'}`}>
-                {injured ? 'Injured' : fielded ? 'Field' : 'Reserve'}
-              </span>
-            </div>
-            <div className="text-xs font-bold opacity-80">{MINION_CLASS_LABELS[template.class]} - {template.role}</div>
-            <div className="ui-faint mt-1 text-[10px] font-black">
-              Slot {rosterIndex + 1}{injured ? ` - recovers in ${injuryTime}` : ''}
-            </div>
-          </div>
-
-          <div className="flex shrink-0 flex-col gap-1">
-            <button
-              onClick={() => handleMoveMinion(minion.id, 'up')}
-              className="ui-button h-7 w-7 rounded text-xs font-black"
-              title="Move up"
-            >
-              ^
-            </button>
-            <button
-              onClick={() => handleMoveMinion(minion.id, 'down')}
-              className="ui-button h-7 w-7 rounded text-xs font-black"
-              title="Move down"
-            >
-              v
-            </button>
-          </div>
-        </div>
-
-        <div className="mt-3 grid grid-cols-2 gap-2">
-          <button
-            onClick={() => handleToggleMinionField(minion.id)}
-            disabled={injured}
-            className={`${fielded ? 'ui-button-danger' : 'ui-button-primary'} rounded px-3 py-2 text-xs font-bold disabled:opacity-40`}
-          >
-            {injured ? 'Recovering' : fielded ? 'Reserve' : 'Field'}
-          </button>
-          <button
-            onClick={() => setSelectedMinionId(minion.id)}
-            className="ui-button rounded px-3 py-2 text-xs font-bold"
-          >
-            Details
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  function renderMinionDetailsModal(templateId: string, minion: MinionStack) {
-    const template = getMinionTemplate(templateId);
-    if (!template) return null;
-
-    const fielded = Boolean(minion?.fielded);
-    const injured = isMinionInjured(minion, now);
-    const injuryTime = injured ? formatMinionInjuryTime(minion, now) : '';
-    const rosterIndex = minion
-      ? typeof minion.rosterOrder === 'number' ? minion.rosterOrder : minions.findIndex(item => item.id === minion.id)
-      : -1;
-    const closeDetails = () => {
-      setSelectedMinionId(null);
-    };
-
-    return (
-      <div className="fixed inset-0 z-[65] flex items-center justify-center bg-black/72 p-4 backdrop-blur-sm">
-        <section className={`command-panel vine-frame w-full max-w-xl rounded border p-5 text-zinc-100 ${minionTierClasses(template.tier)}`}>
-          <div className="flex items-start justify-between gap-4">
-            <div className="flex min-w-0 items-center gap-4">
-              <span className="ui-icon-frame relative h-24 w-24 shrink-0 overflow-hidden rounded border">
-                <Image
-                  src={`${MINION_ICON_BASE}/${template.assetName}`}
-                  alt={template.name}
-                  fill
-                  className="sprite-soft-glow minion-menu-image object-contain p-2"
-                  sizes="96px"
-                  unoptimized
-                />
-              </span>
-              <div className="min-w-0">
-                <div className="arcane-label">
-                  {MINION_TIER_LABELS[template.tier]} - Slot {rosterIndex + 1}
-                </div>
-                <h3 className="fantasy-heading text-2xl">{template.name}</h3>
-                <p className="ui-muted text-sm font-bold">{MINION_CLASS_LABELS[template.class]} - {template.role}</p>
-              </div>
-            </div>
-            <button
-              onClick={closeDetails}
-              className="ui-button rounded px-3 py-2 text-xs font-bold"
-            >
-              Close
-            </button>
-          </div>
-
-          <div className="mt-5 grid grid-cols-2 gap-2">
-            <StatusPill label="Status" value={injured ? `Injured ${injuryTime}` : fielded ? 'Fielded' : 'Reserve'} />
-            <StatusPill label="Acquired" value={formatDate(minion.acquiredAt)} />
-          </div>
-
-          <div className="mt-4 grid grid-cols-4 gap-2 text-center">
-            <StatusPill label="Attack" value={String(template.stats.attack)} />
-            <StatusPill label="Defense" value={String(template.stats.defense)} />
-            <StatusPill label="Magic" value={String(template.stats.magic)} />
-            <StatusPill label="Healing" value={String(template.stats.healing)} />
-            <StatusPill label="Health" value={String(template.stats.health)} />
-            <StatusPill label="Move" value={String(template.stats.movement)} />
-            <StatusPill label="Range" value={String(template.stats.range)} />
-            <StatusPill label="Tier" value={MINION_TIER_LABELS[template.tier]} />
-          </div>
-
-          <div className="mt-5 grid grid-cols-3 gap-2">
-            <button
-              onClick={() => handleMoveMinion(minion.id, 'up')}
-              className="ui-button rounded px-3 py-3 text-sm font-bold"
-            >
-              Move Up
-            </button>
-            <button
-              onClick={() => handleMoveMinion(minion.id, 'down')}
-              className="ui-button rounded px-3 py-3 text-sm font-bold"
-            >
-              Move Down
-            </button>
-            <button
-              onClick={() => handleToggleMinionField(minion.id)}
-              disabled={injured}
-              className={`${fielded ? 'ui-button-danger' : 'ui-button-primary'} rounded px-3 py-3 text-sm font-bold disabled:opacity-40`}
-            >
-              {injured ? 'Recovering' : fielded ? 'Reserve' : 'Field'}
-            </button>
-          </div>
-        </section>
       </div>
     );
   }

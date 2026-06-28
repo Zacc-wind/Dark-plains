@@ -23,6 +23,8 @@ export interface PlayerStateRow {
   city_quests?: User['cityQuests'];
   story_quests?: User['storyQuests'];
   daily_run?: User['dailyRun'];
+  mp_daily_dungeon?: User['mpDailyDungeon'];
+  gear_set_bonus_snapshot?: User['gearSetBonusSnapshot'];
   social?: User['social'];
   activity_log: User['activityLog'];
   spell_unlock_version: number;
@@ -59,6 +61,8 @@ export function userToPlayerStateRow(user: User, userId: string): PlayerStateRow
     city_quests: user.cityQuests || [],
     story_quests: user.storyQuests || [],
     daily_run: user.dailyRun,
+    mp_daily_dungeon: user.mpDailyDungeon,
+    gear_set_bonus_snapshot: user.gearSetBonusSnapshot,
     social: user.social,
     activity_log: user.activityLog || [],
     spell_unlock_version: user.spellUnlockVersion || 1,
@@ -90,6 +94,8 @@ export function playerStateRowToUser(row: PlayerStateRow, profile: ProfileRow): 
     cityQuests: row.city_quests || [],
     storyQuests: row.story_quests || [],
     dailyRun: row.daily_run,
+    mpDailyDungeon: row.mp_daily_dungeon,
+    gearSetBonusSnapshot: row.gear_set_bonus_snapshot,
     knownSpellIds: row.known_spell_ids,
     equippedSpellIds: row.equipped_spell_ids,
     spellUnlockVersion: row.spell_unlock_version,

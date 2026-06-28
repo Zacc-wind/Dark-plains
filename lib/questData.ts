@@ -1,15 +1,20 @@
 import type { EquipmentRarity, MinionTier } from './auth';
 
-export type QuestTown = 'Harborview' | 'Riverside';
+export type QuestTown = 'Harborview' | 'Riverside' | 'Blackwater Gate' | 'Moonbridge' | 'Ashford' | 'Eclipse Hold';
+
 export type QuestRequirementType =
   | 'complete_jobs'
   | 'complete_timed_jobs'
+  | 'complete_jobs_at_poi'
   | 'player_level'
   | 'own_rare_gems'
   | 'collect_item'
   | 'recruit_minions'
   | 'win_battles'
+  | 'defeat_enemies_level'
+  | 'clear_dungeons'
   | 'visit_poi'
+  | 'visit_quest_npc'
   | 'defeat_boss';
 
 export interface QuestRequirementSpec {
@@ -20,6 +25,10 @@ export interface QuestRequirementSpec {
   poiName?: string;
   itemId?: string;
   bossId?: string;
+  questNpcId?: string;
+  minEnemyLevel?: number;
+  maxEnemyLevel?: number;
+  minDungeonLevel?: number;
 }
 
 export interface QuestRewardSpec {
@@ -52,6 +61,7 @@ export interface StoryQuestTemplate {
   lore: string;
   requirement: QuestRequirementSpec;
   rewards: QuestRewardSpec;
+  dialogId?: string;
 }
 
 export interface StoryChapter {
@@ -352,6 +362,60 @@ export const CITY_QUESTS: CityQuestTemplate[] = [
     requirement: { type: 'player_level', count: 11 },
     rewards: { gold: 580, exp: 360, equipmentRarity: 'epic', minionTier: 'tier2' },
   },
+  {
+    id: 'bw-moonwell-tithe',
+    town: 'Blackwater Gate',
+    faction: 'Moon Tithe',
+    name: 'Moonwell Tithe',
+    description: 'Work the Moonwell Pier ledgers before mirror agents forge the entries.',
+    requirement: { type: 'complete_jobs_at_poi', count: 2, poiName: 'Moonwell Pier', minDuration: ONE_MINUTE },
+    rewards: { gold: 420, exp: 240, rareGems: 2 },
+  },
+  {
+    id: 'bw-scout-breaker',
+    town: 'Blackwater Gate',
+    faction: 'Gate Watch',
+    name: 'Scout Breaker',
+    description: 'Break mirror warbands stalking the roads between level fourteen and nineteen.',
+    requirement: { type: 'defeat_enemies_level', count: 3, minEnemyLevel: 14, maxEnemyLevel: 19 },
+    rewards: { gold: 480, exp: 280, equipmentRarity: 'rare' },
+  },
+  {
+    id: 'bw-ossuary-proof',
+    town: 'Blackwater Gate',
+    faction: 'Relic Weighers',
+    name: 'Ossuary Proof',
+    description: 'Clear a sealed dungeon and bring back its ward stone.',
+    requirement: { type: 'clear_dungeons', count: 1, minDungeonLevel: 5 },
+    rewards: { gold: 540, exp: 320, equipmentRarity: 'epic' },
+  },
+  {
+    id: 'eh-mirror-hunt',
+    town: 'Eclipse Hold',
+    faction: 'Eclipse Tribunal',
+    name: 'Mirror Hunt',
+    description: 'Hunt veteran warbands between level twenty and twenty-six on the eclipse marches.',
+    requirement: { type: 'defeat_enemies_level', count: 4, minEnemyLevel: 20, maxEnemyLevel: 26 },
+    rewards: { gold: 620, exp: 380, equipmentRarity: 'epic', rareGems: 2 },
+  },
+  {
+    id: 'eh-deep-chamber',
+    town: 'Eclipse Hold',
+    faction: 'Ossuary Order',
+    name: 'Deep Chamber',
+    description: 'Clear two veteran dungeons beneath the hold.',
+    requirement: { type: 'clear_dungeons', count: 2, minDungeonLevel: 10 },
+    rewards: { gold: 700, exp: 420, equipmentRarity: 'legendary' },
+  },
+  {
+    id: 'eh-candle-council',
+    town: 'Eclipse Hold',
+    faction: 'Candle Synod',
+    name: 'Candle Council',
+    description: 'Gather candle key fragments for the archivist before the court seals the hold.',
+    requirement: { type: 'collect_item', count: 3, itemId: 'candle-key-fragment' },
+    rewards: { gold: 760, exp: 460, rareGems: 3, spellIds: ['iron-benediction'] },
+  },
 ];
 
 export const STORY_CHAPTERS: StoryChapter[] = [
@@ -367,6 +431,7 @@ export const STORY_CHAPTERS: StoryChapter[] = [
         requiredLevel: 1,
         name: 'First Banner',
         lore: 'The road accepts no commander without a banner. Raise yours under the first moon and learn who salutes.',
+        dialogId: 'story-01-first-banner',
         requirement: { type: 'complete_jobs', count: 1 },
         rewards: { gold: 80, exp: 40, minionTier: 'tier1' },
       },
@@ -377,6 +442,7 @@ export const STORY_CHAPTERS: StoryChapter[] = [
         requiredLevel: 2,
         name: 'The Candle Road',
         lore: 'Harborview claims the old road was once lit by saints, scholars, and oath fires. Walk to its gates and report to the candle court.',
+        dialogId: 'story-02-candle-road',
         requirement: { type: 'visit_poi', count: 1, poiName: 'Harborview' },
         rewards: { gold: 120, exp: 70, equipmentRarity: 'decent', spellIds: ['thorn-ward'] },
       },
@@ -417,6 +483,7 @@ export const STORY_CHAPTERS: StoryChapter[] = [
         requiredLevel: 6,
         name: 'Black Pike Warning',
         lore: 'The Black Pike Raider taxes the mid-road in blood and calls it discipline.',
+        dialogId: 'story-06-black-pike',
         requirement: { type: 'win_battles', count: 1 },
         rewards: { gold: 260, exp: 160, minionTier: 'tier2', spellIds: ['chain-spark'] },
       },
@@ -507,12 +574,188 @@ export const STORY_CHAPTERS: StoryChapter[] = [
         requiredLevel: 15,
         name: 'The Broken Crown',
         lore: 'Emperor Grave-Aurel keeps a broken crown for anyone who still believes commanders rule alone.',
+        dialogId: 'story-15-broken-crown',
         requirement: { type: 'defeat_boss', count: 1, bossId: 'emperor-grave-aurel' },
         rewards: { gold: 900, exp: 600, equipmentRarity: 'legendary', minionTier: 'tier3', spellIds: ['eclipse-nova', 'time-crown-edict'] },
       },
     ],
   },
+  {
+    id: 'chapter-2',
+    title: 'Chapter II: The Mirror Court',
+    summary: 'The broken crown was only the first seal. A mirror court rises in the east, and every road you cleared now feeds its war.',
+    quests: [
+      {
+        id: 'story-16-mirror-council',
+        chapter: 'chapter-2',
+        order: 1,
+        requiredLevel: 16,
+        name: 'Mirror Council',
+        lore: 'Veil Captain Serat summons commanders who survived the crown. The mirror court listens through glass and ash.',
+        dialogId: 'story-16-mirror-council',
+        requirement: { type: 'visit_quest_npc', count: 1, questNpcId: 'quest-npc-veil-captain' },
+        rewards: { gold: 520, exp: 340, equipmentRarity: 'rare', spellIds: ['moonlit-veil'] },
+      },
+      {
+        id: 'story-17-moonwell-contract',
+        chapter: 'chapter-2',
+        order: 2,
+        requiredLevel: 17,
+        name: 'Moonwell Contract',
+        lore: 'Star Law pays in ink and salt for work done where the moonwell pier still remembers drowned kings.',
+        dialogId: 'story-17-moonwell-contract',
+        requirement: { type: 'complete_jobs_at_poi', count: 2, poiName: 'Moonwell Pier', minDuration: ONE_MINUTE },
+        rewards: { gold: 580, exp: 380, rareGems: 2 },
+      },
+      {
+        id: 'story-18-blackwater-gate',
+        chapter: 'chapter-2',
+        order: 3,
+        requiredLevel: 18,
+        name: 'Blackwater Gate',
+        lore: 'Blackwater Gate trades in writs that outlive their signers. Walk its walls before the mirror court buys them.',
+        dialogId: 'story-18-blackwater-gate',
+        requirement: { type: 'visit_poi', count: 1, poiName: 'Blackwater Gate' },
+        rewards: { gold: 640, exp: 420, equipmentRarity: 'rare' },
+      },
+      {
+        id: 'story-19-eclipse-scouts',
+        chapter: 'chapter-2',
+        order: 4,
+        requiredLevel: 19,
+        name: 'Eclipse Scouts',
+        lore: 'Mirror scouts wear your old banner colors. Break their warbands before they learn your formations.',
+        requirement: { type: 'defeat_enemies_level', count: 3, minEnemyLevel: 14, maxEnemyLevel: 19 },
+        rewards: { gold: 700, exp: 460, minionTier: 'tier2' },
+      },
+      {
+        id: 'story-20-first-dungeon-oath',
+        chapter: 'chapter-2',
+        order: 5,
+        requiredLevel: 20,
+        name: 'First Dungeon Oath',
+        lore: 'The ossuaries beneath the marches are recruiting again. Clear a sealed chamber and bring proof.',
+        dialogId: 'story-20-first-dungeon-oath',
+        requirement: { type: 'clear_dungeons', count: 1, minDungeonLevel: 5 },
+        rewards: { gold: 760, exp: 500, rareGems: 2, equipmentRarity: 'epic' },
+      },
+      {
+        id: 'story-21-quarry-ledger',
+        chapter: 'chapter-2',
+        order: 6,
+        requiredLevel: 21,
+        name: 'Quarry Ledger',
+        lore: 'Granite Heights still cuts saint-bone for the mirror court. Work the quarry and steal their tally.',
+        requirement: { type: 'complete_jobs_at_poi', count: 2, poiName: 'Granite Heights Quarry', minDuration: ONE_MINUTE },
+        rewards: { gold: 820, exp: 540, equipmentRarity: 'epic' },
+      },
+      {
+        id: 'story-22-eclipse-hold',
+        chapter: 'chapter-2',
+        order: 7,
+        requiredLevel: 22,
+        name: 'Eclipse Hold',
+        lore: 'Eclipse Hold is where king-mages signed their last lies. Reach the hold before the mirror court rewrites them.',
+        dialogId: 'story-22-eclipse-hold',
+        requirement: { type: 'visit_poi', count: 1, poiName: 'Eclipse Hold' },
+        rewards: { gold: 880, exp: 580, spellIds: ['frost-lance'] },
+      },
+      {
+        id: 'story-23-iron-chorus',
+        chapter: 'chapter-2',
+        order: 8,
+        requiredLevel: 23,
+        name: 'Iron Chorus',
+        lore: 'Veteran warbands now march under mirror sigils. Hunt the strongest among them on the eastern roads.',
+        requirement: { type: 'defeat_enemies_level', count: 4, minEnemyLevel: 18, maxEnemyLevel: 24 },
+        rewards: { gold: 940, exp: 620, minionTier: 'tier3' },
+      },
+      {
+        id: 'story-24-candle-key',
+        chapter: 'chapter-2',
+        order: 9,
+        requiredLevel: 24,
+        name: 'Candle Key Fragment',
+        lore: 'Brother Kaito claims a candle key can unseal the mirror court if the fragments are whole.',
+        dialogId: 'story-24-candle-key',
+        requirement: { type: 'collect_item', count: 3, itemId: 'candle-key-fragment' },
+        rewards: { gold: 1000, exp: 660, rareGems: 3 },
+      },
+      {
+        id: 'story-25-paragon-muster',
+        chapter: 'chapter-2',
+        order: 10,
+        requiredLevel: 25,
+        name: 'Paragon Muster',
+        lore: 'The mirror court fields elites that remember every defeat you ever paid for.',
+        requirement: { type: 'recruit_minions', count: 8 },
+        rewards: { gold: 1080, exp: 700, equipmentRarity: 'epic', minionTier: 'tier3' },
+      },
+      {
+        id: 'story-26-deep-dungeon',
+        chapter: 'chapter-2',
+        order: 11,
+        requiredLevel: 26,
+        name: 'Deep Chamber',
+        lore: 'A deeper ossuary opens only when the mirror moon is high. Clear a veteran dungeon and return.',
+        requirement: { type: 'clear_dungeons', count: 2, minDungeonLevel: 10 },
+        rewards: { gold: 1160, exp: 760, equipmentRarity: 'legendary' },
+      },
+      {
+        id: 'story-27-mirror-envoy',
+        chapter: 'chapter-2',
+        order: 12,
+        requiredLevel: 27,
+        name: 'Mirror Envoy',
+        lore: 'Archivist Letho carries the court writ in a reliquary of glass. Find the envoy on the eclipse road.',
+        dialogId: 'story-27-mirror-envoy',
+        requirement: { type: 'visit_quest_npc', count: 1, questNpcId: 'quest-npc-archivist-letho' },
+        rewards: { gold: 1240, exp: 820, spellIds: ['saint-king-aegis'] },
+      },
+      {
+        id: 'story-28-eclipse-field',
+        chapter: 'chapter-2',
+        order: 13,
+        requiredLevel: 28,
+        name: 'Eclipse Field Redux',
+        lore: 'The field where Aurel fell now reflects every army you have ever lost.',
+        requirement: { type: 'win_battles', count: 6 },
+        rewards: { gold: 1320, exp: 880, equipmentRarity: 'legendary' },
+      },
+      {
+        id: 'story-29-high-war',
+        chapter: 'chapter-2',
+        order: 14,
+        requiredLevel: 29,
+        name: 'High War',
+        lore: 'Only commanders who break mirror champions above level twenty-four earn the right to enter the court.',
+        requirement: { type: 'defeat_enemies_level', count: 5, minEnemyLevel: 24, maxEnemyLevel: 30 },
+        rewards: { gold: 1400, exp: 940, rareGems: 4, minionTier: 'tier3' },
+      },
+      {
+        id: 'story-30-lady-in-glass',
+        chapter: 'chapter-2',
+        order: 15,
+        requiredLevel: 30,
+        name: 'The Lady in Glass',
+        lore: 'Lady Mirror-Veyra keeps the last king-mage reflection. Shatter the court or kneel to your own image.',
+        dialogId: 'story-30-lady-in-glass',
+        requirement: { type: 'defeat_boss', count: 1, bossId: 'lady-mirror-veyra' },
+        rewards: { gold: 1800, exp: 1200, equipmentRarity: 'legendary', minionTier: 'tier3', spellIds: ['blood-star', 'eclipse-nova'] },
+      },
+    ],
+  },
 ];
+
+export function getAllStoryQuestsSorted(): StoryQuestTemplate[] {
+  return STORY_CHAPTERS.flatMap(chapter => chapter.quests)
+    .sort((left, right) => {
+      const leftChapter = STORY_CHAPTERS.findIndex(chapter => chapter.id === left.chapter);
+      const rightChapter = STORY_CHAPTERS.findIndex(chapter => chapter.id === right.chapter);
+      if (leftChapter !== rightChapter) return leftChapter - rightChapter;
+      return left.order - right.order;
+    });
+}
 
 export const QUEST_NPCS: QuestNpc[] = [
   {
@@ -605,7 +848,41 @@ export const QUEST_NPCS: QuestNpc[] = [
     requirement: { type: 'win_battles', count: 3 },
     rewards: { gold: 260, exp: 160, equipmentRarity: 'epic', minionTier: 'tier2' },
   },
+  {
+    id: 'quest-npc-archivist-letho',
+    name: 'Archivist Letho',
+    title: 'Mirror Court Scribe',
+    faction: 'Glass Reliquary',
+    x: 73,
+    y: 38,
+    modelNumber: 5,
+    levelRange: '24-30',
+    town: 'Eclipse Hold',
+    line: 'Every reflection in the court is a confession someone refused to make aloud.',
+    questHook: 'Guides the mirror court chapter and candle key lore.',
+    requirement: { type: 'collect_item', count: 2, itemId: 'candle-key-fragment' },
+    rewards: { gold: 320, exp: 200, rareGems: 2, equipmentRarity: 'epic' },
+  },
+  {
+    id: 'quest-npc-gate-warden',
+    name: 'Gate Warden Sable',
+    title: 'Blackwater Quartermaster',
+    faction: 'Blackwater Syndicate',
+    x: 54,
+    y: 20,
+    modelNumber: 1,
+    levelRange: '16-22',
+    town: 'Blackwater Gate',
+    line: 'Writs outlive the hands that signed them. Bring me work from the eastern quarries.',
+    questHook: 'Routes players toward Blackwater contracts and quarry jobs.',
+    requirement: { type: 'complete_jobs_at_poi', count: 2, poiName: 'Granite Heights Quarry' },
+    rewards: { gold: 210, exp: 130, equipmentRarity: 'rare' },
+  },
 ];
+
+export function getQuestNpcById(npcId: string): QuestNpc | undefined {
+  return QUEST_NPCS.find(npc => npc.id === npcId);
+}
 
 function hashText(value: string): number {
   return value.split('').reduce((hash, char) => ((hash << 5) - hash + char.charCodeAt(0)) | 0, 0);

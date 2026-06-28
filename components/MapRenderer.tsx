@@ -19,12 +19,15 @@ import {
   getQuestNpcStatus,
   getUsers,
   getCityQuestTemplate,
-  hasClaimedQuestNpcReward,
+  getCityQuestStatus,
   levelUp,
   RewardSummary,
   startTravel,
   STORY_CHAPTERS,
   getStoryQuestStatus,
+  getPendingStoryDialogQuest,
+  markStoryQuestIntroSeen,
+  recordQuestNpcVisit,
   updateJobTravelProgress,
   isPartyMember as isSocialPartyMember,
 } from '@/lib/auth';
@@ -34,7 +37,10 @@ import { BATTLE_SPELLS, WorldEnemy, getBattleRatingPreview, getNpcEnemiesForUser
 import { emitCompletionNotice, type CompletionRewardLine } from '@/lib/completionEvents';
 import { emitFxEvent } from '@/lib/fxEvents';
 import { emitMapFogState } from '@/lib/mapFogEvents';
-import { QUEST_NPCS, type QuestNpc } from '@/lib/questData';
+import { QUEST_NPCS, getAllStoryQuestsSorted, type QuestNpc } from '@/lib/questData';
+import { getStoryDialogSequence } from '@/lib/storyDialogue';
+import { isDungeonQuestObjective, isPoiQuestObjective, isQuestNpcObjective } from '@/lib/questMarkers';
+import StoryDialogOverlay from './StoryDialogOverlay';
 import { WorldDungeon, formatDungeonTimeRemaining, getActiveDungeons, getRegionForTile } from '@/lib/worldEvents';
 import POIModal from './POIModal';
 import TownModal from './TownModal';
@@ -186,6 +192,8 @@ function drawCampfireEmberParticles(
 
 const DEFAULT_MAP_ZOOM = 1.75;
 const MAX_MAP_ZOOM = 2.75;
+const MIN_PLAYABLE_MAP_ZOOM = 1.62;
+const MAP_ZOOM_OUT_RANGE_FACTOR = 0.5;
 const ZOOM_STEP = 0.14;
 const DIRECT_TRAVEL_RENDER_INTERVAL_MS = 1000 / 15;
 const MAP_REVEAL_RADIUS = 105;
@@ -250,6 +258,21 @@ function getRenderedUserPosition(user: ReturnType<typeof getCurrentUser>, now: n
     x: startX + xDistance * xDirection,
     y: startY + Math.min(distanceY, yDistance) * yDirection,
   };
+}
+
+function getMinMapZoom(viewportWidth: number, viewportHeight: number): number {
+  const fitToScreenZoom = Math.max(
+    viewportWidth / (MAP_CONFIG.width * MAP_CONFIG.tileSize),
+    viewportHeight / (MAP_CONFIG.height * MAP_CONFIG.tileSize),
+    0.5,
+  );
+  const zoomOutRange = Math.max(0, DEFAULT_MAP_ZOOM - fitToScreenZoom);
+  const limitedMin = DEFAULT_MAP_ZOOM - zoomOutRange * MAP_ZOOM_OUT_RANGE_FACTOR;
+
+  return Math.min(
+    MAX_MAP_ZOOM,
+    Math.max(MIN_PLAYABLE_MAP_ZOOM, limitedMin),
+  );
 }
 
 function getFogRevealZoomScale(zoom: number): number {
@@ -368,7 +391,7 @@ function isQuestNpcRequestedByActiveQuest(currentUser: ReturnType<typeof getCurr
     .sort((left, right) => left.order - right.order)
     .find(story => {
       const status = getStoryQuestStatus(currentUser, story.id);
-      if (!status.unlocked || status.claimed) return false;
+      if (!status.unlocked || status.claimed || status.complete) return false;
       return getQuestGuideNpc(story.requiredLevel)?.id === npc.id;
     });
   if (activeStoryNpc) return true;
@@ -376,15 +399,18 @@ function isQuestNpcRequestedByActiveQuest(currentUser: ReturnType<typeof getCurr
   return (currentUser.cityQuests || []).some(progress => {
     if (progress.claimed) return false;
     const template = getCityQuestTemplate(progress.questId);
-    return Boolean(template && getQuestGuideNpc(currentUser.stats.level, template.town)?.id === npc.id);
+    if (!template) return false;
+    const status = getCityQuestStatus(currentUser, progress.questId);
+    if (status.complete) return false;
+    return getQuestGuideNpc(currentUser.stats.level, template.town)?.id === npc.id;
   });
 }
 
 function shouldShowQuestNpcMarker(currentUser: ReturnType<typeof getCurrentUser>, npc: QuestNpc): boolean {
   if (!currentUser) return false;
+  if (isQuestNpcObjective(currentUser, npc.id)) return true;
   if (isQuestNpcRequestedByActiveQuest(currentUser, npc)) return true;
-  if (hasClaimedQuestNpcReward(currentUser, npc.id)) return false;
-  return isLevelInsideNpcRange(npc.levelRange, currentUser.stats.level);
+  return false;
 }
 
 function getEnemyScreenCenter(
@@ -997,6 +1023,7 @@ export default function MapRenderer({
     if (typeof window === 'undefined') return false;
     return window.localStorage.getItem(MAIN_QUEST_TRACKER_HIDDEN_KEY) === 'true';
   });
+  const [storyDialogQuestId, setStoryDialogQuestId] = useState<string | null>(null);
   const cameraInitialized = useRef(false);
   const dragOriginRef = useRef({ x: 0, y: 0 });
   const hasDraggedRef = useRef(false);
@@ -1014,11 +1041,17 @@ export default function MapRenderer({
   }, [selectedDungeonRun]);
 
   useEffect(() => {
+    const pending = getPendingStoryDialogQuest(currentUser);
+    if (pending && !storyDialogQuestId) {
+      setStoryDialogQuestId(pending.id);
+    }
+  }, [currentUser, storyDialogQuestId]);
+
+  useEffect(() => {
     const frameId = window.requestAnimationFrame(() => setIsMounted(true));
     return () => window.cancelAnimationFrame(frameId);
   }, []);
 
-  // Preload all assets
   useEffect(() => {
     preloadAllAssets().then(() => {
       setAssetsLoaded(true);
@@ -1229,14 +1262,7 @@ export default function MapRenderer({
     }
   }, [worldEnemies]);
 
-  const minMapZoom = Math.min(
-    MAX_MAP_ZOOM,
-    Math.max(
-      actualWidth / (MAP_CONFIG.width * MAP_CONFIG.tileSize),
-      actualHeight / (MAP_CONFIG.height * MAP_CONFIG.tileSize),
-      0.5
-    )
-  );
+  const minMapZoom = getMinMapZoom(actualWidth, actualHeight);
   const effectiveZoom = Math.max(minMapZoom, Math.min(MAX_MAP_ZOOM, zoom));
   const scaledTileSize = MAP_CONFIG.tileSize * effectiveZoom;
   const maxCameraX = Math.max(0, MAP_CONFIG.width * scaledTileSize - actualWidth);
@@ -1271,6 +1297,13 @@ export default function MapRenderer({
   }, [actualHeight, actualWidth, cameraX, cameraY, cursorScreen, effectiveZoom, poisData, renderedUserPosition, scaledTileSize]);
 
   const clampZoom = (value: number) => Math.max(minMapZoom, Math.min(MAX_MAP_ZOOM, Number(value.toFixed(2))));
+
+  useEffect(() => {
+    setZoom(current => {
+      const next = Math.max(minMapZoom, Math.min(MAX_MAP_ZOOM, Number(current.toFixed(2))));
+      return next === current ? current : next;
+    });
+  }, [minMapZoom]);
 
   const zoomAroundBasePoint = (
     nextZoomValue: number,
@@ -1443,6 +1476,9 @@ export default function MapRenderer({
           fallbackLabel: poi.name.slice(0, 2).toUpperCase(),
           label: poi.name,
         });
+        if (isPoiQuestObjective(currentUser, poi.name)) {
+          drawMapLabel(ctx, '!', markerCenterX, screenY - 6, '#fef08a');
+        }
         return;
       }
 
@@ -1456,6 +1492,9 @@ export default function MapRenderer({
           label: poi.name,
           now: mapAnimNow,
         });
+        if (isPoiQuestObjective(currentUser, poi.name)) {
+          drawMapLabel(ctx, '!', markerCenterX, screenY - 6, '#fef08a');
+        }
         return;
       }
 
@@ -1470,6 +1509,9 @@ export default function MapRenderer({
         label: poi.name,
         now: worldNow,
       });
+      if (isPoiQuestObjective(currentUser, poi.name)) {
+        drawMapLabel(ctx, '!', markerCenterX, screenY - 6, '#fef08a');
+      }
     };
 
     poisData
@@ -1516,6 +1558,9 @@ export default function MapRenderer({
           ctx.font = 'bold 9px sans-serif';
           ctx.textAlign = 'center';
           ctx.fillText(`Lv ${dungeon.level}`, dungeonScreenX + dungeonSize / 2, dungeonScreenY - 5);
+        }
+        if (isDungeonQuestObjective(currentUser)) {
+          drawMapLabel(ctx, '!', dungeonScreenX + dungeonSize / 2, dungeonScreenY - 16, '#fef08a');
         }
         ctx.restore();
       }
@@ -2123,6 +2168,23 @@ export default function MapRenderer({
       )}
     </div>
     {isMounted && mainQuestUi ? createPortal(mainQuestUi, document.body) : null}
+    {storyDialogQuestId && currentUser && (() => {
+      const quest = getAllStoryQuestsSorted().find(item => item.id === storyDialogQuestId);
+      const sequence = getStoryDialogSequence(quest?.dialogId);
+      if (!sequence) return null;
+      return (
+        <StoryDialogOverlay
+          key={sequence.id}
+          sequence={sequence}
+          playerModelNumber={currentUser.selectedModel || 3}
+          onComplete={() => {
+            markStoryQuestIntroSeen(storyDialogQuestId);
+            setStoryDialogQuestId(null);
+            setCurrentUser(getCurrentUser());
+          }}
+        />
+      );
+    })()}
     </>
   );
 }
@@ -2203,6 +2265,14 @@ function getStoryRequirementLabel(story: StoryQuestForTracker): string {
       return `Defeat ${requirement.count} enemy warband${requirement.count === 1 ? '' : 's'} on the world map`;
     case 'visit_poi':
       return `Reach ${requirement.poiName || 'the marked place'}`;
+    case 'visit_quest_npc':
+      return 'Find the quest contact on the map';
+    case 'complete_jobs_at_poi':
+      return `Work ${requirement.count} job${requirement.count === 1 ? '' : 's'} at ${requirement.poiName || 'the marked site'}`;
+    case 'defeat_enemies_level':
+      return `Defeat ${requirement.count} warband${requirement.count === 1 ? '' : 's'} (Lv ${requirement.minEnemyLevel || 1}${requirement.maxEnemyLevel ? `-${requirement.maxEnemyLevel}` : '+'})`;
+    case 'clear_dungeons':
+      return `Clear ${requirement.count} dungeon${requirement.count === 1 ? '' : 's'}${requirement.minDungeonLevel ? ` (Lv ${requirement.minDungeonLevel}+)` : ''}`;
     case 'defeat_boss':
       return 'Defeat the story boss';
     default:
@@ -2412,6 +2482,13 @@ function QuestNpcModal({ npc, onTravel, onClose }: { npc: QuestNpc; onTravel: ()
   const counselStatus = getQuestNpcStatus(user, npc.id);
   const claimed = counselStatus.claimed;
   const atNpc = Boolean(user && isTileInsideFootprint(user.x, user.y, npc.x, npc.y, 2, 2));
+
+  useEffect(() => {
+    if (atNpc) {
+      recordQuestNpcVisit(npc.id);
+      setUser(getCurrentUser());
+    }
+  }, [atNpc, npc.id]);
 
   const handleClaimCounsel = () => {
     if (!atNpc) {

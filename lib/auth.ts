@@ -4,6 +4,8 @@ import {
   QUEST_NPCS,
   STORY_CHAPTERS,
   getCityQuestTemplate,
+  getAllStoryQuestsSorted,
+  getQuestNpcById,
   getRotatingCityQuests,
   type CityQuestTemplate,
   type QuestRequirementSpec,
@@ -21,8 +23,19 @@ import { getCachedWorldPlayers, worldMapPlayerToUser } from './worldPlayers';
 import { isSupabaseConfigured } from './supabase/config';
 import { getStaticPOIs, MAP_CONFIG, POIType } from './mapData';
 import { BOSS_PROFILES, type BossProfile } from './bosses';
+import { sumGearSetBonusStats } from './gearSets';
+import { generateLootEquipment } from './lootTables';
+import { normalizeMpDailyDungeonState, type MpDailyDungeonState } from './mpDailyDungeon';
+import {
+  applyPvpRatingLoss,
+  applyPvpRatingWin,
+  calculatePvpRatingDelta,
+  createDefaultPvpRatingState,
+  normalizePvpRatingState,
+  type PvpRatingState,
+} from './pvpRating';
 
-export { CITY_QUESTS, QUEST_NPCS, STORY_CHAPTERS, getCityQuestTemplate, getRotatingCityQuests };
+export { CITY_QUESTS, QUEST_NPCS, STORY_CHAPTERS, getAllStoryQuestsSorted, getCityQuestTemplate, getRotatingCityQuests };
 export { TRAVEL_EVENT_CONTENT_COUNTS };
 
 export type EquipmentSlot = 'sword' | 'shield' | 'armor' | 'armor-pants' | 'boots' | 'gloves' | 'helmet';
@@ -34,6 +47,7 @@ export type ActivityEntryType = 'job' | 'quest' | 'battle' | 'shop' | 'upgrade' 
 export type AllocatableStat = 'armyPower' | 'defensivePower' | 'morale' | 'spellPower' | 'health';
 export const MAX_FIELD_MINIONS = 7;
 export const BASE_INVENTORY_SLOTS = 20;
+export const MAX_PLAYER_LEVEL = 30;
 export const MAX_PARTY_SIZE = 4;
 export const MINION_INJURY_DURATION_MS = 2 * 60 * 60 * 1000;
 export const MINION_SAFE_INJURIES = 2;
@@ -108,6 +122,8 @@ export interface Equipment {
   };
   socketBonuses?: EquipmentSocketBonus[];
   passive?: string; // Legendary equipment passive effect description
+  gearSetId?: string;
+  lootSource?: string;
 }
 
 export interface MinionStats {
@@ -169,6 +185,10 @@ export interface ActivityEntry {
   completedAt: number;
   rewards: RewardSummary;
   description?: string;
+  battleLevel?: number;
+  jobDurationMs?: number;
+  dungeonLevel?: number;
+  questNpcId?: string;
 }
 
 export interface DailyQuest {
@@ -176,7 +196,7 @@ export interface DailyQuest {
   name: string;
   description: string;
   requirement: {
-    type: 'complete_jobs' | 'complete_timed_jobs';
+    type: 'complete_jobs' | 'complete_timed_jobs' | 'collect_daily_gift';
     count: number;
     minDuration?: number; // in milliseconds
   };
@@ -190,6 +210,7 @@ export interface DailyQuest {
       chance: number;
     };
     legendaryChance: number; // 0.01 for 1%
+    randomSupply?: boolean;
     minionChance?: {
       tier: MinionTier;
       chance: number;
@@ -277,7 +298,7 @@ export interface DailyRunLeaderboardEntry {
   lastCompletedDate?: string;
 }
 
-export type LeaderboardCategory = 'power' | 'daily' | 'gold' | 'battles';
+export type LeaderboardCategory = 'power' | 'daily' | 'gold' | 'battles' | 'pvp';
 
 export interface LeaderboardEntry {
   rank: number;
@@ -384,11 +405,22 @@ export interface User {
   cityQuests?: CityQuestProgress[];
   storyQuests?: StoryQuestProgress[];
   dailyRun?: DailyRunState;
+  mpDailyDungeon?: MpDailyDungeonState;
+  gearSetBonusSnapshot?: {
+    armyPower: number;
+    defensivePower: number;
+    morale: number;
+    spellPower: number;
+    maxHealth: number;
+  };
   knownSpellIds?: string[];
   equippedSpellIds?: string[];
   spellUnlockVersion?: number;
   social?: SocialState;
+  pvpRating?: PvpRatingState;
 }
+
+export type { PvpRatingState };
 
 export interface JobState {
   id: string;
@@ -486,6 +518,7 @@ export interface StoryQuestProgress {
   questId: string;
   claimed: boolean;
   completedAt?: number;
+  introSeen?: boolean;
 }
 
 export interface InventoryActionResult {
@@ -988,6 +1021,57 @@ function getPoiFootprintSize(type: POIType): { width: number; height: number } {
   return { width: 4, height: 4 };
 }
 
+function isPreviousStoryQuestClaimed(user: User, quest: StoryQuestTemplate): boolean {
+  const ordered = getAllStoryQuestsSorted();
+  const index = ordered.findIndex(item => item.id === quest.id);
+  if (index <= 0) return true;
+  const previous = ordered[index - 1];
+  return Boolean(user.storyQuests?.some(item => item.questId === previous.id && item.claimed));
+}
+
+function hasVisitedQuestNpc(user: User, questNpcId?: string): boolean {
+  if (!questNpcId) return false;
+  const npc = getQuestNpcById(questNpcId);
+  if (!npc) return false;
+
+  if (Math.abs(user.x - npc.x) + Math.abs(user.y - npc.y) <= 1) return true;
+
+  return (user.activityLog || []).some(activity => (
+    activity.type === 'quest' && activity.questNpcId === questNpcId
+  ));
+}
+
+function getJobsAtPoiCount(user: User, requirement: QuestRequirementSpec): number {
+  return (user.activityLog || []).filter(activity => {
+    if (activity.type !== 'job') return false;
+    if (requirement.poiName && activity.source !== requirement.poiName) return false;
+    if (requirement.minDuration && (activity.jobDurationMs || 0) < requirement.minDuration) return false;
+    return true;
+  }).length;
+}
+
+function getDefeatEnemiesInLevelRangeCount(
+  user: User,
+  minLevel = 1,
+  maxLevel = MAX_PLAYER_LEVEL,
+): number {
+  return (user.activityLog || []).filter(activity => (
+    activity.type === 'battle'
+    && typeof activity.battleLevel === 'number'
+    && activity.battleLevel >= minLevel
+    && activity.battleLevel <= maxLevel
+  )).length;
+}
+
+function getDungeonClearCount(user: User, minDungeonLevel = 1): number {
+  return (user.activityLog || []).filter(activity => (
+    activity.type === 'battle'
+    && activity.source === 'Dungeon Run'
+    && typeof activity.dungeonLevel === 'number'
+    && activity.dungeonLevel >= minDungeonLevel
+  )).length;
+}
+
 function getQuestTargetPoi(requirement: QuestRequirementSpec) {
   if (!requirement.poiId && !requirement.poiName) return null;
   return getStaticPOIs().find(poi => (
@@ -1051,6 +1135,18 @@ function getQuestRequirementProgressValue(
       return getOrderedMinions(user).length;
     case 'win_battles':
       return getBattleWinCount(user);
+    case 'defeat_enemies_level':
+      return getDefeatEnemiesInLevelRangeCount(
+        user,
+        requirement.minEnemyLevel || 1,
+        requirement.maxEnemyLevel || MAX_PLAYER_LEVEL,
+      );
+    case 'clear_dungeons':
+      return getDungeonClearCount(user, requirement.minDungeonLevel || 1);
+    case 'complete_jobs_at_poi':
+      return getJobsAtPoiCount(user, requirement);
+    case 'visit_quest_npc':
+      return hasVisitedQuestNpc(user, requirement.questNpcId) ? 1 : acceptedProgress;
     case 'visit_poi':
       return hasVisitedQuestPoi(user, requirement) ? 1 : acceptedProgress;
     case 'defeat_boss':
@@ -1064,6 +1160,7 @@ function getCityQuestProgressValue(user: User, quest: CityQuestTemplate, progres
   switch (quest.requirement.type) {
     case 'complete_jobs':
     case 'complete_timed_jobs':
+    case 'complete_jobs_at_poi':
       return progress?.progress || 0;
     case 'player_level':
       return user.stats.level;
@@ -1075,6 +1172,16 @@ function getCityQuestProgressValue(user: User, quest: CityQuestTemplate, progres
       return getOrderedMinions(user).length;
     case 'win_battles':
       return getBattleWinCount(user);
+    case 'defeat_enemies_level':
+      return getDefeatEnemiesInLevelRangeCount(
+        user,
+        quest.requirement.minEnemyLevel || 1,
+        quest.requirement.maxEnemyLevel || MAX_PLAYER_LEVEL,
+      );
+    case 'clear_dungeons':
+      return getDungeonClearCount(user, quest.requirement.minDungeonLevel || 1);
+    case 'visit_quest_npc':
+      return hasVisitedQuestNpc(user, quest.requirement.questNpcId) ? 1 : progress?.progress || 0;
     case 'visit_poi':
       return hasVisitedQuestPoi(user, quest.requirement) ? 1 : progress?.progress || 0;
     default:
@@ -1132,7 +1239,12 @@ export function getStoryQuestStatus(
   const quest = getStoryQuestTemplate(questId);
   const state = user?.storyQuests?.find(item => item.questId === questId);
   const required = quest?.requirement.count || 1;
-  const unlocked = Boolean(user && quest && user.stats.level >= quest.requiredLevel);
+  const unlocked = Boolean(
+    user
+    && quest
+    && user.stats.level >= quest.requiredLevel
+    && isPreviousStoryQuestClaimed(user, quest),
+  );
   const rawProgress = user && quest ? getQuestRequirementProgressValue(user, quest.requirement, 0) : 0;
   const progress = Math.min(rawProgress, required);
 
@@ -1145,7 +1257,67 @@ export function getStoryQuestStatus(
   };
 }
 
-function updateCityQuestProgressForJob(cityQuests: CityQuestProgress[] | undefined, jobDuration: number): CityQuestProgress[] {
+export function markStoryQuestIntroSeen(questId: string): void {
+  const currentUser = getCurrentUser();
+  if (!currentUser) return;
+
+  const storyQuests = currentUser.storyQuests || [];
+  if (storyQuests.some(item => item.questId === questId && item.introSeen)) return;
+
+  updateCurrentUser({
+    storyQuests: [
+      ...storyQuests.filter(item => item.questId !== questId),
+      {
+        questId,
+        claimed: storyQuests.find(item => item.questId === questId)?.claimed || false,
+        completedAt: storyQuests.find(item => item.questId === questId)?.completedAt,
+        introSeen: true,
+      },
+    ],
+  });
+}
+
+export function getPendingStoryDialogQuest(user: User | null | undefined): StoryQuestTemplate | undefined {
+  if (!user) return undefined;
+
+  return getAllStoryQuestsSorted().find(story => {
+    if (!story.dialogId) return false;
+    const status = getStoryQuestStatus(user, story.id);
+    if (!status.unlocked || status.claimed) return false;
+    const state = user.storyQuests?.find(item => item.questId === story.id);
+    return !state?.introSeen;
+  });
+}
+
+export function recordQuestNpcVisit(npcId: string): void {
+  const currentUser = getCurrentUser();
+  if (!currentUser) return;
+
+  const npc = getQuestNpcById(npcId);
+  if (!npc) return;
+
+  if ((currentUser.activityLog || []).some(entry => entry.type === 'quest' && entry.questNpcId === npcId)) {
+    return;
+  }
+
+  updateCurrentUser({
+    activityLog: pushActivityEntry(currentUser.activityLog, {
+      id: `activity-quest-npc-visit-${npcId}-${Date.now()}`,
+      type: 'quest',
+      title: `Spoke with ${npc.name}`,
+      source: npc.faction,
+      completedAt: Date.now(),
+      rewards: {},
+      questNpcId: npcId,
+    }),
+  });
+}
+
+function updateCityQuestProgressForJob(
+  cityQuests: CityQuestProgress[] | undefined,
+  jobDuration: number,
+  jobPoiName: string,
+): CityQuestProgress[] {
   return (cityQuests || []).map(progress => {
     if (progress.claimed) return progress;
 
@@ -1153,6 +1325,12 @@ function updateCityQuestProgressForJob(cityQuests: CityQuestProgress[] | undefin
     if (!quest) return progress;
 
     if (quest.requirement.type === 'complete_jobs') {
+      return { ...progress, progress: progress.progress + 1 };
+    }
+
+    if (quest.requirement.type === 'complete_jobs_at_poi') {
+      if (quest.requirement.poiName && quest.requirement.poiName !== jobPoiName) return progress;
+      if (quest.requirement.minDuration && jobDuration < quest.requirement.minDuration) return progress;
       return { ...progress, progress: progress.progress + 1 };
     }
 
@@ -1448,7 +1626,15 @@ export function claimStoryQuestReward(questId: string): {
   }
 
   const status = getStoryQuestStatus(currentUser, questId);
-  if (!status.unlocked) return { success: false, error: `Reach level ${quest.requiredLevel} first.` };
+  if (!status.unlocked) {
+    const previous = getAllStoryQuestsSorted().find((item, index, list) => (
+      list[index + 1]?.id === questId
+    ));
+    if (previous && !storyQuests.some(item => item.questId === previous.id && item.claimed)) {
+      return { success: false, error: `Complete "${previous.name}" first.` };
+    }
+    return { success: false, error: `Reach level ${quest.requiredLevel} first.` };
+  }
   if (!status.complete) return { success: false, error: 'Story objective is not complete yet.' };
 
   const reward = buildQuestRewardSummary(quest.rewards);
@@ -1496,7 +1682,7 @@ export function claimStoryQuestReward(questId: string): {
     knownSpellIds: spellUnlock.knownSpellIds,
     storyQuests: [
       ...storyQuests.filter(item => item.questId !== questId),
-      { questId, claimed: true, completedAt },
+      { questId, claimed: true, completedAt, introSeen: true },
     ],
     activityLog: pushActivityEntry(currentUser.activityLog, {
       id: `activity-story-quest-${quest.id}-${completedAt}`,
@@ -1857,6 +2043,38 @@ function getEquipmentStatValue(item: Equipment, stat: Exclude<keyof CharacterSta
   if (stat === 'maxHealth') return toFiniteNumber(stats.maxHealth, 0) + getEquipmentSocketStatValue(item, 'maxHealth');
 
   return 0;
+}
+
+type GearSetBonusSnapshot = ReturnType<typeof sumGearSetBonusStats>;
+
+function reconcileGearSetBonuses(
+  user: Pick<User, 'equipment' | 'equippedSlots' | 'gearSetBonusSnapshot'>,
+  stats: CharacterStats,
+): { stats: CharacterStats; snapshot: GearSetBonusSnapshot } {
+  const nextSnapshot = sumGearSetBonusStats(user);
+  const previousSnapshot = user.gearSetBonusSnapshot || {
+    armyPower: 0,
+    defensivePower: 0,
+    morale: 0,
+    spellPower: 0,
+    maxHealth: 0,
+  };
+  const updatedStats = { ...stats };
+
+  updatedStats.armyPower = (updatedStats.armyPower || 0) - previousSnapshot.armyPower + nextSnapshot.armyPower;
+  updatedStats.defensivePower = (updatedStats.defensivePower || 0) - previousSnapshot.defensivePower + nextSnapshot.defensivePower;
+  updatedStats.morale = (updatedStats.morale || 0) - previousSnapshot.morale + nextSnapshot.morale;
+  updatedStats.spellPower = (updatedStats.spellPower || 0) - previousSnapshot.spellPower + nextSnapshot.spellPower;
+
+  if (nextSnapshot.maxHealth !== previousSnapshot.maxHealth) {
+    updatedStats.maxHealth = (updatedStats.maxHealth || 0) - previousSnapshot.maxHealth + nextSnapshot.maxHealth;
+    updatedStats.health = Math.min(
+      updatedStats.maxHealth,
+      (updatedStats.health || 0) - previousSnapshot.maxHealth + nextSnapshot.maxHealth,
+    );
+  }
+
+  return { stats: updatedStats, snapshot: nextSnapshot };
 }
 
 function toSessionUser(user: User): User {
@@ -2915,6 +3133,11 @@ export function sellMinion(minionId: string): InventoryActionResult {
 
   const template = getMinionTemplate(minion.templateId);
   const minionName = template?.name || 'Unit';
+  const fieldedIds = new Set(getFieldedMinions(currentUser).map(item => item.id));
+  if (fieldedIds.has(minionId)) {
+    return { success: false, error: 'Remove this unit from your active roster before selling it.' };
+  }
+
   const sellValue = getMinionSellValue(minion);
   const completedAt = Date.now();
   const rewards: RewardSummary = { gold: sellValue };
@@ -3787,6 +4010,8 @@ export function register(username: string, password: string): { success: boolean
     cityQuests: [],
     storyQuests: [],
     dailyRun: normalizeDailyRunState(),
+    mpDailyDungeon: normalizeMpDailyDungeonState(),
+    pvpRating: createDefaultPvpRatingState(),
     knownSpellIds: DEFAULT_KNOWN_SPELL_IDS,
     equippedSpellIds: DEFAULT_EQUIPPED_SPELL_IDS,
     spellUnlockVersion: 1,
@@ -3991,7 +4216,9 @@ export function getCurrentUser(): User | null {
   }
   parsedUser.social = normalizeSocialStateForUser(parsedUser);
   parsedUser.dailyRun = normalizeDailyRunState(parsedUser.dailyRun);
-  
+  parsedUser.mpDailyDungeon = normalizeMpDailyDungeonState(parsedUser.mpDailyDungeon);
+  parsedUser.pvpRating = normalizePvpRatingState(parsedUser.pvpRating);
+
   parsedUser.dailyQuests = normalizeDailyQuests(parsedUser.dailyQuests);
   
   const sessionUser = toSessionUser(parsedUser);
@@ -4676,12 +4903,12 @@ export function checkJobsComplete(): void {
     minionsEarned.length > 0
   ) {
     const updatedStats = { ...currentUser.stats };
-    
+
     // Restore health (cap at maxHealth)
     if (healthRestored > 0) {
       updatedStats.health = Math.min(updatedStats.maxHealth, updatedStats.health + healthRestored);
     }
-    
+
     const itemCapacity = getInventorySlotCapacity(currentUser);
     const itemAddResult = addInventoryItemsWithLimit(currentUser.inventory || [], itemsEarned, itemCapacity);
     const acceptedRareGems = itemAddResult.acceptedItems
@@ -4698,7 +4925,7 @@ export function checkJobsComplete(): void {
     const updatedEquipment = gearAddResult.equipment;
     const updatedMinions = mergeMinionStacks(currentUser.minions || [], minionsEarned);
     const updatedCityQuests = firstJob
-      ? updateCityQuestProgressForJob(currentUser.cityQuests || [], firstJob.duration)
+      ? updateCityQuestProgressForJob(currentUser.cityQuests || [], firstJob.workDuration, firstJob.poiName)
       : currentUser.cityQuests || [];
     const updatedActivityLog = firstJob
       ? pushActivityEntry(currentUser.activityLog, {
@@ -4707,6 +4934,7 @@ export function checkJobsComplete(): void {
           title: inventoryOverflowed ? `${firstJob.jobName} (gear storage full)` : firstJob.jobName,
           source: firstJob.poiName,
           completedAt: now,
+          jobDurationMs: firstJob.workDuration,
           rewards: {
             gold: goldEarned || undefined,
             exp: expEarned || undefined,
@@ -5092,8 +5320,15 @@ export function equipItem(equipmentId: string): { success: boolean; error?: stri
     updatedStats.maxHealth += maxHealth;
     updatedStats.health += maxHealth; // Also increase current health
   }
-  
-  updateCurrentUser({ equippedSlots: updatedSlots, stats: updatedStats });
+
+  const previewUser = { ...currentUser, equippedSlots: updatedSlots };
+  const reconciled = reconcileGearSetBonuses(previewUser, updatedStats);
+
+  updateCurrentUser({
+    equippedSlots: updatedSlots,
+    stats: reconciled.stats,
+    gearSetBonusSnapshot: reconciled.snapshot,
+  });
   return { success: true };
 }
 
@@ -5129,8 +5364,15 @@ export function unequipItem(slot: EquipmentSlot): { success: boolean; error?: st
     // Don't reduce current health below 1
     updatedStats.health = Math.max(1, Math.min(updatedStats.health, updatedStats.maxHealth));
   }
-  
-  updateCurrentUser({ equippedSlots: updatedSlots, stats: updatedStats });
+
+  const previewUser = { ...currentUser, equippedSlots: updatedSlots };
+  const reconciled = reconcileGearSetBonuses(previewUser, updatedStats);
+
+  updateCurrentUser({
+    equippedSlots: updatedSlots,
+    stats: reconciled.stats,
+    gearSetBonusSnapshot: reconciled.snapshot,
+  });
   return { success: true };
 }
 
@@ -5560,7 +5802,56 @@ function normalizeLeaderboardUser(user: User): User {
     knownSpellIds: normalizeSpellIds(user.knownSpellIds || DEFAULT_KNOWN_SPELL_IDS),
     equippedSpellIds: (user.equippedSpellIds || DEFAULT_EQUIPPED_SPELL_IDS).slice(0, 4),
     spellUnlockVersion: user.spellUnlockVersion || 1,
+    pvpRating: normalizePvpRatingState(user.pvpRating),
   };
+}
+
+export function getPvpRating(user: Pick<User, 'pvpRating'> | null | undefined = getCurrentUser()): PvpRatingState {
+  return normalizePvpRatingState(user?.pvpRating);
+}
+
+export function recordPvpDuelOutcome(
+  winnerUsername: string,
+  loserUsername: string,
+): { success: boolean; delta?: ReturnType<typeof calculatePvpRatingDelta> } {
+  const winnerKey = normalizeUsername(winnerUsername);
+  const loserKey = normalizeUsername(loserUsername);
+  if (!winnerKey || !loserKey || winnerKey === loserKey) {
+    return { success: false };
+  }
+
+  const users = getUsers();
+  const winnerIndex = users.findIndex(user => normalizeUsername(user.username) === winnerKey);
+  const loserIndex = users.findIndex(user => normalizeUsername(user.username) === loserKey);
+  if (winnerIndex === -1 || loserIndex === -1) {
+    return { success: false };
+  }
+
+  const winnerRating = normalizePvpRatingState(users[winnerIndex].pvpRating);
+  const loserRating = normalizePvpRatingState(users[loserIndex].pvpRating);
+  const delta = calculatePvpRatingDelta(winnerRating, loserRating);
+
+  users[winnerIndex] = {
+    ...users[winnerIndex],
+    pvpRating: applyPvpRatingWin(winnerRating, delta),
+  };
+  users[loserIndex] = {
+    ...users[loserIndex],
+    pvpRating: applyPvpRatingLoss(loserRating, delta),
+  };
+  saveUsers(users);
+
+  const sessionUser = readGameJson<User | null>(CURRENT_USER_KEY, null);
+  if (sessionUser) {
+    const currentKey = normalizeUsername(sessionUser.username);
+    if (currentKey === winnerKey) {
+      updateCurrentUser({ pvpRating: users[winnerIndex].pvpRating });
+    } else if (currentKey === loserKey) {
+      updateCurrentUser({ pvpRating: users[loserIndex].pvpRating });
+    }
+  }
+
+  return { success: true, delta };
 }
 
 function getFieldedMinionPowerScore(user: User): number {
@@ -5674,6 +5965,21 @@ export function getLeaderboardBoards(): LeaderboardBoard[] {
         getBattleWinCount,
         (_user, score) => `${score} wins`,
         user => `${(user.activityLog || []).filter(activity => activity.type === 'battle').slice(0, 1)[0]?.title || 'No battle report yet'}`
+      ),
+    },
+    {
+      id: 'pvp',
+      title: 'PVP Rating',
+      subtitle: 'Ranked duel rating from 100 to 300.',
+      entries: makeLeaderboardEntries(
+        'pvp',
+        users,
+        user => getPvpRating(user).rating,
+        user => `${getPvpRating(user).rating} rating`,
+        user => {
+          const rating = getPvpRating(user);
+          return `${rating.wins}W / ${rating.losses}L · streak ${rating.winStreak || rating.lossStreak * -1}`;
+        }
       ),
     },
   ];
@@ -5912,6 +6218,22 @@ function initializeDailyQuests(now = Date.now()): DailyQuestState {
             chance: 0.30,
           }
         }
+      },
+      {
+        id: 'daily-gift',
+        name: 'Daily Supply Cache',
+        description: 'Claim a free random unit stack or gear piece once today.',
+        requirement: {
+          type: 'collect_daily_gift',
+          count: 1,
+        },
+        progress: 1,
+        claimed: false,
+        rewards: {
+          randomSupply: true,
+          guaranteedItem: 'decent',
+          legendaryChance: 0.02,
+        },
       }
     ]
   };
@@ -5930,15 +6252,18 @@ function normalizeDailyQuests(state?: Partial<DailyQuestState> | null, now = Dat
   if (resetByDate || resetByAge) return initializeDailyQuests(now);
 
   const fallback = initializeDailyQuests(lastResetAt || now);
-  const quests = Array.isArray(state.quests) && state.quests.length > 0
-    ? state.quests.map((quest, index) => ({
-      ...fallback.quests[index % fallback.quests.length],
-      ...quest,
-      progress: Math.max(0, Math.floor(toFiniteNumber(quest.progress, 0))),
-      claimed: Boolean(quest.claimed),
-      claimedAt: quest.claimedAt === undefined ? undefined : toFiniteNumber(quest.claimedAt, now),
-    }))
-    : fallback.quests;
+  const quests = fallback.quests.map(template => {
+    const existing = (state.quests || []).find(quest => quest.id === template.id);
+    if (!existing) return template;
+
+    return {
+      ...template,
+      ...existing,
+      progress: Math.max(0, Math.floor(toFiniteNumber(existing.progress, template.progress))),
+      claimed: Boolean(existing.claimed),
+      claimedAt: existing.claimedAt === undefined ? undefined : toFiniteNumber(existing.claimedAt, now),
+    };
+  });
 
   return {
     lastResetDate,
@@ -5979,6 +6304,8 @@ function updateQuestProgress(jobDuration: number): void {
       if (quest.requirement.minDuration && jobDuration >= quest.requirement.minDuration) {
         return { ...quest, progress: quest.progress + 1 };
       }
+    } else if (quest.requirement.type === 'collect_daily_gift') {
+      return quest;
     }
     
     return quest;
@@ -6015,53 +6342,84 @@ export function claimQuestReward(questId: string): { success: boolean; rewards?:
   // Generate rewards
   const rewardEquipment: Equipment[] = [];
   const rewardMinions: MinionStack[] = [];
-  
-  // Guaranteed item
-  const guaranteedItem = generateEquipment(0, quest.rewards.guaranteedItem);
-  if (guaranteedItem) {
-    rewardEquipment.push(guaranteedItem);
-  }
-  
-  // Bonus item (if applicable)
-  if (quest.rewards.bonusItem) {
-    const bonusRoll = Math.random();
-    if (bonusRoll < quest.rewards.bonusItem.chance) {
-      const bonusItem = generateEquipment(0, quest.rewards.bonusItem.rarity);
-      if (bonusItem) {
-        rewardEquipment.push(bonusItem);
+
+  if (quest.rewards.randomSupply) {
+    if (Math.random() < 0.48) {
+      const minion = generateMinionDrop(
+        5 * 60 * 1000,
+        Math.random() < 0.18 ? 'tier2' : 'tier1',
+        Math.random() < 0.2 ? 2 : 1,
+      );
+      if (minion) rewardMinions.push(minion);
+    } else {
+      const forcedRarity: EquipmentRarity = Math.random() < 0.08
+        ? 'legendary'
+        : Math.random() < 0.28
+          ? 'epic'
+          : Math.random() < 0.55
+            ? 'rare'
+            : 'decent';
+      const supplyItem = generateLootEquipment({ source: 'quest', forcedRarity });
+      if (supplyItem) rewardEquipment.push(supplyItem);
+    }
+  } else {
+    // Guaranteed item
+    const guaranteedItem = generateEquipment(0, quest.rewards.guaranteedItem);
+    if (guaranteedItem) {
+      rewardEquipment.push(guaranteedItem);
+    }
+
+    // Bonus item (if applicable)
+    if (quest.rewards.bonusItem) {
+      const bonusRoll = Math.random();
+      if (bonusRoll < quest.rewards.bonusItem.chance) {
+        const bonusItem = generateEquipment(0, quest.rewards.bonusItem.rarity);
+        if (bonusItem) {
+          rewardEquipment.push(bonusItem);
+        }
+      }
+    }
+
+    // Legendary chance
+    const legendaryRoll = Math.random();
+    if (legendaryRoll < quest.rewards.legendaryChance) {
+      const legendaryItem = generateEquipment(0, 'legendary');
+      if (legendaryItem) {
+        rewardEquipment.push(legendaryItem);
+      }
+    }
+
+    if (quest.rewards.minionChance && Math.random() < quest.rewards.minionChance.chance) {
+      const minion = generateMinionDrop(
+        0,
+        quest.rewards.minionChance.tier,
+        quest.rewards.minionChance.quantity || 1
+      );
+
+      if (minion) {
+        rewardMinions.push(minion);
       }
     }
   }
-  
-  // Legendary chance
-  const legendaryRoll = Math.random();
-  if (legendaryRoll < quest.rewards.legendaryChance) {
-    const legendaryItem = generateEquipment(0, 'legendary');
-    if (legendaryItem) {
-      rewardEquipment.push(legendaryItem);
-    }
+
+  const gearResult = addEquipmentWithLimit(
+    currentUser.equipment || [],
+    currentUser.equippedSlots || {},
+    rewardEquipment,
+    getInventorySlotCapacity(currentUser),
+  );
+  if (gearResult.rejectedEquipment.length > 0) {
+    return { success: false, error: 'Gear storage is full. Sell or equip gear before claiming this reward.' };
   }
 
-  if (quest.rewards.minionChance && Math.random() < quest.rewards.minionChance.chance) {
-    const minion = generateMinionDrop(
-      0,
-      quest.rewards.minionChance.tier,
-      quest.rewards.minionChance.quantity || 1
-    );
-
-    if (minion) {
-      rewardMinions.push(minion);
-    }
-  }
-
+  const updatedMinions = mergeMinionStacks(currentUser.minions || [], rewardMinions);
   // Update quest as claimed and add rewards.
   const claimedAt = Date.now();
   const updatedQuests = dailyQuests.quests.map(q => 
     q.id === questId ? { ...q, claimed: true, claimedAt } : q
   );
 
-  const updatedEquipment = [...currentUser.equipment, ...rewardEquipment];
-  const updatedMinions = mergeMinionStacks(currentUser.minions || [], rewardMinions);
+  const acceptedEquipment = gearResult.acceptedEquipment;
   const updatedActivityLog = pushActivityEntry(currentUser.activityLog, {
     id: `activity-quest-${quest.id}-${claimedAt}`,
     type: 'quest',
@@ -6069,7 +6427,7 @@ export function claimQuestReward(questId: string): { success: boolean; rewards?:
     source: 'Daily Quests',
     completedAt: claimedAt,
     rewards: {
-      equipment: rewardEquipment.length > 0 ? rewardEquipment : undefined,
+      equipment: acceptedEquipment.length > 0 ? acceptedEquipment : undefined,
       minions: rewardMinions.length > 0 ? rewardMinions : undefined,
     },
   });
@@ -6079,12 +6437,12 @@ export function claimQuestReward(questId: string): { success: boolean; rewards?:
       ...dailyQuests,
       quests: updatedQuests
     },
-    equipment: updatedEquipment,
+    equipment: gearResult.equipment,
     minions: updatedMinions,
     activityLog: updatedActivityLog
   });
 
-  return { success: true, rewards: rewardEquipment, minions: rewardMinions };
+  return { success: true, rewards: acceptedEquipment, minions: rewardMinions };
 }
 
 export function claimReadyQuestRewards(options: { includeDaily?: boolean } = {}): { success: boolean; claimed: AutoClaimedQuestReward[]; error?: string } {
@@ -6167,12 +6525,14 @@ export function levelUp(): void {
   const currentUser = getCurrentUser();
   if (!currentUser) return;
 
+  if (currentUser.stats.level >= MAX_PLAYER_LEVEL) return;
+
   const expNeeded = getExpNeeded(currentUser.stats.level);
   
   if (currentUser.exp >= expNeeded) {
     const updatedStats = { ...currentUser.stats };
-    updatedStats.level += 1;
-    updatedStats.unallocatedPoints += 4; // 4 points per level
+    updatedStats.level = Math.min(MAX_PLAYER_LEVEL, updatedStats.level + 1);
+    updatedStats.unallocatedPoints += 4;
     
     updateCurrentUser({ 
       exp: currentUser.exp - expNeeded,

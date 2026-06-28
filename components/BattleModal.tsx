@@ -79,6 +79,7 @@ import {
   MINION_CLASS_LABELS,
   MINION_TIER_LABELS,
   recruitMinionsFromOffer,
+  recordPvpDuelOutcome,
   rollInventoryBonusDrops,
   STORY_CHAPTERS,
   updateCurrentUser,
@@ -196,6 +197,9 @@ interface BattleSpeedConfig {
 const SPELL_PRESENTATION_MS = 2300;
 const SPELL_NOTICE_MS = 1450;
 const BATTLE_MOVE_TRANSIT_MS = 1450;
+const RUN_VICTORY_BANNER_DELAY_MS = 500;
+const RUN_VICTORY_AFTER_ANIMATION_HOLD_MS = 3000;
+const RUN_VICTORY_HANDOFF_FLOOR_MS = BATTLE_DEATH_HIT_MS + BATTLE_DEATH_DISSOLVE_MS + RUN_VICTORY_AFTER_ANIMATION_HOLD_MS;
 
 /** Enemy turns always use this pacing, regardless of the combat speed setting. */
 const ENEMY_BATTLE_PACE = {
@@ -361,6 +365,7 @@ export default function BattleModal({
   const enemyTimer = useRef<number | null>(null);
   const enemyActionHoldTimer = useRef<number | null>(null);
   const playerActionTimer = useRef<number | null>(null);
+  const battleEndNotifyTimer = useRef<number | null>(null);
   const defeatExitTimer = useRef<number | null>(null);
   const combatTutorialCompleteTimerRef = useRef<number | null>(null);
   const battleSoundTimers = useRef<number[]>([]);
@@ -404,6 +409,7 @@ export default function BattleModal({
     if (enemyTimer.current) window.clearTimeout(enemyTimer.current);
     if (enemyActionHoldTimer.current) window.clearTimeout(enemyActionHoldTimer.current);
     if (playerActionTimer.current) window.clearTimeout(playerActionTimer.current);
+    if (battleEndNotifyTimer.current) window.clearTimeout(battleEndNotifyTimer.current);
     if (bossLastStandTimer.current) window.clearTimeout(bossLastStandTimer.current);
     if (bossSpecialTimer.current) window.clearTimeout(bossSpecialTimer.current);
     if (defeatExitTimer.current) window.clearTimeout(defeatExitTimer.current);
@@ -772,8 +778,14 @@ export default function BattleModal({
         });
       }, 0);
       if (!battleEndNotified.current) {
-        onBattleEnd?.({ status: 'victory', battle, reward });
         battleEndNotified.current = true;
+        if (onBattleEnd) {
+          const notifyDelayMs = getBattleVictoryHandoffDelayMs(battle);
+          battleEndNotifyTimer.current = window.setTimeout(() => {
+            battleEndNotifyTimer.current = null;
+            onBattleEnd({ status: 'victory', battle, reward });
+          }, notifyDelayMs);
+        }
       }
       rewardClaimed.current = true;
     } else if (battle.status === 'defeat') {
@@ -993,13 +1005,36 @@ export default function BattleModal({
       intensity: cue.tone === 'danger' ? 0.76 : 0.62,
     });
 
-    const isSpellAction = Boolean(getRecentPresentationLogEntry(nextBattle, now)?.action === 'spell');
+    const preferredPresentationEntry = getRecentPresentationLogEntry(nextBattle);
+    const preferredPresentationEntryId = preferredPresentationEntry?.id;
+    const isSpellAction = preferredPresentationEntry?.action === 'spell';
     const applyDelayMs = speedConfig.playerDelayMs;
 
     const finishPlayerAction = (appliedBattle: BattleState) => {
-      const stampedBattle = refreshPresentationLogTimestamp(appliedBattle);
-      const entry = getRecentPresentationLogEntry(stampedBattle, Date.now());
+      const stampedBattle = refreshPresentationLogTimestamp(appliedBattle, preferredPresentationEntryId);
+      const entry = preferredPresentationEntryId
+        ? stampedBattle.log.find(item => item.id === preferredPresentationEntryId)
+        : getRecentPresentationLogEntry(stampedBattle, Date.now());
       const holdMs = entry ? getRemainingPresentationMs(entry, stampedBattle) : 0;
+      if (entry) {
+        setPresentationPin({ entry, expiresAt: entry.createdAt + getBattleLogPresentationMs(entry, stampedBattle) });
+
+        if (entry.action === 'spell') {
+          const spell = getBattleSpellFromLogEntry(entry);
+          if (spell) {
+            if (spellNoticeTimer.current) window.clearTimeout(spellNoticeTimer.current);
+            const notice = { id: entry.id, spell, side: entry.side };
+            activeSpellNoticeRef.current = notice;
+            setSpellCastNotice(notice);
+            spellNoticeTimer.current = window.setTimeout(() => {
+              spellNoticeTimer.current = null;
+              activeSpellNoticeRef.current = null;
+              setSpellCastNotice(current => current?.id === notice.id ? null : current);
+              flushQueuedTurnBanner();
+            }, entry.side === 'enemy' ? ENEMY_BATTLE_PACE.spellNoticeMs : SPELL_NOTICE_MS);
+          }
+        }
+      }
       setBattle(stampedBattle);
 
       if (getPendingCinematicEntry(stampedBattle)) {
@@ -1018,7 +1053,7 @@ export default function BattleModal({
     };
 
     if (isSpellAction) {
-      const spellApplyDelayMs = applyDelayMs <= 0 ? 0 : Math.min(applyDelayMs, 320);
+      const spellApplyDelayMs = 0;
       playerActionTimer.current = window.setTimeout(() => {
         finishPlayerAction(nextBattle);
       }, spellApplyDelayMs);
@@ -1321,6 +1356,10 @@ export default function BattleModal({
   };
 
   const handleLeaveField = () => {
+    if (battleEndNotifyTimer.current) {
+      window.clearTimeout(battleEndNotifyTimer.current);
+      battleEndNotifyTimer.current = null;
+    }
     if (defeatExitTimer.current) {
       window.clearTimeout(defeatExitTimer.current);
       defeatExitTimer.current = null;
@@ -1345,7 +1384,7 @@ export default function BattleModal({
     selectedSpell,
     recruitOfferPending,
   });
-  const controlCue = battleCue || defaultCue;
+  const controlCue = battle.status === 'active' ? battleCue || defaultCue : defaultCue;
   const hoverPreview = getBattleHoverPreview({
     battle,
     activeUnit,
@@ -1434,7 +1473,7 @@ export default function BattleModal({
           ) : (
             <>
           <main className="battle-main flex min-h-0 flex-col gap-2">
-            {battle.status !== 'active' && battle.status !== 'defeat' && (
+            {battle.status !== 'active' && battle.status !== 'defeat' && !onBattleEnd && (
               <BattleResultReport battle={battle} report={resultReport} onClose={handleLeaveField} />
             )}
 
@@ -1475,6 +1514,9 @@ export default function BattleModal({
                 >
                   Cancel Spell
                 </button>
+              )}
+              {battle.status !== 'active' && !bossLastStandCue && !bossSpecialCue && (
+                <BattleOutcomeBanner cue={controlCue} />
               )}
               <BattleHoverOverlay
                 preview={hoverPreview}
@@ -2193,6 +2235,20 @@ function BattleSpellCastNotice({ notice }: { notice: BattleSpellCastNoticeData }
   );
 }
 
+function BattleOutcomeBanner({ cue }: { cue: BattleCue }) {
+  return (
+    <div
+      className={`battle-outcome-banner battle-outcome-banner-${cue.tone}`}
+      style={{ '--battle-outcome-banner-delay-ms': `${RUN_VICTORY_BANNER_DELAY_MS}ms` } as CSSProperties}
+      aria-hidden="true"
+    >
+      <span className="arcane-label">{cue.tone === 'victory' ? 'Field resolved' : 'Battle resolved'}</span>
+      <span className="fantasy-heading">{cue.headline}</span>
+      {cue.detail && <span>{cue.detail}</span>}
+    </div>
+  );
+}
+
 function getViewportClampedOverlayStyle(
   cursor: { x: number; y: number },
   size: { width: number; height: number }
@@ -2899,8 +2955,12 @@ function getPendingCinematicEntry(battle: BattleState, now = Date.now()): Battle
   ));
 }
 
-function refreshPresentationLogTimestamp(battle: BattleState): BattleState {
-  const entry = battle.log[0];
+function refreshPresentationLogTimestamp(battle: BattleState, preferredEntryId?: string): BattleState {
+  const preferredIndex = preferredEntryId
+    ? battle.log.findIndex(entry => entry.id === preferredEntryId)
+    : 0;
+  const entryIndex = preferredIndex >= 0 ? preferredIndex : 0;
+  const entry = battle.log[entryIndex];
   if (
     !entry
     || entry.action === 'round'
@@ -2909,9 +2969,12 @@ function refreshPresentationLogTimestamp(battle: BattleState): BattleState {
   ) {
     return battle;
   }
+  const createdAt = Date.now();
   return {
     ...battle,
-    log: [{ ...entry, createdAt: Date.now() }, ...battle.log.slice(1)],
+    log: battle.log.map((item, index) => (
+      index === entryIndex ? { ...item, createdAt } : item
+    )),
   };
 }
 
@@ -2921,6 +2984,19 @@ function getRemainingPresentationMs(
   now = Date.now(),
 ): number {
   return Math.max(0, getBattleLogPresentationMs(entry, battle) - (now - entry.createdAt));
+}
+
+function getBattleVictoryHandoffDelayMs(battle: BattleState, now = Date.now()): number {
+  const entry = getRecentPresentationLogEntry(battle, now)
+    ?? battle.log.find(item => item.action === 'attack' || item.action === 'spell')
+    ?? battle.log[0];
+  const actionMs = entry
+    ? Math.max(getBattleLogPresentationMs(entry, battle), BATTLE_DEATH_HIT_MS + BATTLE_DEATH_DISSOLVE_MS)
+    : BATTLE_DEFAULT_PRESENTATION_MS;
+  const startedAt = entry?.createdAt ?? now;
+  const handoffAt = startedAt + actionMs + RUN_VICTORY_AFTER_ANIMATION_HOLD_MS;
+
+  return Math.max(RUN_VICTORY_HANDOFF_FLOOR_MS, handoffAt - now);
 }
 
 function getBattleDeathHitAnimation(entry: BattleLogEntry | undefined): BattlePieceAnimation {
@@ -3949,6 +4025,8 @@ function applyVictoryReward(enemy: WorldEnemy): VictoryRewardReport | null {
     title: gearAddResult.rejectedEquipment.length > 0 ? `Defeated ${enemy.name} (gear storage full)` : `Defeated ${enemy.name}`,
     source: enemy.id.startsWith('dungeon-') ? 'Dungeon Battle' : 'Battle',
     completedAt,
+    battleLevel: enemy.level,
+    description: enemy.bossId ? `boss:${enemy.bossId}` : undefined,
     rewards: {
       gold: reward.gold,
       exp: reward.exp,
@@ -3970,6 +4048,11 @@ function applyVictoryReward(enemy: WorldEnemy): VictoryRewardReport | null {
   const questProgress = getBattleQuestProgressDeltas(questProgressBefore, getBattleQuestSnapshots(nextUser));
 
   updateCurrentUser(nextUser);
+
+  const pvpOpponent = getPvpOpponentUsername(enemy);
+  if (pvpOpponent) {
+    recordPvpDuelOutcome(user.username, pvpOpponent);
+  }
 
   return {
     ...reward,
@@ -3994,5 +4077,16 @@ function applyDefeatPenalty(enemy: WorldEnemy): number {
     },
   });
 
+  const pvpOpponent = getPvpOpponentUsername(enemy);
+  if (pvpOpponent) {
+    recordPvpDuelOutcome(pvpOpponent, user.username);
+  }
+
   return penalty;
+}
+
+function getPvpOpponentUsername(enemy: WorldEnemy): string | null {
+  if (!enemy.id.startsWith('pvp-')) return null;
+  const name = enemy.name?.trim();
+  return name || null;
 }

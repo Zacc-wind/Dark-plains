@@ -1024,6 +1024,12 @@ function getHourlyWorldBoss(user: User | null, now: number, occupied: Set<string
   return makeWorldBossEnemy({ profile, level, home, patrol, seed, spawnedAt, expiresAt, cycle });
 }
 
+export function getActiveWorldBoss(user: User | null, now = Date.now()): WorldEnemy | null {
+  const { cycle } = getWorldBossCycle(now);
+  const defeatedEnemyIds = readDefeatedWorldEnemyIds(cycle);
+  return getHourlyWorldBoss(user, now, new Set<string>(), defeatedEnemyIds);
+}
+
 function getNearbyEnemyRegion(user: User): EnemySpawnRegion {
   return {
     id: 'player-nearby',
