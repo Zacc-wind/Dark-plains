@@ -2100,6 +2100,7 @@ export default function MapRenderer({
       <PlayerListModal
         isOpen={showPlayerList && !selectedPOI && !selectedTown && !selectedEnemy && !activeBattleEnemy && !selectedDungeon && !selectedDungeonRun && !selectedQuestNpc}
         location={playerListLocation}
+        players={otherPlayers}
         onClose={() => setShowPlayerList(false)}
       />
 

@@ -35,6 +35,7 @@ export async function GET() {
       y: row.y as number,
       selectedModel: row.selected_model as number,
       level: row.level as number,
+      updatedAt: row.updated_at as string,
     }));
 
   return apiOk({ players }, { status: 200 }, 'database');

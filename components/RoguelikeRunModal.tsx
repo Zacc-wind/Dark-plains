@@ -59,12 +59,13 @@ import {
   generateEquipment,
   getCurrentUser,
   getDailyRunChallenge,
-  getFieldedMinions,
   getMinionTemplate,
+  getOrderedMinions,
   getDailyRunState,
   getRandomRunEffectiveLevel,
   getRandomRunExpNeeded,
   getRandomRunProgressRatio,
+  isMinionInjured,
   isStandaloneMinionTemplate,
   isStandaloneTier1MinionTemplate,
   isStandaloneTier2MinionTemplate,
@@ -4204,19 +4205,48 @@ function createDailySession(user: User, dailyChallenge = createRandomRunChalleng
   };
 }
 
+function createRosterRunUnits(user: User, prefix: string): RunUnit[] {
+  const ordered = getOrderedMinions(user).filter(stack => !isMinionInjured(stack));
+  const activeIds = new Set(
+    ordered
+      .filter(stack => stack.fielded)
+      .slice(0, MAX_FIELD_MINIONS)
+      .map(stack => stack.id),
+  );
+  const fielded = ordered.filter(stack => activeIds.has(stack.id));
+  const reserve = ordered.filter(stack => !activeIds.has(stack.id));
+
+  return [...fielded, ...reserve].map((stack, index) => ({
+    stack: cloneRunStack(stack.templateId, `${prefix}-${index}`, activeIds.has(stack.id)),
+    alive: true,
+    origin: 'roster' as const,
+  }));
+}
+
+function createLoanedStarterUnits(prefix: string): RunUnit[] {
+  return ['knight-squire', 'priest-acolyte', 'wizard-apprentice'].map((templateId, index) => ({
+    stack: cloneRunStack(templateId, `${prefix}-${index}`, true),
+    alive: true,
+    origin: 'loaned' as const,
+  }));
+}
+
+function makeRosterPresetFormation(units: RunUnit[]): Record<string, BoardCell> {
+  const activeStacks = units
+    .filter(unit => unit.alive && unit.stack.fielded)
+    .map(unit => unit.stack)
+    .slice(0, MAX_FIELD_MINIONS);
+  const fallbackStacks = units
+    .filter(unit => unit.alive)
+    .map(unit => unit.stack)
+    .slice(0, MAX_FIELD_MINIONS);
+
+  return makeDefaultFormation(activeStacks.length > 0 ? activeStacks : fallbackStacks);
+}
+
 function createDungeonSession(user: User, dungeon: WorldDungeon): RunSession {
-  const rosterMinions = getFieldedMinions(user).slice(0, MAX_FIELD_MINIONS);
-  const startingStacks = rosterMinions.length > 0
-    ? rosterMinions.map((stack, index) => ({
-      stack: cloneRunStack(stack.templateId, `loaned-dungeon-${dungeon.id}-${index}`),
-      alive: true,
-      origin: 'roster' as const,
-    }))
-    : ['knight-squire', 'priest-acolyte', 'wizard-apprentice'].map((templateId, index) => ({
-      stack: cloneRunStack(templateId, `loaned-dungeon-${dungeon.id}-${index}`),
-      alive: true,
-      origin: 'loaned' as const,
-    }));
+  const rosterUnits = createRosterRunUnits(user, `loaned-dungeon-${dungeon.id}`);
+  const startingStacks = rosterUnits.length > 0 ? rosterUnits : createLoanedStarterUnits(`loaned-dungeon-${dungeon.id}`);
 
   const nodes = createDungeonNodes(dungeon);
   const spellIds = (user.equippedSpellIds || ['arcane-bolt', 'sanctified-mend', 'ember-dart', 'warding-prayer']).slice(0, 4);
@@ -4233,7 +4263,7 @@ function createDungeonSession(user: User, dungeon: WorldDungeon): RunSession {
     targetBattles: nodes.filter(node => ['battle', 'elite', 'boss'].includes(node.type)).length,
     runGold: 40,
     activeEnemy: null,
-    formation: makeDefaultFormation(startingStacks.map(unit => unit.stack)),
+    formation: makeRosterPresetFormation(startingStacks),
     spellIds,
     knownSpellIds: getRunStartingKnownSpellIds(spellIds, user),
     rewardChoices: [],
@@ -4254,12 +4284,7 @@ function createDungeonSession(user: User, dungeon: WorldDungeon): RunSession {
 }
 
 function createEncounterSession(user: User, enemy: WorldEnemy): RunSession {
-  const rosterMinions = getFieldedMinions(user).slice(0, MAX_FIELD_MINIONS);
-  const startingStacks = rosterMinions.map((stack, index) => ({
-    stack: cloneRunStack(stack.templateId, `loaned-encounter-${enemy.id}-${index}`),
-    alive: true,
-    origin: 'roster' as const,
-  }));
+  const startingStacks = createRosterRunUnits(user, `loaned-encounter-${enemy.id}`);
   const nodes = createEncounterRunNodes(enemy);
   const spellIds = (user.equippedSpellIds || ['arcane-bolt', 'sanctified-mend', 'ember-dart', 'warding-prayer']).slice(0, 4);
 
@@ -4275,7 +4300,7 @@ function createEncounterSession(user: User, enemy: WorldEnemy): RunSession {
     targetBattles: nodes.filter(node => ['battle', 'elite', 'boss'].includes(node.type)).length,
     runGold: enemy.level <= 3 ? 15 : 25,
     activeEnemy: null,
-    formation: makeDefaultFormation(startingStacks.map(unit => unit.stack)),
+    formation: makeRosterPresetFormation(startingStacks),
     spellIds,
     knownSpellIds: getRunStartingKnownSpellIds(spellIds, user),
     rewardChoices: [],
@@ -4297,18 +4322,8 @@ function createEncounterSession(user: User, enemy: WorldEnemy): RunSession {
 }
 
 function createMpDailySession(user: User, challenge: MpDailyDungeonChallenge): RunSession {
-  const rosterMinions = getFieldedMinions(user).slice(0, MAX_FIELD_MINIONS);
-  const startingStacks = rosterMinions.length > 0
-    ? rosterMinions.map((stack, index) => ({
-      stack: cloneRunStack(stack.templateId, `loaned-mp-daily-${index}`),
-      alive: true,
-      origin: 'roster' as const,
-    }))
-    : ['knight-squire', 'priest-acolyte', 'wizard-apprentice'].map((templateId, index) => ({
-      stack: cloneRunStack(templateId, `loaned-mp-daily-${index}`),
-      alive: true,
-      origin: 'loaned' as const,
-    }));
+  const rosterUnits = createRosterRunUnits(user, 'loaned-mp-daily');
+  const startingStacks = rosterUnits.length > 0 ? rosterUnits : createLoanedStarterUnits('loaned-mp-daily');
 
   const startLevel = Math.max(1, (user.stats.level || 1) + challenge.enemyLevelOffset - 2);
   const nodes = createScaledRunNodes({
@@ -4338,7 +4353,7 @@ function createMpDailySession(user: User, challenge: MpDailyDungeonChallenge): R
     targetBattles: nodes.filter(node => ['battle', 'elite', 'boss'].includes(node.type)).length,
     runGold: 35,
     activeEnemy: null,
-    formation: makeDefaultFormation(startingStacks.map(unit => unit.stack)),
+    formation: makeRosterPresetFormation(startingStacks),
     spellIds,
     knownSpellIds: getRunStartingKnownSpellIds(spellIds, user),
     rewardChoices: [],
@@ -7152,8 +7167,14 @@ function addRunMinionFromTemplate(session: RunSession, template: MinionTemplate,
   };
 }
 
+function getRunRosterLimit(session: RunSession): number {
+  return session.mode === 'daily'
+    ? RUN_MAX_ROSTER
+    : Math.max(RUN_MAX_ROSTER, session.minions.length);
+}
+
 function getAliveRunRoster(session: RunSession): MinionStack[] {
-  return session.minions.filter(unit => unit.alive).map(unit => unit.stack).slice(0, RUN_MAX_ROSTER);
+  return session.minions.filter(unit => unit.alive).map(unit => unit.stack).slice(0, getRunRosterLimit(session));
 }
 
 function getRunPlacedStacks(session: RunSession, formation: Record<string, BoardCell> = session.formation): MinionStack[] {
@@ -7174,13 +7195,13 @@ function getRunFormationIssue(session: RunSession, formation: Record<string, Boa
   return getFormationIssue(formation, placedStacks);
 }
 
-function cloneRunStack(templateId: string, prefix: string): MinionStack {
+function cloneRunStack(templateId: string, prefix: string, fielded = true): MinionStack {
   return {
     id: `${prefix}-${templateId}-${Math.random().toString(16).slice(2)}`,
     templateId,
     quantity: 1,
     acquiredAt: Date.now(),
-    fielded: true,
+    fielded,
   };
 }
 

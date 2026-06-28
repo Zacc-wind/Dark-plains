@@ -3734,6 +3734,45 @@ export function toggleMinionFielded(minionId: string): { success: boolean; error
   return { success: true };
 }
 
+export function assignMinionToBattleSlot(minionId: string, slotIndex: number): { success: boolean; error?: string } {
+  const currentUser = getCurrentUser();
+  if (!currentUser) return { success: false, error: 'Not logged in.' };
+
+  const roster = normalizeMinionRoster(currentUser.minions);
+  const source = roster.find(minion => minion.id === minionId);
+  if (!source) return { success: false, error: 'Minion not found.' };
+  if (isMinionInjured(source)) {
+    return { success: false, error: `${getMinionTemplate(source.templateId)?.name || 'This minion'} is injured for ${formatMinionInjuryTime(source)}.` };
+  }
+
+  const targetSlot = Math.max(0, Math.min(MAX_FIELD_MINIONS - 1, Math.floor(slotIndex)));
+  const currentFieldedIds = roster
+    .filter(minion => minion.fielded && !isMinionInjured(minion))
+    .slice(0, MAX_FIELD_MINIONS)
+    .map(minion => minion.id);
+  const nextFieldedIds = currentFieldedIds.filter(id => id !== minionId);
+  const insertIndex = Math.min(targetSlot, nextFieldedIds.length);
+
+  if (nextFieldedIds.length >= MAX_FIELD_MINIONS) {
+    nextFieldedIds.splice(targetSlot, 1, minionId);
+  } else {
+    nextFieldedIds.splice(insertIndex, 0, minionId);
+  }
+
+  const fieldedSet = new Set(nextFieldedIds.slice(0, MAX_FIELD_MINIONS));
+  const fieldedRoster = nextFieldedIds
+    .map(id => roster.find(minion => minion.id === id))
+    .filter((minion): minion is MinionStack => Boolean(minion));
+  const reserveRoster = roster.filter(minion => !fieldedSet.has(minion.id));
+
+  saveMinionRoster([
+    ...fieldedRoster.map(minion => ({ ...minion, fielded: true })),
+    ...reserveRoster.map(minion => ({ ...minion, fielded: false })),
+  ]);
+
+  return { success: true };
+}
+
 export function reorderMinionRoster(draggedMinionId: string, targetMinionId: string): { success: boolean; error?: string } {
   const currentUser = getCurrentUser();
   if (!currentUser) return { success: false, error: 'Not logged in.' };

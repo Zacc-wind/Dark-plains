@@ -8,7 +8,10 @@ export interface WorldMapPlayer {
   y: number;
   selectedModel: number;
   level: number;
+  updatedAt?: string;
 }
+
+export const WORLD_PLAYER_ONLINE_WINDOW_MS = 2 * 60 * 1000;
 
 let cachedWorldPlayers: WorldMapPlayer[] = [];
 
@@ -49,6 +52,28 @@ export function worldMapPlayerToUser(player: WorldMapPlayer): User {
   };
 }
 
+export function getWorldPlayerUpdatedMs(player: Pick<WorldMapPlayer, 'updatedAt'>): number {
+  const parsed = player.updatedAt ? Date.parse(player.updatedAt) : 0;
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+export function isWorldPlayerOnline(player: Pick<WorldMapPlayer, 'updatedAt'>, now = Date.now()): boolean {
+  const updatedMs = getWorldPlayerUpdatedMs(player);
+  return updatedMs > 0 && now - updatedMs <= WORLD_PLAYER_ONLINE_WINDOW_MS;
+}
+
+export function formatWorldPlayerLastSeen(player: Pick<WorldMapPlayer, 'updatedAt'>, now = Date.now()): string {
+  const updatedMs = getWorldPlayerUpdatedMs(player);
+  if (updatedMs <= 0) return 'unknown';
+
+  const diffMs = Math.max(0, now - updatedMs);
+  if (diffMs < 10_000) return 'just now';
+  if (diffMs < 60_000) return `${Math.ceil(diffMs / 1000)}s ago`;
+  if (diffMs < 60 * 60_000) return `${Math.floor(diffMs / 60_000)}m ago`;
+  if (diffMs < 24 * 60 * 60_000) return `${Math.floor(diffMs / (60 * 60_000))}h ago`;
+  return `${Math.floor(diffMs / (24 * 60 * 60_000))}d ago`;
+}
+
 export async function refreshWorldPlayers(): Promise<WorldMapPlayer[]> {
   if (!isSupabaseConfigured()) {
     cachedWorldPlayers = [];
@@ -61,10 +86,15 @@ export async function refreshWorldPlayers(): Promise<WorldMapPlayer[]> {
 
     const payload = await response.json() as {
       ok?: boolean;
-      data?: { players?: WorldMapPlayer[] };
+      data?: { players?: Array<WorldMapPlayer & { updated_at?: string }> };
     };
 
-    cachedWorldPlayers = payload.data?.players || [];
+    cachedWorldPlayers = (payload.data?.players || []).map(player => ({
+      ...player,
+      selectedModel: Number(player.selectedModel || 3),
+      level: Number(player.level || 1),
+      updatedAt: player.updatedAt || player.updated_at,
+    }));
     return cachedWorldPlayers;
   } catch {
     return cachedWorldPlayers;

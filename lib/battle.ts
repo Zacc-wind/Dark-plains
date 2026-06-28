@@ -2808,6 +2808,14 @@ export function isPresentationBattleLogAction(action: BattleLogAction): boolean 
   return action !== 'round' && action !== 'system';
 }
 
+export function isStatusEffectTickLogEntry(entry: Pick<BattleLogEntry, 'action' | 'style' | 'spellId'>): boolean {
+  return (
+    entry.action === 'spell' &&
+    (entry.style === 'bleed' || entry.style === 'poison') &&
+    (entry.spellId === 'bleed' || entry.spellId === 'poison')
+  );
+}
+
 export function getBattleLogPresentationMs(entry: BattleLogEntry, battle?: BattleState): number {
   if (entry.style === 'boss-phase') return BOSS_LAST_STAND_PRESENTATION_MS;
   if (entry.style === 'boss-special') return BOSS_SPECIAL_PRESENTATION_MS;
@@ -2831,6 +2839,7 @@ export function getBattleLogPresentationMs(entry: BattleLogEntry, battle?: Battl
 export function getRecentPresentationLogEntry(battle: BattleState, now = Date.now()): BattleLogEntry | undefined {
   const candidates = battle.log.filter(entry => (
     isPresentationBattleLogAction(entry.action)
+    && !isStatusEffectTickLogEntry(entry)
     && now - entry.createdAt < getBattleLogPresentationMs(entry, battle)
   ));
 
@@ -2842,11 +2851,12 @@ export function getRecentPresentationLogEntry(battle: BattleState, now = Date.no
 }
 
 export function pickFreshPresentationLogEntry(entries: BattleLogEntry[]): BattleLogEntry | undefined {
-  if (entries.length === 0) return undefined;
-  return entries.find(entry => entry.style === 'boss-phase')
-    ?? entries.find(entry => entry.style === 'boss-special')
-    ?? entries.find(entry => entry.action === 'spell')
-    ?? entries.find(entry => isPresentationBattleLogAction(entry.action));
+  const presentationEntries = entries.filter(entry => !isStatusEffectTickLogEntry(entry));
+  if (presentationEntries.length === 0) return undefined;
+  return presentationEntries.find(entry => entry.style === 'boss-phase')
+    ?? presentationEntries.find(entry => entry.style === 'boss-special')
+    ?? presentationEntries.find(entry => entry.action === 'spell')
+    ?? presentationEntries.find(entry => isPresentationBattleLogAction(entry.action));
 }
 
 export function castBattleSpell(state: BattleState, spellId: string, targetId?: string): BattleState {

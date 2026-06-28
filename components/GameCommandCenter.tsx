@@ -30,6 +30,7 @@ import {
   RewardSummary,
   SocialChatChannel,
   TravelState,
+  assignMinionToBattleSlot,
   allocateStatPoint,
   cancelJob,
   cancelTravel,
@@ -77,6 +78,7 @@ import {
   removeFriend,
   sendFriendRequest,
   sendSocialChatMessage,
+  toggleMinionFielded,
   unequipItem,
   upgradeInventoryCapacity,
   activateInventoryItem,
@@ -942,6 +944,28 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
     setArmySwapSourceId(null);
     if (!result.success) {
       setTemporaryNotice(result.error || 'Could not swap units.');
+      return;
+    }
+
+    setUser(getCurrentUser());
+  };
+
+  const handleAssignMinionBattleSlot = (minionId: string, slotIndex: number) => {
+    const result = assignMinionToBattleSlot(minionId, slotIndex);
+    setArmySwapSourceId(null);
+    if (!result.success) {
+      setTemporaryNotice(result.error || 'Could not update battle lineup.');
+      return;
+    }
+
+    setUser(getCurrentUser());
+  };
+
+  const handleToggleArmyFielded = (minionId: string) => {
+    const result = toggleMinionFielded(minionId);
+    setArmySwapSourceId(null);
+    if (!result.success) {
+      setTemporaryNotice(result.error || 'Could not update battle lineup.');
       return;
     }
 
@@ -2056,32 +2080,30 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
           )}
         </section>
 
-        <section className="ui-card rounded border p-4">
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <h3 className="fantasy-heading text-base">Gear Storage Upgrade</h3>
-              <p className="ui-muted text-xs font-bold">
-                {inventoryUpgradeQuote.maxed
-                  ? 'Gear storage is fully expanded.'
-                  : `Level ${inventoryUpgradeQuote.nextLevel}/10 - ${inventoryUpgradeQuote.successChance}% chance`}
-              </p>
+        {!inventoryUpgradeQuote.maxed && (
+          <section className="ui-card rounded border p-4">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h3 className="fantasy-heading text-base">Gear Storage Upgrade</h3>
+                <p className="ui-muted text-xs font-bold">
+                  Level {inventoryUpgradeQuote.nextLevel}/10 - {inventoryUpgradeQuote.successChance}% chance
+                </p>
+              </div>
+              <button
+                onClick={handleInventoryUpgrade}
+                disabled={player.gold < inventoryUpgradeQuote.goldCost || rareGemCount < inventoryUpgradeQuote.gemCost}
+                className="ui-button-primary rounded px-3 py-2 text-xs font-bold disabled:opacity-40"
+              >
+                Upgrade
+              </button>
             </div>
-            <button
-              onClick={handleInventoryUpgrade}
-              disabled={inventoryUpgradeQuote.maxed || player.gold < inventoryUpgradeQuote.goldCost || rareGemCount < inventoryUpgradeQuote.gemCost}
-              className="ui-button-primary rounded px-3 py-2 text-xs font-bold disabled:opacity-40"
-            >
-              Upgrade
-            </button>
-          </div>
-          {!inventoryUpgradeQuote.maxed && (
             <div className="mt-3 grid grid-cols-3 gap-2 text-center">
               <StatusPill label="Gold" value={`${inventoryUpgradeQuote.goldCost}`} />
               <StatusPill label="Gems" value={`${inventoryUpgradeQuote.gemCost}/${rareGemCount}`} />
               <StatusPill label="Next" value={`${inventorySlots + 1} slots`} />
             </div>
-          )}
-        </section>
+          </section>
+        )}
       </div>
     );
   }
@@ -2089,21 +2111,47 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
 
   function renderMinions() {
     const rosterMinions = getOrderedMinions(player);
+    const reserveCount = rosterMinions.filter(minion => !minion.fielded).length;
 
     return (
       <div className="minions-layout-grid minions-layout-modern">
         <section className="ui-card minion-field-strip rounded border p-4">
           <SectionTitle title="Battle Lineup" action={`${fieldedMinions.length}/${MAX_FIELD_MINIONS} fielded`} />
-          <p className="ui-muted mb-3 text-xs font-bold">The first seven healthy roster positions fight with you.</p>
+          <p className="ui-muted mb-3 text-xs font-bold">
+            Drag units from the roster into seven active slots. Reserves stay available for multiplayer formation screens.
+          </p>
           <div className="army-lineup-strip">
             {Array.from({ length: MAX_FIELD_MINIONS }, (_, index) => {
               const minion = fieldedMinions[index];
               const template = minion ? getMinionTemplate(minion.templateId) : undefined;
 
               return (
-                <div
+                <button
+                  type="button"
                   key={index}
-                  className={`army-lineup-slot ui-icon-frame relative aspect-square overflow-hidden rounded ${minion ? 'army-lineup-slot-filled' : ''}`}
+                  draggable={Boolean(minion)}
+                  onClick={() => {
+                    if (armySwapSourceId) {
+                      handleAssignMinionBattleSlot(armySwapSourceId, index);
+                    } else if (minion) {
+                      setArmySwapSourceId(minion.id);
+                    }
+                  }}
+                  onDragStart={(event) => {
+                    if (!minion) return;
+                    event.dataTransfer.setData('text/army-minion', minion.id);
+                    event.dataTransfer.effectAllowed = 'move';
+                  }}
+                  onDragOver={(event) => {
+                    event.preventDefault();
+                    event.dataTransfer.dropEffect = 'move';
+                  }}
+                  onDrop={(event) => {
+                    event.preventDefault();
+                    const minionId = event.dataTransfer.getData('text/army-minion');
+                    if (minionId) handleAssignMinionBattleSlot(minionId, index);
+                  }}
+                  className={`army-lineup-slot ui-icon-frame relative aspect-square overflow-hidden rounded ${minion ? 'army-lineup-slot-filled' : ''} ${minion && armySwapSourceId === minion.id ? 'army-lineup-slot-selected' : ''}`}
                   title={template?.name || `Battle slot ${index + 1}`}
                 >
                   {template ? (
@@ -2118,9 +2166,12 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
                   ) : (
                     <span className="ui-faint text-xs font-black">{index + 1}</span>
                   )}
-                </div>
+                </button>
               );
             })}
+          </div>
+          <div className="ui-faint mt-3 text-[11px] font-bold">
+            {reserveCount} reserve unit{reserveCount === 1 ? '' : 's'} outside the active line.
           </div>
         </section>
 
@@ -2128,8 +2179,8 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
           <SectionTitle title="Army Roster" action={`${rosterMinions.length} recruited`} />
           <p className="ui-muted mb-3 text-xs font-bold">
             {armySwapSourceId
-              ? 'Select a second unit to swap positions.'
-              : 'Click one unit, then click another to swap roster order.'}
+              ? 'Drop or click a battle slot, another unit, or press Bench to change lineup.'
+              : 'Drag a unit to the battle lineup, or click two units to reorder reserves.'}
           </p>
           {rosterMinions.length === 0 ? (
             <EmptyState text="No recruited minions." />
@@ -2159,6 +2210,30 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
                     <button
                       type="button"
                       onClick={() => handleArmyMinionClick(minion.id)}
+                      onDoubleClick={(event) => {
+                        event.preventDefault();
+                        handleToggleArmyFielded(minion.id);
+                      }}
+                      draggable={!injured}
+                      onDragStart={(event) => {
+                        event.dataTransfer.setData('text/army-minion', minion.id);
+                        event.dataTransfer.effectAllowed = 'move';
+                      }}
+                      onDragOver={(event) => {
+                        event.preventDefault();
+                      }}
+                      onDrop={(event) => {
+                        event.preventDefault();
+                        const sourceId = event.dataTransfer.getData('text/army-minion');
+                        if (!sourceId || sourceId === minion.id) return;
+                        const result = reorderMinionRoster(sourceId, minion.id);
+                        setArmySwapSourceId(null);
+                        if (!result.success) {
+                          setTemporaryNotice(result.error || 'Could not swap units.');
+                          return;
+                        }
+                        setUser(getCurrentUser());
+                      }}
                       className={`army-roster-tile command-icon-tile command-icon-tile-external-tip rounded border ${minionTierClasses(template.tier)} ${selected ? 'army-roster-tile-selected' : ''} ${fielded ? 'army-roster-tile-fielded' : ''} ${injured ? 'army-roster-tile-injured' : ''} ${isBattleSlot ? 'army-roster-tile-battle-slot' : ''}`}
                       aria-label={`${template.name}, roster position ${index + 1}`}
                       aria-pressed={selected}
@@ -2175,6 +2250,7 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
                       </span>
                       <span className="army-roster-tier">{MINION_TIER_LABELS[template.tier]}</span>
                       <span className="army-roster-slot">{index + 1}</span>
+                      {!injured && <span className="army-roster-fielded">{fielded ? 'Active' : 'Reserve'}</span>}
                       {injured && <span className="army-roster-status">Injured</span>}
                     </button>
                   </CommandGearHoverTip>

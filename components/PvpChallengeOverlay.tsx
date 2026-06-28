@@ -18,6 +18,10 @@ import {
   shouldUseOnlineChallenges,
   updateOnlineBattleChallenge,
 } from '@/lib/pvpChallengeClient';
+import {
+  getCachedWorldPlayers,
+  refreshWorldPlayers,
+} from '@/lib/worldPlayers';
 
 function getIncomingChallenge(
   challenges: BattleChallenge[],
@@ -32,6 +36,7 @@ function getIncomingChallenge(
 
 export default function PvpChallengeOverlay() {
   const [challenges, setChallenges] = useState<BattleChallenge[]>([]);
+  const [worldPlayers, setWorldPlayers] = useState(() => getCachedWorldPlayers());
   const [now, setNow] = useState(() => Date.now());
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -58,10 +63,19 @@ export default function PvpChallengeOverlay() {
       }
 
       try {
-        const onlineChallenges = await fetchOnlineBattleChallenges();
-        if (!cancelled) setChallenges(onlineChallenges);
+        const [onlineChallenges, latestWorldPlayers] = await Promise.all([
+          fetchOnlineBattleChallenges(),
+          refreshWorldPlayers(),
+        ]);
+        if (!cancelled) {
+          setChallenges(onlineChallenges);
+          setWorldPlayers(latestWorldPlayers);
+        }
       } catch {
-        if (!cancelled) setChallenges(getBattleChallenges());
+        if (!cancelled) {
+          setChallenges(getBattleChallenges());
+          setWorldPlayers(getCachedWorldPlayers());
+        }
       }
     };
 
@@ -80,6 +94,8 @@ export default function PvpChallengeOverlay() {
 
   const remaining = getBattleChallengeTimeRemaining(incoming, now);
   const challenger = getUsers().find(player => player.username.toLowerCase() === incoming.challengerUsername.toLowerCase());
+  const onlineChallenger = worldPlayers.find(player => player.username.toLowerCase() === incoming.challengerUsername.toLowerCase());
+  const challengerModel = challenger?.selectedModel || onlineChallenger?.selectedModel || 3;
 
   const refreshChallenges = async () => {
     if (!onlineEnabled) {
@@ -150,7 +166,7 @@ export default function PvpChallengeOverlay() {
 
           <div className="mx-auto mb-4 flex h-24 w-24 items-center justify-center overflow-hidden rounded-full border">
             <Image
-              src={getPlayerModelPath(challenger?.selectedModel || 3)}
+              src={getPlayerModelPath(challengerModel)}
               alt={incoming.challengerUsername}
               width={96}
               height={96}

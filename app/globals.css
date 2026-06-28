@@ -2836,6 +2836,13 @@ button.vine-frame::before,
   box-shadow: inset 0 0 0 1px rgba(244, 221, 176, 0.08);
 }
 
+.army-lineup-slot-selected {
+  border-color: rgba(255, 248, 231, 0.78);
+  box-shadow:
+    0 0 0 1px rgba(255, 248, 231, 0.25),
+    0 0 1.2rem rgba(244, 221, 176, 0.24);
+}
+
 .army-roster-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(5.5rem, 1fr));
@@ -2874,6 +2881,7 @@ button.vine-frame::before,
 
 .army-roster-tier,
 .army-roster-slot,
+.army-roster-fielded,
 .army-roster-status {
   position: absolute;
   z-index: 3;
@@ -2906,6 +2914,19 @@ button.vine-frame::before,
   transform: translateX(-50%);
   background: rgba(127, 29, 29, 0.88);
   color: #fecaca;
+}
+
+.army-roster-fielded {
+  left: 50%;
+  bottom: 0.32rem;
+  transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.72);
+  color: rgba(232, 217, 184, 0.82);
+  font-size: 0.52rem;
+}
+
+.army-roster-tile-fielded .army-roster-fielded {
+  color: rgba(110, 231, 183, 0.92);
 }
 
 .character-layout-modern .character-sets-card {

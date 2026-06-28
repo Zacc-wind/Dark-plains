@@ -3,7 +3,7 @@
 import { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import type { BattleLogEntry, BattleLogStyle, BattleState, BattleUnit } from '@/lib/battle';
-import { pickFreshPresentationLogEntry } from '@/lib/battle';
+import { isStatusEffectTickLogEntry, pickFreshPresentationLogEntry } from '@/lib/battle';
 
 interface CombatThreeFxLayerProps {
   battle: BattleState;
@@ -652,6 +652,11 @@ export default function CombatThreeFxLayer({ battle }: CombatThreeFxLayerProps) 
 
     const freshEntries = battle.log.filter(entry => !processedLogIdsRef.current.has(entry.id));
     freshEntries.forEach(entry => processedLogIdsRef.current.add(entry.id));
+
+    freshEntries
+      .filter(isStatusEffectTickLogEntry)
+      .forEach(entry => runtime.spawnBattleLog(battle, entry));
+
     const entry = pickFreshPresentationLogEntry(freshEntries);
     if (!entry) return;
 

@@ -45,6 +45,7 @@ import {
   getTurnTimeRemaining,
   getTurnOrder,
   getUnitAt,
+  isStatusEffectTickLogEntry,
   healBattleUnit,
   isBonusMovePending,
   isObstacle,
@@ -369,6 +370,7 @@ export default function BattleModal({
   const defeatExitTimer = useRef<number | null>(null);
   const combatTutorialCompleteTimerRef = useRef<number | null>(null);
   const battleSoundTimers = useRef<number[]>([]);
+  const statusEffectSoundTimers = useRef<number[]>([]);
   const bossLastStandTimer = useRef<number | null>(null);
   const bossLastStandCueRef = useRef<typeof bossLastStandCue>(null);
   const bossSpecialTimer = useRef<number | null>(null);
@@ -418,6 +420,8 @@ export default function BattleModal({
     if (turnBannerTimer.current) window.clearTimeout(turnBannerTimer.current);
     battleSoundTimers.current.forEach(timer => window.clearTimeout(timer));
     battleSoundTimers.current = [];
+    statusEffectSoundTimers.current.forEach(timer => window.clearTimeout(timer));
+    statusEffectSoundTimers.current = [];
   }, []);
 
   useEffect(() => {
@@ -633,6 +637,19 @@ export default function BattleModal({
           startBossSpecialCue();
         }
       }
+    }
+
+    const statusEffectEntries = freshEntries.filter(isStatusEffectTickLogEntry);
+    if (statusEffectEntries.length > 0) {
+      statusEffectEntries.forEach(statusEntry => {
+        getBattleLogSoundPlan(battle, statusEntry, battleSpeed).forEach(sound => {
+          const timeoutId = window.setTimeout(() => {
+            playGameSound(sound.id, { volumeScale: sound.volumeScale, throttleMs: sound.throttleMs });
+            statusEffectSoundTimers.current = statusEffectSoundTimers.current.filter(timer => timer !== timeoutId);
+          }, sound.delayMs);
+          statusEffectSoundTimers.current.push(timeoutId);
+        });
+      });
     }
 
     const entry = pickFreshPresentationLogEntry(freshEntries);
