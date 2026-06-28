@@ -19,6 +19,7 @@ import {
   canHeal,
   canMoveTo,
   canRetaliateAfterAttack,
+  canSkirmishAttackAfterMove,
   castBattleSpell,
   createNpcBattleState,
   getBattleSpellLogStyle,
@@ -947,6 +948,12 @@ export default function BattleModal({
     pendingMoveUndo.activeUnitId === battle.activeUnitId &&
     activeUnit?.side === 'player'
   );
+  const canAttackAfterPendingMove = Boolean(
+    canUndoMove &&
+    battle &&
+    activeUnit &&
+    canSkirmishAttackAfterMove(battle, activeUnit.id)
+  );
 
   if (!battle) return null;
 
@@ -1138,7 +1145,7 @@ export default function BattleModal({
       if (shouldBlockCommanderTutorialNonSpell(unitAtCell ? 'strike' : 'move')) return;
     }
 
-    if (unitAtCell && canHeal(activeUnit, unitAtCell)) {
+    if (unitAtCell && !canUndoMove && canHeal(activeUnit, unitAtCell)) {
       queuePlayerAction(advanceBattleTurn(healBattleUnit(battle, activeUnit.id, unitAtCell.id)), {
         headline: 'Healing',
         detail: '',
@@ -1147,7 +1154,7 @@ export default function BattleModal({
       return;
     }
 
-    if (unitAtCell && canAttack(activeUnit, unitAtCell)) {
+    if (unitAtCell && (!canUndoMove || canAttackAfterPendingMove) && canAttack(activeUnit, unitAtCell)) {
       const attackedBattle = attackBattleUnit(battle, activeUnit.id, unitAtCell.id);
       const attackerAfterAttack = attackedBattle.units.find(unit => unit.id === activeUnit.id && unit.currentHealth > 0);
       queuePlayerAction(
@@ -1165,18 +1172,22 @@ export default function BattleModal({
 
     if (!unitAtCell && !canUndoMove && canMoveTo(battle, activeUnit, x, y)) {
       const movedBattle = moveBattleUnit(battle, activeUnit.id, x, y);
+      const skirmishAttackReady = canSkirmishAttackAfterMove(movedBattle, activeUnit.id);
+      const moveResultBattle = skirmishAttackReady
+        ? { ...movedBattle, turnStartedAt: now }
+        : movedBattle;
       if (!confirmMoveEnabled) {
-        setBattle(movedBattle);
-        queuePlayerAction(advanceBattleTurn(movedBattle), {
+        setBattle(moveResultBattle);
+        queuePlayerAction(skirmishAttackReady ? moveResultBattle : advanceBattleTurn(moveResultBattle), {
           headline: 'Move',
-          detail: '',
+          detail: skirmishAttackReady ? 'Strike from the new position.' : '',
           tone: 'player',
         });
         return;
       }
 
       setPendingMoveUndo(battle);
-      setBattle(movedBattle);
+      setBattle(moveResultBattle);
       setBattleCue({
         headline: 'Move',
         detail: '',
@@ -1410,6 +1421,7 @@ export default function BattleModal({
     selectedSpell,
     isResolvingAction,
     movementLocked: canUndoMove,
+    canAttackAfterPendingMove,
     movementAnimating: isMoveAnimating,
   });
   const hoverForecast = getBattleHoverForecast({
@@ -1420,6 +1432,7 @@ export default function BattleModal({
     selectedSpell,
     isResolvingAction,
     movementLocked: canUndoMove,
+    canAttackAfterPendingMove,
     movementAnimating: isMoveAnimating,
   });
   const hasActionForecast = Boolean(
@@ -1616,6 +1629,7 @@ export default function BattleModal({
                   selectedSpell,
                   isResolvingAction,
                   movementLocked: canUndoMove,
+                  canAttackAfterPendingMove,
                   movementAnimating: isMoveAnimating,
                 });
                 const isActiveCell = unit?.id === battle.activeUnitId;
@@ -1628,8 +1642,20 @@ export default function BattleModal({
                   !unit &&
                   (bonusMoveActive ? canBonusMoveTo(battle, activeUnit, x, y) : canMoveTo(battle, activeUnit, x, y))
                 );
-                const canStrike = Boolean(!bonusMoveActive && isPlayerTurn && unit && playerActionTargetIds.strikeIds.has(unit.id));
-                const canMend = Boolean(!bonusMoveActive && isPlayerTurn && unit && playerActionTargetIds.healIds.has(unit.id));
+                const canStrike = Boolean(
+                  !bonusMoveActive &&
+                  isPlayerTurn &&
+                  unit &&
+                  (!canUndoMove || canAttackAfterPendingMove) &&
+                  playerActionTargetIds.strikeIds.has(unit.id)
+                );
+                const canMend = Boolean(
+                  !bonusMoveActive &&
+                  isPlayerTurn &&
+                  unit &&
+                  !canUndoMove &&
+                  playerActionTargetIds.healIds.has(unit.id)
+                );
                 const canSpellTarget = Boolean(
                   !bonusMoveActive &&
                   selectedSpell &&
@@ -3595,6 +3621,7 @@ function getBattleHoverForecast({
   selectedSpell,
   isResolvingAction,
   movementLocked = false,
+  canAttackAfterPendingMove = false,
   movementAnimating = false,
 }: {
   battle: BattleState;
@@ -3604,6 +3631,7 @@ function getBattleHoverForecast({
   selectedSpell?: BattleSpell;
   isResolvingAction: boolean;
   movementLocked?: boolean;
+  canAttackAfterPendingMove?: boolean;
   movementAnimating?: boolean;
 }): BattleHoverForecastData | null {
   if (!hoveredCell) return null;
@@ -3638,7 +3666,7 @@ function getBattleHoverForecast({
     };
   }
 
-  if (!movementLocked && canAttack(activeUnit, unitAtCell)) {
+  if ((!movementLocked || canAttackAfterPendingMove) && canAttack(activeUnit, unitAtCell)) {
     const damage = getAttackDamage(activeUnit, unitAtCell, battle);
     const projectedHealth = Math.max(0, unitAtCell.currentHealth - damage);
     const defenderAfterHit = { ...unitAtCell, currentHealth: projectedHealth };
@@ -3658,7 +3686,7 @@ function getBattleHoverForecast({
     };
   }
 
-  if (canHeal(activeUnit, unitAtCell)) {
+  if (!movementLocked && canHeal(activeUnit, unitAtCell)) {
     const healing = getHealAmount(activeUnit, unitAtCell, battle);
     return {
       ...baseForecast,
@@ -3728,6 +3756,7 @@ function getBattleHoverPreview({
   selectedSpell,
   isResolvingAction,
   movementLocked = false,
+  canAttackAfterPendingMove = false,
   movementAnimating = false,
 }: {
   battle: BattleState;
@@ -3737,6 +3766,7 @@ function getBattleHoverPreview({
   selectedSpell?: BattleSpell;
   isResolvingAction: boolean;
   movementLocked?: boolean;
+  canAttackAfterPendingMove?: boolean;
   movementAnimating?: boolean;
 }): BattleHoverPreviewData {
   if (battle.status !== 'active') {
@@ -3793,7 +3823,7 @@ function getBattleHoverPreview({
       };
     }
 
-    if (isPlayerTurn && canHeal(activeUnit, unitAtCell)) {
+    if (isPlayerTurn && !movementLocked && canHeal(activeUnit, unitAtCell)) {
       return {
         title: 'Healing',
         detail: '',
@@ -3801,7 +3831,7 @@ function getBattleHoverPreview({
       };
     }
 
-    if (isPlayerTurn && canAttack(activeUnit, unitAtCell)) {
+    if (isPlayerTurn && (!movementLocked || canAttackAfterPendingMove) && canAttack(activeUnit, unitAtCell)) {
       return {
         title: 'Strike',
         detail: '',

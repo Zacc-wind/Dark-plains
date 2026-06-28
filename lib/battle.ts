@@ -1813,6 +1813,15 @@ function isSkirmishStepUnit(unit: BattleUnit | undefined): boolean {
   return getSkirmishStepRange(unit) > 0;
 }
 
+export function canSkirmishAttackAfterMove(state: BattleState, unitId: string): boolean {
+  const unit = state.units.find(item => item.id === unitId && item.currentHealth > 0);
+  if (!unit || !isSkirmishStepUnit(unit) || state.activeUnitId !== unit.id || state.status !== 'active') {
+    return false;
+  }
+
+  return state.units.some(target => target.currentHealth > 0 && canAttack(unit, target));
+}
+
 function isBleedStrikeUnit(unit: BattleUnit | undefined): boolean {
   return unit?.templateId === 'crow' || unit?.templateId === 'thief';
 }
