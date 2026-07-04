@@ -113,16 +113,6 @@ export default function SingleplayerHub() {
                 <p className="sp-hub-hero-copy mt-3 max-w-2xl">
                   Draft a warband, clear branching roads, and bank permanent upgrades between runs.
                 </p>
-                <div className="mt-5 flex flex-wrap gap-2.5">
-                  <span className="run-header-chip sp-hub-hero-chip" title="Your permanent run level">
-                    <Image src="/assets/icons/xp.png" alt="" width={22} height={22} className="run-header-chip-icon" unoptimized />
-                    <span className="run-header-chip-value">Run Lv {runState.runLevel}</span>
-                  </span>
-                  <span className="run-header-chip sp-hub-hero-chip" title="Total roads cleared">
-                    <Image src="/assets/icons/loot-chest.png" alt="" width={22} height={22} className="run-header-chip-icon" unoptimized />
-                    <span className="run-header-chip-value">{runState.completions} Clears</span>
-                  </span>
-                </div>
               </div>
 
               <div className="sp-hub-cta-wrap w-full shrink-0 lg:max-w-[22rem]">
