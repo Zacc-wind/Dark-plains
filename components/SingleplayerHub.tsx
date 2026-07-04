@@ -20,7 +20,7 @@ export default function SingleplayerHub() {
   const [showRun, setShowRun] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showMilestones, setShowMilestones] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(true);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [user, setUser] = useState(getCurrentUser());
   const [previewBoss] = useState(() => getRandomLobbyBossPreview());
 
@@ -111,7 +111,7 @@ export default function SingleplayerHub() {
                 <div className="arcane-label sp-hub-arcane-label">Roguelike Run Hall</div>
                 <h1 className="fantasy-heading sp-hub-hero-title mt-1">Run Overview</h1>
                 <p className="sp-hub-hero-copy mt-3 max-w-2xl">
-                  Draft a warband, fight branching roads, and bank permanent upgrades between runs. Retreat always returns here.
+                  Draft a warband, clear branching roads, and bank permanent upgrades between runs.
                 </p>
                 <div className="mt-5 flex flex-wrap gap-2.5">
                   <span className="run-header-chip sp-hub-hero-chip" title="Your permanent run level">
@@ -167,7 +167,11 @@ export default function SingleplayerHub() {
       <RunMilestonesModal
         isOpen={showMilestones}
         runState={runState}
-        onClose={() => setShowMilestones(false)}
+        onClose={() => {
+          setShowMilestones(false);
+          setUser(getCurrentUser());
+        }}
+        onClaim={() => setUser(getCurrentUser())}
       />
 
       <DailyRunModal isOpen={showRun} onClose={handleCloseRun} tutorialScope="singleplayer" />

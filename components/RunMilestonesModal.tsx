@@ -25,6 +25,7 @@ interface RunMilestonesModalProps {
   isOpen: boolean;
   runState: DailyRunState;
   onClose: () => void;
+  onClaim?: () => void;
 }
 
 export function MilestoneIconTile({
@@ -64,7 +65,7 @@ export function MilestoneIconTile({
   );
 }
 
-export default function RunMilestonesModal({ isOpen, runState, onClose }: RunMilestonesModalProps) {
+export default function RunMilestonesModal({ isOpen, runState, onClose, onClaim }: RunMilestonesModalProps) {
   const [refreshKey, setRefreshKey] = useState(0);
   const [claimNotice, setClaimNotice] = useState<string | null>(null);
   const player = getCurrentUser();
@@ -89,6 +90,7 @@ export default function RunMilestonesModal({ isOpen, runState, onClose }: RunMil
     if (!result.ok) return;
 
     updateCurrentUser({ dailyRun: result.dailyRun });
+    onClaim?.();
     setRefreshKey(value => value + 1);
   };
 

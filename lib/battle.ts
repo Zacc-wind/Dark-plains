@@ -1157,6 +1157,10 @@ function isBossBattleEnemy(enemy: Pick<WorldEnemy, 'personality' | 'bossId' | 's
   return enemy.personality === 'boss' || Boolean(enemy.bossId) || enemy.spawnKind === 'world-boss';
 }
 
+function isSingleplayerRandomRunEnemy(enemy: Pick<WorldEnemy, 'id'>): boolean {
+  return enemy.id.startsWith('daily-run-enemy-');
+}
+
 function getSideMana(state: BattleState, side: BattleSide): number {
   return state.mana[side] || 0;
 }
@@ -1331,14 +1335,22 @@ function makeMinionUnit(stack: MinionStack, side: BattleSide, x: number, y: numb
   const template = getMinionTemplate(stack.templateId);
   if (!template) return null;
 
-  const maxHealth = template.stats.health + Math.floor(modifiers.defensivePower * 0.9) + Math.floor(modifiers.morale / 2);
+  const runBonus = stack.runStatBonus || {};
+  const baseAttack = template.stats.attack + (runBonus.attack || 0);
+  const baseDefense = template.stats.defense + (runBonus.defense || 0);
+  const baseMagic = template.stats.magic + (runBonus.magic || 0);
+  const baseHealing = template.stats.healing + (runBonus.healing || 0);
+  const baseHealth = template.stats.health + (runBonus.health || 0);
+  const baseMovement = template.stats.movement + (runBonus.movement || 0);
+  const baseRange = template.stats.range + (runBonus.range || 0);
+  const maxHealth = baseHealth + Math.floor(modifiers.defensivePower * 0.9) + Math.floor(modifiers.morale / 2);
   const currentHealth = typeof stack.runCurrentHealth === 'number'
     ? clamp(Math.round(stack.runCurrentHealth), 0, maxHealth)
     : maxHealth;
-  const movement = clamp(template.stats.movement + Math.floor(modifiers.morale / 12), 1, 5);
-  const range = template.stats.range;
+  const movement = clamp(baseMovement + Math.floor(modifiers.morale / 12), 1, 6);
+  const range = clamp(baseRange, 1, 6);
   const healing = template.class === 'priest'
-    ? template.stats.healing + Math.floor(modifiers.spellPower / 6)
+    ? baseHealing + Math.floor(modifiers.spellPower / 6)
     : 0;
 
   return {
@@ -1353,11 +1365,11 @@ function makeMinionUnit(stack: MinionStack, side: BattleSide, x: number, y: numb
     currentHealth,
     maxHealth,
     healthPerUnit: maxHealth,
-    attack: template.stats.attack + Math.floor(modifiers.armyPower / 3),
-    defense: template.stats.defense + Math.floor(modifiers.defensivePower / 5),
-    magic: template.stats.magic + Math.floor(modifiers.spellPower / 5),
+    attack: baseAttack + Math.floor(modifiers.armyPower / 3),
+    defense: baseDefense + Math.floor(modifiers.defensivePower / 5),
+    magic: baseMagic + Math.floor(modifiers.spellPower / 5),
     healing,
-    speed: movement * 3 + template.stats.attack + Math.floor(template.stats.magic / 2),
+    speed: movement * 3 + baseAttack + Math.floor(baseMagic / 2),
     movement,
     range,
     x,
@@ -2665,6 +2677,13 @@ function applyBossLastStand(state: BattleState, commander: BattleUnit): BattleSt
   const isFinalBoss = state.enemy.personality === 'boss';
   const resurrectCount = isFinalBoss ? 4 : 2;
   const { state: risenState, resurrectedIds } = resurrectBossMinions(state, commander, resurrectCount);
+  const resetPhaseTwoSpecials = isSingleplayerRandomRunEnemy(state.enemy);
+  const nextBossSpecialUses = resetPhaseTwoSpecials
+    ? { ...(state.bossSpecialUses || {}), [commander.id]: 0 }
+    : state.bossSpecialUses;
+  const nextBossSpecialRounds = resetPhaseTwoSpecials
+    ? Object.fromEntries(Object.entries(state.bossSpecialRounds || {}).filter(([unitId]) => unitId !== commander.id))
+    : state.bossSpecialRounds;
   const targetIds = [
     commander.id,
     ...resurrectedIds,
@@ -2674,6 +2693,8 @@ function applyBossLastStand(state: BattleState, commander: BattleUnit): BattleSt
   const nextState = setSideMana({
     ...risenState,
     bossPhase: 2,
+    bossSpecialUses: nextBossSpecialUses,
+    bossSpecialRounds: nextBossSpecialRounds,
     units: risenState.units.map(unit => {
       if (unit.id === commander.id) {
         return {
@@ -3220,10 +3241,11 @@ function finishBossSpecial(
 
 function runBossSpecialAbility(state: BattleState, commander: BattleUnit): BattleState | null {
   if (!isBossBattleEnemy(state.enemy)) return null;
-  if (state.bossPhase === 2) return null;
+  const phaseTwoSingleplayerReset = state.bossPhase === 2 && isSingleplayerRandomRunEnemy(state.enemy);
+  if (state.bossPhase === 2 && !phaseTwoSingleplayerReset) return null;
   if (getBossSpecialUses(state, commander.id) >= BOSS_SPECIAL_MAX_USES_BEFORE_PHASE_2) return null;
   if (state.bossSpecialRounds?.[commander.id] === state.round) return null;
-  if (Math.random() > 0.58) return null;
+  if (Math.random() > (phaseTwoSingleplayerReset ? 0.78 : 0.58)) return null;
 
   const players = state.units.filter(unit => unit.side === 'player' && unit.currentHealth > 0);
   const enemies = state.units.filter(unit => unit.side === 'enemy' && unit.currentHealth > 0);

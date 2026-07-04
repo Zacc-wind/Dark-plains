@@ -21,18 +21,18 @@ Turn the current shared world-map prototype into a real multiplayer layer withou
 
 ## Phase 2: Social Request Popups
 - [ ] Add a shared `SocialRequestOverlay` component for incoming requests.
-- [ ] Challenge request popup: sword icon burst, challenger sprite/name, accept/decline buttons, timeout state.
+- [x] Challenge request popup: sword icon burst, challenger sprite/name, accept/decline buttons, timeout state.
 - [ ] Trade request popup: gold icon burst, requester sprite/name, accept/decline buttons, timeout state.
 - [ ] Party invite popup: banner/group icon burst, leader name, party member preview, accept/decline buttons.
 - [ ] Add request sounds: challenge received, trade received, party invite received, accept, decline.
 - [ ] Store request state with ids, sender, receiver, createdAt, expiresAt, status, and payload.
 
 ## Phase 3: Party UI
-- [ ] Add a compact party strip to the main map HUD showing leader, members, pending invites, health/level, and location status.
-- [ ] Add a party details popover with promote leader, leave party, invite player, kick member, and party chat shortcut.
+- [x] Add a compact party strip to the main map HUD showing leader, members, pending invites, health/level, and location status.
+- [x] Add a party details popover with promote leader, leave party, invite player, kick member, and party chat shortcut.
 - [ ] Show party members on the world map with a distinct but subtle frame/glow that does not collide with quest/enemy markers.
 - [ ] In dungeons, show party readiness and who has confirmed entry.
-- [ ] Add party state validation: max 4 players, one leader, no duplicate invites, no player in two parties.
+- [x] Add party state validation: max 4 players, one leader, no duplicate invites, no player in two parties.
 
 ## Phase 4: Player Duels
 - [ ] Add `PvpDuelSession` state: challenger, defender, acceptedAt, phase, seed, combat snapshot, result.

@@ -42,6 +42,11 @@ export const GAME_SOUND_ASSETS = {
   'inventory.goldGain': { file: '/assets/audio/inventory/gold_gain.ogg', volume: 0.44 },
   'inventory.gemGain': { file: '/assets/audio/inventory/gem_gain.ogg', volume: 0.44 },
   'quest.claim': { file: '/assets/audio/quest/quest_claim.ogg', volume: 0.5 },
+  'social.challengeReceived': { file: '/assets/audio/combat/weapon_draw.ogg', volume: 0.42 },
+  'social.tradeReceived': { file: '/assets/audio/inventory/coins.ogg', volume: 0.4 },
+  'social.partyInvite': { file: '/assets/audio/ui/book_open.ogg', volume: 0.44 },
+  'social.accept': { file: '/assets/audio/ui/click_confirm.ogg', volume: 0.52 },
+  'social.decline': { file: '/assets/audio/ui/click_soft.ogg', volume: 0.44 },
 } as const;
 
 export type GameSoundId = keyof typeof GAME_SOUND_ASSETS;

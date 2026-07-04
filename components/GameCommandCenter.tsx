@@ -1,6 +1,6 @@
 'use client';
 
-import { type CSSProperties, type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
@@ -75,7 +75,9 @@ import {
   getCityQuestTemplate,
   getStoryQuestStatus,
   reorderMinionRoster,
+  promotePartyMember,
   removeFriend,
+  removePlayerFromParty,
   sendFriendRequest,
   sendSocialChatMessage,
   toggleMinionFielded,
@@ -152,27 +154,6 @@ const statIconPaths: Record<string, string> = {
 
 function getEquipmentIconPath(item: Pick<Equipment, 'slot' | 'rarity'>): string {
   return `${EQUIPMENT_ICON_BASE}/${item.slot}-${item.rarity}.png`;
-}
-
-function toRoman(value: number): string {
-  const numerals: Array<[number, string]> = [
-    [10, 'X'],
-    [9, 'IX'],
-    [5, 'V'],
-    [4, 'IV'],
-    [1, 'I'],
-  ];
-  let remaining = Math.max(0, Math.floor(value));
-  let result = '';
-
-  numerals.forEach(([amount, numeral]) => {
-    while (remaining >= amount) {
-      result += numeral;
-      remaining -= amount;
-    }
-  });
-
-  return result || '0';
 }
 
 function getInventoryIconPath(item: InventoryItem): string {
@@ -526,6 +507,8 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
   const [showPveHub, setShowPveHub] = useState(false);
   const [showMpDailyRun, setShowMpDailyRun] = useState(false);
   const [isMapActionRailCompact, setIsMapActionRailCompact] = useState(true);
+  const [isPartyDetailsOpen, setIsPartyDetailsOpen] = useState(false);
+  const [partyInviteDraft, setPartyInviteDraft] = useState('');
   const lastActivityNoticeId = useRef<string | null>(null);
   const router = useRouter();
 
@@ -684,6 +667,12 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
     }
   }, [activePanel]);
 
+  useEffect(() => {
+    if (!getSocialState(getCurrentUser()).party) {
+      setIsPartyDetailsOpen(false);
+    }
+  }, [user?.social?.party]);
+
   if (!user) return null;
 
   const player = user;
@@ -750,6 +739,7 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
   };
 
   const applySocialResult = (result: { success: boolean; message?: string; error?: string }) => {
+    playGameSound(result.success ? 'social.accept' : 'social.decline', { throttleMs: 120 });
     setTemporaryNotice(result.message || result.error || (result.success ? 'Social action complete.' : 'Social action failed.'));
     setUser(getCurrentUser());
   };
@@ -769,6 +759,18 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
     }
 
     applySocialResult(result);
+  };
+
+  const handleInvitePartyPlayer = () => {
+    const result = invitePlayerToParty(partyInviteDraft);
+    if (result.success) setPartyInviteDraft('');
+    applySocialResult(result);
+  };
+
+  const openPartyChat = () => {
+    setChatChannel('party');
+    setIsChatDockOpen(true);
+    setIsPartyDetailsOpen(false);
   };
 
   const handleLogout = () => {
@@ -1052,6 +1054,8 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
       </header>
 
       {!isCommandOpen && (!showRandomRun || !showDailyRun) && !showMultiplayerHub && !showPveHub && renderMapActionRail()}
+      {!isCommandOpen && (!showRandomRun || !showDailyRun) && !showMultiplayerHub && !showPveHub && renderPartyStrip()}
+      {!isCommandOpen && (!showRandomRun || !showDailyRun) && !showMultiplayerHub && !showPveHub && renderPartyDetailsPopover()}
       {!isCommandOpen && (!showRandomRun || !showDailyRun) && !showMultiplayerHub && !showPveHub && renderChatDock()}
       {!isCommandOpen && (!showRandomRun || !showDailyRun) && !showMultiplayerHub && !showPveHub && (
         <ChatLiveFeed enabled />
@@ -1432,6 +1436,251 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
             Send
           </button>
         </form>
+      </aside>
+    );
+  }
+
+  function renderPartyStrip() {
+    if (!socialState.party) return null;
+
+    const currentIsInvited = partyInvites.some(username => username.toLowerCase() === player.username.toLowerCase());
+    const leaderUsername = socialState.party.leaderUsername;
+    const memberCount = socialState.party.memberUsernames.length;
+    const visibleMembers = partyMembers.slice(0, MAX_PARTY_SIZE);
+    const membersHere = partyMembers.filter(member => member.x === player.x && member.y === player.y).length;
+
+    return (
+      <aside className="party-map-strip command-panel vine-frame pointer-events-auto fixed z-40 rounded border text-zinc-100">
+        <div className="party-map-strip-head">
+          <div className="min-w-0">
+            <div className="arcane-label">Party</div>
+            <div className="party-map-strip-title">
+              {currentIsInvited ? 'Invite Pending' : `${memberCount}/${MAX_PARTY_SIZE} Commanders`}
+            </div>
+          </div>
+          <span className="party-map-strip-status">{membersHere}/{memberCount} here</span>
+          {partyInvites.length > 0 && <span className="party-map-strip-status">{partyInvites.length} invited</span>}
+        </div>
+
+        <div className="party-map-strip-members">
+          {visibleMembers.map(member => {
+            const isLeader = member.username.toLowerCase() === leaderUsername.toLowerCase();
+            const locationLabel = member.x === player.x && member.y === player.y ? 'same tile' : `${member.x}, ${member.y}`;
+            return (
+              <span
+                key={member.username}
+                className={`party-map-member ${isLeader ? 'party-map-member-leader' : ''}`}
+                title={`${member.username}${isLeader ? ' - leader' : ''} - Lv ${member.stats?.level || 1} - HP ${member.stats?.health || 0}/${member.stats?.maxHealth || 0} - ${locationLabel}`}
+              >
+                <Image
+                  src={getPlayerModelPath(member.selectedModel || 3)}
+                  alt=""
+                  width={44}
+                  height={44}
+                  className="player-model-art"
+                  unoptimized
+                />
+              </span>
+            );
+          })}
+        </div>
+
+        <div className="party-map-strip-actions">
+          {currentIsInvited && (
+            <button
+              type="button"
+              onClick={() => applySocialResult(acceptPartyInvite())}
+              className="party-map-strip-button party-map-strip-button-primary"
+            >
+              Join
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => setIsPartyDetailsOpen(open => !open)}
+            className={`party-map-strip-button ${isPartyDetailsOpen ? 'party-map-strip-button-active' : ''}`}
+            aria-expanded={isPartyDetailsOpen}
+          >
+            Details
+          </button>
+          <button
+            type="button"
+            onClick={openPartyChat}
+            disabled={currentIsInvited}
+            className="party-map-strip-button disabled:opacity-40"
+          >
+            Chat
+          </button>
+        </div>
+      </aside>
+    );
+  }
+
+  function renderPartyDetailsPopover() {
+    const party = socialState.party;
+    if (!party || !isPartyDetailsOpen) return null;
+
+    const currentUsername = player.username.toLowerCase();
+    const isLeader = party.leaderUsername.toLowerCase() === currentUsername;
+    const isInvited = party.invitedUsernames.some(username => username.toLowerCase() === currentUsername);
+    const memberNames = new Set(party.memberUsernames.map(username => username.toLowerCase()));
+    const inviteNames = new Set(party.invitedUsernames.map(username => username.toLowerCase()));
+    const inviteCandidates = socialCandidates
+      .filter(candidate => !memberNames.has(candidate.username.toLowerCase()) && !inviteNames.has(candidate.username.toLowerCase()))
+      .slice(0, 4);
+
+    return (
+      <aside className="party-details-popover command-panel vine-frame pointer-events-auto fixed z-50 rounded border text-zinc-100">
+        <div className="party-details-head">
+          <div>
+            <div className="arcane-label">Party Detail</div>
+            <h3 className="fantasy-heading party-details-title">
+              {isInvited ? 'Invitation Waiting' : `${party.memberUsernames.length}/${MAX_PARTY_SIZE} Commanders`}
+            </h3>
+          </div>
+          <button
+            type="button"
+            onClick={() => setIsPartyDetailsOpen(false)}
+            className="party-details-close"
+            aria-label="Close party details"
+          >
+            X
+          </button>
+        </div>
+
+        {isInvited ? (
+          <div className="party-details-invite-card">
+            <p className="text-sm font-bold text-zinc-200">
+              {party.leaderUsername} invited you to their party.
+            </p>
+            <button
+              type="button"
+              onClick={() => applySocialResult(acceptPartyInvite())}
+              className="party-details-action party-details-action-primary"
+            >
+              Join Party
+            </button>
+          </div>
+        ) : (
+          <>
+            <div className="party-details-member-list">
+              {partyMembers.map(member => {
+                const memberIsLeader = member.username.toLowerCase() === party.leaderUsername.toLowerCase();
+                const memberIsCurrentUser = member.username.toLowerCase() === currentUsername;
+                const locationLabel = member.x === player.x && member.y === player.y ? 'Same tile' : `Tile ${member.x}, ${member.y}`;
+                return (
+                  <div key={member.username} className={`party-details-member ${memberIsLeader ? 'party-details-member-leader' : ''}`}>
+                    <span className="party-details-member-avatar">
+                      <Image
+                        src={getPlayerModelPath(member.selectedModel || 3)}
+                        alt=""
+                        width={58}
+                        height={58}
+                        className="player-model-art"
+                        unoptimized
+                      />
+                    </span>
+                    <span className="party-details-member-copy">
+                      <span className="party-details-member-name">{member.username}</span>
+                      <span className="party-details-member-meta">
+                        {memberIsLeader ? 'Leader' : 'Member'} - Lv {member.stats?.level || 1} - {locationLabel}
+                      </span>
+                    </span>
+                    {isLeader && !memberIsCurrentUser && (
+                      <span className="party-details-member-actions">
+                        <button
+                          type="button"
+                          onClick={() => applySocialResult(promotePartyMember(member.username))}
+                          className="party-details-mini-action"
+                        >
+                          Lead
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => applySocialResult(removePlayerFromParty(member.username))}
+                          className="party-details-mini-action party-details-mini-danger"
+                        >
+                          Kick
+                        </button>
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            {party.invitedUsernames.length > 0 && (
+              <div className="party-details-pending">
+                <div className="arcane-label">Pending Invites</div>
+                <div className="party-details-pending-list">
+                  {party.invitedUsernames.map(username => (
+                    <span key={username} className="party-details-pending-chip">
+                      {username}
+                      {isLeader && (
+                        <button
+                          type="button"
+                          onClick={() => applySocialResult(removePlayerFromParty(username))}
+                          aria-label={`Cancel invite to ${username}`}
+                        >
+                          X
+                        </button>
+                      )}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {isLeader && (
+              <form
+                className="party-details-invite-form"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  handleInvitePartyPlayer();
+                }}
+              >
+                <input
+                  value={partyInviteDraft}
+                  onChange={(event) => setPartyInviteDraft(event.target.value)}
+                  className="party-details-input"
+                  placeholder="Invite player name"
+                  list="party-invite-candidates"
+                />
+                <datalist id="party-invite-candidates">
+                  {inviteCandidates.map(candidate => (
+                    <option key={candidate.username} value={candidate.username} />
+                  ))}
+                </datalist>
+                <button type="submit" className="party-details-action party-details-action-primary">
+                  Invite
+                </button>
+              </form>
+            )}
+
+            <div className="party-details-actions">
+              <button type="button" onClick={openPartyChat} className="party-details-action">
+                Party Chat
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsPartyDetailsOpen(false);
+                  openPanel('social');
+                }}
+                className="party-details-action"
+              >
+                Social Panel
+              </button>
+              <button
+                type="button"
+                onClick={() => applySocialResult(leaveParty())}
+                className="party-details-action party-details-action-danger"
+              >
+                Leave Party
+              </button>
+            </div>
+          </>
+        )}
       </aside>
     );
   }
@@ -3030,50 +3279,6 @@ function CommandNavGroup({
           {navButtons}
         </div>
       ) : navButtons}
-    </div>
-  );
-}
-
-function HudIconValue({ iconPath, value, toneClass }: { iconPath?: string; value: string; toneClass: string }) {
-  return (
-    <span className="flex min-w-0 items-center gap-2">
-      {iconPath && (
-        <span className="relative h-5 w-5 shrink-0">
-          <Image
-            src={iconPath}
-            alt=""
-            fill
-            sizes="20px"
-            className="object-contain"
-            style={{ imageRendering: 'pixelated' }}
-          />
-        </span>
-      )}
-      <span className={`truncate text-sm font-black text-white ${toneClass}`}>{value}</span>
-    </span>
-  );
-}
-
-function OverviewTile({ label, value, accent }: { label: string; value: string; accent: string }) {
-  const iconPath = statIconPaths[label];
-
-  return (
-    <div className="ui-card rounded border p-3">
-      <div className="flex items-center gap-2 text-xs font-black uppercase text-[var(--ui-faint)]">
-        {iconPath && (
-          <span className="relative h-5 w-5">
-            <Image
-              src={iconPath}
-              alt=""
-              fill
-              className="object-contain"
-              style={{ imageRendering: 'pixelated' }}
-            />
-          </span>
-        )}
-        <span>{label}</span>
-      </div>
-      <div className={`text-2xl font-black ${accent}`}>{value}</div>
     </div>
   );
 }

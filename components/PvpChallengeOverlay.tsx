@@ -22,6 +22,7 @@ import {
   getCachedWorldPlayers,
   refreshWorldPlayers,
 } from '@/lib/worldPlayers';
+import { playGameSound, preloadGameSounds } from '@/lib/sound';
 
 function getIncomingChallenge(
   challenges: BattleChallenge[],
@@ -45,6 +46,7 @@ export default function PvpChallengeOverlay() {
   const incoming = username
     ? getIncomingChallenge(challenges, username)
     : undefined;
+  const incomingChallengeId = incoming?.id;
 
   useEffect(() => {
     if (!username) {
@@ -90,9 +92,24 @@ export default function PvpChallengeOverlay() {
     };
   }, [username, onlineEnabled]);
 
+  useEffect(() => {
+    if (!incomingChallengeId) return undefined;
+
+    preloadGameSounds(['ui.modalOpen', 'social.challengeReceived']);
+    playGameSound('ui.modalOpen', { throttleMs: 250 });
+    emitFxEvent({ type: 'attack', tone: 'gold', intensity: 0.95 });
+
+    const weaponDrawTimer = window.setTimeout(() => {
+      playGameSound('social.challengeReceived', { volumeScale: 0.9, throttleMs: 500 });
+    }, 140);
+
+    return () => window.clearTimeout(weaponDrawTimer);
+  }, [incomingChallengeId]);
+
   if (!incoming || !username) return null;
 
   const remaining = getBattleChallengeTimeRemaining(incoming, now);
+  const responseProgress = Math.max(0, Math.min(100, (remaining / 60_000) * 100));
   const challenger = getUsers().find(player => player.username.toLowerCase() === incoming.challengerUsername.toLowerCase());
   const onlineChallenger = worldPlayers.find(player => player.username.toLowerCase() === incoming.challengerUsername.toLowerCase());
   const challengerModel = challenger?.selectedModel || onlineChallenger?.selectedModel || 3;
@@ -124,6 +141,7 @@ export default function PvpChallengeOverlay() {
         confirmBattleChallenge(incoming.id);
       }
       await refreshChallenges();
+      playGameSound('social.accept', { throttleMs: 120 });
       setNotice('Duel accepted. Prepare your warband.');
     } catch (error) {
       setNotice(error instanceof Error ? error.message : 'Could not accept challenge.');
@@ -144,6 +162,7 @@ export default function PvpChallengeOverlay() {
         declineBattleChallenge(incoming.id);
       }
       await refreshChallenges();
+      playGameSound('social.decline', { throttleMs: 120 });
     } catch (error) {
       setNotice(error instanceof Error ? error.message : 'Could not decline challenge.');
     } finally {
@@ -159,17 +178,23 @@ export default function PvpChallengeOverlay() {
           <h2 className="fantasy-heading mt-1 text-2xl">Crossed Blades</h2>
         </div>
 
-        <div className="px-5 py-6 text-center">
-          <div className="mx-auto mb-4 flex h-20 w-20 items-center justify-center rounded-full border border-amber-300/35 bg-amber-950/30 text-4xl">
-            ⚔
+        <div className="pvp-challenge-stage px-5 py-6 text-center">
+          <div className="pvp-challenge-blade-mark mx-auto mb-4" aria-hidden="true">
+            <svg viewBox="0 0 64 64">
+              <path d="M14 9l17 17m-7 3L8 13l5-5 16 16" />
+              <path d="M50 9L33 26m7 3 16-16-5-5-16 16" />
+              <path d="M22 36l-9 9-5-5 9-9" />
+              <path d="M42 36l9 9 5-5-9-9" />
+              <path d="M27 31l10 10m0-10L27 41" />
+            </svg>
           </div>
 
-          <div className="mx-auto mb-4 flex h-24 w-24 items-center justify-center overflow-hidden rounded-full border">
+          <div className="pvp-challenge-commander-portrait mx-auto mb-4">
             <Image
               src={getPlayerModelPath(challengerModel)}
               alt={incoming.challengerUsername}
-              width={96}
-              height={96}
+              width={148}
+              height={148}
               className="player-model-art object-contain"
               unoptimized
             />
@@ -182,6 +207,9 @@ export default function PvpChallengeOverlay() {
           <p className="ui-accent mt-3 text-xs font-black uppercase tracking-[0.18em]">
             {Math.max(0, Math.ceil(remaining / 1000))}s to respond
           </p>
+          <div className="pvp-challenge-time-track mx-auto mt-3" aria-hidden="true">
+            <span style={{ width: `${responseProgress}%` }} />
+          </div>
         </div>
 
         <div className="grid grid-cols-2 gap-3 border-t px-5 py-4">

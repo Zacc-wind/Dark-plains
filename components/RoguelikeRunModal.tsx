@@ -50,6 +50,8 @@ import {
   MINION_CLASS_LABELS,
   MINION_TEMPLATES,
   MINION_TIER_LABELS,
+  type MinionClass,
+  type MinionStats,
   MinionStack,
   MinionTemplate,
   RANDOM_RUN_BALANCE,
@@ -96,6 +98,7 @@ import {
   type MpDailyDungeonChallenge,
 } from '@/lib/mpDailyDungeon';
 import { BOSS_PROFILES, getBossProfileById, getBossProfileByIndex } from '@/lib/bosses';
+import { getRunMilestoneRewardExp, getRunMilestoneViews } from '@/lib/runMilestones';
 import {
   createSingleplayerRunTutorialStep,
   markSingleplayerRunTutorialStepSeen,
@@ -112,12 +115,196 @@ type RunOutcome = 'victory' | 'defeat' | 'abandoned' | null;
 type RewardDestination = 'daily-next' | 'dungeon-next' | 'complete' | null;
 type DungeonNodeType = 'battle' | 'elite' | 'shop' | 'event' | 'boss';
 type RunTutorialScope = 'singleplayer' | 'none';
+type RunLengthId = 'quick' | 'short' | 'standard' | 'long';
+
+interface SingleplayerRunSetup {
+  commanderModel: PlayerModelNumber;
+  runLength: RunLengthId;
+}
+
+interface RunLengthOption {
+  id: RunLengthId;
+  label: string;
+  title: string;
+  description: string;
+  fixedBattles?: number;
+  minRunLevel: number;
+  enemyLevelOffset: number;
+  rewardMultiplier: number;
+}
+
+interface RunCommanderProfile {
+  model: PlayerModelNumber;
+  label: string;
+  title: string;
+  description: string;
+  passiveName: string;
+  passiveSummary: string;
+  statBonus: Partial<Pick<CharacterStats, 'armyPower' | 'defensivePower' | 'morale' | 'spellPower' | 'maxHealth' | 'health'>>;
+  unitFocus: RunCommanderUnitFocus;
+}
+
+interface RunCommanderUnitFocus {
+  label: string;
+  summary: string;
+  class?: MinionClass;
+  roleKeywords?: string[];
+  statBonus: Partial<Pick<MinionStats, 'attack' | 'defense' | 'magic' | 'healing' | 'health' | 'movement' | 'range'>>;
+}
+
+const DEFAULT_RUN_SETUP: SingleplayerRunSetup = {
+  commanderModel: 3,
+  runLength: 'standard',
+};
+
+const RANDOM_RUN_ABSOLUTE_BATTLE_MIN = 5;
+
+const RUN_LENGTH_OPTIONS: RunLengthOption[] = [
+  {
+    id: 'quick',
+    label: 'Quick',
+    title: 'Quick Road',
+    description: 'A five-fight road for fast testing, light pressure, and smaller rewards.',
+    fixedBattles: 5,
+    minRunLevel: 1,
+    enemyLevelOffset: -2,
+    rewardMultiplier: 0.65,
+  },
+  {
+    id: 'short',
+    label: 'Short',
+    title: 'Short Road',
+    description: 'A compact road with fewer fights, lower pressure, and lighter rewards.',
+    fixedBattles: 9,
+    minRunLevel: 1,
+    enemyLevelOffset: -1,
+    rewardMultiplier: 0.85,
+  },
+  {
+    id: 'standard',
+    label: 'Standard',
+    title: 'Standard Road',
+    description: 'The balanced run length. Uses your current run level for road size.',
+    minRunLevel: 1,
+    enemyLevelOffset: 0,
+    rewardMultiplier: 1,
+  },
+  {
+    id: 'long',
+    label: 'Long',
+    title: 'Long Road',
+    description: 'A longer road with more bosses, stronger scaling, and better run XP.',
+    fixedBattles: RANDOM_RUN_BALANCE.routeBattleMax,
+    minRunLevel: 5,
+    enemyLevelOffset: 1,
+    rewardMultiplier: 1.25,
+  },
+];
+
+const RUN_COMMANDER_PROFILES: RunCommanderProfile[] = [
+  {
+    model: 1,
+    label: 'Templar',
+    title: 'Iron Marshal',
+    description: 'Best for shielded warbands and knight-heavy drafts.',
+    passiveName: 'Shield Oath',
+    passiveSummary: '+1 army ward, +10 commander health, and templars gain ward and health.',
+    statBonus: { defensivePower: 1, maxHealth: 10, health: 10 },
+    unitFocus: {
+      label: 'Templar Line',
+      summary: 'Templars gain +2 ward and +6 health.',
+      class: 'templar',
+      statBonus: { defense: 2, health: 6 },
+    },
+  },
+  {
+    model: 2,
+    label: 'Arcanist',
+    title: 'Moon Arcanist',
+    description: 'Best for spell pressure and commander damage.',
+    passiveName: 'Moon Channel',
+    passiveSummary: '+2 spell power, and wizards gain stronger magic.',
+    statBonus: { spellPower: 2 },
+    unitFocus: {
+      label: 'Wizard Circle',
+      summary: 'Wizards gain +2 magic.',
+      class: 'wizard',
+      statBonus: { magic: 2 },
+    },
+  },
+  {
+    model: 3,
+    label: 'Prior',
+    title: 'Candle Prior',
+    description: 'Best for defensive healer-centered runs.',
+    passiveName: 'Candle Discipline',
+    passiveSummary: '+1 ward, +1 morale, +6 commander health, and priests heal better.',
+    statBonus: { defensivePower: 1, morale: 1, maxHealth: 6, health: 6 },
+    unitFocus: {
+      label: 'Priest Choir',
+      summary: 'Priests gain +2 healing and +4 health.',
+      class: 'priest',
+      statBonus: { healing: 2, health: 4 },
+    },
+  },
+  {
+    model: 4,
+    label: 'Vanguard',
+    title: 'Blood Vanguard',
+    description: 'Best for aggressive melee drafts.',
+    passiveName: 'Red Advance',
+    passiveSummary: '+2 army damage, and knight frontliners hit harder.',
+    statBonus: { armyPower: 2 },
+    unitFocus: {
+      label: 'Knight Charge',
+      summary: 'Knights gain +2 attack.',
+      class: 'knight',
+      statBonus: { attack: 2 },
+    },
+  },
+  {
+    model: 5,
+    label: 'Duelist',
+    title: 'Road Duelist',
+    description: 'Best for fast turns and skirmisher-heavy drafts.',
+    passiveName: 'Quick March',
+    passiveSummary: '+1 morale, +1 army damage, and skirmishers move faster.',
+    statBonus: { morale: 1, armyPower: 1 },
+    unitFocus: {
+      label: 'Skirmisher Steps',
+      summary: 'Assassins and skirmishers gain +1 movement and +1 attack.',
+      roleKeywords: ['assassin', 'skirmisher', 'wing-step'],
+      statBonus: { movement: 1, attack: 1 },
+    },
+  },
+  {
+    model: 6,
+    label: 'Warden',
+    title: 'Grave Warden',
+    description: 'Best for durable mixed warbands.',
+    passiveName: 'Grave Hold',
+    passiveSummary: '+1 damage, +1 ward, +8 commander health, and guards hold longer.',
+    statBonus: { armyPower: 1, defensivePower: 1, maxHealth: 8, health: 8 },
+    unitFocus: {
+      label: 'Grave Guard',
+      summary: 'Guard and tank units gain +1 ward and +5 health.',
+      roleKeywords: ['guard', 'tank', 'fighter'],
+      statBonus: { defense: 1, health: 5 },
+    },
+  },
+];
+
+function pickRunCommanderDraftChoices(count = 4): RunCommanderProfile[] {
+  return shuffle(RUN_COMMANDER_PROFILES).slice(0, Math.min(count, RUN_COMMANDER_PROFILES.length));
+}
 
 interface RunUnit {
   stack: MinionStack;
   alive: boolean;
   origin: 'draft' | 'roster' | 'reward' | 'loaned';
 }
+
+type RunUnitStatBonus = Partial<Pick<MinionStats, 'attack' | 'defense' | 'magic' | 'healing' | 'health' | 'movement' | 'range'>>;
 
 interface RunBattleUnitReport {
   id: string;
@@ -191,6 +378,12 @@ interface RunSession {
   title: string;
   phase: RunPhase;
   stats: CharacterStats;
+  commanderModel: PlayerModelNumber;
+  commanderPassiveName?: string;
+  commanderPassiveSummary?: string;
+  runLengthId?: RunLengthId;
+  runLengthName?: string;
+  runLengthRewardMultiplier?: number;
   minions: RunUnit[];
   draftChoices: MinionTemplate[];
   wins: number;
@@ -470,6 +663,8 @@ const RUN_MAX_ROSTER = 10;
 const RANDOM_REWARD_ANIMATION_ICON = '/assets/icons/dice.png';
 const MERCENARY_TEMPLATE_ID = 'mercenary';
 const MERCENARY_SHOP_REWARD_ID = 'mercenary-contract';
+const MERCENARY_SHOP_OFFER_CHANCE = 0.05;
+const FALLEN_FINAL_DRAFT_CHANCE = 0.06;
 const PLAYER_RUN_EXCLUDED_TEMPLATE_IDS = new Set(['thief', 'darkpriest']);
 
 function makeMercenaryShopReward(): RunRewardChoice {
@@ -714,11 +909,12 @@ function DailyRunModalContent({ onClose, tutorialScope }: { onClose: () => void;
   const [, setTutorialRefreshKey] = useState(0);
   const user = getCurrentUser();
   const username = user?.username || null;
-  const lobbyTutorialStep = tutorialScope === 'singleplayer'
-    && !dismissedTutorialStepIds.has('lobby')
-    && shouldShowSingleplayerRunTutorialStep(username, 'lobby')
-    ? createSingleplayerRunTutorialStep('lobby')
+  const lobbyTutorialStepId = tutorialScope === 'singleplayer'
+    ? (['lobby', 'run-setup'] as SingleplayerRunTutorialStepId[]).find(stepId => (
+        !dismissedTutorialStepIds.has(stepId) && shouldShowSingleplayerRunTutorialStep(username, stepId)
+      ))
     : null;
+  const lobbyTutorialStep = lobbyTutorialStepId ? createSingleplayerRunTutorialStep(lobbyTutorialStepId) : null;
 
   const handleTutorialContinue = (stepId: SingleplayerRunTutorialStepId) => {
     markSingleplayerRunTutorialStepSeen(username, stepId);
@@ -750,11 +946,12 @@ function DailyRunModalContent({ onClose, tutorialScope }: { onClose: () => void;
     }
   }, [session]);
 
-  const startNewRun = () => {
+  const startNewRun = (setup: SingleplayerRunSetup) => {
     const user = getCurrentUser();
     if (!user) return;
+    const runSetup = normalizeRunSetup(user, setup);
     clearDailyRunSession(user.username);
-    setSession(createDailySession(user, createRandomRunChallenge(user)));
+    setSession(createDailySession(user, createRandomRunChallenge(user, runSetup), runSetup));
     setShowLobby(false);
   };
 
@@ -766,6 +963,7 @@ function DailyRunModalContent({ onClose, tutorialScope }: { onClose: () => void;
           onResume={() => session && setShowLobby(false)}
           onStart={startNewRun}
           onClose={onClose}
+          tutorialStepId={lobbyTutorialStep?.id || null}
         />
         {lobbyTutorialStep && (
           <SingleplayerTutorialOverlay
@@ -795,13 +993,18 @@ function RandomRunLobby({
   onResume,
   onStart,
   onClose,
+  tutorialStepId,
 }: {
   activeSession: RunSession | null;
   onResume: () => void;
-  onStart: () => void;
+  onStart: (setup: SingleplayerRunSetup) => void;
   onClose: () => void;
+  tutorialStepId?: SingleplayerRunTutorialStepId | null;
 }) {
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [selectedRunLength, setSelectedRunLength] = useState<RunLengthId>('standard');
+  const [setupPicker, setSetupPicker] = useState<'length' | null>(null);
+  const [commanderDraftChoices, setCommanderDraftChoices] = useState<RunCommanderProfile[] | null>(null);
   const [previewBoss] = useState(() => getRandomLobbyBossPreview());
   const user = getCurrentUser();
   const runState = getDailyRunState(user);
@@ -811,6 +1014,11 @@ function RandomRunLobby({
   const expPercent = runLevelCapped ? 100 : clamp((runState.runExp / Math.max(1, expNeeded)) * 100, 0, 100);
   const permanent = runState.permanentStats;
   const activeRunReady = Boolean(activeSession && !activeSession.rewardClaimed && activeSession.phase !== 'complete');
+  const selectedLength = getRunLengthOption(selectedRunLength);
+  const startCommanderDraftRun = (profile: RunCommanderProfile) => {
+    setCommanderDraftChoices(null);
+    onStart({ commanderModel: profile.model, runLength: selectedRunLength });
+  };
   const upgradeRows = [
     { label: 'Army', value: `+${permanent.armyPower}` },
     { label: 'Ward', value: `+${permanent.defensivePower}` },
@@ -847,7 +1055,7 @@ function RandomRunLobby({
                 </button>
               ) : null}
               <button
-                onClick={onStart}
+                onClick={() => setCommanderDraftChoices(pickRunCommanderDraftChoices())}
                 className={`rounded px-6 py-3 text-sm font-black ${activeRunReady ? 'ui-button' : 'random-run-start ui-button-primary'}`}
               >
                 New Run
@@ -856,8 +1064,144 @@ function RandomRunLobby({
             Close
           </button>
             </div>
+
+            <div className={`random-run-setup-summary-cards random-run-setup-summary-cards-single mt-5 ${tutorialStepId === 'run-setup' ? 'random-run-setup-summary-cards-tutorial' : ''}`}>
+              <button
+                type="button"
+                className="random-run-setup-summary-card"
+                onClick={() => setSetupPicker('length')}
+              >
+                <span className="random-run-setup-summary-icon">
+                  {selectedLength.fixedBattles ? selectedLength.fixedBattles : 'Lv'}
+                </span>
+                <span className="random-run-setup-summary-copy">
+                  <span className="arcane-label">Road Length</span>
+                  <strong>{selectedLength.title}</strong>
+                  <span>{selectedLength.fixedBattles ? `${selectedLength.fixedBattles} fights` : 'Scaled to run level'}</span>
+                </span>
+              </button>
+            </div>
           </div>
         </div>
+
+        {setupPicker && (
+          <div className="random-run-setup-picker-backdrop" onClick={() => setSetupPicker(null)}>
+            <div className="random-run-setup-picker command-panel vine-frame rounded border" onClick={(event) => event.stopPropagation()}>
+              <div className="random-run-setup-picker-head">
+                <div>
+                  <span className="arcane-label">Run Setup</span>
+                  <h3 className="fantasy-heading">Choose Road Length</h3>
+                </div>
+                <button type="button" className="ui-button rounded px-3 py-2 text-xs font-black" onClick={() => setSetupPicker(null)}>
+                  Close
+                </button>
+              </div>
+
+              <div className={`random-run-length-choice-grid ${tutorialStepId === 'run-setup' ? 'random-run-length-choice-row-tutorial' : ''}`}>
+                {RUN_LENGTH_OPTIONS.map(option => {
+                  const selected = option.id === selectedRunLength;
+                  const locked = runState.runLevel < option.minRunLevel;
+                  return (
+                    <button
+                      key={option.id}
+                      type="button"
+                      className={`random-run-length-choice-card ${selected ? 'random-run-length-choice-card-selected' : ''} ${locked ? 'random-run-length-choice-card-locked' : ''}`}
+                      disabled={locked}
+                      aria-disabled={locked}
+                      onClick={() => {
+                        if (locked) return;
+                        setSelectedRunLength(option.id);
+                        setSetupPicker(null);
+                      }}
+                    >
+                      <span className="random-run-length-choice-card-label">{option.label}</span>
+                      <strong>{option.title}</strong>
+                      <span>{option.fixedBattles ? `${option.fixedBattles} fights` : 'Scaled road'}</span>
+                      <em>{locked ? `Unlocks at run Lv ${option.minRunLevel}` : option.rewardMultiplier === 1 ? 'Normal rewards' : `${Math.round(option.rewardMultiplier * 100)}% run rewards`}</em>
+                      <p>{option.description}</p>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {commanderDraftChoices && (
+          <div className="random-run-commander-draft-backdrop" onClick={() => setCommanderDraftChoices(null)}>
+            <section className="random-run-commander-draft run-draft-stage" onClick={(event) => event.stopPropagation()}>
+              <section className="run-draft-hero random-run-commander-draft-hero relative overflow-hidden">
+                <div className="relative z-10 max-w-xl">
+                  <span className="arcane-label">Run Draft</span>
+                  <h3 className="fantasy-heading mt-1">Choose Your Commander</h3>
+                  <p className="ui-muted text-sm font-bold">
+                    Pick one commander for this road. The offered captains change every run, and each one changes your starting stats and favored units.
+                  </p>
+                  <div className="run-draft-setup-summary mt-4">
+                    <span>{selectedLength.title}</span>
+                    <span>{selectedLength.fixedBattles ? `${selectedLength.fixedBattles} fights` : 'Scaled road'}</span>
+                    <span>{Math.round(selectedLength.rewardMultiplier * 100)}% run rewards</span>
+                  </div>
+                </div>
+
+                <div className="random-run-commander-draft-preview" aria-hidden>
+                  {commanderDraftChoices.map((profile, index) => (
+                    <span
+                      key={profile.model}
+                      className="random-run-commander-draft-preview-sprite"
+                      style={{ '--commander-draft-index': index } as CSSProperties}
+                    >
+                      <Image src={getPlayerModelAsset(profile.model)} alt="" fill sizes="240px" className="object-contain object-bottom" unoptimized />
+                    </span>
+                  ))}
+                </div>
+
+                <div className="run-draft-counter random-run-commander-draft-counter relative z-10 text-center">
+                  <span className="arcane-label block">Pick</span>
+                  <strong className="fantasy-heading block text-2xl">1/4</strong>
+                </div>
+              </section>
+
+              <section className="run-draft-choice-shell random-run-commander-draft-choice-shell rounded border p-4">
+                <div className="run-draft-choice-header flex items-start justify-between gap-3">
+                  <div>
+                    <span className="arcane-label">Choose One</span>
+                    <h4 className="fantasy-heading">Available Commanders</h4>
+                  </div>
+                  <button type="button" className="ui-button rounded px-3 py-2 text-xs font-black" onClick={() => setCommanderDraftChoices(null)}>
+                    Back
+                  </button>
+                </div>
+
+                <div className="run-draft-grid random-run-commander-draft-grid mt-4 grid gap-4">
+                  {commanderDraftChoices.map(profile => (
+                    <button
+                      key={profile.model}
+                      type="button"
+                      className="run-draft-card random-run-commander-draft-card"
+                      onClick={() => startCommanderDraftRun(profile)}
+                    >
+                      <span className="run-draft-card-art">
+                        <span className="run-draft-recruit-frame random-run-commander-draft-frame">
+                          <Image src={getPlayerModelAsset(profile.model)} alt="" fill sizes="280px" className="run-draft-recruit-sprite object-contain object-bottom" unoptimized />
+                        </span>
+                      </span>
+                      <span className="run-draft-card-copy random-run-commander-draft-copy">
+                        <span className="arcane-label">{profile.label}</span>
+                        <strong className="fantasy-heading block">{profile.title}</strong>
+                        <span className="random-run-commander-passive">{profile.passiveName}</span>
+                        <span className="ui-muted block text-xs font-bold">{profile.passiveSummary}</span>
+                        <span className="ui-pill mt-1 inline-flex justify-center rounded border px-2 py-1 text-[10px] font-black uppercase">
+                          {profile.unitFocus.summary}
+                        </span>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </section>
+            </section>
+          </div>
+        )}
 
         <div className="random-run-lobby-body">
           {detailsOpen && lastRun && (
@@ -1038,18 +1382,20 @@ interface MpDailyDungeonModalProps {
 export function MpDailyDungeonModal({ isOpen, onClose }: MpDailyDungeonModalProps) {
   const [session, setSession] = useState<RunSession | null>(null);
   const user = getCurrentUser();
+  const username = user?.username;
 
   useEffect(() => {
-    if (!isOpen) {
-      setSession(null);
-      return;
-    }
-    if (!user || hasCompletedMpDailyDungeonToday(user)) {
-      setSession(null);
-      return;
-    }
-    setSession(createMpDailySession(user, getMpDailyDungeonChallenge()));
-  }, [isOpen, user?.username]);
+    const timer = window.setTimeout(() => {
+      const currentUser = getCurrentUser();
+      if (!isOpen || !currentUser || hasCompletedMpDailyDungeonToday(currentUser)) {
+        setSession(null);
+        return;
+      }
+      setSession(createMpDailySession(currentUser, getMpDailyDungeonChallenge()));
+    }, 0);
+
+    return () => window.clearTimeout(timer);
+  }, [isOpen, username]);
 
   if (!isOpen || !session) return null;
 
@@ -1197,7 +1543,7 @@ function RunController({
         key,
         commanderName: user?.username || 'Commander',
         enemyName: session.activeEnemy?.name || 'Enemy Commander',
-        artworkPath: getPlayerModelAsset(user?.selectedModel || 3),
+        artworkPath: getPlayerModelAsset(session.commanderModel || user?.selectedModel || 3),
       });
 
       clearTimer = window.setTimeout(() => {
@@ -1209,7 +1555,7 @@ function RunController({
       if (introTimer) window.clearTimeout(introTimer);
       if (clearTimer) window.clearTimeout(clearTimer);
     };
-  }, [session.activeEnemy, session.currentNodeIndex, session.id, session.phase]);
+  }, [session.activeEnemy, session.commanderModel, session.currentNodeIndex, session.id, session.phase]);
 
   useEffect(() => {
     let immediateTimer: number | null = null;
@@ -1315,22 +1661,75 @@ function RunController({
         bonusGearDrop ? `${bonusGearDrop.name} dropped into your run satchel.` : '',
         permanentUnlock ? `${permanentUnlock} permanently unlocked.` : '',
       ].filter(Boolean);
-
-      return {
+      const updatedBossHistory = clearedNode?.type === 'boss'
+        ? [...(withBonusGear.bossHistory || []), clearedNode.label]
+        : withBonusGear.bossHistory || [];
+      const updatedPermanentSpellUnlocks = permanentUnlock
+        ? [...(withBonusGear.permanentSpellUnlocks || []), permanentUnlock]
+        : withBonusGear.permanentSpellUnlocks || [];
+      const runGoldAfterBattle = withHardRouteBonus.runGold + goldEarned;
+      const completedBattleSession: RunSession = {
         ...withBonusGear,
-        phase: 'reward',
         activeEnemy: null,
         wins: nextWins,
-        runGold: withHardRouteBonus.runGold + goldEarned,
-        rewardChoices: pickRunRewardChoices(withHardRouteBonus),
+        runGold: runGoldAfterBattle,
         rewardDestination,
-        bossHistory: clearedNode?.type === 'boss'
-          ? [...(withBonusGear.bossHistory || []), clearedNode.label]
-          : withBonusGear.bossHistory || [],
-        permanentSpellUnlocks: permanentUnlock
-          ? [...(withBonusGear.permanentSpellUnlocks || []), permanentUnlock]
-          : withBonusGear.permanentSpellUnlocks || [],
+        bossHistory: updatedBossHistory,
+        permanentSpellUnlocks: updatedPermanentSpellUnlocks,
         notice: noticeParts.join(' '),
+      };
+
+      if (
+        completedBattleSession.mode === 'daily'
+        && isBossFight
+        && rewardDestination === 'dungeon-next'
+      ) {
+        const bossRecruitSource = {
+          id: `boss-gate-tier3-${clearedNode?.id || completedBattleSession.wins}`,
+          name: 'Boss Gate Recruit',
+        };
+        const withBossRecruit = queueRunRewardCelebrations(
+          completedBattleSession,
+          addGuaranteedRandomRunMinion(
+            completedBattleSession,
+            'tier3',
+            'A tier III veteran joins before the last boss.'
+          ),
+          bossRecruitSource
+        );
+
+        return completeDungeonNode({
+          ...withBossRecruit,
+          rewardChoices: [],
+          rewardDestination: null,
+          notice: `${result.battle.enemy.name} defeated. +${goldEarned} run gold. A tier III veteran joins before the last boss.`,
+        });
+      }
+
+      if (completedBattleSession.mode === 'daily' && rewardDestination === 'complete') {
+        const completed = completedBattleSession.nodes.length > 0
+          ? completeDungeonNode({
+            ...completedBattleSession,
+            rewardChoices: [],
+            rewardDestination: null,
+          })
+          : completedBattleSession;
+
+        return {
+          ...completed,
+          activeEnemy: null,
+          phase: 'complete',
+          outcome: 'victory',
+          rewardChoices: [],
+          rewardDestination: null,
+          notice: `${result.battle.enemy.name} defeated. +${goldEarned} run gold. The random road is complete.`,
+        };
+      }
+
+      return {
+        ...completedBattleSession,
+        phase: 'reward',
+        rewardChoices: pickRunRewardChoices(withHardRouteBonus),
       };
     });
   };
@@ -1460,6 +1859,7 @@ function RunController({
         enemy={session.activeEnemy}
         playerStacks={aliveStacks}
         playerStats={session.stats}
+        playerModelNumber={session.commanderModel}
         playerFormation={session.formation}
         availableSpellIds={session.spellIds}
         persistentResults={false}
@@ -1544,7 +1944,7 @@ function RunController({
                 enemyName={session.activeEnemy.name}
                 enemySubtitle={session.activeEnemy.subtitle}
                 commanderName={getCurrentUser()?.username || 'Commander'}
-                commanderModel={(getCurrentUser()?.selectedModel || 3) as PlayerModelNumber}
+                commanderModel={session.commanderModel}
                 stacks={getAliveRunRoster(session)}
                 stackHealth={formationStackHealth}
                 maxFielded={MAX_FIELD_MINIONS}
@@ -1620,6 +2020,10 @@ function DailyDraftPanel({ session, onPick }: { session: RunSession; onPick: (te
           <p className="run-draft-hero-status ui-faint mt-1.5 text-[11px] font-bold sm:text-xs">
             {remaining > 0 ? `${remaining} pick${remaining === 1 ? '' : 's'} remaining` : 'Warband ready — the road awaits.'}
           </p>
+          <div className="run-draft-setup-summary mt-3">
+            <span>{session.runLengthName || 'Standard Road'}</span>
+            <span>{session.commanderPassiveName || 'Commander Passive'}: {session.commanderPassiveSummary || 'Run-only commander bonus active.'}</span>
+          </div>
         </div>
 
         <div className="run-draft-counter relative z-10 rounded border px-3 py-2 text-right sm:px-4 sm:py-3">
@@ -1792,11 +2196,14 @@ function RunMapPanel({
   const isDaily = session.mode === 'daily';
   const branchMap = hasBranchNodeLayout(session.nodes);
   const reachableIds = getReachableNodeIds(session);
+  const routeModifier = isDaily ? getBossRouteModifier(session.dailyChallenge?.bossId) : null;
   const mapSummary = {
     label: getRunMapLabel(session),
     title: isDaily || session.mode === 'encounter' ? 'Choose the next road stop' : 'Choose the next chamber',
     detail: isDaily
-      ? `Battles count. Shops and omens are free stops. Bosses wait along the road. Final boss: fight ${session.targetBattles}.`
+      ? routeModifier
+        ? `Battles count. Shops and omens are free stops. Final boss: fight ${session.targetBattles}. ${routeModifier.title}: ${routeModifier.summary}`
+        : `Battles count. Shops and omens are free stops. Bosses wait along the road. Final boss: fight ${session.targetBattles}.`
       : session.mode === 'encounter'
         ? `${session.encounterEnemy?.name || 'The enemy commander'} waits as the boss. Lower-level roads are shorter; omens only appear on longer routes.`
         : 'A long dungeon road with battles, shops, and omens before the final boss.',
@@ -3475,7 +3882,7 @@ function RunRoster({
         <RunGearPanel
           session={session}
           variant={variant}
-          commanderModel={(getCurrentUser()?.selectedModel || 3) as PlayerModelNumber}
+          commanderModel={session.commanderModel}
           onEquip={onEquipGear!}
           onUnequip={onUnequipGear!}
         />
@@ -3993,10 +4400,23 @@ function hydrateRunSession(storedSession: StoredRunSession | null, challenge?: D
   const knownSpellIds = storedSession.knownSpellIds?.length
     ? storedSession.knownSpellIds
     : getInitialRunKnownSpellIds(spellIds);
+  const restoredSetup = normalizeRunSetup(null, {
+    commanderModel: storedSession.commanderModel,
+    runLength: storedSession.runLengthId,
+  });
+  const restoredCommanderProfile = getRunCommanderProfile(restoredSetup.commanderModel);
+  const restoredRunLength = getRunLengthOption(restoredSetup.runLength);
 
   return {
     ...session,
     ...equipmentState,
+    minions: applyRunCommanderUnitBonusesToUnits(session.minions, restoredCommanderProfile),
+    commanderModel: restoredSetup.commanderModel,
+    commanderPassiveName: storedSession.commanderPassiveName || restoredCommanderProfile.passiveName,
+    commanderPassiveSummary: storedSession.commanderPassiveSummary || restoredCommanderProfile.passiveSummary,
+    runLengthId: restoredSetup.runLength,
+    runLengthName: storedSession.runLengthName || restoredRunLength.title,
+    runLengthRewardMultiplier: storedSession.runLengthRewardMultiplier || restoredRunLength.rewardMultiplier,
     targetBattles: refreshStoredRoad
       ? normalizeRandomRunBattleCount(resolvedChallenge.targetBattles)
       : normalizeRandomRunBattleCount(session.targetBattles),
@@ -4086,6 +4506,30 @@ function clearDailyRunSession(username: string): void {
   removeGameStorageItem(getRandomRunSessionKey(username));
 }
 
+function getRunLengthOption(runLength: RunLengthId | undefined): RunLengthOption {
+  return RUN_LENGTH_OPTIONS.find(option => option.id === runLength)
+    || RUN_LENGTH_OPTIONS.find(option => option.id === DEFAULT_RUN_SETUP.runLength)
+    || RUN_LENGTH_OPTIONS[0];
+}
+
+function getRunCommanderProfile(model: number | undefined): RunCommanderProfile {
+  return RUN_COMMANDER_PROFILES.find(profile => profile.model === model) || RUN_COMMANDER_PROFILES[2];
+}
+
+function normalizeRunSetup(user?: User | null, setup?: Partial<SingleplayerRunSetup>): SingleplayerRunSetup {
+  const commanderModel = [1, 2, 3, 4, 5, 6].includes(setup?.commanderModel || 0)
+    ? setup!.commanderModel as PlayerModelNumber
+    : (user?.selectedModel || DEFAULT_RUN_SETUP.commanderModel) as PlayerModelNumber;
+  const runState = getDailyRunState(user);
+  const requestedLength = RUN_LENGTH_OPTIONS.find(option => option.id === setup?.runLength);
+  const fallbackLength = getRunLengthOption(DEFAULT_RUN_SETUP.runLength);
+  const runLength = requestedLength && runState.runLevel >= requestedLength.minRunLevel
+    ? requestedLength.id
+    : fallbackLength.id;
+
+  return { commanderModel, runLength };
+}
+
 function getRandomRunTargetBattleCount(runLevel: number): number {
   const progress = getRandomRunProgressRatio(runLevel);
   const min = RANDOM_RUN_BALANCE.routeBattleMin;
@@ -4100,9 +4544,62 @@ function getRandomRunTargetBattleCount(runLevel: number): number {
 function normalizeRandomRunBattleCount(value: number): number {
   return clamp(
     Math.round(value),
-    RANDOM_RUN_BALANCE.routeBattleMin,
+    RANDOM_RUN_ABSOLUTE_BATTLE_MIN,
     RANDOM_RUN_BALANCE.routeBattleMax
   );
+}
+
+function getRunLengthBattleCount(runLevel: number, option: RunLengthOption, targetBattleBonus: number): number {
+  const baseBattleCount = typeof option.fixedBattles === 'number'
+    ? option.fixedBattles
+    : getRandomRunTargetBattleCount(runLevel);
+  return normalizeRandomRunBattleCount(baseBattleCount + targetBattleBonus);
+}
+
+function applyRunCommanderProfileStats(stats: CharacterStats, profile: RunCommanderProfile): CharacterStats {
+  const maxHealth = stats.maxHealth + (profile.statBonus.maxHealth || 0);
+  return {
+    ...stats,
+    armyPower: stats.armyPower + (profile.statBonus.armyPower || 0),
+    defensivePower: stats.defensivePower + (profile.statBonus.defensivePower || 0),
+    morale: stats.morale + (profile.statBonus.morale || 0),
+    spellPower: stats.spellPower + (profile.statBonus.spellPower || 0),
+    maxHealth,
+    health: Math.min(maxHealth, stats.health + (profile.statBonus.maxHealth || 0) + (profile.statBonus.health || 0)),
+  };
+}
+
+function doesCommanderUnitFocusApply(template: MinionTemplate, focus: RunCommanderUnitFocus): boolean {
+  if (focus.class && template.class === focus.class) return true;
+  if (focus.roleKeywords?.some(keyword => template.role.toLowerCase().includes(keyword))) return true;
+  return false;
+}
+
+function applyRunCommanderUnitBonusToStack(stack: MinionStack, profile: RunCommanderProfile): MinionStack {
+  const template = getMinionTemplate(stack.templateId);
+  if (!template || !doesCommanderUnitFocusApply(template, profile.unitFocus)) {
+    const { runStatBonus: _runStatBonus, runBonusLabel: _runBonusLabel, ...cleanStack } = stack;
+    void _runStatBonus;
+    void _runBonusLabel;
+    return cleanStack;
+  }
+
+  return {
+    ...stack,
+    runStatBonus: profile.unitFocus.statBonus,
+    runBonusLabel: profile.unitFocus.label,
+  };
+}
+
+function applyRunCommanderUnitBonusesToUnits(units: RunUnit[], profile: RunCommanderProfile): RunUnit[] {
+  return units.map(unit => ({
+    ...unit,
+    stack: applyRunCommanderUnitBonusToStack(unit.stack, profile),
+  }));
+}
+
+function applyRunCommanderUnitBonusForSession(session: RunSession, stack: MinionStack): MinionStack {
+  return applyRunCommanderUnitBonusToStack(stack, getRunCommanderProfile(session.commanderModel));
 }
 
 function getRandomRunScaledBattleLevel(playerLevel: number, battleNumber: number, battleCount: number, extra = 0): number {
@@ -4116,22 +4613,27 @@ function getRandomRunScaledBattleLevel(playerLevel: number, battleNumber: number
   return clamp(level, 1, RANDOM_RUN_BALANCE.enemyLevelCap);
 }
 
-function createRandomRunChallenge(user?: User): DailyRunChallenge {
+function createRandomRunChallenge(user?: User, setup?: Partial<SingleplayerRunSetup>): DailyRunChallenge {
   const now = Date.now();
   const randomOffset = Math.floor(Math.random() * 4200) * 86_400_000 + Math.floor(Math.random() * 86_400_000);
   const base = getDailyRunChallenge(now + randomOffset);
   const runState = getDailyRunState(user);
   const runIndex = runState.completions + 1;
+  const runSetup = normalizeRunSetup(user, setup);
+  const runLength = getRunLengthOption(runSetup.runLength);
   const targetBattleBonus = base.modifiers.reduce((total, modifier) => total + (modifier.targetBattleBonus || 0), 0);
-  const targetBattles = normalizeRandomRunBattleCount(getRandomRunTargetBattleCount(runState.runLevel) + targetBattleBonus);
+  const targetBattles = getRunLengthBattleCount(runState.runLevel, runLength, targetBattleBonus);
   const finalBoss = getBossProfileByIndex(runIndex + Math.floor(Math.random() * 8));
 
   return {
     ...base,
     date: `random-${now}-${Math.random().toString(16).slice(2)}`,
-    name: `${base.name}`,
-    subtitle: 'Random roguelike road',
+    name: `${runLength.title}: ${base.name}`,
+    subtitle: `${runLength.description} Random roguelike road.`,
     targetBattles,
+    enemyLevelOffset: (base.enemyLevelOffset || 0) + runLength.enemyLevelOffset,
+    rewardExpMultiplier: roundToTwo((base.rewardExpMultiplier || 1) * runLength.rewardMultiplier),
+    rewardGoldMultiplier: roundToTwo((base.rewardGoldMultiplier || 1) * runLength.rewardMultiplier),
     bossId: finalBoss.id,
     bossName: finalBoss.name,
     bossSubtitle: finalBoss.subtitle,
@@ -4145,13 +4647,17 @@ function createRandomRunChallenge(user?: User): DailyRunChallenge {
   };
 }
 
-function getRandomRunBaseStats(user: User): CharacterStats {
+function roundToTwo(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+
+function getRandomRunBaseStats(user: User, setup?: Partial<SingleplayerRunSetup>): CharacterStats {
   const runState = getDailyRunState(user);
   const permanent = runState.permanentStats;
   const effectiveLevel = getRandomRunEffectiveLevel(runState.runLevel);
   const maxHealth = 96 + permanent.maxHealth + (effectiveLevel - 1) * 4;
 
-  return {
+  const baseStats: CharacterStats = {
     armyPower: 5 + permanent.armyPower + Math.floor(permanent.unitPower / 2),
     defensivePower: 5 + permanent.defensivePower + Math.floor(permanent.unitWard / 2),
     morale: 5 + permanent.morale,
@@ -4161,10 +4667,15 @@ function getRandomRunBaseStats(user: User): CharacterStats {
     level: effectiveLevel,
     unallocatedPoints: 0,
   };
+
+  return applyRunCommanderProfileStats(baseStats, getRunCommanderProfile(normalizeRunSetup(user, setup).commanderModel));
 }
 
-function createDailySession(user: User, dailyChallenge = createRandomRunChallenge(user)): RunSession {
-  const runStats = getRandomRunBaseStats(user);
+function createDailySession(user: User, dailyChallenge = createRandomRunChallenge(user), setup?: Partial<SingleplayerRunSetup>): RunSession {
+  const runSetup = normalizeRunSetup(user, setup);
+  const commanderProfile = getRunCommanderProfile(runSetup.commanderModel);
+  const runLength = getRunLengthOption(runSetup.runLength);
+  const runStats = getRandomRunBaseStats(user, runSetup);
   const nodes = createDailyRunNodes(dailyChallenge, runStats.level || 1);
   const spellIds = pickRunSpellLoadout(dailyChallenge.date);
 
@@ -4174,6 +4685,12 @@ function createDailySession(user: User, dailyChallenge = createRandomRunChalleng
     title: dailyChallenge.name,
     phase: 'draft',
     stats: applyDailyChallengeStats(cloneRunStats(runStats), dailyChallenge),
+    commanderModel: runSetup.commanderModel,
+    commanderPassiveName: commanderProfile.passiveName,
+    commanderPassiveSummary: commanderProfile.passiveSummary,
+    runLengthId: runSetup.runLength,
+    runLengthName: runLength.title,
+    runLengthRewardMultiplier: runLength.rewardMultiplier,
     minions: [],
     draftChoices: getDraftChoices(0),
     wins: 0,
@@ -4257,6 +4774,7 @@ function createDungeonSession(user: User, dungeon: WorldDungeon): RunSession {
     title: dungeon.name,
     phase: 'map',
     stats: cloneRunStats(user.stats),
+    commanderModel: (user.selectedModel || 3) as PlayerModelNumber,
     minions: startingStacks,
     draftChoices: [],
     wins: 0,
@@ -4294,6 +4812,7 @@ function createEncounterSession(user: User, enemy: WorldEnemy): RunSession {
     title: enemy.name,
     phase: 'map',
     stats: cloneRunStats(user.stats),
+    commanderModel: (user.selectedModel || 3) as PlayerModelNumber,
     minions: startingStacks,
     draftChoices: [],
     wins: 0,
@@ -4347,6 +4866,7 @@ function createMpDailySession(user: User, challenge: MpDailyDungeonChallenge): R
     title: challenge.name,
     phase: 'map',
     stats: cloneRunStats(user.stats),
+    commanderModel: (user.selectedModel || 3) as PlayerModelNumber,
     minions: startingStacks,
     draftChoices: [],
     wins: 0,
@@ -4450,6 +4970,104 @@ function getEnemyRunTemplatePool(tier: MinionTemplate['tier']): MinionTemplate[]
   return weighted.length > 0 ? weighted : tierTemplates;
 }
 
+interface RunEnemyFormationProfile {
+  id: string;
+  minLevel: number;
+  minProgress: number;
+  minBossesDefeated?: number;
+  eliteOnly?: boolean;
+  templateIds: string[];
+}
+
+const RUN_ENEMY_FORMATION_PROFILES: RunEnemyFormationProfile[] = [
+  {
+    id: 'road-spearline',
+    minLevel: 4,
+    minProgress: 0.25,
+    templateIds: ['knight-squire', 'crossbow', 'witchdoc', 'darkpriest', 'bell'],
+  },
+  {
+    id: 'black-choir',
+    minLevel: 7,
+    minProgress: 0.35,
+    templateIds: ['bell', 'crossbow', 'enchanter', 'firelord', 'witchdoc', 'knight-squire'],
+  },
+  {
+    id: 'cutthroat-flank',
+    minLevel: 8,
+    minProgress: 0.4,
+    templateIds: ['thief', 'crossbow', 'crow', 'witchdoc', 'archer', 'knight-squire'],
+  },
+  {
+    id: 'execution-row',
+    minLevel: 9,
+    minProgress: 0.42,
+    eliteOnly: true,
+    templateIds: ['crow', 'thief', 'crossbow', 'archer', 'plaugedoc', 'bell', 'mercenary'],
+  },
+  {
+    id: 'grave-phalanx',
+    minLevel: 10,
+    minProgress: 0.55,
+    templateIds: ['mercenary', 'bell', 'crossbow', 'plaugedoc', 'enchanter', 'firelord', 'knight-squire'],
+  },
+  {
+    id: 'cinder-doctrine',
+    minLevel: 8,
+    minProgress: 0.5,
+    minBossesDefeated: 1,
+    templateIds: ['firelord', 'bell', 'darkpriest', 'witchdoc', 'crossbow', 'mercenary', 'enchanter'],
+  },
+  {
+    id: 'imperial-vanguard',
+    minLevel: 11,
+    minProgress: 0.65,
+    minBossesDefeated: 2,
+    templateIds: ['mercenary', 'fallen', 'crow', 'plaugedoc', 'bell', 'firelord', 'enchanter', 'knight-squire'],
+  },
+];
+
+function getRunEnemyFormationProfile({
+  sessionId,
+  battleIndex,
+  effectiveLevel,
+  routeProgress,
+  bossesDefeated,
+  elite,
+}: {
+  sessionId: string;
+  battleIndex: number;
+  effectiveLevel: number;
+  routeProgress: number;
+  bossesDefeated: number;
+  elite: boolean;
+}): RunEnemyFormationProfile | null {
+  const eligibleProfiles = RUN_ENEMY_FORMATION_PROFILES.filter(profile => (
+    effectiveLevel >= profile.minLevel
+    && routeProgress >= profile.minProgress
+    && bossesDefeated >= (profile.minBossesDefeated || 0)
+    && (!profile.eliteOnly || elite)
+    && profile.templateIds.some(templateId => Boolean(getMinionTemplate(templateId)))
+  ));
+
+  if (eligibleProfiles.length === 0) return null;
+  const profileIndex = getStableShopRoll(`${sessionId}:${battleIndex}:${effectiveLevel}:${bossesDefeated}:formation`, eligibleProfiles.length);
+  return eligibleProfiles[profileIndex] || null;
+}
+
+function pickRunEnemyFormationTemplate(
+  profile: RunEnemyFormationProfile | null,
+  slot: number,
+  effectiveLevel: number,
+  battleIndex: number
+): MinionTemplate | undefined {
+  if (!profile) return undefined;
+  const validIds = profile.templateIds.filter(templateId => Boolean(getMinionTemplate(templateId)));
+  if (validIds.length === 0) return undefined;
+  const offset = getStableShopRoll(`${profile.id}:${effectiveLevel}:${battleIndex}`, validIds.length);
+  return getMinionTemplate(validIds[(slot + offset) % validIds.length]);
+}
+
 function getStandaloneFirstTemplatePool(templates: MinionTemplate[]): MinionTemplate[] {
   const standalone = templates.filter(template => isStandaloneMinionTemplate(template.templateId));
   const standard = templates.filter(template => !isStandaloneMinionTemplate(template.templateId));
@@ -4462,7 +5080,9 @@ function getDraftChoices(picksMade: number): MinionTemplate[] {
     : picksMade < 6
       ? ['tier1', 'tier2']
       : ['tier2', 'tier3'];
-  const candidates = getPlayerRunTemplatePool(allowedTiers);
+  const includeRareFallen = picksMade < MAX_FIELD_MINIONS - 1 || Math.random() < FALLEN_FINAL_DRAFT_CHANCE;
+  const canUseTemplate = (template: MinionTemplate) => includeRareFallen || template.templateId !== 'fallen';
+  const candidates = getPlayerRunTemplatePool(allowedTiers).filter(canUseTemplate);
   const choices: MinionTemplate[] = [];
   const seen = new Set<string>();
   const addChoice = (template: MinionTemplate) => {
@@ -4472,8 +5092,8 @@ function getDraftChoices(picksMade: number): MinionTemplate[] {
   };
 
   shuffle(candidates).forEach(addChoice);
-  shuffle(MINION_TEMPLATES.filter(template => allowedTiers.includes(template.tier) && isPlayerRunEligibleTemplate(template))).forEach(addChoice);
-  if (choices.length < 4) shuffle(MINION_TEMPLATES.filter(isPlayerRunEligibleTemplate)).forEach(addChoice);
+  shuffle(MINION_TEMPLATES.filter(template => allowedTiers.includes(template.tier) && isPlayerRunEligibleTemplate(template) && canUseTemplate(template))).forEach(addChoice);
+  if (choices.length < 4) shuffle(MINION_TEMPLATES.filter(template => isPlayerRunEligibleTemplate(template) && canUseTemplate(template))).forEach(addChoice);
 
   return choices.slice(0, 4);
 }
@@ -4482,7 +5102,10 @@ function addDraftMinion(session: RunSession, template: MinionTemplate): RunSessi
   const minions = [
     ...session.minions,
     {
-      stack: cloneRunStack(template.templateId, `loaned-run-${session.id}-${session.minions.length}`),
+      stack: applyRunCommanderUnitBonusForSession(
+        session,
+        cloneRunStack(template.templateId, `loaned-run-${session.id}-${session.minions.length}`)
+      ),
       alive: true,
       origin: 'draft' as const,
     },
@@ -4642,11 +5265,22 @@ function makeRunEnemy({
       minionTemplates: bossProfile?.minionTemplates || session.dungeon?.bossMinionTemplates || [],
     }
     : undefined;
+  const enemyFormationProfile = boss
+    ? null
+    : getRunEnemyFormationProfile({
+      sessionId: session.id,
+      battleIndex: index,
+      effectiveLevel,
+      routeProgress,
+      bossesDefeated: session.bossHistory?.length || 0,
+      elite,
+    });
   const minions = enforcePostBossMinionTiers(
     Array.from({ length: minionCount }, (_, slot) => {
       const templateId = boss
         ? pickBossEscortTemplate(effectiveLevel, slot, runBoss?.minionTemplates, finalBoss).templateId
-        : pickEnemyTemplate(effectiveLevel, slot, elite, session.bossHistory?.length || 0).templateId;
+        : (pickRunEnemyFormationTemplate(enemyFormationProfile, slot, effectiveLevel, index)
+          || pickEnemyTemplate(effectiveLevel, slot, elite, session.bossHistory?.length || 0)).templateId;
       return cloneRunStack(templateId, `enemy-${session.id}-${index}-${slot}`);
     }),
     {
@@ -4802,6 +5436,9 @@ function pickBossEscortTemplate(level: number, slot: number, bossTemplateIds: st
 
 function getRandomRunBossBattleNumbers(battleCount: number): number[] {
   const safeCount = Math.max(2, Math.round(battleCount));
+  if (safeCount <= 3) return [safeCount];
+  if (safeCount <= 5) return [safeCount - 1, safeCount];
+
   const contentBossCap = Math.max(
     RANDOM_RUN_BALANCE.currentContentBosses,
     Math.ceil(safeCount / (RANDOM_RUN_BALANCE.bossSpacing + 2))
@@ -4829,6 +5466,113 @@ function getRandomRunBossBattleNumbers(battleCount: number): number[] {
     .sort((a, b) => a - b);
 }
 
+interface BossRouteModifier {
+  title: string;
+  summary: string;
+  battleSuffix: string;
+  eliteSuffix: string;
+  stopSuffix: string;
+  battleLevelDelta: number;
+  eliteLevelDelta: number;
+  shopChanceDelta: number;
+  hardRewardPreference?: 'shop' | 'omen';
+}
+
+const BOSS_ROUTE_MODIFIERS: Record<string, BossRouteModifier> = {
+  'mother-cindervein': {
+    title: 'Candle Tithe',
+    summary: 'Omens appear more often, but ordinary fights carry candle curses.',
+    battleSuffix: 'Cindervein candles make even safe fights harder to leave clean.',
+    eliteSuffix: 'Her candle guard presses hard and leaves a stronger omen behind.',
+    stopSuffix: 'Candle signs are more common on this road.',
+    battleLevelDelta: 0,
+    eliteLevelDelta: 1,
+    shopChanceDelta: -0.25,
+    hardRewardPreference: 'omen',
+  },
+  'ser-kael-duskplate': {
+    title: 'Blue Oath Road',
+    summary: 'Hard routes are tougher, but their reward stops favor quartermasters.',
+    battleSuffix: 'Blue oath shields slow the road and reward stronger positioning.',
+    eliteSuffix: 'Duskplate elites are reinforced and pay better if broken.',
+    stopSuffix: 'Blue-oath spoils draw more road merchants than shrines.',
+    battleLevelDelta: 0,
+    eliteLevelDelta: 2,
+    shopChanceDelta: 0.25,
+    hardRewardPreference: 'shop',
+  },
+  'prior-moon-voss': {
+    title: 'Moon Reading',
+    summary: 'The road bends toward omens and spell pressure.',
+    battleSuffix: 'Moonlit reflections make enemy casters more confident.',
+    eliteSuffix: 'Moon priests guard the hard route with sharper rites.',
+    stopSuffix: 'Moon omens answer more often than merchants.',
+    battleLevelDelta: 0,
+    eliteLevelDelta: 1,
+    shopChanceDelta: -0.3,
+    hardRewardPreference: 'omen',
+  },
+  'key-saint-ardan': {
+    title: 'Sealed Gate Toll',
+    summary: 'More shops appear, but road fights scale slightly faster.',
+    battleSuffix: 'Every gate toll adds pressure before Ardan.',
+    eliteSuffix: 'Key-guards hold the hard route with heavier armor.',
+    stopSuffix: 'Locked caches and merchants gather near Ardan roads.',
+    battleLevelDelta: 1,
+    eliteLevelDelta: 1,
+    shopChanceDelta: 0.35,
+    hardRewardPreference: 'shop',
+  },
+  'blackroot-vessel': {
+    title: 'Root Hunger',
+    summary: 'All fights are slightly stronger and omens lean dangerous.',
+    battleSuffix: 'Black roots thicken the road and strengthen enemy lines.',
+    eliteSuffix: 'Root-bound elites arrive heavier than expected.',
+    stopSuffix: 'Root omens are unstable but can shape a build.',
+    battleLevelDelta: 1,
+    eliteLevelDelta: 1,
+    shopChanceDelta: -0.15,
+  },
+  'lady-mirror-veyra': {
+    title: 'Mirror Road',
+    summary: 'Alternate lanes and hard fights are more deceptive.',
+    battleSuffix: 'Mirror signs make the enemy tempo less predictable.',
+    eliteSuffix: 'Veyra reflections make hard-route enemies sharper.',
+    stopSuffix: 'Mirror omens often change the run plan.',
+    battleLevelDelta: 0,
+    eliteLevelDelta: 1,
+    shopChanceDelta: -0.1,
+  },
+  'scarlet-matron-yvane': {
+    title: 'Scarlet Thread',
+    summary: 'Hard routes hit much harder, but their aftermath is more valuable.',
+    battleSuffix: 'Scarlet thread tightens around every fight.',
+    eliteSuffix: 'Scarlet elites are dangerous and should be chosen deliberately.',
+    stopSuffix: 'Blood-star roads leave stronger spoils after danger.',
+    battleLevelDelta: 1,
+    eliteLevelDelta: 2,
+    shopChanceDelta: 0,
+  },
+  'emperor-grave-aurel': {
+    title: 'Imperial Wake',
+    summary: 'The whole road scales upward; expect stronger late formations.',
+    battleSuffix: 'The emperor wakes the road earlier than normal.',
+    eliteSuffix: 'Imperial hard routes march like miniature boss fights.',
+    stopSuffix: 'Imperial spoils are guarded by old vows.',
+    battleLevelDelta: 1,
+    eliteLevelDelta: 2,
+    shopChanceDelta: 0.1,
+  },
+};
+
+function getBossRouteModifier(bossId?: string): BossRouteModifier | null {
+  return bossId ? BOSS_ROUTE_MODIFIERS[bossId] || null : null;
+}
+
+function appendRouteModifierDescription(description: string, suffix?: string): string {
+  return suffix ? `${description} ${suffix}` : description;
+}
+
 function createDailyRunNodes(challenge: DailyRunChallenge, playerLevel: number): DungeonNode[] {
   const battleCount = normalizeRandomRunBattleCount(challenge.targetBattles);
   const roadLabels = ['Road Watch', 'Bell Patrol', 'Ash Crossing', 'Moonlit Ambush', 'Candle Guard', 'Iron Vow', 'Root Camp', 'Saint Gate', 'Black Causeway', 'Pilgrim Cut'];
@@ -4840,6 +5584,7 @@ function createDailyRunNodes(challenge: DailyRunChallenge, playerLevel: number):
   const bossBattleNumbers = getRandomRunBossBattleNumbers(battleCount);
   const intermediateBossNumbers = bossBattleNumbers.filter(number => number < battleCount);
   const intermediateBossPool = shuffle(BOSS_PROFILES.filter(profile => profile.id !== challenge.bossId));
+  const routeModifier = getBossRouteModifier(challenge.bossId);
   let row = 0;
   let bonusStopIndex = 0;
 
@@ -4880,7 +5625,11 @@ function createDailyRunNodes(challenge: DailyRunChallenge, playerLevel: number):
   };
 
   const addRewardStopRow = (baseLevel: number, reason: 'boss' | 'hard') => {
-    const useShop = Math.random() < 0.5;
+    const shopChance = clamp(0.5 + (routeModifier?.shopChanceDelta || 0), 0.15, 0.85);
+    const preferredHardStop = reason === 'hard' ? routeModifier?.hardRewardPreference : undefined;
+    const useShop = preferredHardStop
+      ? preferredHardStop === 'shop'
+      : Math.random() < shopChance;
     const stopIndex = bonusStopIndex;
     bonusStopIndex += 1;
     addRow([{
@@ -4889,8 +5638,8 @@ function createDailyRunNodes(challenge: DailyRunChallenge, playerLevel: number):
         ? shopLabels[stopIndex % shopLabels.length]
         : eventLabels[stopIndex % eventLabels.length],
       description: useShop
-        ? `${reason === 'boss' ? 'Boss' : 'Hard-route'} spoils. Spend run gold before the road twists again.`
-        : `${reason === 'boss' ? 'Boss' : 'Hard-route'} omen. A risky blessing waits after the dangerous fight.`,
+        ? appendRouteModifierDescription(`${reason === 'boss' ? 'Boss' : 'Hard-route'} spoils. Spend run gold before the road twists again.`, routeModifier?.stopSuffix)
+        : appendRouteModifierDescription(`${reason === 'boss' ? 'Boss' : 'Hard-route'} omen. A risky blessing waits after the dangerous fight.`, routeModifier?.stopSuffix),
       level: baseLevel,
       rewardSource: reason,
     }]);
@@ -4898,7 +5647,12 @@ function createDailyRunNodes(challenge: DailyRunChallenge, playerLevel: number):
 
   for (let battleNumber = 1; battleNumber < battleCount; battleNumber += 1) {
     const battleIndex = battleNumber - 1;
-    const baseLevel = getRandomRunScaledBattleLevel(playerLevel, battleNumber, battleCount, challenge.enemyLevelOffset || 0);
+    const baseLevel = getRandomRunScaledBattleLevel(
+      playerLevel,
+      battleNumber,
+      battleCount,
+      (challenge.enemyLevelOffset || 0) + (routeModifier?.battleLevelDelta || 0)
+    );
     const roadLabel = roadLabels[battleIndex % roadLabels.length];
     const alternateLabel = alternateLabels[battleIndex % alternateLabels.length];
     const eliteLabel = eliteLabels[battleIndex % eliteLabels.length];
@@ -4907,10 +5661,13 @@ function createDailyRunNodes(challenge: DailyRunChallenge, playerLevel: number):
     if (bossIndex >= 0) {
       const boss = intermediateBossPool[bossIndex % Math.max(1, intermediateBossPool.length)]
         || getBossProfileByIndex(battleIndex + bossIndex);
+      const grantsVeteran = battleNumber === battleCount - 1;
       addRow([{
         type: 'boss',
         label: boss.name,
-        description: `${boss.subtitle}. ${boss.intro}`,
+        description: grantsVeteran
+          ? `${boss.subtitle}. ${boss.intro} Defeat this gate to call a tier III veteran before the last boss.`
+          : `${boss.subtitle}. ${boss.intro}`,
         level: getRandomRunScaledBattleLevel(playerLevel, battleNumber, battleCount, bossIndex + (challenge.enemyLevelOffset || 0)),
         battleNumber,
         bossId: boss.id,
@@ -4923,7 +5680,7 @@ function createDailyRunNodes(challenge: DailyRunChallenge, playerLevel: number):
       addRow([{
         type: 'battle',
         label: roadLabel,
-        description: 'Opening fight. Clear it to reveal the first road split.',
+        description: appendRouteModifierDescription('Opening fight. Clear it to reveal the first road split.', routeModifier?.battleSuffix),
         level: baseLevel,
         battleNumber,
       }]);
@@ -4932,22 +5689,22 @@ function createDailyRunNodes(challenge: DailyRunChallenge, playerLevel: number):
         {
           type: 'battle',
           label: roadLabel,
-          description: 'Safer fight. Lower pressure, lower payout.',
+          description: appendRouteModifierDescription('Safer fight. Lower pressure, lower payout.', routeModifier?.battleSuffix),
           level: baseLevel,
           battleNumber,
         },
         {
           type: 'elite',
           label: eliteLabel,
-          description: 'Elite fight. Harder enemy, better run-gold pressure.',
-          level: getRandomRunScaledBattleLevel(playerLevel, battleNumber, battleCount, 1 + (challenge.enemyLevelOffset || 0)),
+          description: appendRouteModifierDescription('Elite fight. Harder enemy, better run-gold pressure.', routeModifier?.eliteSuffix),
+          level: getRandomRunScaledBattleLevel(playerLevel, battleNumber, battleCount, 1 + (challenge.enemyLevelOffset || 0) + (routeModifier?.eliteLevelDelta || 0)),
           battleNumber,
         },
         {
           type: 'battle',
           label: alternateLabel,
-          description: 'Alternate route. Similar danger with different enemy tempo.',
-          level: getRandomRunScaledBattleLevel(playerLevel, battleNumber, battleCount, challenge.enemyLevelOffset || 0),
+          description: appendRouteModifierDescription('Alternate route. Similar danger with different enemy tempo.', routeModifier?.battleSuffix),
+          level: getRandomRunScaledBattleLevel(playerLevel, battleNumber, battleCount, (challenge.enemyLevelOffset || 0) + (routeModifier?.battleLevelDelta || 0)),
           battleNumber,
         },
       ]);
@@ -4956,15 +5713,15 @@ function createDailyRunNodes(challenge: DailyRunChallenge, playerLevel: number):
         {
           type: 'battle',
           label: roadLabel,
-          description: 'Standard fight toward the boss road.',
+          description: appendRouteModifierDescription('Standard fight toward the boss road.', routeModifier?.battleSuffix),
           level: baseLevel,
           battleNumber,
         },
         {
           type: 'elite',
           label: eliteLabel,
-          description: 'Hard route. More danger now, more gold for shops.',
-          level: getRandomRunScaledBattleLevel(playerLevel, battleNumber, battleCount, 1 + (challenge.enemyLevelOffset || 0)),
+          description: appendRouteModifierDescription('Hard route. More danger now, more gold for shops.', routeModifier?.eliteSuffix),
+          level: getRandomRunScaledBattleLevel(playerLevel, battleNumber, battleCount, 1 + (challenge.enemyLevelOffset || 0) + (routeModifier?.eliteLevelDelta || 0)),
           battleNumber,
         },
       ]);
@@ -4972,7 +5729,7 @@ function createDailyRunNodes(challenge: DailyRunChallenge, playerLevel: number):
       addRow([{
         type: 'battle',
         label: roadLabel,
-        description: 'A tactical road fight. Defeated enemies pay run gold.',
+        description: appendRouteModifierDescription('A tactical road fight. Defeated enemies pay run gold.', routeModifier?.battleSuffix),
         level: baseLevel,
         battleNumber,
       }]);
@@ -4989,13 +5746,13 @@ function createDailyRunNodes(challenge: DailyRunChallenge, playerLevel: number):
         {
           type: 'shop',
           label: shopLabels[shopIndex % shopLabels.length],
-          description: 'Spend only run gold on temporary upgrades. This stop does not count as a fight.',
+          description: appendRouteModifierDescription('Spend only run gold on temporary upgrades. This stop does not count as a fight.', routeModifier?.stopSuffix),
           level: baseLevel,
         },
         {
           type: 'event',
           label: eventLabels[eventIndex % eventLabels.length],
-          description: 'Risk a blessing, recruit, revive, wound, or coin payout. This stop does not count as a fight.',
+          description: appendRouteModifierDescription('Risk a blessing, recruit, revive, wound, or coin payout. This stop does not count as a fight.', routeModifier?.stopSuffix),
           level: baseLevel,
         },
       ]);
@@ -5007,7 +5764,9 @@ function createDailyRunNodes(challenge: DailyRunChallenge, playerLevel: number):
   addRow([{
     type: 'boss',
     label: challenge.bossName,
-    description: `${challenge.bossSubtitle}. A stronger lone commander ends the road.`,
+    description: routeModifier
+      ? `${challenge.bossSubtitle}. ${routeModifier.title}: ${routeModifier.summary} A stronger lone commander ends the road.`
+      : `${challenge.bossSubtitle}. A stronger lone commander ends the road.`,
     level: getRandomRunScaledBattleLevel(playerLevel, battleCount, battleCount, 2 + (challenge.enemyLevelOffset || 0)),
     battleNumber: battleCount,
     bossId: challenge.bossId,
@@ -5403,10 +6162,10 @@ function isFinalRunNode(session: RunSession, node?: DungeonNode): boolean {
 }
 
 function getRewardDestination(session: RunSession, nextWins: number): RewardDestination {
-    if (session.nodes.length > 0) {
-      const node = session.nodes[session.currentNodeIndex];
+  if (session.nodes.length > 0) {
+    const node = session.nodes[session.currentNodeIndex];
     return isFinalRunNode(session, node) || nextWins >= session.targetBattles ? 'complete' : 'dungeon-next';
-    }
+  }
 
   if (session.mode === 'daily') {
     return nextWins >= session.targetBattles ? 'complete' : 'daily-next';
@@ -5478,8 +6237,9 @@ function getRunGoldEarned(session: RunSession, battle: BattleState): number {
   const perUnit = 7 + Math.floor(enemyLevel / 5) + Math.round(routeProgress * 3);
   const commanderBonus = commanderDefeated ? 18 + Math.round(routeProgress * 12) : 0;
   const base = defeatedEnemies.length * perUnit + commanderBonus + nodeBonus;
+  const runMultiplier = session.dailyChallenge?.rewardGoldMultiplier || 1;
 
-  return Math.max(12, Math.round(base * (battle.enemy.lootMultiplier || 1)));
+  return Math.max(12, Math.round(base * (battle.enemy.lootMultiplier || 1) * runMultiplier));
 }
 
 function applyBattleLossesToRun(session: RunSession, battle: BattleState): RunSession {
@@ -5841,6 +6601,10 @@ function makeMercenaryShopOffer(session: RunSession): RunShopOffer | null {
   if (isWorldMapRun(session) || !canAddRunMinion(session) || !getMinionTemplate(MERCENARY_TEMPLATE_ID)) {
     return null;
   }
+  const chanceRoll = getStableShopRoll(`${session.id}:${getShopNodeOfferKey(session)}:${session.wins}:mercenary-offer`, 10000) / 10000;
+  if (chanceRoll >= MERCENARY_SHOP_OFFER_CHANCE) {
+    return null;
+  }
 
   return {
     choiceId: MERCENARY_SHOP_REWARD_ID,
@@ -6059,6 +6823,129 @@ function getScaledRunOmenGold(session: RunSession, base: number): number {
   return Math.max(10, Math.round((base + routeProgress * 24 + (level - 1) * 1.8) / 5) * 5);
 }
 
+function getAliveRunUnitIndexes(session: RunSession): number[] {
+  return session.minions
+    .map((unit, index) => unit.alive ? index : -1)
+    .filter(index => index >= 0);
+}
+
+function applyBloodCovenantOmen(session: RunSession): RunSession {
+  const aliveIndexes = getAliveRunUnitIndexes(session);
+  const chosenIndex = shuffle(aliveIndexes)[0];
+  const wounded = typeof chosenIndex === 'number' ? woundSpecificMinion(session, chosenIndex) : session;
+
+  return {
+    ...wounded,
+    stats: {
+      ...wounded.stats,
+      armyPower: wounded.stats.armyPower + 2,
+      spellPower: wounded.stats.spellPower + 1,
+    },
+    notice: 'Blood Covenant claimed: one fighter falls, but the run gains +2 Army Power and +1 Spell Power.',
+  };
+}
+
+function buildClassDoctrineOmen(session: RunSession): OmenOutcome {
+  const classes = Array.from(new Set(
+    session.minions
+      .filter(unit => unit.alive)
+      .map(unit => getMinionTemplate(unit.stack.templateId)?.class)
+      .filter((classId): classId is MinionClass => Boolean(classId))
+  ));
+  const classId = shuffle(classes)[0] || 'knight';
+  const label = `${MINION_CLASS_LABELS[classId]} Doctrine`;
+  const bonus: RunUnitStatBonus = classId === 'priest'
+    ? { healing: 2, health: 4 }
+    : classId === 'wizard'
+      ? { magic: 2, health: 3 }
+      : classId === 'templar'
+        ? { defense: 2, health: 5 }
+        : { attack: 2, health: 4 };
+
+  return {
+    id: `omen-class-doctrine-${classId}`,
+    title: label,
+    flavor: 'The sign chooses one order in the warband and brands its vow deeper.',
+    detail: `${MINION_CLASS_LABELS[classId]} units gain a run-only combat bonus.`,
+    tone: classId === 'templar' ? 'ward' : 'blessing',
+    apply: current => grantRunUnitClassBonus(
+      current,
+      classId,
+      bonus,
+      label,
+      `${label} strengthened the ${MINION_CLASS_LABELS[classId].toLowerCase()} line.`
+    ),
+  };
+}
+
+function buildRangedDoctrineOmen(session: RunSession): OmenOutcome {
+  const hasRanged = session.minions.some(unit => {
+    const template = getMinionTemplate(unit.stack.templateId);
+    return unit.alive && Boolean(template && template.stats.range > 1);
+  });
+
+  if (!hasRanged) {
+    return {
+      id: 'omen-ranged-fallback',
+      title: 'Unspent Arrow Rite',
+      flavor: 'The omen finds no ranged line to bless, so it leaves coin for the next road.',
+      detail: `You gain ${getScaledRunOmenGold(session, 45)} run gold.`,
+      tone: 'gold',
+      apply: current => ({ ...current, runGold: current.runGold + getScaledRunOmenGold(current, 45) }),
+    };
+  }
+
+  return {
+    id: 'omen-ranged-doctrine',
+    title: 'Moon Arrow Doctrine',
+    flavor: 'A pale arc traces itself from every bow, staff, and thrown curse.',
+    detail: 'Ranged units gain +1 range and +1 attack or magic for this run.',
+    tone: 'blessing',
+    apply: current => grantRangedRunUnitBonus(
+      current,
+      { range: 1, attack: 1, magic: 1 },
+      'Moon Arrow',
+      'Moon Arrow Doctrine sharpened the ranged line.'
+    ),
+  };
+}
+
+function rollSpecialDungeonEventOutcome(session: RunSession, roll: number, deepRoad: boolean): OmenOutcome | null {
+  if (roll >= 0.2 && roll < 0.28 && getAliveRunUnitIndexes(session).length >= 2) {
+    return {
+      id: 'omen-blood-covenant',
+      title: 'Blood Covenant',
+      flavor: 'The road offers strength for a body. The bargain is ugly, but clear.',
+      detail: 'One living minion falls. Gain +2 Army Power and +1 Spell Power for this run.',
+      tone: 'curse',
+      apply: applyBloodCovenantOmen,
+    };
+  }
+
+  if (roll >= 0.48 && roll < 0.56) return buildClassDoctrineOmen(session);
+
+  if (roll >= 0.68 && roll < 0.74) {
+    const gold = getScaledRunOmenGold(session, deepRoad ? 55 : 40);
+    return {
+      id: 'omen-quartermaster-route',
+      title: 'Quartermaster Route',
+      flavor: 'A hidden cart road opens for one night, marked by black coin and candle smoke.',
+      detail: `Gain ${gold} run gold and +1 shop reroll.`,
+      tone: 'gold',
+      apply: current => ({
+        ...current,
+        runGold: current.runGold + gold,
+        shopRerollsRemaining: (current.shopRerollsRemaining ?? RUN_SHOP_REROLL_COUNT) + 1,
+        notice: 'Quartermaster Route added run gold and a shop reroll.',
+      }),
+    };
+  }
+
+  if (roll >= 0.84 && roll < 0.9) return buildRangedDoctrineOmen(session);
+
+  return null;
+}
+
 function rollPositiveWorldMapEventOutcome(session: RunSession): OmenOutcome {
   const outcomes: OmenOutcome[] = [
     {
@@ -6086,6 +6973,15 @@ function rollPositiveWorldMapEventOutcome(session: RunSession): OmenOutcome {
       apply: current => makeStatBuff('hard-route-morale', 'Banner Echo', '+2 Morale from the hard road.', { morale: 2 }).apply(current),
     },
   ];
+
+  outcomes.push(buildClassDoctrineOmen(session));
+
+  if (session.minions.some(unit => {
+    const template = getMinionTemplate(unit.stack.templateId);
+    return unit.alive && Boolean(template && template.stats.range > 1);
+  })) {
+    outcomes.push(buildRangedDoctrineOmen(session));
+  }
 
   if (hasWoundedRunMinions(session)) {
     outcomes.push({
@@ -6131,6 +7027,29 @@ function rollPositiveDungeonEventOutcome(session: RunSession): OmenOutcome {
       apply: current => makeStatBuff('hard-route-training', 'Road Tempering', '+1 Army, Morale, and Spell Power.', { armyPower: 1, morale: 1, spellPower: 1 }).apply(current),
     },
   ];
+
+  outcomes.push(buildClassDoctrineOmen(session));
+
+  if (session.minions.some(unit => {
+    const template = getMinionTemplate(unit.stack.templateId);
+    return unit.alive && Boolean(template && template.stats.range > 1);
+  })) {
+    outcomes.push(buildRangedDoctrineOmen(session));
+  }
+
+  outcomes.push({
+    id: 'hard-route-quartermaster',
+    title: 'Quartermaster Route',
+    flavor: 'A hidden cart road opens behind the hard route, marked by black coin and candle smoke.',
+    detail: `Gain ${goldReward} run gold and +1 shop reroll.`,
+    tone: 'gold',
+    apply: current => ({
+      ...current,
+      runGold: current.runGold + goldReward,
+      shopRerollsRemaining: (current.shopRerollsRemaining ?? RUN_SHOP_REROLL_COUNT) + 1,
+      notice: 'Quartermaster Route added run gold and a shop reroll.',
+    }),
+  });
 
   if (hasFallenMinions(session)) {
     outcomes.push({
@@ -6287,6 +7206,8 @@ function rollDungeonEventOutcome(session: RunSession): OmenOutcome {
   const highGold = getScaledRunOmenGold(session, 60);
   const curseGold = getScaledRunOmenGold(session, 25);
   const deepRoad = session.targetBattles > 0 && session.wins >= Math.floor(session.targetBattles * 0.45);
+  const specialOutcome = rollSpecialDungeonEventOutcome(session, roll, deepRoad);
+  if (specialOutcome) return specialOutcome;
 
   if (roll < 0.2) {
     const alive = session.minions
@@ -6741,6 +7662,16 @@ function grantRandomRunCompletionReward(session: RunSession, user: User, complet
     + getRandomRunEffectiveLevel(session.stats.level || 1) * 5
   ) * runExpMultiplier));
   const previousRunState = getDailyRunState(user);
+  const runTemplates = session.minions
+    .map(unit => getMinionTemplate(unit.stack.templateId))
+    .filter((template): template is MinionTemplate => Boolean(template));
+  const unitTemplateIds = Array.from(new Set(session.minions.map(unit => unit.stack.templateId).filter(Boolean)));
+  const unitClassIds = Array.from(new Set(runTemplates.map(template => template.class)));
+  const tierThreeUnitNames = Array.from(new Set(
+    runTemplates
+      .filter(template => template.tier === 'tier3')
+      .map(template => template.name)
+  ));
   const dailyRun = recordDailyRunCompletionState(user, {
       completedAt,
       wins: session.wins,
@@ -6760,6 +7691,9 @@ function grantRandomRunCompletionReward(session: RunSession, user: User, complet
     shopBuys: session.shopBuyHistory || [],
     omens: session.omenHistory || [],
     unlockedSpellNames: session.permanentSpellUnlocks || [],
+    unitTemplateIds,
+    unitClassIds,
+    tierThreeUnitNames,
   });
   const levelUps = Math.max(0, dailyRun.runLevel - previousRunState.runLevel);
   const activity: ActivityEntry = {
@@ -6776,6 +7710,44 @@ function grantRandomRunCompletionReward(session: RunSession, user: User, complet
     dailyRun,
     activityLog: [activity, ...(user.activityLog || [])].slice(0, 30),
   });
+
+  const previouslyUnlockedMilestoneIds = new Set(
+    getRunMilestoneViews(previousRunState)
+      .filter(milestone => milestone.unlocked)
+      .map(milestone => milestone.id)
+  );
+  const newlyUnlockedMilestones = getRunMilestoneViews(dailyRun)
+    .filter(milestone => milestone.unlocked && !previouslyUnlockedMilestoneIds.has(milestone.id));
+
+  if (typeof window !== 'undefined' && newlyUnlockedMilestones.length > 0) {
+    const previewMilestones = newlyUnlockedMilestones.slice(0, 3);
+    const claimableExp = newlyUnlockedMilestones.reduce(
+      (total, milestone) => total + getRunMilestoneRewardExp(milestone.id),
+      0
+    );
+
+    window.setTimeout(() => {
+      emitCompletionNotice({
+        id: `run-milestones-${session.id}-${completedAt}`,
+        kind: 'run',
+        kicker: 'Achievement Unlocked',
+        title: newlyUnlockedMilestones.length === 1
+          ? previewMilestones[0].title
+          : `${newlyUnlockedMilestones.length} Milestones Unlocked`,
+        description: newlyUnlockedMilestones.length === 1
+          ? previewMilestones[0].description
+          : previewMilestones.map(milestone => milestone.title).join(', '),
+        artworkPath: previewMilestones[0].iconPath,
+        artworkStyle: 'item',
+        rewards: [
+          { label: 'Claim XP', value: `+${claimableExp}`, tone: 'blue' },
+          { label: 'Milestones', value: String(newlyUnlockedMilestones.length), tone: 'violet' },
+        ],
+        completedAt,
+        skipBurst: true,
+      });
+    }, 250);
+  }
 
   return levelUps > 0
     ? `Random run cleared: ${score} score, +${runExp} run XP, ${levelUps} new run upgrade${levelUps === 1 ? '' : 's'}.`
@@ -6892,6 +7864,70 @@ function makeStatBuff(
   };
 }
 
+function mergeRunUnitStatBonus(current: RunUnitStatBonus | undefined, bonus: RunUnitStatBonus): RunUnitStatBonus {
+  return {
+    ...(current || {}),
+    attack: (current?.attack || 0) + (bonus.attack || 0),
+    defense: (current?.defense || 0) + (bonus.defense || 0),
+    magic: (current?.magic || 0) + (bonus.magic || 0),
+    healing: (current?.healing || 0) + (bonus.healing || 0),
+    health: (current?.health || 0) + (bonus.health || 0),
+    movement: (current?.movement || 0) + (bonus.movement || 0),
+    range: (current?.range || 0) + (bonus.range || 0),
+  };
+}
+
+function grantRunUnitStatBonus(
+  session: RunSession,
+  predicate: (unit: RunUnit, template: MinionTemplate) => boolean,
+  bonus: RunUnitStatBonus,
+  label: string,
+  notice: string,
+): RunSession {
+  let affected = 0;
+
+  const minions = session.minions.map(unit => {
+    const template = getMinionTemplate(unit.stack.templateId);
+    if (!unit.alive || !template || !predicate(unit, template)) return unit;
+
+    affected += 1;
+    const healthBonus = Math.max(0, bonus.health || 0);
+    const currentHealth = getRunUnitCurrentHealthForSession(session, unit);
+
+    return {
+      ...unit,
+      stack: {
+        ...unit.stack,
+        runStatBonus: mergeRunUnitStatBonus(unit.stack.runStatBonus, bonus),
+        runBonusLabel: unit.stack.runBonusLabel
+          ? `${unit.stack.runBonusLabel} + ${label}`
+          : label,
+        runCurrentHealth: healthBonus > 0 ? currentHealth + healthBonus : unit.stack.runCurrentHealth,
+      },
+    };
+  });
+
+  return {
+    ...session,
+    minions,
+    notice: affected > 0 ? notice : 'The omen found no matching unit and faded.',
+  };
+}
+
+function grantRunUnitClassBonus(
+  session: RunSession,
+  classId: MinionClass,
+  bonus: RunUnitStatBonus,
+  label: string,
+  notice: string,
+): RunSession {
+  return grantRunUnitStatBonus(session, (_unit, template) => template.class === classId, bonus, label, notice);
+}
+
+function grantRangedRunUnitBonus(session: RunSession, bonus: RunUnitStatBonus, label: string, notice: string): RunSession {
+  return grantRunUnitStatBonus(session, (_unit, template) => template.stats.range > 1, bonus, label, notice);
+}
+
 function hasFallenMinions(session: RunSession): boolean {
   return session.minions.some(unit => !unit.alive);
 }
@@ -6980,6 +8016,7 @@ function getRunUnitMaxHealthForSession(session: RunSession, unit: RunUnit): numb
   return Math.max(
     1,
     template.stats.health
+      + (unit.stack.runStatBonus?.health || 0)
       + Math.floor(session.stats.defensivePower * 0.9)
       + Math.floor(session.stats.morale / 2)
   );
@@ -7053,7 +8090,10 @@ function addRandomRunMinion(session: RunSession, tier: MinionTemplate['tier'], n
   const template = pickPlayerRunTemplate(tier);
   const replacementIndex = session.minions.findIndex(unit => !unit.alive);
   const newUnit: RunUnit = {
-    stack: cloneRunStack(template.templateId, `loaned-reward-${session.id}-${Date.now()}`),
+    stack: applyRunCommanderUnitBonusForSession(
+      session,
+      cloneRunStack(template.templateId, `loaned-reward-${session.id}-${Date.now()}`)
+    ),
     alive: true,
     origin: 'reward',
   };
@@ -7071,6 +8111,29 @@ function addRandomRunMinion(session: RunSession, tier: MinionTemplate['tier'], n
   return {
     ...session,
     minions: [...session.minions, newUnit],
+    notice: notice || `${template.name} joins the run.`,
+  };
+}
+
+function addGuaranteedRandomRunMinion(session: RunSession, tier: MinionTemplate['tier'], notice?: string): RunSession {
+  const normalResult = addRandomRunMinion(session, tier, notice);
+  if (normalResult.minions !== session.minions) return normalResult;
+
+  const template = pickPlayerRunTemplate(tier);
+  const replacementIndex = session.minions.findIndex(unit => getMinionTemplate(unit.stack.templateId)?.tier !== tier);
+  const safeReplacementIndex = replacementIndex >= 0 ? replacementIndex : Math.max(0, session.minions.length - 1);
+  const newUnit: RunUnit = {
+    stack: applyRunCommanderUnitBonusForSession(
+      session,
+      cloneRunStack(template.templateId, `loaned-guaranteed-${session.id}-${Date.now()}`)
+    ),
+    alive: true,
+    origin: 'reward',
+  };
+
+  return {
+    ...session,
+    minions: session.minions.map((unit, index) => index === safeReplacementIndex ? newUnit : unit),
     notice: notice || `${template.name} joins the run.`,
   };
 }
@@ -7111,7 +8174,14 @@ function upgradeRandomMinion(session: RunSession): RunSession {
     ...session,
     minions: session.minions.map((unit, index) => (
       index === chosen.index
-        ? { ...unit, stack: { ...unit.stack, templateId: chosen.nextTemplate?.templateId || unit.stack.templateId, runCurrentHealth: undefined } }
+        ? {
+          ...unit,
+          stack: applyRunCommanderUnitBonusForSession(session, {
+            ...unit.stack,
+            templateId: chosen.nextTemplate?.templateId || unit.stack.templateId,
+            runCurrentHealth: undefined,
+          }),
+        }
         : unit
     )),
     notice: `${chosen.nextTemplate.name} joins the front line.`,
@@ -7145,7 +8215,10 @@ function woundSpecificMinion(session: RunSession, index: number): RunSession {
 function addRunMinionFromTemplate(session: RunSession, template: MinionTemplate, notice: string): RunSession {
   const replacementIndex = session.minions.findIndex(unit => !unit.alive);
   const newUnit: RunUnit = {
-    stack: cloneRunStack(template.templateId, `loaned-reward-${session.id}-${Date.now()}`),
+    stack: applyRunCommanderUnitBonusForSession(
+      session,
+      cloneRunStack(template.templateId, `loaned-reward-${session.id}-${Date.now()}`)
+    ),
     alive: true,
     origin: 'reward',
   };

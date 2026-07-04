@@ -1,5 +1,5 @@
 import { BOSS_PROFILES } from '@/lib/bosses';
-import type { DailyRunState } from '@/lib/auth';
+import type { DailyRunState, MinionClass } from '@/lib/auth';
 
 export type RunMilestoneCategory = 'boss' | 'road' | 'army' | 'spell' | 'meta' | 'economy';
 export const RUN_MILESTONE_CATEGORY_LABELS: Record<RunMilestoneCategory, string> = {
@@ -73,6 +73,22 @@ function historyHasOmen(state: DailyRunState): boolean {
   return state.history.some(entry => (entry.omens?.length || 0) > 0);
 }
 
+function maxShopBuysInRun(state: DailyRunState): number {
+  return Math.max(0, ...state.history.map(entry => entry.shopBuys?.length || 0));
+}
+
+function maxOmensInRun(state: DailyRunState): number {
+  return Math.max(0, ...state.history.map(entry => entry.omens?.length || 0));
+}
+
+function historyHasUnitClass(state: DailyRunState, classId: MinionClass): boolean {
+  return state.history.some(entry => entry.unitClassIds?.includes(classId));
+}
+
+function historyHasTierThreeUnit(state: DailyRunState): boolean {
+  return state.history.some(entry => (entry.tierThreeUnitNames?.length || 0) > 0);
+}
+
 const BOSS_MILESTONES: RunMilestoneDefinition[] = BOSS_PROFILES.map(boss => ({
   id: `boss-${boss.id}`,
   category: 'boss' as const,
@@ -104,6 +120,20 @@ const STATIC_MILESTONES: RunMilestoneDefinition[] = [
     iconPath: '/assets/icons/speed.png',
   },
   {
+    id: 'road-double-boss',
+    category: 'road',
+    title: 'Twin Graves',
+    description: 'Defeat two bosses in one run.',
+    iconPath: '/assets/icons/attack.png',
+  },
+  {
+    id: 'road-full-warband',
+    category: 'road',
+    title: 'No Empty Graves',
+    description: 'Clear a run with seven units still standing.',
+    iconPath: '/assets/icons/defense.png',
+  },
+  {
     id: 'army-priest-recruit',
     category: 'army',
     title: 'Faithful Recruit',
@@ -124,6 +154,20 @@ const STATIC_MILESTONES: RunMilestoneDefinition[] = [
     title: 'Arcane Pact',
     description: 'Field a wizard-class minion in a cleared run.',
     iconPath: '/assets/minions/wizard-magus.png',
+  },
+  {
+    id: 'army-templar-recruit',
+    category: 'army',
+    title: 'Templar Vow',
+    description: 'Field a templar-class minion in a run.',
+    iconPath: '/assets/minions/templar-initiate.png',
+  },
+  {
+    id: 'army-tier-three-recruit',
+    category: 'army',
+    title: 'Elite Contract',
+    description: 'Recruit or finish with any tier III unit in a run.',
+    iconPath: '/assets/minions/knight-champion.png',
   },
   {
     id: 'spell-arcane-bolt',
@@ -172,6 +216,13 @@ const STATIC_MILESTONES: RunMilestoneDefinition[] = [
     iconPath: '/assets/icons/xp.png',
   },
   {
+    id: 'meta-run-level-15',
+    category: 'meta',
+    title: 'Crown Road',
+    description: 'Reach the current run level cap.',
+    iconPath: '/assets/icons/xp.png',
+  },
+  {
     id: 'meta-ten-clears',
     category: 'meta',
     title: 'Decade of Roads',
@@ -193,10 +244,24 @@ const STATIC_MILESTONES: RunMilestoneDefinition[] = [
     iconPath: '/assets/icons/gold.png',
   },
   {
+    id: 'economy-three-shop-buys',
+    category: 'economy',
+    title: 'Quartermaster',
+    description: 'Buy three shop offers in one run.',
+    iconPath: '/assets/icons/gold.png',
+  },
+  {
     id: 'economy-omen',
     category: 'economy',
     title: 'Omen Touched',
     description: 'Resolve an omen on a run.',
+    iconPath: '/assets/icons/rare-gem.png',
+  },
+  {
+    id: 'economy-five-omens',
+    category: 'economy',
+    title: 'Star Reader',
+    description: 'Resolve five omens in one run.',
     iconPath: '/assets/icons/rare-gem.png',
   },
 ];
@@ -209,7 +274,6 @@ export const RUN_MILESTONE_CATALOG: RunMilestoneDefinition[] = [
 function isMilestoneUnlocked(state: DailyRunState, milestone: RunMilestoneDefinition): boolean {
   const defeatedBosses = getDefeatedBossNames(state);
   const unlockedSpells = getUnlockedSpellNames(state);
-  const clearedRuns = state.history.filter(entry => entry.wins >= entry.targetBattles);
 
   switch (milestone.id) {
     case 'road-first-clear':
@@ -218,12 +282,20 @@ function isMilestoneUnlocked(state: DailyRunState, milestone: RunMilestoneDefini
       return state.history.some(entry => entry.wins >= 5);
     case 'road-hard-route':
       return historyHasRouteKeyword(state, 'hard');
+    case 'road-double-boss':
+      return state.history.some(entry => (entry.bossesDefeated?.length || 0) >= 2);
+    case 'road-full-warband':
+      return state.history.some(entry => entry.wins >= entry.targetBattles && entry.unitsStanding >= 7);
     case 'army-priest-recruit':
-      return clearedRuns.some(entry => entry.unitsStanding > 0) && state.completions > 0;
+      return historyHasUnitClass(state, 'priest');
     case 'army-knight-recruit':
-      return state.completions > 0 && state.permanentStats.armyPower > 0;
+      return historyHasUnitClass(state, 'knight');
     case 'army-wizard-recruit':
-      return state.completions > 0 && state.permanentStats.spellPower > 0;
+      return historyHasUnitClass(state, 'wizard');
+    case 'army-templar-recruit':
+      return historyHasUnitClass(state, 'templar');
+    case 'army-tier-three-recruit':
+      return historyHasTierThreeUnit(state);
     case 'spell-arcane-bolt':
       return unlockedSpells.has('Arcane Bolt');
     case 'spell-frost-lance':
@@ -236,14 +308,20 @@ function isMilestoneUnlocked(state: DailyRunState, milestone: RunMilestoneDefini
       return state.runLevel >= 5;
     case 'meta-run-level-10':
       return state.runLevel >= 10;
+    case 'meta-run-level-15':
+      return state.runLevel >= 15;
     case 'meta-ten-clears':
       return state.completions >= 10;
     case 'meta-streak-5':
       return state.streak >= 5 || state.history.some(entry => entry.streakAfter >= 5);
     case 'economy-shop-buy':
       return historyHasShopBuy(state);
+    case 'economy-three-shop-buys':
+      return maxShopBuysInRun(state) >= 3;
     case 'economy-omen':
       return historyHasOmen(state);
+    case 'economy-five-omens':
+      return maxOmensInRun(state) >= 5;
     default:
       if (milestone.id.startsWith('boss-')) {
         const bossId = milestone.id.replace('boss-', '');
@@ -254,15 +332,30 @@ function isMilestoneUnlocked(state: DailyRunState, milestone: RunMilestoneDefini
   }
 }
 
+function getRunMilestoneProgressLabel(state: DailyRunState, milestoneId: string): string | undefined {
+  if (milestoneId === 'meta-run-level-5') return `Lv ${state.runLevel}/5`;
+  if (milestoneId === 'meta-run-level-10') return `Lv ${state.runLevel}/10`;
+  if (milestoneId === 'meta-run-level-15') return `Lv ${state.runLevel}/15`;
+  if (milestoneId === 'meta-ten-clears') return `${state.completions}/10`;
+  if (milestoneId === 'meta-streak-5') return `${state.streak}/5 streak`;
+  if (milestoneId === 'economy-three-shop-buys') return `${maxShopBuysInRun(state)}/3 buys`;
+  if (milestoneId === 'economy-five-omens') return `${maxOmensInRun(state)}/5 omens`;
+  if (milestoneId === 'road-double-boss') {
+    const maxBosses = Math.max(0, ...state.history.map(entry => entry.bossesDefeated?.length || 0));
+    return `${maxBosses}/2 bosses`;
+  }
+  if (milestoneId === 'road-full-warband') {
+    const maxStanding = Math.max(0, ...state.history.map(entry => entry.unitsStanding || 0));
+    return `${maxStanding}/7 standing`;
+  }
+  return undefined;
+}
+
 export function getRunMilestoneViews(state: DailyRunState): RunMilestoneView[] {
   return RUN_MILESTONE_CATALOG.map(milestone => ({
     ...milestone,
     unlocked: isMilestoneUnlocked(state, milestone),
-    progressLabel: milestone.id === 'meta-run-level-5' || milestone.id === 'meta-run-level-10'
-      ? `Lv ${state.runLevel}/${milestone.id === 'meta-run-level-10' ? 10 : 5}`
-      : milestone.id === 'meta-ten-clears'
-        ? `${state.completions}/10`
-        : undefined,
+    progressLabel: getRunMilestoneProgressLabel(state, milestone.id),
   }));
 }
 
@@ -272,7 +365,7 @@ export function getMilestonesByCategory(state: DailyRunState, category: RunMiles
 
 export function getRunMilestoneCategorySummaries(state: DailyRunState): RunMilestoneCategorySummary[] {
   const views = getRunMilestoneViews(state);
-  const categories: RunMilestoneCategory[] = ['boss', 'road', 'army', 'spell'];
+  const categories: RunMilestoneCategory[] = ['boss', 'road', 'army', 'spell', 'meta', 'economy'];
 
   return categories.map(category => {
     const inCategory = views.filter(view => view.category === category);

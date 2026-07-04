@@ -16,6 +16,7 @@ import {
   getRunMilestoneViews,
   getRunMilestoneCategorySummaries,
   getRunMilestoneUnlockCounts,
+  getFeaturedHubMilestones,
   isRunMilestoneRewardClaimed,
 } from '@/lib/runMilestones';
 
@@ -41,6 +42,7 @@ const LOBBY_UPGRADE_ICONS: Record<RandomRunUpgradeStat, string> = {
 
 interface UpgradeRow {
   label: string;
+  shortLabel: string;
   value: string;
   hint: string;
   stat: RandomRunUpgradeStat;
@@ -53,7 +55,7 @@ function clamp(value: number, min: number, max: number): number {
 function RunStatTile({ icon, label, value, hint }: { icon: string; label: string; value: string; hint: string }) {
   return (
     <div className="sp-hub-stat-tile" title={hint}>
-      <Image src={icon} alt="" width={32} height={32} className="sp-hub-stat-tile-icon" unoptimized />
+      <Image src={icon} alt="" width={26} height={26} className="sp-hub-stat-tile-icon" unoptimized />
       <div className="sp-hub-stat-tile-copy">
         <span className="sp-hub-stat-tile-value">{value}</span>
         <span className="sp-hub-stat-tile-label">{label}</span>
@@ -82,6 +84,7 @@ function RunBonusTile({
       <button
         type="button"
         className="sp-hub-bonus-tile sp-hub-bonus-tile-spendable"
+        aria-label={`${label}: ${value}. ${hint}. Spend 1 upgrade point.`}
         title={`${hint} - click to spend 1 upgrade point`}
         onClick={onSpend}
       >
@@ -94,7 +97,7 @@ function RunBonusTile({
   }
 
   return (
-    <div className="sp-hub-bonus-tile" title={hint}>
+    <div className="sp-hub-bonus-tile" title={`${label}: ${hint}`} aria-label={`${label}: ${value}. ${hint}`}>
       <Image src={icon} alt="" width={28} height={28} className="sp-hub-bonus-tile-icon" unoptimized />
       <span className="sp-hub-bonus-tile-value">{value}</span>
       <span className="sp-hub-bonus-tile-label">{label}</span>
@@ -129,19 +132,20 @@ export default function RunOverviewPanel({ onOpenMilestones }: RunOverviewPanelP
   const categorySummaries = getRunMilestoneCategorySummaries(runState);
   const milestoneCounts = getRunMilestoneUnlockCounts(runState);
   const milestoneViews = getRunMilestoneViews(runState);
+  const featuredMilestones = getFeaturedHubMilestones(runState, 3);
   const claimableMilestones = milestoneViews.filter(view =>
     view.unlocked && !isRunMilestoneRewardClaimed(runState, view.id)
   ).length;
   const milestonePercent = clamp((milestoneCounts.unlocked / Math.max(1, milestoneCounts.total)) * 100, 0, 100);
   const canSpendUpgradePoints = runState.runUpgradePoints > 0;
   const upgradeRows: UpgradeRow[] = [
-    { label: 'Army Damage', value: `+${permanent.armyPower}`, hint: 'Extra damage for the whole warband', stat: 'armyPower' },
-    { label: 'Army Ward', value: `+${permanent.defensivePower}`, hint: 'Extra protection for the whole warband', stat: 'defensivePower' },
-    { label: 'Morale', value: `+${permanent.morale}`, hint: 'Run-start morale and tempo bonus', stat: 'morale' },
-    { label: 'Spell Power', value: `+${permanent.spellPower}`, hint: 'Stronger commander spells', stat: 'spellPower' },
-    { label: 'Commander HP', value: `+${permanent.maxHealth}`, hint: 'Extra commander health each run', stat: 'maxHealth' },
-    { label: 'Unit Attack', value: `+${permanent.unitPower}`, hint: 'Extra attack for drafted units', stat: 'unitPower' },
-    { label: 'Unit Ward', value: `+${permanent.unitWard}`, hint: 'Extra defense for drafted units', stat: 'unitWard' },
+    { label: 'Army Damage', shortLabel: 'Damage', value: `+${permanent.armyPower}`, hint: 'Extra damage for the whole warband', stat: 'armyPower' },
+    { label: 'Army Ward', shortLabel: 'Ward', value: `+${permanent.defensivePower}`, hint: 'Extra protection for the whole warband', stat: 'defensivePower' },
+    { label: 'Morale', shortLabel: 'Morale', value: `+${permanent.morale}`, hint: 'Run-start morale and tempo bonus', stat: 'morale' },
+    { label: 'Spell Power', shortLabel: 'Spells', value: `+${permanent.spellPower}`, hint: 'Stronger commander spells', stat: 'spellPower' },
+    { label: 'Commander HP', shortLabel: 'King HP', value: `+${permanent.maxHealth}`, hint: 'Extra commander health each run', stat: 'maxHealth' },
+    { label: 'Unit Attack', shortLabel: 'Unit Atk', value: `+${permanent.unitPower}`, hint: 'Extra attack for drafted units', stat: 'unitPower' },
+    { label: 'Unit Ward', shortLabel: 'Unit Ward', value: `+${permanent.unitWard}`, hint: 'Extra defense for drafted units', stat: 'unitWard' },
   ];
 
   const handleSpendUpgrade = (stat: RandomRunUpgradeStat) => {
@@ -190,28 +194,25 @@ export default function RunOverviewPanel({ onOpenMilestones }: RunOverviewPanelP
         </div>
 
         <div className="sp-hub-stat-grid">
-          <RunStatTile icon={RUN_STAT_ICONS.chest} label="Roads cleared" value={String(runState.completions)} hint="Lifetime full road clears" />
-          <RunStatTile icon={RUN_STAT_ICONS.wins} label="Best battle wins" value={String(dailyStatus.bestWins)} hint="Most wins in a single run" />
-          <RunStatTile icon={RUN_STAT_ICONS.time} label="Clear streak" value={String(runState.streak)} hint="Consecutive cleared runs" />
-          <RunStatTile icon={RUN_STAT_ICONS.gold} label="Upgrade points" value={String(runState.runUpgradePoints)} hint="Spend on permanent bonuses after runs" />
+          <RunStatTile icon={RUN_STAT_ICONS.chest} label="Clears" value={String(runState.completions)} hint="Lifetime full road clears" />
+          <RunStatTile icon={RUN_STAT_ICONS.wins} label="Best" value={String(dailyStatus.bestWins)} hint="Most wins in a single run" />
+          <RunStatTile icon={RUN_STAT_ICONS.time} label="Streak" value={String(runState.streak)} hint="Consecutive cleared runs" />
+          <RunStatTile icon={RUN_STAT_ICONS.gold} label="Points" value={String(runState.runUpgradePoints)} hint="Spend on permanent bonuses after runs" />
         </div>
 
         <div className="sp-hub-bonus-section">
-          <div>
+          <div className="sp-hub-section-row">
             <span className="arcane-label sp-hub-arcane-label">Permanent Bonuses</span>
-            <p className="sp-hub-section-hint">
-              {canSpendUpgradePoints
-                ? 'Click a bonus tile to spend 1 upgrade point.'
-                : 'These bonuses apply at the start of every run.'}
-            </p>
-            {upgradeNotice ? <p className="sp-hub-section-hint ui-value mt-1">{upgradeNotice}</p> : null}
+            <span className="sp-hub-section-hint">
+              {upgradeNotice || (canSpendUpgradePoints ? 'Click any icon to spend a point.' : 'Level up runs to earn upgrade points.')}
+            </span>
           </div>
           <div className="sp-hub-bonus-grid">
             {upgradeRows.map(row => (
               <RunBonusTile
                 key={row.label}
                 icon={LOBBY_UPGRADE_ICONS[row.stat] || RUN_STAT_ICONS.wins}
-                label={row.label}
+                label={row.shortLabel}
                 value={row.value}
                 hint={row.hint}
                 canSpend={canSpendUpgradePoints}
@@ -227,11 +228,21 @@ export default function RunOverviewPanel({ onOpenMilestones }: RunOverviewPanelP
           <div>
             <span className="arcane-label sp-hub-arcane-label">Achievements</span>
             <h2 className="fantasy-heading sp-hub-card-title">Trophies & Unlocks</h2>
-            <p className="sp-hub-section-hint">Hidden away until you want the full list.</p>
           </div>
-          <span className="sp-hub-pill ui-pill rounded border px-3 py-1.5 text-xs font-black uppercase">
-            {milestoneCounts.unlocked}/{milestoneCounts.total}
-          </span>
+          <div className="sp-hub-card-actions">
+            <span className="sp-hub-pill ui-pill rounded border px-3 py-1.5 text-xs font-black uppercase">
+              {milestoneCounts.unlocked}/{milestoneCounts.total}
+            </span>
+            {onOpenMilestones ? (
+              <button
+                type="button"
+                onClick={onOpenMilestones}
+                className="sp-hub-milestones-btn ui-button rounded px-4 py-2 text-xs font-black"
+              >
+                Open Achievements
+              </button>
+            ) : null}
+          </div>
         </div>
 
         <div className="sp-hub-achievement-summary">
@@ -248,7 +259,7 @@ export default function RunOverviewPanel({ onOpenMilestones }: RunOverviewPanelP
           <div className="sp-hub-achievement-category-grid">
             {categorySummaries.map(summary => (
               <div key={summary.category} className="sp-hub-achievement-category">
-                <Image src={summary.iconPath} alt="" width={34} height={34} className="sp-hub-achievement-category-icon" unoptimized />
+                <Image src={summary.iconPath} alt="" width={28} height={28} className="sp-hub-achievement-category-icon" unoptimized />
                 <div className="min-w-0">
                   <span className="sp-hub-achievement-category-title">{summary.label}</span>
                   <span className="sp-hub-achievement-category-count">{summary.unlocked}/{summary.total}</span>
@@ -258,15 +269,31 @@ export default function RunOverviewPanel({ onOpenMilestones }: RunOverviewPanelP
           </div>
         </div>
 
-        {onOpenMilestones ? (
-          <button
-            type="button"
-            onClick={onOpenMilestones}
-            className="sp-hub-milestones-btn ui-button w-full rounded px-5 py-3.5 text-sm font-black"
-          >
-            Open Achievements
-          </button>
-        ) : null}
+        <div className="sp-hub-featured-achievements" aria-label="Featured achievements">
+          {featuredMilestones.map(milestone => {
+            const claimed = isRunMilestoneRewardClaimed(runState, milestone.id);
+            const claimable = milestone.unlocked && !claimed;
+            return (
+              <button
+                key={milestone.id}
+                type="button"
+                className={`sp-hub-featured-achievement ${milestone.unlocked ? 'sp-hub-featured-achievement-unlocked' : 'sp-hub-featured-achievement-locked'} ${claimable ? 'sp-hub-featured-achievement-claimable' : ''}`}
+                onClick={onOpenMilestones}
+                title={milestone.description}
+              >
+                <span className="sp-hub-featured-achievement-icon relative" aria-hidden>
+                  <Image src={milestone.iconPath} alt="" fill sizes="42px" className="object-contain" unoptimized />
+                </span>
+                <span className="sp-hub-featured-achievement-copy">
+                  <span className="sp-hub-featured-achievement-title">{milestone.title}</span>
+                  <span className="sp-hub-featured-achievement-state">
+                    {claimed ? 'Claimed' : claimable ? 'Claim XP' : milestone.progressLabel || 'Locked'}
+                  </span>
+                </span>
+              </button>
+            );
+          })}
+        </div>
       </section>
     </div>
   );

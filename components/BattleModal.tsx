@@ -110,6 +110,7 @@ interface BattleModalProps {
   playerStacks?: MinionStack[];
   playerStats?: CharacterStats;
   playerFormation?: Record<string, { x: number; y: number }>;
+  playerModelNumber?: number;
   availableSpellIds?: string[];
   persistentResults?: boolean;
   onBattleEnd?: (result: { status: BattleResultReportData['status']; battle: BattleState; reward?: VictoryRewardReport; healthLost?: number; retreated?: boolean }) => void;
@@ -125,6 +126,19 @@ interface BattleCue {
   headline: string;
   detail: string;
   tone: BattleCueTone;
+}
+
+interface BattleCombatFeedEntry {
+  id: string;
+  actor?: BattleUnit;
+  target?: BattleUnit;
+  actionIconPath: string;
+  actionLabel: string;
+  actionClass: 'attack' | 'spell' | 'heal' | 'guard' | 'move' | 'neutral';
+  aoeCount?: number;
+  defeated?: boolean;
+  poison?: boolean;
+  bleed?: boolean;
 }
 
 type CombatTutorialStageId =
@@ -202,6 +216,8 @@ const BATTLE_MOVE_TRANSIT_MS = 1450;
 const RUN_VICTORY_BANNER_DELAY_MS = 500;
 const RUN_VICTORY_AFTER_ANIMATION_HOLD_MS = 3000;
 const RUN_VICTORY_HANDOFF_FLOOR_MS = BATTLE_DEATH_HIT_MS + BATTLE_DEATH_DISSOLVE_MS + RUN_VICTORY_AFTER_ANIMATION_HOLD_MS;
+const COMBAT_FEED_MAX_ENTRIES = 10;
+const TURN_ORDER_RAIL_MAX_ROWS = 10;
 
 /** Enemy turns always use this pacing, regardless of the combat speed setting. */
 const ENEMY_BATTLE_PACE = {
@@ -313,6 +329,7 @@ export default function BattleModal({
   playerStacks,
   playerStats,
   playerFormation,
+  playerModelNumber,
   availableSpellIds,
   persistentResults = true,
   onBattleEnd,
@@ -326,6 +343,7 @@ export default function BattleModal({
       playerStacks,
       playerStats,
       playerFormation,
+      playerModelNumber,
       suppressRecruitOffer: !persistentResults,
     }) : null;
   });
@@ -1508,28 +1526,16 @@ export default function BattleModal({
             )}
 
             <div className="battle-combat-grid min-h-0 flex-1">
-              <aside className="battle-retreat-rail" aria-label="Battle retreat">
-                {battle.status === 'active' ? (
-                  <div className="battle-retreat-panel rounded border">
-                    <div className="battle-retreat-panel-head">
-                      <h3 className="battle-retreat-panel-title fantasy-heading">Retreat</h3>
-                      <p className="battle-retreat-panel-copy">Quit this fight and return</p>
-                    </div>
-                    <button type="button" onClick={handleRetreat} className="battle-retreat-btn">
-                      Retreat
-                    </button>
-                  </div>
-                ) : (
-                  <div className="battle-retreat-panel rounded border">
-                    <div className="battle-retreat-panel-head">
-                      <h3 className="battle-retreat-panel-title fantasy-heading">Leave Field</h3>
-                      <p className="battle-retreat-panel-copy">Return from the aftermath</p>
-                    </div>
-                    <button type="button" onClick={handleLeaveField} className="battle-leave-field-btn">
-                      Leave Field
-                    </button>
-                  </div>
-                )}
+              <aside className="battle-retreat-rail" aria-label="Battle command">
+                <BattleCommandRail
+                  battle={battle}
+                  activeUnit={activeUnit}
+                  isPlayerTurn={isPlayerTurn}
+                  isResolvingAction={isResolvingAction}
+                  selectedSpell={selectedSpell}
+                  onRetreat={handleRetreat}
+                  onLeaveField={handleLeaveField}
+                />
               </aside>
 
               <div className="battle-board-shell relative min-h-0">
@@ -2529,6 +2535,272 @@ function getHealthPercent(current: number, max: number): number {
   return Math.max(0, Math.min(100, (current / max) * 100));
 }
 
+function BattleCommandRail({
+  battle,
+  activeUnit,
+  isPlayerTurn,
+  isResolvingAction,
+  selectedSpell,
+  onRetreat,
+  onLeaveField,
+}: {
+  battle: BattleState;
+  activeUnit?: BattleUnit;
+  isPlayerTurn: boolean;
+  isResolvingAction: boolean;
+  selectedSpell?: BattleSpell;
+  onRetreat: () => void;
+  onLeaveField: () => void;
+}) {
+  const active = battle.status === 'active';
+  const healthPercent = activeUnit ? getHealthPercent(activeUnit.currentHealth, activeUnit.maxHealth) : 0;
+  const mana = activeUnit?.kind === 'commander' ? getBattleMana(battle, activeUnit.side) : undefined;
+  const supportAbility = getMinionSupportAbility(activeUnit);
+  const bleedStacks = activeUnit?.statusEffects?.bleedStacks || 0;
+  const poisonTurns = activeUnit?.statusEffects?.poisonTurns || 0;
+  const combatFeed = getBattleCombatFeedEntries(battle);
+  const statusItems = [
+    activeUnit?.chargedHeal ? 'Blessing' : '',
+    bleedStacks > 0 ? `Bleed ${bleedStacks}` : '',
+    poisonTurns > 0 ? `Poison ${poisonTurns}` : '',
+    supportAbility ? supportAbility.shortLabel : '',
+  ].filter(Boolean);
+  const commandTitle = !active
+    ? 'Aftermath'
+    : isResolvingAction
+      ? 'Resolving'
+      : selectedSpell
+        ? 'Target Spell'
+        : isPlayerTurn
+          ? 'Your Command'
+          : 'Enemy Command';
+  const commandCopy = !active
+    ? 'The field is decided.'
+    : selectedSpell
+      ? selectedSpell.name
+      : activeUnit
+        ? getBattleUnitSubtitle(activeUnit)
+        : 'Waiting for the next fighter.';
+
+  return (
+    <div className={`battle-command-rail-panel rounded border ${active ? '' : 'battle-command-rail-panel-after'}`}>
+      <div className="battle-command-section battle-command-state">
+        <span className="battle-command-kicker">Field Command</span>
+        <h3 className="battle-command-title fantasy-heading">{commandTitle}</h3>
+        <p className="battle-command-copy">{commandCopy}</p>
+      </div>
+
+      <div className="battle-command-section battle-command-main">
+        {activeUnit ? (
+          <>
+            <div className={`battle-command-unit-card ${activeUnit.side === 'player' ? 'battle-command-unit-card-player' : 'battle-command-unit-card-enemy'}`}>
+              <span className="battle-command-portrait" aria-hidden="true">
+                <Image
+                  src={activeUnit.assetPath}
+                  alt=""
+                  fill
+                  className="run-ui-art object-contain"
+                  unoptimized
+                />
+              </span>
+              <span className="battle-command-unit-copy">
+                <span className="battle-command-unit-name">{shortBattleUnitName(activeUnit.name, 18)}</span>
+                <span className="battle-command-unit-meta">
+                  {activeUnit.side === 'player' ? 'Ally' : 'Enemy'}
+                  {activeUnit.kind === 'commander' ? ' - Commander' : ''}
+                </span>
+              </span>
+            </div>
+
+            <div className="battle-command-health">
+              <div className="battle-command-health-head">
+                <span>Health</span>
+                <b>{activeUnit.currentHealth}/{activeUnit.maxHealth}</b>
+              </div>
+              <span className="battle-command-health-bar" aria-hidden="true">
+                <span style={{ width: `${healthPercent}%` }} />
+              </span>
+            </div>
+
+            <div className="battle-command-stat-grid">
+              <span><b>{activeUnit.attack}</b><em>Atk</em></span>
+              <span><b>{activeUnit.defense}</b><em>Ward</em></span>
+              <span><b>{activeUnit.movement}</b><em>Move</em></span>
+              <span><b>{activeUnit.range}</b><em>Range</em></span>
+              {mana !== undefined ? <span><b>{mana}</b><em>Mana</em></span> : null}
+            </div>
+
+            {statusItems.length > 0 ? (
+              <div className="battle-command-status-list" aria-label="Active unit status">
+                {statusItems.map(item => (
+                  <span key={item}>{item}</span>
+                ))}
+              </div>
+            ) : null}
+          </>
+        ) : (
+          <div className="battle-command-empty rounded border">
+            <span>No active unit</span>
+          </div>
+        )}
+      </div>
+
+      <BattleCombatFeed entries={combatFeed} />
+
+      <div className="battle-command-section battle-command-danger">
+        <span className="battle-command-danger-label">{active ? 'Retreat' : 'Leave Field'}</span>
+        <button
+          type="button"
+          onClick={active ? onRetreat : onLeaveField}
+          className={active ? 'battle-retreat-btn' : 'battle-leave-field-btn'}
+        >
+          {active ? 'Retreat' : 'Leave Field'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function BattleCombatFeed({ entries }: { entries: BattleCombatFeedEntry[] }) {
+  return (
+    <div className="battle-combat-feed battle-command-section" aria-label="Combat log">
+      <div className="battle-combat-feed-head">
+        <span>Combat Log</span>
+        <b>{entries.length}</b>
+      </div>
+      <div className="battle-combat-feed-list">
+        {entries.length > 0 ? entries.map(entry => (
+          <div key={entry.id} className={`battle-combat-feed-row battle-combat-feed-row-${entry.actionClass}`}>
+            <BattleCombatFeedUnit unit={entry.actor} />
+            <span className="battle-combat-feed-action" aria-label={entry.actionLabel}>
+              <span className="battle-combat-feed-action-icon" aria-hidden="true">
+                <Image
+                  src={entry.actionIconPath}
+                  alt=""
+                  fill
+                  sizes="28px"
+                  className="object-contain"
+                  unoptimized
+                />
+              </span>
+              {entry.aoeCount ? <span className="battle-combat-feed-aoe">AOE</span> : null}
+              {entry.poison ? <span className="battle-combat-feed-status battle-combat-feed-status-poison" aria-label="Poison" /> : null}
+              {entry.bleed ? <span className="battle-combat-feed-status battle-combat-feed-status-bleed" aria-label="Bleed" /> : null}
+            </span>
+            {entry.aoeCount ? (
+              <span className={`battle-combat-feed-target battle-combat-feed-target-aoe ${entry.defeated ? 'battle-combat-feed-target-defeated' : ''}`}>
+                <span>{entry.aoeCount}</span>
+              </span>
+            ) : (
+              <BattleCombatFeedUnit unit={entry.target} defeated={entry.defeated} />
+            )}
+          </div>
+        )) : (
+          <div className="battle-combat-feed-empty">Actions appear here.</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function BattleCombatFeedUnit({ unit, defeated = false }: { unit?: BattleUnit; defeated?: boolean }) {
+  if (!unit) {
+    return <span className="battle-combat-feed-unit battle-combat-feed-unit-empty" aria-hidden="true" />;
+  }
+
+  return (
+    <span
+      className={`battle-combat-feed-unit battle-combat-feed-unit-${unit.side} ${defeated || unit.currentHealth <= 0 ? 'battle-combat-feed-unit-defeated' : ''}`}
+      aria-label={unit.name}
+    >
+      <Image
+        src={unit.assetPath}
+        alt=""
+        fill
+        sizes="32px"
+        className="object-contain"
+        unoptimized
+      />
+    </span>
+  );
+}
+
+function getBattleCombatFeedEntries(battle: BattleState): BattleCombatFeedEntry[] {
+  return battle.log
+    .filter(entry => isCombatFeedLogEntry(entry))
+    .slice(0, COMBAT_FEED_MAX_ENTRIES)
+    .map(entry => getBattleCombatFeedEntry(battle, entry));
+}
+
+function isCombatFeedLogEntry(entry: BattleLogEntry): boolean {
+  return !['round', 'system'].includes(entry.action);
+}
+
+function getBattleCombatFeedEntry(battle: BattleState, entry: BattleLogEntry): BattleCombatFeedEntry {
+  const actor = entry.actorId ? battle.units.find(unit => unit.id === entry.actorId) : undefined;
+  const targets = (entry.targetIds || [])
+    .map(targetId => battle.units.find(unit => unit.id === targetId))
+    .filter((unit): unit is BattleUnit => Boolean(unit));
+  const spell = getBattleSpellFromLogEntry(entry);
+  const areaAction = isBattleCombatFeedAreaAction(entry, spell, targets.length);
+  const aoeCount = areaAction && targets.length > 1 ? targets.length : undefined;
+  const target = !areaAction && targets.length > 0 ? targets[0] : undefined;
+  const actionClass = getBattleCombatFeedActionClass(entry);
+  const statusText = entry.message.toLowerCase();
+
+  return {
+    id: entry.id,
+    actor,
+    target,
+    actionIconPath: getBattleCombatFeedActionIcon(entry, spell),
+    actionLabel: getBattleCombatFeedActionLabel(entry, spell),
+    actionClass,
+    aoeCount,
+    defeated: targets.some(unit => unit.currentHealth <= 0),
+    poison: entry.style === 'poison' || entry.spellId === 'poison' || statusText.includes('poison'),
+    bleed: entry.style === 'bleed' || entry.spellId === 'bleed' || statusText.includes('bleed'),
+  };
+}
+
+function isBattleCombatFeedAreaAction(entry: BattleLogEntry, spell: BattleSpell | undefined, targetCount: number): boolean {
+  if (targetCount <= 1) return false;
+  if (entry.style === 'boss-phase' || entry.style === 'boss-special') return true;
+  if (entry.action === 'wait' && entry.style === 'buff') return true;
+  if (spell?.target === 'none') return true;
+  return /\b(all|allied|allies|army|every)\b/i.test(entry.message);
+}
+
+function getBattleCombatFeedActionClass(entry: BattleLogEntry): BattleCombatFeedEntry['actionClass'] {
+  if (entry.action === 'attack') return 'attack';
+  if (entry.action === 'spell' || entry.action === 'mana' || entry.action === 'morale') return 'spell';
+  if (entry.action === 'heal') return 'heal';
+  if (entry.action === 'wait') return 'guard';
+  if (entry.action === 'move') return 'move';
+  return 'neutral';
+}
+
+function getBattleCombatFeedActionIcon(entry: BattleLogEntry, spell?: BattleSpell): string {
+  if (spell && entry.spellId !== 'bleed' && entry.spellId !== 'poison') return getSpellIconPath(spell);
+  if (entry.action === 'attack') return '/assets/icons/attack.png';
+  if (entry.action === 'heal') return '/assets/icons/healing.png';
+  if (entry.action === 'wait') return BATTLE_WAIT_SHIELD_ICON;
+  if (entry.action === 'mana') return BATTLE_MANA_FOCUS_ICON;
+  if (entry.action === 'move') return '/assets/icons/speed.png';
+  if (entry.action === 'morale') return '/assets/icons/magic.png';
+  return '/assets/icons/magic.png';
+}
+
+function getBattleCombatFeedActionLabel(entry: BattleLogEntry, spell?: BattleSpell): string {
+  if (spell) return spell.name;
+  if (entry.action === 'attack') return entry.style === 'ranged' ? 'Ranged attack' : 'Attack';
+  if (entry.action === 'heal') return 'Heal';
+  if (entry.action === 'wait') return entry.style === 'buff' ? 'Buff' : 'Wait';
+  if (entry.action === 'mana') return 'Focus mana';
+  if (entry.action === 'move') return 'Move';
+  if (entry.action === 'morale') return 'Morale';
+  return entry.action;
+}
+
 function getUpcomingTurnOrder(battle: BattleState): BattleUnit[] {
   const sortedLiveUnits = getTurnOrder(battle.units);
   const activeUnit = sortedLiveUnits.find(unit => unit.id === battle.activeUnitId);
@@ -2565,6 +2837,9 @@ function BattleTurnTimeline({
   rail?: boolean;
 }) {
   const order = getUpcomingTurnOrder(battle);
+  const railHasOverflow = rail && order.length > TURN_ORDER_RAIL_MAX_ROWS;
+  const visibleOrder = railHasOverflow ? order.slice(0, TURN_ORDER_RAIL_MAX_ROWS - 1) : order;
+  const hiddenOrderCount = railHasOverflow ? order.length - visibleOrder.length : 0;
 
   if (rail) {
     return (
@@ -2574,7 +2849,7 @@ function BattleTurnTimeline({
           <p className="battle-turn-timeline-rail-copy">Next fighters up the field</p>
         </div>
         <ol className="battle-order-list">
-          {order.map((unit, index) => {
+          {visibleOrder.map((unit, index) => {
             const isActive = unit.id === battle.activeUnitId;
             const isPlayer = unit.side === 'player';
 
@@ -2582,7 +2857,7 @@ function BattleTurnTimeline({
               <li
                 key={unit.id}
                 className={`battle-order-entry ${isActive ? 'battle-order-entry-active' : ''} ${isPlayer ? 'battle-order-entry-player' : 'battle-order-entry-enemy'}`}
-                title={`${unit.name} · ${isPlayer ? 'Ally' : 'Enemy'}`}
+                aria-label={`${unit.name} - ${isPlayer ? 'Ally' : 'Enemy'}${unit.kind === 'commander' ? ' commander' : ''}`}
               >
                 <span className="battle-order-index" aria-hidden="true">{index + 1}</span>
                 <span className="battle-order-portrait">
@@ -2606,6 +2881,16 @@ function BattleTurnTimeline({
               </li>
             );
           })}
+          {hiddenOrderCount > 0 ? (
+            <li className="battle-order-entry battle-order-entry-more" aria-label={`${hiddenOrderCount} more fighters queued`}>
+              <span className="battle-order-index" aria-hidden="true">+</span>
+              <span className="battle-order-more-count">{hiddenOrderCount}</span>
+              <span className="battle-order-copy">
+                <span className="battle-order-name">More queued</span>
+                <span className="battle-order-meta">After these turns</span>
+              </span>
+            </li>
+          ) : null}
         </ol>
       </div>
     );

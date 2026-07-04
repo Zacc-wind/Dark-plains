@@ -3,6 +3,7 @@ import { readGameJson, writeGameJson } from '@/lib/gameStore';
 
 export type SingleplayerRunTutorialStepId =
   | 'lobby'
+  | 'run-setup'
   | 'draft'
   | 'route-map'
   | 'formation'
@@ -42,6 +43,7 @@ export const SINGLEPLAYER_RUN_TUTORIAL_GUIDE_ASSET = '/assets/bosses/boss8.png';
 
 export const SINGLEPLAYER_RUN_TUTORIAL_STEP_IDS: SingleplayerRunTutorialStepId[] = [
   'lobby',
+  'run-setup',
   'draft',
   'route-map',
   'formation',
@@ -150,6 +152,20 @@ export function createSingleplayerRunTutorialStep(
       body: 'Each run drafts temporary fighters, spends run-only gold, and builds permanent run strength after victories. Losing or retreating simply ends the attempt.',
       hint: 'Start when you are ready. I will stop the road only the first time a major screen needs explaining.',
       continueLabel: 'Continue Run',
+    },
+    'run-setup': {
+      kicker: 'Run Setup',
+      speakerName: 'The Grave-Crowned Emperor',
+      speakerTitle: 'Road Tutor',
+      title: 'Choose the commander and road before drafting.',
+      body: 'The commander choice changes this run with a passive bonus. The road length changes pressure and rewards. These choices shape the draft before the first unit is picked.',
+      hint: 'Quick, short, and standard roads are open from run level 1. Long roads unlock at run level 5 and pay stronger run rewards.',
+      continueLabel: 'Continue Run',
+      cards: [
+        { title: 'Commander', body: 'Pick the leader whose passive fits your plan.', iconPath: '/assets/playermodel1.png' },
+        { title: 'Passive', body: 'The selected passive applies only inside this run.', iconPath: '/assets/icons/magic.png' },
+        { title: 'Road Length', body: 'Quick, short, and standard are open now. Long unlocks at run level 5.', iconPath: '/assets/icons/attack.png' },
+      ],
     },
     draft: {
       kicker: 'Draft',

@@ -33,6 +33,7 @@
 - First Steps was removed from the main map; the main quest tracker keeps hide/reopen behavior and has been restyled toward the clearer modern HUD panel treatment.
 - Random-run unit-join rewards now stop after the cinematic sprite burst instead of showing the extra stat report popup.
 - Singleplayer random-run tutorial is now a cinematic first-run guide with boss8 as the guide sprite; it is scoped to `/singleplayer` and can be disabled or reset from Settings.
+- Singleplayer Run Overview now uses a closed-by-default Menu pill, a cleaner lower hero CTA, icon-led permanent bonuses, and a compact achievements header action.
 - Follow-up verification on 2026-06-19 confirms login, main map, random-run lobby/draft/map, formation intro, formation layout, combat overlay controls, and empty-cell combat hover behavior load correctly in-browser.
 - Random reward celebrations now queue dice -> actual result, with dice/unit sprite art rendered as transparent burst art instead of item-card art.
 - Blessing reroll now has a short dice/reroll transition before choices swap.
@@ -235,9 +236,11 @@
 - [x] Add second-pass random-run omen variety: healing, upgrade, deep-road recruit, stat/morale boon, extra omen reroll, and gold fallbacks.
 - [x] Add transparent dice/random-result celebration sequencing for random gear and unit rewards.
 - [x] Add a visible blessing reroll animation before replacing offered choices.
-- [ ] Add more random-run omen/event variants with clear positive, risky, and build-defining outcomes.
-- [ ] Add boss-specific route modifiers so each boss changes one or two road rules before the fight.
-- [ ] Add more late-run enemy formations before increasing run length or level cap.
+- [x] Make the five-fight quick road end with two boss nodes, with the penultimate boss granting one guaranteed tier III recruit before the final boss.
+- [x] Add more random-run omen/event variants with clear positive, risky, and build-defining outcomes.
+- [x] Add boss-specific route modifiers so each boss changes one or two road rules before the fight.
+- [x] Add more late-run enemy formations before increasing run length or level cap.
+- [x] Remove run-level per-stat caps from permanent run upgrades so players can specialize freely.
 - [ ] Generate a unique `public/assets/spells/thorn-ward.png` or keep the current Warding Prayer fallback intentionally.
 - [ ] Raise the random-run cap beyond 15 once there are enough bosses, enemies, run rewards, and late-run events to support it.
 
@@ -257,9 +260,10 @@
 - [x] Add collapsible global chat and party chat tabs.
 - [x] Add map-side social presence markers that do not clutter combat/quest markers.
 - [x] Draft proper multiplayer implementation plan for challenge popups, trade popups, party UI, player duels, co-op dungeons, and multi-owner combat.
-- [ ] Add cinematic incoming challenge popup with sword icon, challenger identity, accept/decline, timeout, and sound.
+- [x] Add cinematic incoming challenge popup with sword icon, challenger identity, accept/decline, timeout, and sound.
 - [ ] Add cinematic incoming trade popup with gold icon, requester identity, accept/decline, timeout, and sound.
-- [ ] Redesign party HUD as a compact map strip with member status, pending invites, details popover, and party chat shortcut.
+- [x] Add compact party HUD map strip with member status, pending invites, and party chat shortcut.
+- [x] Add a party details popover from the map strip with promote, leave, invite, kick, and party-chat actions.
 - [ ] Implement real player-vs-player duel sessions with both sides controlled by humans and opponent commander names shown in combat.
 - [ ] Implement cooperative dungeon sessions for parties: up to 4 commanders, shared 8-unit field cap, owner-based turns, longer routes, hard roads, and multiple bosses.
 - [ ] Add `ownerUsername` / team ownership metadata to combat units so players can only control their own commander and units.
@@ -357,9 +361,11 @@
 - [x] Enlarge and recenter the boss8 tutorial guide art, slow the combat coach entrance, and reposition reward/shop/omen tutorial dialogs so they avoid covering the main choice cards.
 - [ ] Add deeper interactive tutorial callouts for first shop purchase, first blessing pick, first combat hover preview, and first damage/retaliation preview.
 - [ ] Add remaining first-combat tutorial callouts for defensive wait/guard, attack action, move action, cancel/selection behavior, and commander focus-mana strategy when mana is intentionally saved.
-- [ ] Add pre-run singleplayer choices: commander selection plus three run lengths with longer roads giving harder scaling and stronger rewards.
-- [ ] Add commander archetype passives by player model: knight/templar tank leader, mage leader, healer leader, and three combat-focused leaders with distinct bleed, movement, sustain, or damage styles.
-- [ ] Add tutorial steps for commander choice, run-length choice, and commander passive differences once those systems exist.
+- [x] Add pre-run singleplayer choices: a forced four-choice randomized commander draft plus four run lengths, including a five-fight quick road, with Long Road gated to run level 5 and longer roads giving harder scaling and stronger rewards.
+- [x] Add initial run-only commander stat passives by player model: tank leader, mage leader, healer leader, damage leader, skirmish leader, and durable mixed leader.
+- [x] Add first commander unit-family synergies so each commander buffs matching run units, not only commander stats.
+- [ ] Upgrade commander passives into deeper special mechanics where useful: bleed, movement, sustain, or unique combat triggers.
+- [x] Add tutorial steps for commander choice, run-length choice, and commander passive differences once those systems exist.
 - [ ] Continue brightening/modernizing older map overlays so they match the random-run and defeat-screen style.
 
 ## Phase 13: Professional Combat Roadmap

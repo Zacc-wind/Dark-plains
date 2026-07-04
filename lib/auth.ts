@@ -157,6 +157,8 @@ export interface MinionStack {
   injuryCount?: number;
   lastInjuredAt?: number;
   runCurrentHealth?: number;
+  runStatBonus?: Partial<Pick<MinionStats, 'attack' | 'defense' | 'magic' | 'healing' | 'health' | 'movement' | 'range'>>;
+  runBonusLabel?: string;
 }
 
 export interface MinionCasualtyReport {
@@ -254,6 +256,9 @@ export interface DailyRunHistoryEntry {
   shopBuys?: string[];
   omens?: string[];
   unlockedSpellNames?: string[];
+  unitTemplateIds?: string[];
+  unitClassIds?: MinionClass[];
+  tierThreeUnitNames?: string[];
   runLevelAfter?: number;
   streakAfter: number;
 }
@@ -1832,7 +1837,7 @@ export const MINION_TEMPLATES: MinionTemplate[] = [
     name: 'Grave Mercenary',
     role: 'Standalone retaliation tank',
     assetName: 'mercenary.png',
-    stats: { attack: 9, defense: 16, magic: 0, healing: 0, health: 92, movement: 1, range: 1 },
+    stats: { attack: 9, defense: 16, magic: 0, healing: 0, health: 92, movement: 2, range: 1 },
   },
   {
     templateId: 'crow',
@@ -2367,15 +2372,23 @@ export function invitePlayerToParty(targetUsername: string): { success: boolean;
 
   const currentSocial = getSocialState(users[currentIndex]);
   const targetSocial = getSocialState(target);
-  const existingParty = normalizePartyState(currentSocial.party, current.username) || {
+  const currentParty = normalizePartyState(currentSocial.party, current.username);
+  if (currentParty && !currentParty.memberUsernames.some(member => normalizeUsername(member) === normalizeUsername(current.username))) {
+    return { success: false, error: 'Accept or leave your pending party invite before creating another party.' };
+  }
+  if (currentParty && normalizeUsername(currentParty.leaderUsername) !== normalizeUsername(current.username)) {
+    return { success: false, error: 'Only the party leader can invite players.' };
+  }
+
+  const existingParty = currentParty || {
     leaderUsername: current.username,
     memberUsernames: [current.username],
     invitedUsernames: [],
     updatedAt: Date.now(),
   };
 
-  if (targetSocial.party?.memberUsernames.some(member => normalizeUsername(member) === normalizeUsername(target.username))) {
-    return { success: false, error: `${target.username} is already in a party.` };
+  if (targetSocial.party && getPartyParticipantSet(normalizePartyState(targetSocial.party, target.username) || targetSocial.party).has(normalizeUsername(target.username))) {
+    return { success: false, error: `${target.username} already has a party or pending invite.` };
   }
 
   if (existingParty.memberUsernames.length >= MAX_PARTY_SIZE) {
@@ -2467,6 +2480,74 @@ export function leaveParty(): { success: boolean; message?: string; error?: stri
   persistUsersWithCurrent(nextUsers, current.username);
 
   return { success: true, message: 'Left party.' };
+}
+
+export function promotePartyMember(targetUsername: string): { success: boolean; message?: string; error?: string } {
+  const current = getCurrentUser();
+  if (!current) return { success: false, error: 'Login required.' };
+
+  const users = getUsers();
+  const currentIndex = findUserIndex(users, current.username);
+  if (currentIndex === -1) return { success: false, error: 'Player not found.' };
+
+  const party = normalizePartyState(getSocialState(users[currentIndex]).party, current.username);
+  if (!party) return { success: false, error: 'Not in a party.' };
+  if (normalizeUsername(party.leaderUsername) !== normalizeUsername(current.username)) {
+    return { success: false, error: 'Only the party leader can promote.' };
+  }
+
+  const target = party.memberUsernames.find(username => normalizeUsername(username) === normalizeUsername(targetUsername));
+  if (!target) return { success: false, error: 'Party member not found.' };
+  if (normalizeUsername(target) === normalizeUsername(current.username)) {
+    return { success: false, error: 'You are already the party leader.' };
+  }
+
+  const nextParty: PartyState = {
+    ...party,
+    leaderUsername: target,
+    updatedAt: Date.now(),
+  };
+  const nextUsers = setPartyForUsers(users, nextParty, [...party.memberUsernames, ...party.invitedUsernames]);
+  persistUsersWithCurrent(nextUsers, current.username);
+
+  return { success: true, message: `${target} now leads the party.` };
+}
+
+export function removePlayerFromParty(targetUsername: string): { success: boolean; message?: string; error?: string } {
+  const current = getCurrentUser();
+  if (!current) return { success: false, error: 'Login required.' };
+
+  const users = getUsers();
+  const currentIndex = findUserIndex(users, current.username);
+  if (currentIndex === -1) return { success: false, error: 'Player not found.' };
+
+  const party = normalizePartyState(getSocialState(users[currentIndex]).party, current.username);
+  if (!party) return { success: false, error: 'Not in a party.' };
+  if (normalizeUsername(party.leaderUsername) !== normalizeUsername(current.username)) {
+    return { success: false, error: 'Only the party leader can remove players.' };
+  }
+  if (normalizeUsername(targetUsername) === normalizeUsername(current.username)) {
+    return { success: false, error: 'Use Leave Party instead.' };
+  }
+
+  const removedMember = party.memberUsernames.find(username => normalizeUsername(username) === normalizeUsername(targetUsername));
+  const removedInvite = party.invitedUsernames.find(username => normalizeUsername(username) === normalizeUsername(targetUsername));
+  if (!removedMember && !removedInvite) return { success: false, error: 'Player is not in this party.' };
+
+  const nextParty: PartyState = {
+    ...party,
+    memberUsernames: party.memberUsernames.filter(username => normalizeUsername(username) !== normalizeUsername(targetUsername)),
+    invitedUsernames: party.invitedUsernames.filter(username => normalizeUsername(username) !== normalizeUsername(targetUsername)),
+    updatedAt: Date.now(),
+  };
+  const affected = [...party.memberUsernames, ...party.invitedUsernames, targetUsername];
+  const nextUsers = setPartyForUsers(users, nextParty, affected);
+  persistUsersWithCurrent(nextUsers, current.username);
+
+  return {
+    success: true,
+    message: removedMember ? `${removedMember} removed from party.` : `Invite to ${removedInvite} cancelled.`,
+  };
 }
 
 export function getPartyMembers(user: Pick<User, 'username' | 'social'> | null | undefined = getCurrentUser()): User[] {
@@ -2767,6 +2848,7 @@ export function addInventoryItemsWithLimit(
   incomingItems: InventoryItem[],
   _capacity: number
 ): { inventory: InventoryItem[]; acceptedItems: InventoryItem[]; rejectedItems: InventoryItem[] } {
+  void _capacity;
   const acceptedItems: InventoryItem[] = [];
 
   incomingItems.forEach(item => {
@@ -5679,20 +5761,16 @@ export function getRandomRunProgressRatio(level: number): number {
   return (getRandomRunEffectiveLevel(level) - 1) / (RANDOM_RUN_BALANCE.levelCap - 1);
 }
 
-function capRandomRunPermanentStats(stats: RandomRunPermanentStats, runLevel: number = RANDOM_RUN_BALANCE.levelCap): RandomRunPermanentStats {
-  const effectiveLevel = getRandomRunEffectiveLevel(runLevel);
-  const commanderStatCap = Math.max(0, Math.ceil((effectiveLevel - 1) / 2));
-  const unitStatCap = Math.max(0, Math.ceil((effectiveLevel - 1) / 3));
-  const healthCap = Math.max(0, Math.ceil((effectiveLevel - 1) / 2) * 10);
-
+function capRandomRunPermanentStats(stats: RandomRunPermanentStats, _runLevel: number = RANDOM_RUN_BALANCE.levelCap): RandomRunPermanentStats {
+  void _runLevel;
   return {
-    armyPower: Math.min(stats.armyPower, commanderStatCap),
-    defensivePower: Math.min(stats.defensivePower, commanderStatCap),
-    morale: Math.min(stats.morale, commanderStatCap),
-    spellPower: Math.min(stats.spellPower, commanderStatCap),
-    maxHealth: Math.min(stats.maxHealth, healthCap),
-    unitPower: Math.min(stats.unitPower, unitStatCap),
-    unitWard: Math.min(stats.unitWard, unitStatCap),
+    armyPower: Math.max(0, Math.floor(toFiniteNumber(stats.armyPower, 0))),
+    defensivePower: Math.max(0, Math.floor(toFiniteNumber(stats.defensivePower, 0))),
+    morale: Math.max(0, Math.floor(toFiniteNumber(stats.morale, 0))),
+    spellPower: Math.max(0, Math.floor(toFiniteNumber(stats.spellPower, 0))),
+    maxHealth: Math.max(0, Math.floor(toFiniteNumber(stats.maxHealth, 0))),
+    unitPower: Math.max(0, Math.floor(toFiniteNumber(stats.unitPower, 0))),
+    unitWard: Math.max(0, Math.floor(toFiniteNumber(stats.unitWard, 0))),
   };
 }
 
@@ -5766,13 +5844,16 @@ function normalizeDailyRunState(state?: Partial<DailyRunState> | null): DailyRun
       shopBuys: (entry.shopBuys || []).slice(0, 24),
       omens: (entry.omens || []).slice(0, 24),
       unlockedSpellNames: (entry.unlockedSpellNames || []).slice(0, 12),
+      unitTemplateIds: (entry.unitTemplateIds || []).filter(Boolean).slice(0, 24),
+      unitClassIds: (entry.unitClassIds || []).filter(Boolean).slice(0, 8) as MinionClass[],
+      tierThreeUnitNames: (entry.tierThreeUnitNames || []).filter(Boolean).slice(0, 12),
       runLevelAfter: Math.max(1, Math.floor(toFiniteNumber(entry.runLevelAfter, runLevel))),
       streakAfter: Math.max(0, Math.floor(toFiniteNumber(entry.streakAfter, 0))),
     })),
     runLevel,
     runExp,
     runUpgradePoints: Math.max(0, Math.floor(toFiniteNumber(state?.runUpgradePoints, 0))),
-    permanentStats: capRandomRunPermanentStats(normalizeRandomRunPermanentStats(state?.permanentStats), runLevel),
+    permanentStats: capRandomRunPermanentStats(normalizeRandomRunPermanentStats(state?.permanentStats)),
     claimedMilestoneIds: Array.from(new Set((state?.claimedMilestoneIds || []).filter(Boolean))).slice(0, 64),
   };
 }
@@ -6062,7 +6143,7 @@ export function recordDailyRunCompletionState(
     runExp = Math.min(runExp, getRandomRunExpNeeded(runLevel) * RANDOM_RUN_BALANCE.maxBankedCapLevels);
   }
 
-  permanentStats = capRandomRunPermanentStats(permanentStats, runLevel);
+  permanentStats = capRandomRunPermanentStats(permanentStats);
 
   const entry: DailyRunHistoryEntry = {
     ...report,
@@ -6118,7 +6199,7 @@ function applyRandomRunExperienceGain(state: DailyRunState, gainedExp: number): 
     runExp = Math.min(runExp, getRandomRunExpNeeded(runLevel) * RANDOM_RUN_BALANCE.maxBankedCapLevels);
   }
 
-  permanentStats = capRandomRunPermanentStats(permanentStats, runLevel);
+  permanentStats = capRandomRunPermanentStats(permanentStats);
 
   return {
     ...state,
@@ -6139,18 +6220,13 @@ export function spendRunUpgradePoint(
   }
 
   const increment = RANDOM_RUN_UPGRADE_INCREMENTS[stat];
-  const capped = capRandomRunPermanentStats(state.permanentStats, state.runLevel);
-  if (state.permanentStats[stat] >= capped[stat]) {
-    return { ok: false, message: 'That bonus is already capped for your run level.', dailyRun: state };
-  }
-
   const nextStats = capRandomRunPermanentStats({
     ...state.permanentStats,
     [stat]: state.permanentStats[stat] + increment,
-  }, state.runLevel);
+  });
 
   if (nextStats[stat] === state.permanentStats[stat]) {
-    return { ok: false, message: 'That bonus is already capped for your run level.', dailyRun: state };
+    return { ok: false, message: 'That bonus could not be upgraded.', dailyRun: state };
   }
 
   const dailyRun: DailyRunState = {

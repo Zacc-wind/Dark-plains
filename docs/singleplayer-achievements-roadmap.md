@@ -11,32 +11,35 @@ Build a dedicated singleplayer progression layer on top of random runs, separate
 ## Phase 1 — Run Overview Foundation
 - [x] Post-login mode select screen with city backdrop.
 - [x] First-login mode tutorial explains that Singleplayer and Multiplayer are separate progression tracks before choosing a mode.
-- [x] Singleplayer Run Hall hub with run overview, ledger, and start/resume run.
+- [x] Singleplayer Run Hall hub with compact run overview, hidden menu, and start/resume run.
 - [x] Settings panel copy in singleplayer hub.
 - [x] Retreat / run close returns to singleplayer hub instead of world map.
 - [x] Remove random-run launcher from multiplayer command center and overview.
 - [x] Add boss8-led first-run tutorial overlays for singleplayer lobby, draft, map, formation, combat, reward, shop, and omen phases.
 
 ## Phase 2 — Achievement Data Model
-- [ ] Add `RunAchievementState` on `User.dailyRun` or a sibling `singleplayerProfile` object.
+- [x] Store claimed milestone ids on `User.dailyRun`.
 - [ ] Track unlock timestamps, tier, and display metadata per achievement id.
-- [ ] Persist boss-first-kill flags, streak milestones, and spell unlock gallery entries.
-- [ ] Migration helper in `lib/auth.ts` `normalizeDailyRunState()` for older saves.
+- [x] Persist boss kills, route notes, shop buys, omens, spell unlocks, unit classes, unit templates, and tier III recruits in run history.
+- [x] Migration helper in `lib/auth.ts` `normalizeDailyRunState()` for older saves.
 
 ## Phase 3 — Achievement Catalog
-- [ ] Define static catalog in `lib/runAchievements.ts` with categories:
+- [x] Define static catalog in `lib/runMilestones.ts` with categories:
   - **Road**: first clear, hard-route clear, no-shop clear, full-streak clear.
   - **Boss**: first kill per boss id, flawless boss (no injuries), speed thresholds.
   - **Army**: recruit every class, promote to tier 3, finish with 7 living units.
   - **Economy**: spend 500 run gold in one run, buy 3 shop items, claim 5 omens.
   - **Meta**: reach run level 5/10/15, 10 lifetime clears, 5-win streak.
-- [ ] Wire unlock checks into `RoguelikeRunModal` completion, shop buy, omen resolve, and boss defeat hooks.
+- [x] Wire unlock checks into run completion history for boss, road, army, economy, meta, and spell milestones.
+- [ ] Add no-shop clear, flawless boss, speed threshold, and spend-500-gold milestones once the run report exposes those exact counters.
 
 ## Phase 4 — Run Overview UI
 - [ ] Replace placeholder card with category tabs: Milestones, Bosses, Unlocks, Recent.
-- [ ] Show locked vs unlocked art, progress bars for partial achievements.
-- [ ] Pin 3 featured achievements on the hub hero row.
-- [ ] Toast / celebration card when a new achievement unlocks after a run.
+- [x] Show compact category summaries and partial progress labels for tracked milestone counters.
+- [x] Move achievements entry into the Trophies & Unlocks header and keep the hub summary compact.
+- [x] Pin 3 featured achievements on the hub overview.
+- [x] Toast / celebration card when a new achievement unlocks after a run.
+- [x] Let players spend run upgrade points freely on any permanent bonus without a run-level per-stat cap.
 
 ## Phase 5 — Reward Hooks
 - [ ] Optional cosmetic titles for commander in run lobby.
@@ -55,7 +58,9 @@ Build a dedicated singleplayer progression layer on top of random runs, separate
 
 ## Future Run Setup
 - [x] Add interactive first-combat tutorial coaching for active unit wait, healer blessing, and the forced first commander spell cast.
-- [ ] Add commander selection before a singleplayer run starts.
-- [ ] Add three run lengths with clear difficulty/reward scaling.
-- [ ] Give each player-model commander a distinct run-only passive or special identity: tank/templar, mage, healer, bleed, movement, sustain, or damage.
-- [ ] Add first-run tutorial steps for commander choice, run length, and passive identity once these choices exist.
+- [x] Replace static commander selection with a forced four-choice randomized commander draft before each singleplayer run starts.
+- [x] Add four run lengths with clear difficulty/reward scaling, including a five-fight quick road, with Long Road gated to run level 5.
+- [x] Give each player-model commander an initial run-only stat passive identity: tank/templar, mage, healer, damage, skirmish, or durable mixed.
+- [x] Add first commander unit-family synergies so commander choices buff matching run units.
+- [ ] Add deeper commander special identities where useful: bleed, movement, sustain, or unique combat triggers.
+- [x] Add first-run tutorial steps for commander choice, run length, and passive identity once these choices exist.
