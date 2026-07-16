@@ -9,6 +9,7 @@ import {
   getCurrentUser,
   getUsers,
   getMinionTemplate,
+  isPlayerRecruitableMinionTemplate,
   isStandaloneMinionTemplate,
 } from './auth';
 import { getMinionAssetPath, getPlayerModelPath } from './assetLoader';
@@ -1522,9 +1523,16 @@ function createRecruitOffer(user: User, enemy: WorldEnemy, enemyStats: Character
   const outclassed = playerRating >= enemyRating * 1.85 || user.stats.level >= enemy.level + 6;
   if (!outclassed || enemy.minions.length === 0) return undefined;
 
+  const offerSeed = Math.abs(hashText(`${user.username}:${enemy.id}:${enemy.spawnedAt || 0}:surrender`));
+  if (seededRoll(offerSeed) >= 0.06) return undefined;
+
+  const eligibleMinions = enemy.minions.filter(stack => isPlayerRecruitableMinionTemplate(stack.templateId));
+  if (eligibleMinions.length === 0) return undefined;
+  const offeredMinion = eligibleMinions[Math.floor(seededRoll(offerSeed + 31) * eligibleMinions.length)];
+
   return {
-    offeredMinions: enemy.minions.map((stack, index) => cloneRecruitMinion(stack, enemy, index)),
-    reason: `${enemy.name} sees your army is overwhelming and offers service instead of bloodshed.`,
+    offeredMinions: [cloneRecruitMinion(offeredMinion, enemy, 0)],
+    reason: `${enemy.name} sees your army is overwhelming. One survivor offers service instead of bloodshed.`,
   };
 }
 
@@ -2806,7 +2814,8 @@ export function getBattleSpellLogStyle(spellId: string): BattleLogStyle {
 }
 
 export const BATTLE_SPELL_PRESENTATION_MS = 2300;
-export const BATTLE_ENEMY_PRESENTATION_MS = 1850;
+export const BATTLE_ENEMY_SPELL_PRESENTATION_MS = 1500;
+export const BATTLE_ENEMY_PRESENTATION_MS = 1050;
 export const BATTLE_DEFAULT_PRESENTATION_MS = 1500;
 /** Brief hit reaction on the victim sprite before the ash dissolve. */
 export const BATTLE_DEATH_HIT_MS = 480;
@@ -2851,7 +2860,9 @@ export function getBattleLogPresentationMs(entry: BattleLogEntry, battle?: Battl
   if (entry.style === 'boss-special') return BOSS_SPECIAL_PRESENTATION_MS;
 
   let base: number;
-  if (entry.action === 'spell') base = BATTLE_SPELL_PRESENTATION_MS;
+  if (entry.action === 'spell') {
+    base = entry.side === 'enemy' ? BATTLE_ENEMY_SPELL_PRESENTATION_MS : BATTLE_SPELL_PRESENTATION_MS;
+  }
   else if (entry.side === 'enemy') base = BATTLE_ENEMY_PRESENTATION_MS;
   else base = BATTLE_DEFAULT_PRESENTATION_MS;
 

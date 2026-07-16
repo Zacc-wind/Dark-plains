@@ -98,10 +98,15 @@ import {
   type MpDailyDungeonChallenge,
 } from '@/lib/mpDailyDungeon';
 import { BOSS_PROFILES, getBossProfileById, getBossProfileByIndex } from '@/lib/bosses';
-import { getRunMilestoneRewardExp, getRunMilestoneViews } from '@/lib/runMilestones';
+import {
+  getRunMilestoneRewardExp,
+  getRunMilestoneViews,
+  getRunProgressionUnlocks,
+} from '@/lib/runMilestones';
 import {
   createSingleplayerRunTutorialStep,
   markSingleplayerRunTutorialStepSeen,
+  SINGLEPLAYER_RUN_TUTORIAL_GUIDE_ASSET,
   SINGLEPLAYER_RUN_TUTORIAL_STEP_IDS,
   shouldShowSingleplayerRunTutorialStep,
   skipSingleplayerRunTutorial,
@@ -417,6 +422,7 @@ interface RunSession {
   shopBuyHistory?: string[];
   omenHistory?: string[];
   permanentSpellUnlocks?: string[];
+  runGearRarityCap?: EquipmentRarity;
   runEquipment: Equipment[];
   runEquippedSlots: Partial<Record<EquipmentSlot, string>>;
 }
@@ -802,7 +808,12 @@ const RUN_BUFFS: RunRewardChoice[] = [
     name: 'Relic Gear Cache',
     description: 'Gain a commander gear piece scaled to this run.',
     category: 'equipment',
-    apply: session => addRunEquipment(session, generateRunLootEquipment(session.wins, session.targetBattles)),
+    apply: session => addRunEquipment(session, generateRunLootEquipment(
+      session.wins,
+      session.targetBattles,
+      undefined,
+      { maxRarity: getRunGearRarityCap(session) },
+    )),
   },
 ];
 
@@ -880,8 +891,15 @@ function restoreRunEquipmentReward(choiceId: string, item: Equipment): RunReward
 }
 
 function makeRunEquipmentReward(session: RunSession, forcedRarity?: EquipmentRarity): RunRewardChoice {
-  const item = generateRunLootEquipment(session.wins, session.targetBattles, forcedRarity, { offer: true });
+  const item = generateRunLootEquipment(session.wins, session.targetBattles, forcedRarity, {
+    offer: true,
+    maxRarity: getRunGearRarityCap(session),
+  });
   return restoreRunEquipmentReward(`gear-offer-${item.id}`, item);
+}
+
+function getRunGearRarityCap(session: RunSession): EquipmentRarity {
+  return session.mode === 'daily' ? session.runGearRarityCap || 'decent' : 'legendary';
 }
 
 function pickRunEquipmentReward(session: RunSession): RunRewardChoice | null {
@@ -1443,6 +1461,8 @@ function RunController({
   const tutorialStep = nextTutorialStep && !dismissedTutorialStepIds.has(nextTutorialStep.id)
     ? nextTutorialStep
     : null;
+  const rewardPickTutorialActive = nextTutorialStep?.id === 'reward' && dismissedTutorialStepIds.has('reward');
+  const shopPurchaseTutorialActive = nextTutorialStep?.id === 'shop' && dismissedTutorialStepIds.has('shop');
 
   const handleTutorialContinue = (stepId: SingleplayerRunTutorialStepId) => {
     markSingleplayerRunTutorialStepSeen(username, stepId);
@@ -1452,6 +1472,19 @@ function RunController({
       return next;
     });
     setTutorialRefreshKey(key => key + 1);
+  };
+
+  const handleTutorialIntroContinue = (stepId: SingleplayerRunTutorialStepId) => {
+    if (stepId !== 'reward' && stepId !== 'shop') {
+      handleTutorialContinue(stepId);
+      return;
+    }
+
+    setDismissedTutorialStepIds(current => {
+      const next = new Set(current);
+      next.add(stepId);
+      return next;
+    });
   };
 
   const handleTutorialSkip = () => {
@@ -1646,7 +1679,9 @@ function RunController({
       const withHardRouteBonus = hardRouteCleared ? applyHardRouteVictoryBonus(withLosses) : withLosses;
       const isBossFight = clearedNode?.type === 'boss';
       const bonusGearDrop = !isWorldMapRun(withLosses) && !isBossFight && Math.random() < 0.33
-        ? generateRunLootEquipment(nextWins, withHardRouteBonus.targetBattles)
+        ? generateRunLootEquipment(nextWins, withHardRouteBonus.targetBattles, undefined, {
+            maxRarity: getRunGearRarityCap(withHardRouteBonus),
+          })
         : null;
       const withBonusGear = bonusGearDrop
         ? addRunEquipment(withHardRouteBonus, bonusGearDrop)
@@ -1735,6 +1770,7 @@ function RunController({
   };
 
   const handleRewardChoice = (choice: RunRewardChoice) => {
+    if (rewardPickTutorialActive) handleTutorialContinue('reward');
     setSession(current => {
       if (!current) return current;
       const applied = queueRunRewardCelebrations(current, choice.apply(current), choice);
@@ -1903,7 +1939,8 @@ function RunController({
           <SingleplayerTutorialOverlay
             key={tutorialStep.id}
             step={tutorialStep}
-            onContinue={() => handleTutorialContinue(tutorialStep.id)}
+            playerModelNumber={session.commanderModel}
+            onContinue={() => handleTutorialIntroContinue(tutorialStep.id)}
             onSkip={handleTutorialSkip}
           />
         )}
@@ -1962,6 +1999,7 @@ function RunController({
               <RewardPanel
                 session={session}
                 choices={session.rewardChoices}
+                tutorialActive={rewardPickTutorialActive}
                 onReroll={() => setSession(current => current ? rerollRewardChoices(current) : current)}
                 onChoose={handleRewardChoice}
               />
@@ -1970,7 +2008,11 @@ function RunController({
             {session.phase === 'shop' && (
               <ShopPanel
                 session={session}
-                onBuy={(offerIndex, choice, cost) => setSession(current => current ? buyShopReward(current, offerIndex, choice, cost) : current)}
+                tutorialActive={shopPurchaseTutorialActive}
+                onBuy={(offerIndex, choice, cost) => {
+                  if (shopPurchaseTutorialActive) handleTutorialContinue('shop');
+                  setSession(current => current ? buyShopReward(current, offerIndex, choice, cost) : current);
+                }}
                 onReroll={() => setSession(current => current ? rerollShopOffers(current) : current)}
                 onSkip={() => setSession(current => current ? completeDungeonNode({ ...current, phase: 'map', notice: 'The shop fades behind you.' }) : current)}
               />
@@ -2741,14 +2783,50 @@ function getRunConnectionState(from: DungeonNode, to: DungeonNode, reachableIds:
   return 'locked';
 }
 
+function RunInteractionTutorialCoach({ kind }: { kind: 'blessing' | 'shop' }) {
+  const isBlessing = kind === 'blessing';
+
+  return (
+    <aside
+      className={`run-interaction-tutorial run-interaction-tutorial-${kind} rounded border`}
+      role="status"
+      aria-live="polite"
+    >
+      <span className="run-interaction-tutorial-guide relative" aria-hidden="true">
+        <Image
+          src={SINGLEPLAYER_RUN_TUTORIAL_GUIDE_ASSET}
+          alt=""
+          fill
+          sizes="76px"
+          className="object-contain object-bottom"
+          unoptimized
+        />
+      </span>
+      <span className="run-interaction-tutorial-copy">
+        <span className="arcane-label">{isBlessing ? 'First Blessing' : 'First Purchase'}</span>
+        <strong className="fantasy-heading">
+          {isBlessing ? 'Choose one highlighted path.' : 'Spend run gold on a highlighted offer.'}
+        </strong>
+        <span>
+          {isBlessing
+            ? 'Hover to read the full effect, then choose the blessing that fits the surviving warband.'
+            : 'Affordable offers are marked. Buying one completes this lesson; the shop remains open afterward.'}
+        </span>
+      </span>
+    </aside>
+  );
+}
+
 function RewardPanel({
   session,
   choices,
+  tutorialActive = false,
   onReroll,
   onChoose,
 }: {
   session: RunSession;
   choices: RunRewardChoice[];
+  tutorialActive?: boolean;
   onReroll: () => void;
   onChoose: (choice: RunRewardChoice) => void;
 }) {
@@ -2820,6 +2898,7 @@ function RewardPanel({
 
         <div className="run-blessing-offer-stage min-h-0">
           <div className="run-blessing-backdrop" aria-hidden="true" />
+          {tutorialActive && <RunInteractionTutorialCoach kind="blessing" />}
           <div className="run-blessing-frame">
             <div className="run-draft-choice-header mb-2 flex flex-wrap items-end justify-between gap-2">
               <div>
@@ -2860,7 +2939,13 @@ function RewardPanel({
 
             <div className={`run-blessing-grid ${isRerolling ? 'run-blessing-grid-rerolling' : ''}`}>
         {choices.map(choice => (
-                <RunRewardCard key={choice.id} choice={choice} onChoose={() => onChoose(choice)} variant="blessing" />
+                <RunRewardCard
+                  key={choice.id}
+                  choice={choice}
+                  tutorialFocus={tutorialActive}
+                  onChoose={() => onChoose(choice)}
+                  variant="blessing"
+                />
         ))}
       </div>
           </div>
@@ -2876,12 +2961,14 @@ function RunRewardCard({
   disabled = false,
   cost,
   variant = 'blessing',
+  tutorialFocus = false,
 }: {
   choice: RunRewardChoice;
   onChoose: () => void;
   disabled?: boolean;
   cost?: number;
   variant?: 'blessing' | 'shop';
+  tutorialFocus?: boolean;
 }) {
   const visual = getRunRewardVisual(choice);
   const [claiming, setClaiming] = useState(false);
@@ -2902,7 +2989,7 @@ function RunRewardCard({
     <button
       onClick={handleChoose}
       disabled={disabled || claiming}
-      className={`run-blessing-card run-blessing-card-${visual.tone} run-reward-card run-reward-card-${visual.tone} run-reward-card-${variant} ${variant === 'shop' ? 'run-shop-offer-card' : 'run-blessing-choice-card'} ${claiming ? 'run-reward-card-claiming' : ''} rounded border text-left transition disabled:opacity-40`}
+      className={`run-blessing-card run-blessing-card-${visual.tone} run-reward-card run-reward-card-${visual.tone} run-reward-card-${variant} ${variant === 'shop' ? 'run-shop-offer-card' : 'run-blessing-choice-card'} ${tutorialFocus ? 'run-reward-card-tutorial-focus' : ''} ${claiming ? 'run-reward-card-claiming' : ''} rounded border text-left transition disabled:opacity-40`}
       style={cardStyle}
     >
       <span className="run-reward-card-burst" aria-hidden="true" />
@@ -3004,11 +3091,13 @@ function getRunRewardVisual(choice: RunRewardChoice): {
 
 function ShopPanel({
   session,
+  tutorialActive = false,
   onBuy,
   onReroll,
   onSkip,
 }: {
   session: RunSession;
+  tutorialActive?: boolean;
   onBuy: (offerIndex: number, choice: RunRewardChoice, cost: number) => void;
   onReroll: () => void;
   onSkip: () => void;
@@ -3019,6 +3108,7 @@ function ShopPanel({
 
   return (
     <div className="run-shop-screen run-draft-stage run-reward-stage min-h-0">
+      {tutorialActive && <RunInteractionTutorialCoach kind="shop" />}
       <section className="run-shop-hero ui-card flex flex-wrap items-start justify-between gap-3 rounded border p-4">
         <div>
           <div className="arcane-label">{session.mode === 'dungeon' ? 'Dungeon Shop' : 'Road Shop'}</div>
@@ -3073,6 +3163,7 @@ function ShopPanel({
               disabled={!canAfford}
                 cost={offer.cost}
                 variant="shop"
+                tutorialFocus={tutorialActive && canAfford}
             />
           );
         })}
@@ -4365,10 +4456,15 @@ function serializeRunSession(username: string, session: RunSession): StoredRunSe
   };
 }
 
-function hydrateRunSession(storedSession: StoredRunSession | null, challenge?: DailyRunChallenge): RunSession | null {
+function hydrateRunSession(
+  storedSession: StoredRunSession | null,
+  challenge?: DailyRunChallenge,
+  user?: User,
+): RunSession | null {
   if (!storedSession || storedSession.mode !== 'daily') return null;
   if (storedSession.phase === 'complete' || storedSession.rewardClaimed) return null;
   const resolvedChallenge = storedSession.dailyChallenge || challenge || createRandomRunChallenge();
+  const progressionUnlocks = getRunProgressionUnlocks(getDailyRunState(user));
   const { rewardChoiceIds, rewardEquipmentOffers, savedAt, ownerUsername, dateKey, ...session } = storedSession;
   void savedAt;
   void ownerUsername;
@@ -4432,13 +4528,13 @@ function hydrateRunSession(storedSession: StoredRunSession | null, challenge?: D
     shopOffers: storedSession.shopOffers || {},
     shopRerollsRemaining: typeof storedSession.shopRerollsRemaining === 'number'
       ? storedSession.shopRerollsRemaining
-      : RUN_SHOP_REROLL_COUNT,
+      : RUN_SHOP_REROLL_COUNT + progressionUnlocks.shopRerollBonus,
     blessingRerollsRemaining: typeof storedSession.blessingRerollsRemaining === 'number'
       ? storedSession.blessingRerollsRemaining
       : RUN_BLESSING_REROLL_COUNT,
     omenRerollsRemaining: typeof storedSession.omenRerollsRemaining === 'number'
       ? storedSession.omenRerollsRemaining
-      : RUN_OMEN_REROLL_COUNT,
+      : RUN_OMEN_REROLL_COUNT + progressionUnlocks.omenRerollBonus,
     pendingPositiveOmen: Boolean(storedSession.pendingPositiveOmen),
     pendingRunCelebrations: storedSession.pendingRunCelebrations || [],
     startedAt: storedSession.startedAt || Date.now(),
@@ -4446,11 +4542,16 @@ function hydrateRunSession(storedSession: StoredRunSession | null, challenge?: D
     shopBuyHistory: storedSession.shopBuyHistory || [],
     omenHistory: storedSession.omenHistory || [],
     permanentSpellUnlocks: storedSession.permanentSpellUnlocks || [],
+    runGearRarityCap: storedSession.runGearRarityCap || progressionUnlocks.maxGearRarity,
   };
 }
 
 function loadDailyRunSession(user: User, challenge?: DailyRunChallenge): RunSession | null {
-  return hydrateRunSession(readGameJson<StoredRunSession | null>(getRandomRunSessionKey(user.username), null), challenge);
+  return hydrateRunSession(
+    readGameJson<StoredRunSession | null>(getRandomRunSessionKey(user.username), null),
+    challenge,
+    user,
+  );
 }
 
 export interface SavedDailyRunSummary {
@@ -4678,6 +4779,7 @@ function createDailySession(user: User, dailyChallenge = createRandomRunChalleng
   const runStats = getRandomRunBaseStats(user, runSetup);
   const nodes = createDailyRunNodes(dailyChallenge, runStats.level || 1);
   const spellIds = pickRunSpellLoadout(dailyChallenge.date);
+  const progressionUnlocks = getRunProgressionUnlocks(getDailyRunState(user));
 
   return {
     id: `random-run-${Date.now()}-${Math.random().toString(16).slice(2)}`,
@@ -4708,9 +4810,9 @@ function createDailySession(user: User, dailyChallenge = createRandomRunChalleng
     outcome: null,
     dailyChallenge,
     shopOffers: {},
-    shopRerollsRemaining: RUN_SHOP_REROLL_COUNT,
+    shopRerollsRemaining: RUN_SHOP_REROLL_COUNT + progressionUnlocks.shopRerollBonus,
     blessingRerollsRemaining: RUN_BLESSING_REROLL_COUNT,
-    omenRerollsRemaining: RUN_OMEN_REROLL_COUNT,
+    omenRerollsRemaining: RUN_OMEN_REROLL_COUNT + progressionUnlocks.omenRerollBonus,
     pendingPositiveOmen: false,
     pendingRunCelebrations: [],
     startedAt: Date.now(),
@@ -4718,6 +4820,7 @@ function createDailySession(user: User, dailyChallenge = createRandomRunChalleng
     shopBuyHistory: [],
     omenHistory: [],
     permanentSpellUnlocks: [],
+    runGearRarityCap: progressionUnlocks.maxGearRarity,
     ...createEmptyRunEquipmentState(),
   };
 }

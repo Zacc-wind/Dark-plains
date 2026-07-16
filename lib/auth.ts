@@ -1282,6 +1282,52 @@ export function markStoryQuestIntroSeen(questId: string): void {
   });
 }
 
+export const MULTIPLAYER_ONBOARDING_STORY_QUEST_IDS = [
+  'story-01-first-banner',
+  'story-02-candle-road',
+  'story-03-lost-apprentice',
+  'story-04-river-law',
+  'story-05-violet-satchel',
+  'story-06-black-pike',
+] as const;
+
+export function skipMultiplayerOnboarding(): {
+  success: boolean;
+  skippedCount: number;
+  message?: string;
+  error?: string;
+} {
+  const currentUser = getCurrentUser();
+  if (!currentUser) return { success: false, skippedCount: 0, error: 'Not logged in.' };
+
+  const progressByQuestId = new Map(
+    (currentUser.storyQuests || []).map(progress => [progress.questId, progress]),
+  );
+  let skippedCount = 0;
+
+  MULTIPLAYER_ONBOARDING_STORY_QUEST_IDS.forEach(questId => {
+    const existing = progressByQuestId.get(questId);
+    if (!existing?.introSeen) skippedCount += 1;
+    progressByQuestId.set(questId, {
+      questId,
+      claimed: existing?.claimed || false,
+      completedAt: existing?.completedAt,
+      introSeen: true,
+    });
+  });
+
+  if (skippedCount === 0) {
+    return { success: true, skippedCount: 0, message: 'Opening conversations were already complete.' };
+  }
+
+  updateCurrentUser({ storyQuests: Array.from(progressByQuestId.values()) });
+  return {
+    success: true,
+    skippedCount,
+    message: 'Opening conversations skipped. Story objectives and rewards remain unchanged.',
+  };
+}
+
 export function getPendingStoryDialogQuest(user: User | null | undefined): StoryQuestTemplate | undefined {
   if (!user) return undefined;
 
@@ -1925,6 +1971,7 @@ export const MINION_TEMPLATES: MinionTemplate[] = [
 export const STANDALONE_TIER1_MINION_TEMPLATE_IDS = ['witchdoc', 'crossbow', 'thief', 'darkpriest'] as const;
 export const STANDALONE_TIER2_MINION_TEMPLATE_IDS = ['enchanter', 'firelord', 'archer', 'bell'] as const;
 export const STANDALONE_TIER3_MINION_TEMPLATE_IDS = ['plaugedoc', 'fallen', 'mercenary', 'crow'] as const;
+export const PLAYER_RECRUIT_EXCLUDED_TEMPLATE_IDS = ['thief', 'darkpriest'] as const;
 export const STANDALONE_MINION_TEMPLATE_IDS = [
   ...STANDALONE_TIER1_MINION_TEMPLATE_IDS,
   ...STANDALONE_TIER2_MINION_TEMPLATE_IDS,
@@ -1945,6 +1992,10 @@ export function isStandaloneTier3MinionTemplate(templateId: string): boolean {
 
 export function isStandaloneMinionTemplate(templateId: string): boolean {
   return (STANDALONE_MINION_TEMPLATE_IDS as readonly string[]).includes(templateId);
+}
+
+export function isPlayerRecruitableMinionTemplate(templateId: string): boolean {
+  return !(PLAYER_RECRUIT_EXCLUDED_TEMPLATE_IDS as readonly string[]).includes(templateId);
 }
 
 const USERS_KEY = 'pirate_game_users';
@@ -4683,9 +4734,8 @@ const JOB_REWARD_PROFILES: Record<string, JobRewardProfile> = {
     exp: [7, 14, 22, 32],
     rareGems: [0, 0, 0, 1],
     itemIds: [null, 'black-amber', 'field-surgeon-kit', 'small-gem-sack'],
-    minionTiers: [null, null, null, 'tier1'],
     levelRequirements: [1, 1, 1, 5],
-    notes: [null, 'Forest trade goods.', 'Safer long-road supplies.', 'Level 5 ranger contact.'],
+    notes: [null, 'Forest trade goods.', 'Safer long-road supplies.', 'Level 5 forest cache.'],
   },
   mountain: {
     gold: [14, 32, 56, 96],
@@ -4709,9 +4759,8 @@ const JOB_REWARD_PROFILES: Record<string, JobRewardProfile> = {
     exp: [6, 13, 21, 31],
     rareGems: [0, 0, 1, 1],
     itemIds: [null, null, 'field-surgeon-kit', null],
-    minionTiers: [null, null, null, 'tier2'],
     levelRequirements: [1, 1, 1, 5],
-    notes: [null, null, 'Hunting supplies.', 'Level 5 veteran tracker.'],
+    notes: [null, null, 'Hunting supplies.', 'Level 5 veteran cache.'],
   },
   windmill: {
     gold: [9, 22, 38, 60],
@@ -5000,7 +5049,12 @@ export function checkJobsComplete(): void {
         equipmentEarned.push(droppedEquipment);
       }
 
-      const droppedMinion = generateMinionDrop(firstJob.workDuration);
+      const droppedMinion = generateMinionDrop(
+        firstJob.workDuration,
+        undefined,
+        1,
+        currentUser.stats.level || 1,
+      );
       if (droppedMinion) {
         minionsEarned.push(droppedMinion);
       }
@@ -5370,39 +5424,40 @@ export function generateEquipment(jobDuration: number, forcedRarity?: EquipmentR
   return equipment;
 }
 
-function rollMinionTier(workDuration: number): MinionTier | null {
-  const random = Math.random() * 100;
+function rollMinionTier(workDuration: number, playerLevel: number): MinionTier | null {
+  const roll = Math.random();
+  const tier2Unlocked = playerLevel >= 5;
+  const tier3Unlocked = playerLevel >= 10;
+  const rates = workDuration >= 15 * 60 * 1000
+    ? { tier1: 0.009, tier2: 0.0018, tier3: 0.0003 }
+    : workDuration >= 5 * 60 * 1000
+      ? { tier1: 0.005, tier2: 0.001, tier3: 0.0001 }
+      : workDuration >= 1 * 60 * 1000
+        ? { tier1: 0.0022, tier2: 0.0002, tier3: 0 }
+        : { tier1: 0.0004, tier2: 0, tier3: 0 };
+  const tier3Chance = tier3Unlocked ? rates.tier3 : 0;
+  const tier2Chance = tier2Unlocked ? rates.tier2 : 0;
 
-  if (workDuration >= 15 * 60 * 1000) {
-    if (random < 20) return 'tier1';
-    if (random < 30) return 'tier2';
-    if (random < 34) return 'tier3';
-    return null;
-  }
-
-  if (workDuration >= 5 * 60 * 1000) {
-    if (random < 16) return 'tier1';
-    if (random < 22) return 'tier2';
-    if (random < 24) return 'tier3';
-    return null;
-  }
-
-  if (workDuration >= 1 * 60 * 1000) {
-    if (random < 12) return 'tier1';
-    if (random < 15) return 'tier2';
-    return null;
-  }
-
-  if (random < 8) return 'tier1';
+  if (roll < tier3Chance) return 'tier3';
+  if (roll < tier3Chance + tier2Chance) return 'tier2';
+  if (roll < tier3Chance + tier2Chance + rates.tier1) return 'tier1';
   return null;
 }
 
-export function generateMinionDrop(workDuration: number, forcedTier?: MinionTier, quantity = 1): MinionStack | null {
-  const tier = forcedTier || rollMinionTier(workDuration);
+export function generateMinionDrop(
+  workDuration: number,
+  forcedTier?: MinionTier,
+  quantity = 1,
+  playerLevel = 1,
+): MinionStack | null {
+  const tier = forcedTier || rollMinionTier(workDuration, playerLevel);
   if (!tier) return null;
 
-  const eligibleTemplates = MINION_TEMPLATES.filter(template => template.tier === tier);
+  const eligibleTemplates = MINION_TEMPLATES.filter(template => (
+    template.tier === tier && isPlayerRecruitableMinionTemplate(template.templateId)
+  ));
   const template = eligibleTemplates[Math.floor(Math.random() * eligibleTemplates.length)];
+  if (!template) return null;
 
   return createMinionStack(template, quantity);
 }
@@ -6243,6 +6298,7 @@ export function claimRunMilestoneReward(
   milestoneId: string,
   rewardExp: number,
   isUnlocked: boolean,
+  claimReward?: string,
 ): { ok: boolean; message: string; dailyRun: DailyRunState } {
   const state = getDailyRunState(user);
   const claimed = new Set(state.claimedMilestoneIds || []);
@@ -6261,7 +6317,7 @@ export function claimRunMilestoneReward(
 
   return {
     ok: true,
-    message: `Milestone reward claimed: +${rewardExp} run XP.`,
+    message: `Milestone reward claimed: +${rewardExp} run XP.${claimReward ? ` ${claimReward}` : ''}`,
     dailyRun,
   };
 }
@@ -6286,7 +6342,7 @@ function initializeDailyQuests(now = Date.now()): DailyQuestState {
           legendaryChance: 0.01,
           minionChance: {
             tier: 'tier1',
-            chance: 0.20,
+            chance: 0.03,
           }
         }
       },
@@ -6310,7 +6366,7 @@ function initializeDailyQuests(now = Date.now()): DailyQuestState {
           legendaryChance: 0.01,
           minionChance: {
             tier: 'tier2',
-            chance: 0.25,
+            chance: 0.05,
           }
         }
       },
@@ -6330,14 +6386,14 @@ function initializeDailyQuests(now = Date.now()): DailyQuestState {
           legendaryChance: 0.01,
           minionChance: {
             tier: 'tier3',
-            chance: 0.30,
+            chance: 0.08,
           }
         }
       },
       {
         id: 'daily-gift',
         name: 'Daily Supply Cache',
-        description: 'Claim a free random unit stack or gear piece once today.',
+        description: 'Claim one free supply cache. Most contain gear; recruits are rare.',
         requirement: {
           type: 'collect_daily_gift',
           count: 1,
@@ -6373,7 +6429,6 @@ function normalizeDailyQuests(state?: Partial<DailyQuestState> | null, now = Dat
 
     return {
       ...template,
-      ...existing,
       progress: Math.max(0, Math.floor(toFiniteNumber(existing.progress, template.progress))),
       claimed: Boolean(existing.claimed),
       claimedAt: existing.claimedAt === undefined ? undefined : toFiniteNumber(existing.claimedAt, now),
@@ -6459,11 +6514,11 @@ export function claimQuestReward(questId: string): { success: boolean; rewards?:
   const rewardMinions: MinionStack[] = [];
 
   if (quest.rewards.randomSupply) {
-    if (Math.random() < 0.48) {
+    if (Math.random() < 0.08) {
       const minion = generateMinionDrop(
         5 * 60 * 1000,
-        Math.random() < 0.18 ? 'tier2' : 'tier1',
-        Math.random() < 0.2 ? 2 : 1,
+        (currentUser.stats.level || 1) >= 5 && Math.random() < 0.10 ? 'tier2' : 'tier1',
+        1,
       );
       if (minion) rewardMinions.push(minion);
     } else {

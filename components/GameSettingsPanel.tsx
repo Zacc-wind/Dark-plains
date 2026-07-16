@@ -26,6 +26,7 @@ import {
   readSingleplayerRunTutorialEnabled,
   readSingleplayerRunTutorialProgress,
   resetSingleplayerRunTutorial,
+  SINGLEPLAYER_RUN_TUTORIAL_STEP_IDS,
   writeSingleplayerRunTutorialEnabled,
 } from '@/lib/singleplayerTutorial';
 
@@ -264,7 +265,9 @@ export default function GameSettingsPanel({ showRunTutorial = false, compact = f
           </button>
           <div className="settings-tutorial-row">
             <span className="ui-faint text-xs font-bold">
-              {runTutorialProgress.completed ? 'Complete' : `${runTutorialProgress.seenStepIds.length}/8 steps`}
+              {runTutorialProgress.completed
+                ? 'Complete'
+                : `${runTutorialProgress.seenStepIds.length}/${SINGLEPLAYER_RUN_TUTORIAL_STEP_IDS.length} steps`}
             </span>
             <button
               type="button"

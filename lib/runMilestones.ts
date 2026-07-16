@@ -1,5 +1,5 @@
 import { BOSS_PROFILES } from '@/lib/bosses';
-import type { DailyRunState, MinionClass } from '@/lib/auth';
+import type { DailyRunState, EquipmentRarity, MinionClass } from '@/lib/auth';
 
 export type RunMilestoneCategory = 'boss' | 'road' | 'army' | 'spell' | 'meta' | 'economy';
 export const RUN_MILESTONE_CATEGORY_LABELS: Record<RunMilestoneCategory, string> = {
@@ -18,6 +18,7 @@ export interface RunMilestoneDefinition {
   description: string;
   iconPath: string;
   rewardHint?: string;
+  claimReward?: string;
 }
 
 export interface RunMilestoneView extends RunMilestoneDefinition {
@@ -202,11 +203,20 @@ const STATIC_MILESTONES: RunMilestoneDefinition[] = [
     rewardHint: 'Spell unlock milestone.',
   },
   {
+    id: 'meta-run-level-3',
+    category: 'meta',
+    title: 'Relic Seeker',
+    description: 'Reach run level 3.',
+    iconPath: '/assets/icons/loot-chest.png',
+    claimReward: 'Rare commander gear can appear in future singleplayer runs.',
+  },
+  {
     id: 'meta-run-level-5',
     category: 'meta',
     title: 'Veteran Runner',
     description: 'Reach run level 5.',
     iconPath: '/assets/icons/xp.png',
+    claimReward: 'Epic commander gear can appear in future singleplayer runs.',
   },
   {
     id: 'meta-run-level-10',
@@ -214,6 +224,7 @@ const STATIC_MILESTONES: RunMilestoneDefinition[] = [
     title: 'Road Legend',
     description: 'Reach run level 10.',
     iconPath: '/assets/icons/xp.png',
+    claimReward: 'Legendary commander gear can appear in future singleplayer runs.',
   },
   {
     id: 'meta-run-level-15',
@@ -249,6 +260,7 @@ const STATIC_MILESTONES: RunMilestoneDefinition[] = [
     title: 'Quartermaster',
     description: 'Buy three shop offers in one run.',
     iconPath: '/assets/icons/gold.png',
+    claimReward: 'Future singleplayer runs begin with one extra shop reroll.',
   },
   {
     id: 'economy-omen',
@@ -263,6 +275,7 @@ const STATIC_MILESTONES: RunMilestoneDefinition[] = [
     title: 'Star Reader',
     description: 'Resolve five omens in one run.',
     iconPath: '/assets/icons/rare-gem.png',
+    claimReward: 'Future singleplayer runs begin with one extra omen reroll.',
   },
 ];
 
@@ -304,6 +317,8 @@ function isMilestoneUnlocked(state: DailyRunState, milestone: RunMilestoneDefini
       return unlockedSpells.has('Sanctified Mend');
     case 'spell-blood-star':
       return unlockedSpells.has('Blood Star');
+    case 'meta-run-level-3':
+      return state.runLevel >= 3;
     case 'meta-run-level-5':
       return state.runLevel >= 5;
     case 'meta-run-level-10':
@@ -333,6 +348,7 @@ function isMilestoneUnlocked(state: DailyRunState, milestone: RunMilestoneDefini
 }
 
 function getRunMilestoneProgressLabel(state: DailyRunState, milestoneId: string): string | undefined {
+  if (milestoneId === 'meta-run-level-3') return `Lv ${state.runLevel}/3`;
   if (milestoneId === 'meta-run-level-5') return `Lv ${state.runLevel}/5`;
   if (milestoneId === 'meta-run-level-10') return `Lv ${state.runLevel}/10`;
   if (milestoneId === 'meta-run-level-15') return `Lv ${state.runLevel}/15`;
@@ -384,7 +400,7 @@ export function getRunMilestoneCategorySummaries(state: DailyRunState): RunMiles
 
 export function getFeaturedHubMilestones(state: DailyRunState, limit = 6): RunMilestoneView[] {
   const views = getRunMilestoneViews(state);
-  const priority = ['road-first-clear', 'meta-run-level-5', 'boss-mother-cindervein', 'spell-arcane-bolt', 'economy-shop-buy', 'army-priest-recruit'];
+  const priority = ['meta-run-level-3', 'meta-run-level-5', 'meta-run-level-10', 'road-first-clear', 'economy-three-shop-buys', 'economy-five-omens'];
   const picked = priority
     .map(id => views.find(view => view.id === id))
     .filter((view): view is RunMilestoneView => Boolean(view));
@@ -404,6 +420,29 @@ export function getRunMilestoneRewardExp(milestoneId: string): number {
 
 export function isRunMilestoneRewardClaimed(state: DailyRunState, milestoneId: string): boolean {
   return (state.claimedMilestoneIds || []).includes(milestoneId);
+}
+
+export interface RunProgressionUnlocks {
+  maxGearRarity: EquipmentRarity;
+  shopRerollBonus: number;
+  omenRerollBonus: number;
+}
+
+export function getRunProgressionUnlocks(state: DailyRunState): RunProgressionUnlocks {
+  const claimed = new Set(state.claimedMilestoneIds || []);
+  const maxGearRarity: EquipmentRarity = claimed.has('meta-run-level-10')
+    ? 'legendary'
+    : claimed.has('meta-run-level-5')
+      ? 'epic'
+      : claimed.has('meta-run-level-3')
+        ? 'rare'
+        : 'decent';
+
+  return {
+    maxGearRarity,
+    shopRerollBonus: claimed.has('economy-three-shop-buys') ? 1 : 0,
+    omenRerollBonus: claimed.has('economy-five-omens') ? 1 : 0,
+  };
 }
 
 export function getRunMilestoneUnlockCounts(state: DailyRunState): { unlocked: number; total: number } {

@@ -21,11 +21,6 @@ export default function StoryDialogOverlay({
   const isLastLine = lineIndex >= sequence.lines.length - 1;
   const activeSpeaker = line?.speaker || 'npc';
 
-  useEffect(() => {
-    setLineIndex(0);
-    finishedRef.current = false;
-  }, [sequence.id]);
-
   const finish = () => {
     if (finishedRef.current) return;
     finishedRef.current = true;
@@ -41,8 +36,20 @@ export default function StoryDialogOverlay({
     setLineIndex(current => current + 1);
   };
 
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      event.preventDefault();
+      advance();
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  });
+
   if (!line) return null;
 
+  const npcImagePath = sequence.npcAssetPath || getPlayerModelPath(sequence.npcModelNumber || 4);
   const overlay = (
     <div
       className="story-dialog-layer fixed inset-0 z-[125] flex items-end justify-center p-3 text-zinc-100 sm:p-5"
@@ -53,13 +60,13 @@ export default function StoryDialogOverlay({
     >
       <div className="story-dialog-backdrop pointer-events-none absolute inset-0" aria-hidden="true" />
 
-      <div className="story-dialog-stage pointer-events-none absolute inset-x-0 bottom-[9.5rem] flex items-end justify-center gap-4 px-4 sm:bottom-[10.5rem] sm:gap-8">
+      <div className="story-dialog-stage pointer-events-none absolute inset-0">
         <div className={`story-dialog-spirit story-dialog-spirit-player ${activeSpeaker === 'player' ? 'story-dialog-spirit-speaking' : ''}`}>
           <Image
             src={getPlayerModelPath(playerModelNumber)}
-            alt=""
-            width={120}
-            height={120}
+            alt="Your commander"
+            width={520}
+            height={720}
             className="story-dialog-spirit-image object-contain"
             unoptimized
           />
@@ -67,10 +74,10 @@ export default function StoryDialogOverlay({
         </div>
         <div className={`story-dialog-spirit story-dialog-spirit-npc ${activeSpeaker === 'npc' ? 'story-dialog-spirit-speaking' : ''}`}>
           <Image
-            src={getPlayerModelPath(sequence.npcModelNumber || 4)}
-            alt=""
-            width={120}
-            height={120}
+            src={npcImagePath}
+            alt={sequence.npcName}
+            width={520}
+            height={720}
             className="story-dialog-spirit-image object-contain"
             unoptimized
           />
@@ -79,7 +86,7 @@ export default function StoryDialogOverlay({
       </div>
 
       <section
-        className="story-dialog-panel command-panel vine-frame relative w-full max-w-3xl rounded border p-4 sm:p-5"
+        className="story-dialog-panel command-panel vine-frame relative w-full max-w-5xl rounded border p-4 sm:p-5"
         onClick={event => event.stopPropagation()}
       >
         <div className="story-dialog-panel-glow" aria-hidden="true" />
@@ -93,19 +100,33 @@ export default function StoryDialogOverlay({
               {activeSpeaker === 'player' ? 'Commander' : sequence.npcTitle}
             </span>
           </div>
-          <p className="ui-muted mt-4 min-h-[4.5rem] text-sm font-bold leading-relaxed sm:text-base">
+          <p key={`${sequence.id}-${lineIndex}`} className="story-dialog-copy ui-muted mt-4 min-h-[4.5rem] max-w-3xl text-sm font-bold leading-relaxed sm:text-base">
             {line.text}
           </p>
+          {isLastLine && sequence.objective && (
+            <div className="story-dialog-objective mt-4 rounded border px-4 py-3">
+              <div className="arcane-label">{sequence.objective.label}</div>
+              <div className="mt-1 text-sm font-black text-zinc-100 sm:text-base">{sequence.objective.title}</div>
+              <p className="ui-muted mt-1 text-xs font-bold leading-relaxed sm:text-sm">{sequence.objective.description}</p>
+            </div>
+          )}
           <div className="mt-5 flex items-center justify-between gap-3">
-            <span className="story-dialog-hint ui-faint text-[10px] font-black uppercase tracking-[0.14em]">
-              Tap outside or continue
-            </span>
+            <div className="flex items-center gap-3">
+              <span className="story-dialog-hint ui-faint text-[10px] font-black uppercase tracking-[0.14em]">
+                Enter or continue
+              </span>
+              <span className="story-dialog-progress" aria-label={`Dialogue line ${lineIndex + 1} of ${sequence.lines.length}`}>
+                {sequence.lines.map((_, index) => (
+                  <span key={index} className={index === lineIndex ? 'is-current' : index < lineIndex ? 'is-complete' : ''} />
+                ))}
+              </span>
+            </div>
             <button
               type="button"
               onClick={advance}
               className="story-dialog-continue ui-button-primary rounded px-4 py-2 text-xs font-black uppercase"
             >
-              {isLastLine ? 'Continue' : 'Next'}
+              {isLastLine ? sequence.objective ? 'Accept Order' : 'Continue' : activeSpeaker === 'npc' ? 'Respond' : 'Continue'}
             </button>
           </div>
         </div>

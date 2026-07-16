@@ -128,6 +128,11 @@ export function rollTravelEvents(durationMs: number, seedText: string): TravelEv
     const isNegative = seededRoll(seed + index * 13) >= 0.8;
     const pool = isNegative ? NEGATIVE_TRAVEL_EVENTS : POSITIVE_TRAVEL_EVENTS;
     const eventIndex = Math.floor(seededRoll(seed + index * 31 + 5) * pool.length);
-    return pool[eventIndex];
+    const event = pool[eventIndex];
+    if (event.effect !== 'minion' || seededRoll(seed + index * 47 + 19) < 0.15) return event;
+
+    const nonRecruitPool = pool.filter(candidate => candidate.effect !== 'minion');
+    const fallbackIndex = Math.floor(seededRoll(seed + index * 53 + 23) * nonRecruitPool.length);
+    return nonRecruitPool[fallbackIndex];
   });
 }

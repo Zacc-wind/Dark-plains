@@ -142,14 +142,21 @@ interface BattleCombatFeedEntry {
 }
 
 type CombatTutorialStageId =
+  | 'attack-preview'
+  | 'attack-action'
+  | 'move-action'
+  | 'move-undo'
   | 'unit-wait'
   | 'healer-blessing'
+  | 'support-wait'
   | 'commander-focus'
+  | 'commander-save-mana'
   | 'commander-open-spells'
   | 'commander-select-spell'
+  | 'commander-cancel-spell'
   | 'commander-pick-target';
 
-type BattleTutorialOrbFocus = 'wait' | 'mana' | 'spell';
+type BattleTutorialOrbFocus = 'wait' | 'mana' | 'spell' | 'undo';
 
 interface CombatTutorialStage {
   id: CombatTutorialStageId;
@@ -158,12 +165,12 @@ interface CombatTutorialStage {
   body: string;
   hint: string;
   orbFocus?: BattleTutorialOrbFocus;
-  acknowledge?: 'unit-wait' | 'healer-blessing';
 }
 
 interface BattleTurnBannerData {
   id: string;
-  side: BattleUnit['side'];
+  side: BattleUnit['side'] | 'neutral';
+  kind?: 'turn' | 'round';
   title: string;
   detail: string;
 }
@@ -212,7 +219,8 @@ interface BattleSpeedConfig {
 /** Shared spell icon / unit presentation window for every spell cast. */
 const SPELL_PRESENTATION_MS = 2300;
 const SPELL_NOTICE_MS = 1450;
-const BATTLE_MOVE_TRANSIT_MS = 1450;
+const BATTLE_MOVE_TRANSIT_MS = 900;
+const BATTLE_ROUND_INTRO_MS = 1250;
 const RUN_VICTORY_BANNER_DELAY_MS = 500;
 const RUN_VICTORY_AFTER_ANIMATION_HOLD_MS = 3000;
 const RUN_VICTORY_HANDOFF_FLOOR_MS = BATTLE_DEATH_HIT_MS + BATTLE_DEATH_DISSOLVE_MS + RUN_VICTORY_AFTER_ANIMATION_HOLD_MS;
@@ -221,13 +229,13 @@ const TURN_ORDER_RAIL_MAX_ROWS = 10;
 
 /** Enemy turns always use this pacing, regardless of the combat speed setting. */
 const ENEMY_BATTLE_PACE = {
-  delayBeforeMs: 1250,
-  actionHoldMs: 850,
-  commanderDelayBonusMs: 400,
-  commanderHoldBonusMs: 550,
-  presentationMs: 1850,
-  spellPresentationMs: SPELL_PRESENTATION_MS,
-  spellNoticeMs: 1750,
+  delayBeforeMs: 420,
+  actionHoldMs: 760,
+  commanderDelayBonusMs: 140,
+  commanderHoldBonusMs: 220,
+  presentationMs: 1050,
+  spellPresentationMs: 1500,
+  spellNoticeMs: 1250,
 } as const;
 
 interface PresentationPin {
@@ -370,6 +378,7 @@ export default function BattleModal({
     summonedUnits: Array<{ id: string; assetPath: string; x: number; y: number }>;
   } | null>(null);
   const [isResolvingAction, setIsResolvingAction] = useState(false);
+  const [roundIntroActive, setRoundIntroActive] = useState(false);
   const [battleCue, setBattleCue] = useState<BattleCue | null>(null);
   const [turnBanner, setTurnBanner] = useState<BattleTurnBannerData | null>(null);
   const [hoveredCell, setHoveredCell] = useState<{ x: number; y: number } | null>(null);
@@ -380,6 +389,13 @@ export default function BattleModal({
   const [combatTutorialIntroDismissed, setCombatTutorialIntroDismissed] = useState(false);
   const [combatTutorialUnitWaitSeen, setCombatTutorialUnitWaitSeen] = useState(false);
   const [combatTutorialHealerBlessingSeen, setCombatTutorialHealerBlessingSeen] = useState(false);
+  const [combatTutorialAttackPreviewSeen, setCombatTutorialAttackPreviewSeen] = useState(false);
+  const [combatTutorialAttackActionSeen, setCombatTutorialAttackActionSeen] = useState(false);
+  const [combatTutorialMoveSeen, setCombatTutorialMoveSeen] = useState(false);
+  const [combatTutorialMoveUndoSeen, setCombatTutorialMoveUndoSeen] = useState(false);
+  const [combatTutorialSupportWaitSeen, setCombatTutorialSupportWaitSeen] = useState(false);
+  const [combatTutorialSpellCancelSeen, setCombatTutorialSpellCancelSeen] = useState(false);
+  const [combatTutorialManaSaveSeen, setCombatTutorialManaSaveSeen] = useState(false);
   const [combatTutorialCommanderSpellCast, setCombatTutorialCommanderSpellCast] = useState(false);
   const [combatTutorialNudge, setCombatTutorialNudge] = useState<string | null>(null);
   const enemyTimer = useRef<number | null>(null);
@@ -388,6 +404,7 @@ export default function BattleModal({
   const battleEndNotifyTimer = useRef<number | null>(null);
   const defeatExitTimer = useRef<number | null>(null);
   const combatTutorialCompleteTimerRef = useRef<number | null>(null);
+  const combatTutorialAttackPreviewTimerRef = useRef<number | null>(null);
   const battleSoundTimers = useRef<number[]>([]);
   const statusEffectSoundTimers = useRef<number[]>([]);
   const bossLastStandTimer = useRef<number | null>(null);
@@ -397,6 +414,9 @@ export default function BattleModal({
   const queuedBossSpecialCue = useRef<typeof bossSpecialCue>(null);
   const spellNoticeTimer = useRef<number | null>(null);
   const turnBannerTimer = useRef<number | null>(null);
+  const roundIntroTimer = useRef<number | null>(null);
+  const roundIntroActiveRef = useRef(false);
+  const lastPresentedRound = useRef(0);
   const activeSpellNoticeRef = useRef<BattleSpellCastNoticeData | null>(null);
   const queuedTurnBanner = useRef<BattleTurnBannerData | null>(null);
   const lastTurnBannerSide = useRef<BattleUnit['side'] | null>(null);
@@ -435,8 +455,10 @@ export default function BattleModal({
     if (bossSpecialTimer.current) window.clearTimeout(bossSpecialTimer.current);
     if (defeatExitTimer.current) window.clearTimeout(defeatExitTimer.current);
     if (combatTutorialCompleteTimerRef.current) window.clearTimeout(combatTutorialCompleteTimerRef.current);
+    if (combatTutorialAttackPreviewTimerRef.current) window.clearTimeout(combatTutorialAttackPreviewTimerRef.current);
     if (spellNoticeTimer.current) window.clearTimeout(spellNoticeTimer.current);
     if (turnBannerTimer.current) window.clearTimeout(turnBannerTimer.current);
+    if (roundIntroTimer.current) window.clearTimeout(roundIntroTimer.current);
     battleSoundTimers.current.forEach(timer => window.clearTimeout(timer));
     battleSoundTimers.current = [];
     statusEffectSoundTimers.current.forEach(timer => window.clearTimeout(timer));
@@ -449,17 +471,51 @@ export default function BattleModal({
     return () => window.clearTimeout(timer);
   }, [combatTutorialNudge]);
 
+  useEffect(() => {
+    if (!isCombatTutorialStep || !combatTutorialIntroDismissed || !combatTutorialCommanderSpellCast) return;
+
+    const coreLessonComplete = combatTutorialUnitWaitSeen
+      && combatTutorialMoveSeen
+      && combatTutorialMoveUndoSeen
+      && combatTutorialAttackPreviewSeen
+      && combatTutorialAttackActionSeen
+      && combatTutorialSpellCancelSeen
+      && combatTutorialManaSaveSeen;
+    const battleFinished = Boolean(battle && battle.status !== 'active');
+    if (!coreLessonComplete && !battleFinished) return;
+    if (combatTutorialCompletedRef.current || combatTutorialCompleteTimerRef.current) return;
+
+    combatTutorialCompletedRef.current = true;
+    combatTutorialCompleteTimerRef.current = window.setTimeout(() => {
+      combatTutorialCompleteTimerRef.current = null;
+      onTutorialContinue?.('combat');
+    }, battleFinished ? 250 : 800);
+  }, [
+    battle,
+    combatTutorialAttackActionSeen,
+    combatTutorialAttackPreviewSeen,
+    combatTutorialCommanderSpellCast,
+    combatTutorialIntroDismissed,
+    combatTutorialManaSaveSeen,
+    combatTutorialMoveSeen,
+    combatTutorialMoveUndoSeen,
+    combatTutorialSpellCancelSeen,
+    combatTutorialUnitWaitSeen,
+    isCombatTutorialStep,
+    onTutorialContinue,
+  ]);
+
   const showTurnBanner = useCallback((banner: BattleTurnBannerData) => {
     if (turnBannerTimer.current) window.clearTimeout(turnBannerTimer.current);
     setTurnBanner(banner);
     turnBannerTimer.current = window.setTimeout(() => {
       setTurnBanner(current => current?.id === banner.id ? null : current);
       turnBannerTimer.current = null;
-    }, banner.side === 'enemy' ? 1450 : 1250);
+    }, banner.side === 'enemy' ? 950 : 850);
   }, []);
 
   const flushQueuedTurnBanner = useCallback(() => {
-    if (queuedTurnBanner.current && !activeSpellNoticeRef.current && !bossLastStandCueRef.current && !bossSpecialCueRef.current) {
+    if (queuedTurnBanner.current && !roundIntroActiveRef.current && !activeSpellNoticeRef.current && !bossLastStandCueRef.current && !bossSpecialCueRef.current) {
       const banner = queuedTurnBanner.current;
       queuedTurnBanner.current = null;
       showTurnBanner(banner);
@@ -488,7 +544,7 @@ export default function BattleModal({
   }, [flushQueuedTurnBanner]);
 
   const queueOrShowTurnBanner = useCallback((banner: BattleTurnBannerData) => {
-    if (activeSpellNoticeRef.current || bossLastStandCueRef.current || bossSpecialCueRef.current) {
+    if (roundIntroActiveRef.current || activeSpellNoticeRef.current || bossLastStandCueRef.current || bossSpecialCueRef.current) {
       queuedTurnBanner.current = banner;
       return;
     }
@@ -507,12 +563,50 @@ export default function BattleModal({
   useEffect(() => {
     activeSpellNoticeRef.current = spellCastNotice;
 
-    if (!spellCastNotice && queuedTurnBanner.current && !bossLastStandCueRef.current && !bossSpecialCueRef.current) {
+    if (!spellCastNotice && queuedTurnBanner.current && !roundIntroActiveRef.current && !bossLastStandCueRef.current && !bossSpecialCueRef.current) {
       const banner = queuedTurnBanner.current;
       queuedTurnBanner.current = null;
       showTurnBanner(banner);
     }
   }, [showTurnBanner, spellCastNotice]);
+
+  useEffect(() => {
+    if (!battle || battle.status !== 'active') {
+      if (roundIntroTimer.current) {
+        window.clearTimeout(roundIntroTimer.current);
+        roundIntroTimer.current = null;
+      }
+      lastPresentedRound.current = 0;
+      roundIntroActiveRef.current = false;
+      return;
+    }
+    if (isResolvingAction || spellCastNotice || bossLastStandCue || bossSpecialCue) return;
+    if (lastPresentedRound.current === battle.round) return;
+
+    lastPresentedRound.current = battle.round;
+    roundIntroActiveRef.current = true;
+    if (turnBannerTimer.current) window.clearTimeout(turnBannerTimer.current);
+    if (roundIntroTimer.current) window.clearTimeout(roundIntroTimer.current);
+
+    const banner: BattleTurnBannerData = {
+      id: `${battle.id}-round-${battle.round}`,
+      side: 'neutral',
+      kind: 'round',
+      title: `Round ${battle.round}`,
+      detail: battle.round === 1 ? 'The first line advances.' : 'The field draws breath.',
+    };
+    roundIntroTimer.current = window.setTimeout(() => {
+      setRoundIntroActive(true);
+      setTurnBanner(banner);
+      roundIntroTimer.current = window.setTimeout(() => {
+        roundIntroTimer.current = null;
+        roundIntroActiveRef.current = false;
+        setRoundIntroActive(false);
+        setTurnBanner(current => current?.id === banner.id ? null : current);
+        flushQueuedTurnBanner();
+      }, BATTLE_ROUND_INTRO_MS);
+    }, 0);
+  }, [battle, isResolvingAction, spellCastNotice, bossLastStandCue, bossSpecialCue, flushQueuedTurnBanner]);
 
   useEffect(() => {
     let scheduleTimer: number | null = null;
@@ -719,7 +813,7 @@ export default function BattleModal({
 
   useEffect(() => {
     if (!battle || battle.status !== 'active') return;
-    if (isResolvingAction || bossLastStandCue || bossSpecialCue) return;
+    if (isResolvingAction || roundIntroActive || bossLastStandCue || bossSpecialCue) return;
     if (battle.recruitOffer && !battle.recruitOffer.declined && !battle.recruitOffer.accepted) return;
 
     const activeUnit = getActiveUnit(battle);
@@ -743,9 +837,7 @@ export default function BattleModal({
         const next = runEnemyBattleTurn(current);
         const presentationEntry = getRecentPresentationLogEntry(next, Date.now());
         const isCinematicOverlay = presentationEntry?.style === 'boss-phase' || presentationEntry?.style === 'boss-special';
-        const holdMs = presentationEntry
-          ? getBattleLogPresentationMs(presentationEntry, next)
-          : enemyHoldMs;
+        const holdMs = getEnemyActionHoldMs(presentationEntry, next, enemyHoldMs);
 
         if (!isCinematicOverlay) {
           if (enemyActionHoldTimer.current) window.clearTimeout(enemyActionHoldTimer.current);
@@ -763,7 +855,7 @@ export default function BattleModal({
     return () => {
       if (enemyTimer.current) window.clearTimeout(enemyTimer.current);
     };
-  }, [battle, isResolvingAction, bossLastStandCue, bossSpecialCue]);
+  }, [battle, isResolvingAction, roundIntroActive, bossLastStandCue, bossSpecialCue]);
 
   useEffect(() => {
     if (!battle || battle.status !== 'active') return;
@@ -868,6 +960,9 @@ export default function BattleModal({
       if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) return;
 
       if (event.key === 'Escape') {
+        if (isCombatTutorialStep && combatTutorialIntroDismissed && selectedSpellId) {
+          setCombatTutorialSpellCancelSeen(true);
+        }
         setSelectedSpellId(null);
         setIsSpellMenuOpen(false);
         return;
@@ -876,6 +971,7 @@ export default function BattleModal({
       if (!battle || battle.status !== 'active' || isResolvingAction) return;
       const keyboardActiveUnit = getActiveUnit(battle);
       if (!keyboardActiveUnit || keyboardActiveUnit.side !== 'player') return;
+      const keyboardCombatTutorialActive = isCombatTutorialStep && combatTutorialIntroDismissed;
       const keyboardTutorialSpell = availableSpells.find(spell => spell.id === 'ember-dart')
         || availableSpells.find(spell => spell.target === 'enemy')
         || availableSpells[0];
@@ -892,6 +988,12 @@ export default function BattleModal({
         getBattleMana(battle, 'player') < keyboardTutorialSpell.cost
       );
       const blockCommanderTutorialShortcut = (action: 'focus' | 'wait') => {
+        if (keyboardCombatTutorialActive && combatTutorialCommanderSpellCast && !combatTutorialManaSaveSeen) {
+          if (action === 'focus') return false;
+          setCombatTutorialNudge('Use Focus Mana once before taking another commander action.');
+          playGameSound('ui.clickSoft', { throttleMs: 120 });
+          return true;
+        }
         if (!keyboardMustCastTutorialSpell) return false;
         if (action === 'focus' && keyboardNeedsMana) return false;
         setSelectedSpellId(null);
@@ -913,6 +1015,11 @@ export default function BattleModal({
           return;
         }
         const supportAbility = getMinionSupportAbility(keyboardActiveUnit);
+        if (keyboardCombatTutorialActive && keyboardActiveUnit.kind === 'minion') {
+          if (supportAbility) setCombatTutorialSupportWaitSeen(true);
+          else if (keyboardActiveUnit.healing > 0) setCombatTutorialHealerBlessingSeen(true);
+          else setCombatTutorialUnitWaitSeen(true);
+        }
         setBattle(supportAbility
           ? applyMinionSupportAbility(battle, keyboardActiveUnit.id)
           : waitBattleUnit(battle, keyboardActiveUnit.id));
@@ -924,11 +1031,19 @@ export default function BattleModal({
         setSelectedSpellId(null);
         setIsSpellMenuOpen(false);
         setPendingMoveUndo(null);
+        if (keyboardCombatTutorialActive && combatTutorialCommanderSpellCast) {
+          setCombatTutorialManaSaveSeen(true);
+        }
         setBattle(focusCommanderMana(battle, keyboardActiveUnit.id));
       }
 
       if (event.key.toLowerCase() === 's' && keyboardActiveUnit.kind === 'commander') {
         event.preventDefault();
+        if (keyboardCombatTutorialActive && combatTutorialCommanderSpellCast && !combatTutorialManaSaveSeen) {
+          setCombatTutorialNudge('Use Focus Mana once before reopening the spellbook.');
+          playGameSound('ui.clickSoft', { throttleMs: 120 });
+          return;
+        }
         playGameSound('ui.modalOpen', { throttleMs: 140 });
         setSelectedSpellId(null);
         setIsSpellMenuOpen(open => !open);
@@ -937,11 +1052,11 @@ export default function BattleModal({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [availableSpells, battle, combatTutorialCommanderSpellCast, combatTutorialIntroDismissed, isCombatTutorialStep, isResolvingAction]);
+  }, [availableSpells, battle, combatTutorialCommanderSpellCast, combatTutorialIntroDismissed, combatTutorialManaSaveSeen, isCombatTutorialStep, isResolvingAction, selectedSpellId]);
 
   const recruitOfferPending = Boolean(battle?.recruitOffer && !battle.recruitOffer.declined && !battle.recruitOffer.accepted);
   const activeUnit = battle ? getActiveUnit(battle) : undefined;
-  const isPlayerTurn = !recruitOfferPending && activeUnit?.side === 'player' && battle?.status === 'active';
+  const isPlayerTurn = !roundIntroActive && !recruitOfferPending && activeUnit?.side === 'player' && battle?.status === 'active';
   const playerActionTargetIds = useMemo(() => {
     const healIds = new Set<string>();
     const strikeIds = new Set<string>();
@@ -960,7 +1075,7 @@ export default function BattleModal({
   const isCommanderTurn = isPlayerTurn && activeUnit?.kind === 'commander';
   const selectedSpell = isCommanderTurn ? availableSpells.find(spell => spell.id === selectedSpellId) : undefined;
   const canUndoMove = Boolean(
-    confirmMoveEnabled &&
+    (confirmMoveEnabled || (isCombatTutorialStep && combatTutorialIntroDismissed && !combatTutorialMoveUndoSeen)) &&
     pendingMoveUndo &&
     battle?.status === 'active' &&
     pendingMoveUndo.activeUnitId === battle.activeUnitId &&
@@ -972,12 +1087,28 @@ export default function BattleModal({
     activeUnit &&
     canSkirmishAttackAfterMove(battle, activeUnit.id)
   );
+  const hasTutorialMoveTarget = Boolean(
+    isCombatTutorialStep
+    && combatTutorialIntroDismissed
+    && battle?.status === 'active'
+    && activeUnit?.kind === 'minion'
+    && Array.from({ length: battle.boardWidth * battle.boardHeight }, (_, index) => index).some(index => {
+      const x = index % battle.boardWidth;
+      const y = Math.floor(index / battle.boardWidth);
+      return !getUnitAt(battle, x, y) && canMoveTo(battle, activeUnit, x, y);
+    })
+  );
 
   if (!battle) return null;
 
   const presentationEntry = getPresentationEntry(battle, presentationPin, now);
   const unitMoveTransit = getUnitMoveTransit(battle, presentationEntry, now);
   const isMoveAnimating = Boolean(unitMoveTransit);
+  const deathPresentationActive = Boolean(
+    presentationEntry
+    && hasDefeatedLogTarget(battle, presentationEntry)
+    && now - presentationEntry.createdAt < getBattleLogPresentationMs(presentationEntry, battle)
+  );
   const tutorialSpell = availableSpells.find(spell => spell.id === 'ember-dart')
     || availableSpells.find(spell => spell.target === 'enemy')
     || availableSpells[0];
@@ -991,8 +1122,18 @@ export default function BattleModal({
     isSpellMenuOpen,
     battleMana: getBattleMana(battle, 'player'),
     tutorialSpell,
+    hasAttackTarget: playerActionTargetIds.strikeIds.size > 0,
+    hasMoveTarget: hasTutorialMoveTarget,
+    attackPreviewSeen: combatTutorialAttackPreviewSeen,
+    attackActionSeen: combatTutorialAttackActionSeen,
+    moveSeen: combatTutorialMoveSeen,
+    moveUndoSeen: combatTutorialMoveUndoSeen,
+    canUndoMove,
     unitWaitSeen: combatTutorialUnitWaitSeen,
     healerBlessingSeen: combatTutorialHealerBlessingSeen,
+    supportWaitSeen: combatTutorialSupportWaitSeen,
+    spellCancelSeen: combatTutorialSpellCancelSeen,
+    manaSaveSeen: combatTutorialManaSaveSeen,
     commanderSpellCast: combatTutorialCommanderSpellCast,
   });
   const mustCastCommanderTutorialSpell = Boolean(
@@ -1014,7 +1155,31 @@ export default function BattleModal({
     emitFxEvent({ type: 'status', tone: 'red', intensity: 0.42 });
   };
 
+  const beginCombatTutorialAttackPreview = () => {
+    if (combatTutorialStage?.id !== 'attack-preview' || combatTutorialAttackPreviewSeen) return;
+    if (combatTutorialAttackPreviewTimerRef.current) window.clearTimeout(combatTutorialAttackPreviewTimerRef.current);
+    combatTutorialAttackPreviewTimerRef.current = window.setTimeout(() => {
+      combatTutorialAttackPreviewTimerRef.current = null;
+      setCombatTutorialAttackPreviewSeen(true);
+      setCombatTutorialNudge('Forecast read: outgoing damage and retaliation are shown before the strike.');
+      playGameSound('ui.toggle', { throttleMs: 120 });
+    }, 650);
+  };
+
+  const cancelCombatTutorialAttackPreview = () => {
+    if (!combatTutorialAttackPreviewTimerRef.current) return;
+    window.clearTimeout(combatTutorialAttackPreviewTimerRef.current);
+    combatTutorialAttackPreviewTimerRef.current = null;
+  };
+
   const shouldBlockCommanderTutorialNonSpell = (action: 'focus' | 'wait' | 'move' | 'strike' | 'heal') => {
+    if (combatTutorialActive && isCommanderTurn && combatTutorialCommanderSpellCast && !combatTutorialManaSaveSeen) {
+      if (action === 'focus') return false;
+      setSelectedSpellId(null);
+      setIsSpellMenuOpen(false);
+      showCombatTutorialNudge('Use Focus Mana once before taking another commander action.');
+      return true;
+    }
     if (!mustCastCommanderTutorialSpell) return false;
     if (action === 'focus' && commanderTutorialNeedsMana) return false;
 
@@ -1025,14 +1190,9 @@ export default function BattleModal({
     return true;
   };
 
-  const completeCombatCommanderSpellTutorial = () => {
-    if (!isCombatTutorialStep || combatTutorialCompletedRef.current) return;
-    combatTutorialCompletedRef.current = true;
+  const recordCombatCommanderSpellTutorialCast = () => {
+    if (!isCombatTutorialStep) return;
     setCombatTutorialCommanderSpellCast(true);
-    combatTutorialCompleteTimerRef.current = window.setTimeout(() => {
-      combatTutorialCompleteTimerRef.current = null;
-      onTutorialContinue?.('combat');
-    }, 900);
   };
 
   const queuePlayerAction = (nextBattle: BattleState, cue: BattleCue) => {
@@ -1137,10 +1297,14 @@ export default function BattleModal({
         (selectedSpell.target === 'ally' && unitAtCell.side === activeUnit.side);
 
       if (validTarget) {
+        if (combatTutorialActive && !combatTutorialSpellCancelSeen) {
+          showCombatTutorialNudge('Cancel this first selection, then reopen the spellbook and choose it again.');
+          return;
+        }
         setSelectedSpellId(null);
         const nextBattle = castBattleSpell(battle, selectedSpell.id, unitAtCell.id);
         if (mustCastCommanderTutorialSpell && selectedSpell.id === tutorialSpell?.id) {
-          completeCombatCommanderSpellTutorial();
+          recordCombatCommanderSpellTutorialCast();
         }
         queuePlayerAction(nextBattle, {
           headline: selectedSpell.name,
@@ -1153,6 +1317,10 @@ export default function BattleModal({
     }
 
     if (isCommanderTurn && unitAtCell?.id === activeUnit.id) {
+      if (combatTutorialCommanderSpellCast && !combatTutorialManaSaveSeen) {
+        showCombatTutorialNudge('Use Focus Mana once before reopening the spellbook.');
+        return;
+      }
       emitFxEvent({ type: 'spell', tone: 'violet', intensity: 0.5 });
       playGameSound('ui.modalOpen', { throttleMs: 140 });
       setIsSpellMenuOpen(open => !open);
@@ -1173,6 +1341,7 @@ export default function BattleModal({
     }
 
     if (unitAtCell && (!canUndoMove || canAttackAfterPendingMove) && canAttack(activeUnit, unitAtCell)) {
+      if (combatTutorialActive) setCombatTutorialAttackActionSeen(true);
       const attackedBattle = attackBattleUnit(battle, activeUnit.id, unitAtCell.id);
       const attackerAfterAttack = attackedBattle.units.find(unit => unit.id === activeUnit.id && unit.currentHealth > 0);
       queuePlayerAction(
@@ -1189,12 +1358,14 @@ export default function BattleModal({
     }
 
     if (!unitAtCell && !canUndoMove && canMoveTo(battle, activeUnit, x, y)) {
+      if (combatTutorialActive) setCombatTutorialMoveSeen(true);
       const movedBattle = moveBattleUnit(battle, activeUnit.id, x, y);
       const skirmishAttackReady = canSkirmishAttackAfterMove(movedBattle, activeUnit.id);
       const moveResultBattle = skirmishAttackReady
         ? { ...movedBattle, turnStartedAt: now }
         : movedBattle;
-      if (!confirmMoveEnabled) {
+      const tutorialNeedsMoveUndo = combatTutorialActive && !combatTutorialMoveUndoSeen;
+      if (!confirmMoveEnabled && !tutorialNeedsMoveUndo) {
         setBattle(moveResultBattle);
         queuePlayerAction(skirmishAttackReady ? moveResultBattle : advanceBattleTurn(moveResultBattle), {
           headline: 'Move',
@@ -1217,6 +1388,7 @@ export default function BattleModal({
 
   const handleUndoMove = () => {
     if (!pendingMoveUndo || isResolvingAction) return;
+    if (combatTutorialActive) setCombatTutorialMoveUndoSeen(true);
     setSelectedSpellId(null);
     setIsSpellMenuOpen(false);
     setBattle(pendingMoveUndo);
@@ -1231,6 +1403,10 @@ export default function BattleModal({
 
   const handleCommitMove = () => {
     if (!battle || !activeUnit || !isPlayerTurn || !canUndoMove || isResolvingAction) return;
+    if (combatTutorialActive && !combatTutorialMoveUndoSeen) {
+      showCombatTutorialNudge('Use U once to learn how movement undo works.');
+      return;
+    }
     if (shouldBlockCommanderTutorialNonSpell('wait')) return;
     setSelectedSpellId(null);
     queuePlayerAction(waitBattleUnit(battle, activeUnit.id, `${activeUnit.name} holds position.`), {
@@ -1254,6 +1430,11 @@ export default function BattleModal({
     }
     const supportAbility = getMinionSupportAbility(activeUnit);
     const priestCharge = Boolean(activeUnit && activeUnit.kind === 'minion' && activeUnit.healing > 0);
+    if (combatTutorialActive && activeUnit?.kind === 'minion') {
+      if (supportAbility) setCombatTutorialSupportWaitSeen(true);
+      else if (priestCharge) setCombatTutorialHealerBlessingSeen(true);
+      else setCombatTutorialUnitWaitSeen(true);
+    }
     queuePlayerAction(supportAbility && activeUnit
       ? applyMinionSupportAbility(battle, activeUnit.id)
       : waitBattleUnit(battle, activeUnit?.id || ''), {
@@ -1267,6 +1448,9 @@ export default function BattleModal({
     if (!battle || !isCommanderTurn || !activeUnit || isResolvingAction) return;
     if (shouldBlockCommanderTutorialNonSpell('focus')) return;
     setSelectedSpellId(null);
+    if (combatTutorialActive && combatTutorialCommanderSpellCast) {
+      setCombatTutorialManaSaveSeen(true);
+    }
     queuePlayerAction(focusCommanderMana(battle, activeUnit.id), {
       headline: 'Focus Mana',
       detail: '',
@@ -1276,6 +1460,11 @@ export default function BattleModal({
 
   const handleSpellClick = (spell: BattleSpell) => {
     if (!battle || !isCommanderTurn || isResolvingAction) return;
+
+    if (combatTutorialActive && combatTutorialCommanderSpellCast && !combatTutorialManaSaveSeen) {
+      showCombatTutorialNudge('Use Focus Mana once before casting another spell.');
+      return;
+    }
 
     if (mustCastCommanderTutorialSpell && tutorialSpell && spell.id !== tutorialSpell.id && !commanderTutorialNeedsMana) {
       showCombatTutorialNudge(`Use ${tutorialSpell.name} for this first spell lesson.`);
@@ -1295,7 +1484,7 @@ export default function BattleModal({
       setIsSpellMenuOpen(false);
       const nextBattle = castBattleSpell(battle, spell.id);
       if (mustCastCommanderTutorialSpell && spell.id === tutorialSpell?.id) {
-        completeCombatCommanderSpellTutorial();
+        recordCombatCommanderSpellTutorialCast();
       }
       queuePlayerAction(nextBattle, {
         headline: spell.name,
@@ -1311,6 +1500,7 @@ export default function BattleModal({
   };
 
   const handleCancelSpell = () => {
+    if (combatTutorialActive && selectedSpellId) setCombatTutorialSpellCancelSeen(true);
     setSelectedSpellId(null);
     setIsSpellMenuOpen(false);
   };
@@ -1468,6 +1658,7 @@ export default function BattleModal({
       {tutorialStep && onTutorialContinue && onTutorialSkip && (tutorialStep.id !== 'combat' || !combatTutorialIntroDismissed) && (
         <SingleplayerTutorialOverlay
           step={tutorialStep}
+          playerModelNumber={playerModelNumber}
           onContinue={() => {
             if (tutorialStep.id === 'combat') {
               setCombatTutorialIntroDismissed(true);
@@ -1538,7 +1729,7 @@ export default function BattleModal({
                 />
               </aside>
 
-              <div className="battle-board-shell relative min-h-0">
+              <div className={`battle-board-shell relative min-h-0 ${deathPresentationActive ? 'battle-board-shell-death-focus' : ''}`}>
               {turnBanner && !spellCastNotice && <BattleTurnBanner key={turnBanner.id} banner={turnBanner} />}
               {spellCastNotice && <BattleSpellCastNotice key={spellCastNotice.id} notice={spellCastNotice} />}
               {selectedSpell && isPlayerTurn && (
@@ -1546,7 +1737,7 @@ export default function BattleModal({
                   type="button"
                   onClick={handleCancelSpell}
                   disabled={isResolvingAction}
-                  className="battle-target-cancel"
+                  className={`battle-target-cancel ${combatTutorialStage?.id === 'commander-cancel-spell' ? 'battle-target-cancel-tutorial-focus' : ''}`}
                 >
                   Cancel Spell
                 </button>
@@ -1572,10 +1763,6 @@ export default function BattleModal({
                   spell={tutorialSpell}
                   mana={getBattleMana(battle, 'player')}
                   nudge={combatTutorialNudge}
-                  onAcknowledge={(acknowledge) => {
-                    if (acknowledge === 'unit-wait') setCombatTutorialUnitWaitSeen(true);
-                    if (acknowledge === 'healer-blessing') setCombatTutorialHealerBlessingSeen(true);
-                  }}
                   onSkip={onTutorialSkip}
                 />
               )}
@@ -1730,6 +1917,7 @@ export default function BattleModal({
                     onMouseEnter={(event) => {
                       setHoveredCell({ x, y });
                       setHoverCursor({ x: event.clientX, y: event.clientY });
+                      if (canStrike) beginCombatTutorialAttackPreview();
                     }}
                     onMouseMove={(event) => {
                       setHoveredCell({ x, y });
@@ -1738,6 +1926,7 @@ export default function BattleModal({
                     onMouseLeave={() => {
                       setHoveredCell(null);
                       setHoverCursor(null);
+                      cancelCombatTutorialAttackPreview();
                     }}
                     aria-label={`${cellPreview.title}. ${cellPreview.detail}`}
                     aria-disabled={isResolvingAction || Boolean(bossLastStandCue) || Boolean(bossSpecialCue) || obstacle || (!canMove && !canStrike && !canMend && !canSpellTarget && !isActiveCell)}
@@ -1747,7 +1936,7 @@ export default function BattleModal({
                         : canMove
                           ? 'battle-cell-move'
                           : ''
-                    } ${enemyMovePreview ? 'battle-cell-enemy-move-preview' : ''} ${enemyAttackPreview ? 'battle-cell-enemy-attack-preview' : ''} ${cellTargetClass} ${isActiveCell ? (unit?.side === 'player' ? 'battle-cell-active battle-cell-active-player' : 'battle-cell-active battle-cell-active-enemy') : ''} ${isActiveCell && combatTutorialStage ? 'battle-cell-tutorial-focus' : ''} ${isPlayerTurn && activeUnit && !actionable && !unit && !obstacle ? 'battle-cell-muted' : ''}`}
+                    } ${enemyMovePreview ? 'battle-cell-enemy-move-preview' : ''} ${enemyAttackPreview ? 'battle-cell-enemy-attack-preview' : ''} ${cellTargetClass} ${(combatTutorialStage?.id === 'attack-preview' || combatTutorialStage?.id === 'attack-action') && canStrike ? 'battle-cell-tutorial-target' : ''} ${combatTutorialStage?.id === 'move-action' && canMove ? 'battle-cell-tutorial-move-target' : ''} ${isActiveCell ? (unit?.side === 'player' ? 'battle-cell-active battle-cell-active-player' : 'battle-cell-active battle-cell-active-enemy') : ''} ${isActiveCell && combatTutorialStage ? 'battle-cell-tutorial-focus' : ''} ${isPlayerTurn && activeUnit && !actionable && !unit && !obstacle ? 'battle-cell-muted' : ''}`}
                   >
                     {terrain !== 'ground' && !unit && !obstacle && (
                       <span className="battle-terrain-chip">{terrainLabel}</span>
@@ -1784,6 +1973,10 @@ export default function BattleModal({
                         tutorialFocus={combatTutorialOrbFocus}
                         onFocusMana={handleFocusMana}
                         onToggleSpellMenu={() => {
+                          if (combatTutorialActive && combatTutorialCommanderSpellCast && !combatTutorialManaSaveSeen) {
+                            showCombatTutorialNudge('Use Focus Mana once before reopening the spellbook.');
+                            return;
+                          }
                           playGameSound('ui.modalOpen', { throttleMs: 140 });
                           setIsSpellMenuOpen(open => !open);
                         }}
@@ -1794,6 +1987,7 @@ export default function BattleModal({
                       <BattleUnitActionOrbs
                         mode="move"
                         isResolvingAction={isResolvingAction}
+                        tutorialFocus={combatTutorialOrbFocus}
                         onUndoMove={handleUndoMove}
                         onCommitMove={handleCommitMove}
                       />
@@ -1862,8 +2056,18 @@ function getCombatTutorialStage({
   isSpellMenuOpen,
   battleMana,
   tutorialSpell,
+  hasAttackTarget,
+  hasMoveTarget,
+  attackPreviewSeen,
+  attackActionSeen,
+  moveSeen,
+  moveUndoSeen,
+  canUndoMove,
   unitWaitSeen,
   healerBlessingSeen,
+  supportWaitSeen,
+  spellCancelSeen,
+  manaSaveSeen,
   commanderSpellCast,
 }: {
   active: boolean;
@@ -1874,14 +2078,35 @@ function getCombatTutorialStage({
   isSpellMenuOpen: boolean;
   battleMana: number;
   tutorialSpell?: BattleSpell;
+  hasAttackTarget: boolean;
+  hasMoveTarget: boolean;
+  attackPreviewSeen: boolean;
+  attackActionSeen: boolean;
+  moveSeen: boolean;
+  moveUndoSeen: boolean;
+  canUndoMove: boolean;
   unitWaitSeen: boolean;
   healerBlessingSeen: boolean;
+  supportWaitSeen: boolean;
+  spellCancelSeen: boolean;
+  manaSaveSeen: boolean;
   commanderSpellCast: boolean;
 }): CombatTutorialStage | null {
   if (!active || !activeUnit || !isPlayerTurn || isResolvingAction) return null;
 
   if (activeUnit.kind === 'commander' && !commanderSpellCast) {
     if (selectedSpell) {
+      if (!spellCancelSeen) {
+        return {
+          id: 'commander-cancel-spell',
+          kicker: 'Change Your Mind',
+          title: 'Cancel the spell once before casting.',
+          body: `${selectedSpell.name} is selected, but no mana has been spent yet. Use Cancel Spell to return to commander actions, then reopen the spellbook and select it again.`,
+          hint: 'Escape performs the same cancel action from the keyboard.',
+          orbFocus: 'undo',
+        };
+      }
+
       return {
         id: 'commander-pick-target',
         kicker: 'Commander Spell',
@@ -1922,15 +2147,78 @@ function getCombatTutorialStage({
     };
   }
 
+  if (activeUnit.kind === 'commander' && commanderSpellCast && !manaSaveSeen) {
+    return {
+      id: 'commander-save-mana',
+      kicker: 'Mana Strategy',
+      title: 'Focus even when a spell is available.',
+      body: 'The M orb adds mana and ends this commander turn. Saving power now can unlock a stronger field spell on the next commander turn.',
+      hint: 'Use Focus Mana once. In normal battles this is a choice, not a requirement.',
+      orbFocus: 'mana',
+    };
+  }
+
+  if (activeUnit.kind === 'minion' && canUndoMove && !moveUndoSeen) {
+    return {
+      id: 'move-undo',
+      kicker: 'Undo Movement',
+      title: 'Reconsider this position.',
+      body: 'The U orb restores the unit to its previous cell before the move is committed. OK accepts the position and ends the turn.',
+      hint: 'Use U once now. Move confirmation remains optional outside this lesson.',
+      orbFocus: 'undo',
+    };
+  }
+
+  if (activeUnit.kind === 'minion' && hasAttackTarget && !attackPreviewSeen) {
+    return {
+      id: 'attack-preview',
+      kicker: 'Damage Forecast',
+      title: 'Read the strike before committing.',
+      body: 'Hover a highlighted enemy and hold the cursor there. Its health bar previews your damage, while the retaliation row shows how much health your attacker would lose.',
+      hint: 'A ranged strike can still be retaliated against when the attacker stands in an enemy melee unit\'s reach.',
+    };
+  }
+
+  if (activeUnit.kind === 'minion' && hasAttackTarget && attackPreviewSeen && !attackActionSeen) {
+    return {
+      id: 'attack-action',
+      kicker: 'Commit the Strike',
+      title: 'The forecast is acceptable. Attack now.',
+      body: 'Click the highlighted enemy to commit the strike. Damage, retaliation, poison, and bleed resolve only after the target is selected.',
+      hint: 'If the retaliation forecast is too costly later, move, heal, or Wait instead of attacking.',
+    };
+  }
+
+  if (activeUnit.kind === 'minion' && hasMoveTarget && !moveSeen) {
+    return {
+      id: 'move-action',
+      kicker: 'Movement',
+      title: 'Choose one highlighted destination.',
+      body: 'Movement cells show where the active unit can reach this turn. Mud restricts movement, while positioning decides who can strike or retaliate next.',
+      hint: 'Click an empty highlighted cell. Movement normally ends the turn unless the unit has a skirmish ability.',
+    };
+  }
+
   if (activeUnit.kind === 'minion' && activeUnit.healing > 0 && !healerBlessingSeen) {
     return {
       id: 'healer-blessing',
       kicker: 'Priest Blessing',
       title: 'Healers can store a blessing.',
       body: 'Priest-line units use Wait to charge a blessing. The next heal from that unit becomes stronger and the blessing icon appears on the sprite.',
-      hint: 'If no ally needs healing this turn, blessing now can save a wounded unit later.',
+      hint: 'Use the W orb now. Unlike an ordinary Wait, this stores a real healing bonus.',
       orbFocus: 'wait',
-      acknowledge: 'healer-blessing',
+    };
+  }
+
+  const supportAbility = getMinionSupportAbility(activeUnit);
+  if (activeUnit.kind === 'minion' && supportAbility && !supportWaitSeen) {
+    return {
+      id: 'support-wait',
+      kicker: 'Class Action',
+      title: `${supportAbility.name} replaces ordinary Wait.`,
+      body: supportAbility.description,
+      hint: `Use the ${supportAbility.shortLabel} orb now. The aura expires when this unit begins its next turn.`,
+      orbFocus: 'wait',
     };
   }
 
@@ -1938,11 +2226,10 @@ function getCombatTutorialStage({
     return {
       id: 'unit-wait',
       kicker: 'Active Unit',
-      title: 'The wait orb is a real action.',
-      body: 'The glowing sprite is the unit currently taking a turn. The W orb passes or holds position when moving or attacking would be worse.',
-      hint: 'Use Wait to preserve position, guard tempo, or set up class mechanics.',
+      title: 'Ordinary Wait holds position.',
+      body: 'The W orb passes this unit without adding a hidden defense bonus. Positional guard comes from an adjacent armored ally; special class orbs clearly name any extra effect they grant.',
+      hint: 'Use W once now to hold this position and advance the turn order.',
       orbFocus: 'wait',
-      acknowledge: 'unit-wait',
     };
   }
 
@@ -1955,7 +2242,6 @@ function BattleCombatTutorialCoach({
   spell,
   mana,
   nudge,
-  onAcknowledge,
   onSkip,
 }: {
   stage: CombatTutorialStage;
@@ -1963,7 +2249,6 @@ function BattleCombatTutorialCoach({
   spell?: BattleSpell;
   mana: number;
   nudge?: string | null;
-  onAcknowledge: (acknowledge: NonNullable<CombatTutorialStage['acknowledge']>) => void;
   onSkip: () => void;
 }) {
   return (
@@ -1990,15 +2275,6 @@ function BattleCombatTutorialCoach({
         </span>
       </span>
       <span className="battle-combat-tutorial-actions">
-        {stage.acknowledge && (
-          <button
-            type="button"
-            onClick={() => onAcknowledge(stage.acknowledge!)}
-            className="ui-button-primary rounded px-3 py-2 text-xs font-black"
-          >
-            Got It
-          </button>
-        )}
         <button type="button" onClick={onSkip} className="ui-button rounded px-3 py-2 text-xs font-black">
           Skip Tutorial
         </button>
@@ -2043,7 +2319,7 @@ function BattleUnitActionOrbs({
           type="button"
           disabled={isResolvingAction}
           onClick={(event) => stopCellAction(event, onUndoMove)}
-          className="battle-unit-orb battle-unit-orb-undo"
+          className={`battle-unit-orb battle-unit-orb-undo ${tutorialFocus === 'undo' ? 'battle-unit-orb-tutorial-focus' : ''}`}
           title="Undo move"
         >
           U
@@ -2112,8 +2388,10 @@ function BattleUnitActionOrbs({
 
 function BattleTurnBanner({ banner }: { banner: BattleTurnBannerData }) {
   return (
-    <div className={`battle-turn-banner battle-turn-banner-${banner.side}`} aria-hidden="true">
-      <span className="arcane-label">{banner.side === 'enemy' ? 'Hostile action' : 'Command ready'}</span>
+    <div className={`battle-turn-banner battle-turn-banner-${banner.side} ${banner.kind === 'round' ? 'battle-turn-banner-round' : ''}`} aria-hidden="true">
+      <span className="arcane-label">
+        {banner.kind === 'round' ? 'Battle Cycle' : banner.side === 'enemy' ? 'Hostile action' : 'Command ready'}
+      </span>
       <span className="fantasy-heading">{banner.title}</span>
       <span>{banner.detail}</span>
     </div>
@@ -3274,6 +3552,23 @@ function getPresentationEntry(
 function getBattleActionPresentationMs(entry: BattleLogEntry | undefined, battle?: BattleState): number {
   if (!entry) return BATTLE_DEFAULT_PRESENTATION_MS;
   return getBattleLogPresentationMs(entry, battle);
+}
+
+function getEnemyActionHoldMs(
+  entry: BattleLogEntry | undefined,
+  battle: BattleState,
+  fallbackMs: number,
+): number {
+  if (!entry) return fallbackMs;
+  if (entry.style === 'boss-phase' || entry.style === 'boss-special') {
+    return getBattleLogPresentationMs(entry, battle);
+  }
+  if (hasDefeatedLogTarget(battle, entry)) {
+    return Math.max(getBattleLogPresentationMs(entry, battle), BATTLE_DEATH_HIT_MS + BATTLE_DEATH_DISSOLVE_MS + 120);
+  }
+  if (entry.action === 'move') return BATTLE_MOVE_TRANSIT_MS;
+  if (entry.action === 'spell') return ENEMY_BATTLE_PACE.spellPresentationMs;
+  return Math.min(getBattleLogPresentationMs(entry, battle), ENEMY_BATTLE_PACE.presentationMs);
 }
 
 function getPendingCinematicEntry(battle: BattleState, now = Date.now()): BattleLogEntry | undefined {

@@ -12,6 +12,7 @@ import MultiplayerHubModal from './MultiplayerHubModal';
 import PveHubModal from './PveHubModal';
 import ChatLiveFeed from './ChatLiveFeed';
 import GameSettingsPanel from './GameSettingsPanel';
+import StoryJournalModal from './StoryJournalModal';
 import {
   ActivityEntry,
   AllocatableStat,
@@ -80,6 +81,7 @@ import {
   removePlayerFromParty,
   sendFriendRequest,
   sendSocialChatMessage,
+  skipMultiplayerOnboarding,
   toggleMinionFielded,
   unequipItem,
   upgradeInventoryCapacity,
@@ -506,6 +508,7 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
   const [showMultiplayerHub, setShowMultiplayerHub] = useState(false);
   const [showPveHub, setShowPveHub] = useState(false);
   const [showMpDailyRun, setShowMpDailyRun] = useState(false);
+  const [showStoryJournal, setShowStoryJournal] = useState(false);
   const [isMapActionRailCompact, setIsMapActionRailCompact] = useState(true);
   const [isPartyDetailsOpen, setIsPartyDetailsOpen] = useState(false);
   const [partyInviteDraft, setPartyInviteDraft] = useState('');
@@ -603,6 +606,7 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
     const handleForceMainScreen = () => {
       setIsCommandOpen(false);
       setShowDailyRun(false);
+      setShowStoryJournal(false);
       setActivePanel('overview');
       setArmySwapSourceId(null);
       setNotice('');
@@ -1147,6 +1151,14 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
       )}
       {!showRandomRun && (
         <>
+          {showStoryJournal && (
+            <StoryJournalModal
+              player={player}
+              onClose={() => setShowStoryJournal(false)}
+              onPlayerRefresh={() => setUser(getCurrentUser())}
+              onSkipOnboarding={skipMultiplayerOnboarding}
+            />
+          )}
           <MultiplayerHubModal
             isOpen={showMultiplayerHub}
             onClose={() => setShowMultiplayerHub(false)}
@@ -2853,6 +2865,15 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
         <section>
           <SectionTitle title="Main Story" action={hiddenStoryCount > 0 ? `${hiddenStoryCount} hidden` : storyChapter?.title || 'Chapter I'} />
           <div className="space-y-2">
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => setShowStoryJournal(true)}
+                className="ui-button rounded px-3 py-2 text-xs font-black"
+              >
+                Open Story Journal
+              </button>
+            </div>
             {visibleStoryQuests.length === 0 && <EmptyState text="No active story step. Level up or claim ready rewards." />}
             {visibleStoryQuests.map(story => {
               const status = getStoryQuestStatus(player, story.id);

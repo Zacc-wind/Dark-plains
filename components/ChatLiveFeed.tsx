@@ -64,16 +64,13 @@ export default function ChatLiveFeed({ enabled = true }: ChatLiveFeedProps) {
     };
   }, [enabled]);
 
-  useEffect(() => {
-    const cutoff = now - RECENT_MESSAGE_WINDOW_MS;
-    setToasts(previous => previous.filter(toast => toast.createdAt >= cutoff));
-  }, [now]);
+  const visibleToasts = toasts.filter(toast => toast.createdAt >= now - RECENT_MESSAGE_WINDOW_MS);
 
-  if (!enabled || toasts.length === 0) return null;
+  if (!enabled || visibleToasts.length === 0) return null;
 
   return (
     <div className="chat-live-feed" aria-live="polite">
-      {toasts.map(toast => {
+      {visibleToasts.map(toast => {
         const remaining = toast.createdAt + RECENT_MESSAGE_WINDOW_MS - now;
         const opacity = Math.max(0, Math.min(1, remaining / RECENT_MESSAGE_WINDOW_MS));
 

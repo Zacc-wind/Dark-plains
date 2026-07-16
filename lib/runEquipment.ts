@@ -104,6 +104,22 @@ export function formatEquipmentRarityLabel(rarity: EquipmentRarity): string {
   return rarity.charAt(0).toUpperCase() + rarity.slice(1);
 }
 
+const RUN_EQUIPMENT_RARITY_RANK: Record<EquipmentRarity, number> = {
+  decent: 0,
+  rare: 1,
+  epic: 2,
+  legendary: 3,
+};
+
+export function capRunEquipmentRarity(
+  rarity: EquipmentRarity,
+  maxRarity: EquipmentRarity = 'legendary',
+): EquipmentRarity {
+  return RUN_EQUIPMENT_RARITY_RANK[rarity] <= RUN_EQUIPMENT_RARITY_RANK[maxRarity]
+    ? rarity
+    : maxRarity;
+}
+
 export function rollRunEquipmentRarity(wins: number, targetBattles: number): EquipmentRarity {
   const progress = targetBattles > 0 ? Math.min(1, wins / targetBattles) : 0;
   const roll = Math.random();
@@ -135,13 +151,14 @@ export function generateRunLootEquipment(
   wins: number,
   targetBattles: number,
   forcedRarity?: EquipmentRarity,
-  options?: { offer?: boolean },
+  options?: { offer?: boolean; maxRarity?: EquipmentRarity },
 ): Equipment {
-  const rarity = forcedRarity || (
+  const rolledRarity = forcedRarity || (
     options?.offer
       ? rollRunOfferEquipmentRarity(wins, targetBattles)
       : rollRunEquipmentRarity(wins, targetBattles)
   );
+  const rarity = capRunEquipmentRarity(rolledRarity, options?.maxRarity);
   return generateEquipment(0, rarity) || generateEquipment(0, 'decent')!;
 }
 

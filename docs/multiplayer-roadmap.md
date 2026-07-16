@@ -8,6 +8,8 @@ Turn the current shared world-map prototype into a real multiplayer layer withou
 - [x] Singleplayer mode exists at `/singleplayer` with separate run progression.
 - [x] Friends, friend requests, party invites, party membership, global chat, and party chat exist in local prototype state.
 - [x] First-pass PVP challenge API route contracts exist.
+- [x] Supabase-backed profiles, presence, and online PVP challenge transport exist.
+- [x] Main-story introductions can open as two-character RPG conversations on the world map.
 - [ ] Challenge, trade, and party flows need polished in-game request popups and acceptance UX.
 - [ ] Player-vs-player combat still needs a real two-player battle session model.
 - [ ] Cooperative dungeon combat still needs multi-commander formation, turn order, and ownership rules.
@@ -18,6 +20,18 @@ Turn the current shared world-map prototype into a real multiplayer layer withou
 - [x] Explain that Singleplayer and Multiplayer are separate games with separate progression.
 - [x] Explain Singleplayer as roguelike runs: temporary army, run-only economy, permanent run-level progression, no world-map penalty.
 - [x] Explain Multiplayer as shared world map: persistent commander, quests, gear, towns, players, parties, duels, trades, and co-op dungeons.
+
+## Phase 1B: Narrative World Onboarding
+- [x] Replace the passive multiplayer tutorial card with an active two-character conversation: player commander on one side, story contact on the other.
+- [x] Show the active speaker clearly and hand the player one concrete objective at the end of each conversation.
+- [x] Repair the missing First Banner introduction so one absent sequence cannot block every later story scene.
+- [x] Rework the opening chain into a guided path: complete a job, reach Harborview, meet Marshal Orren, win a first battle, reach Riverside, then face the Black Pike threat.
+- [x] Reuse the same conversation stage when speaking to world quest contacts, with the NPC task and reward presented after the dialogue.
+- [ ] Add contextual focus states for the first Jobs menu, town travel action, enemy inspect action, formation confirmation, and battle result claim.
+- [x] Add a journal page that can replay completed story conversations without replaying their rewards.
+- [x] Add a single explicit Skip Onboarding action; skipping marks only tutorial introductions complete and never completes quest objectives.
+- [ ] Persist the exact active dialogue line server-side so a disconnected first-time player resumes cleanly.
+- [ ] Add authored player response choices to selected story scenes; choices may change tone or faction reputation but must not silently block core progression.
 
 ## Phase 2: Social Request Popups
 - [ ] Add a shared `SocialRequestOverlay` component for incoming requests.
@@ -76,8 +90,53 @@ Turn the current shared world-map prototype into a real multiplayer layer withou
 - [ ] Add RLS rules so players can read only sessions they participate in.
 - [ ] Add server-side validation for trade completion and combat actions before deployment.
 
+## Phase 9: Progression Gates And Unlock Communication
+- [ ] Define one shared unlock registry consumed by HUD buttons, modal guards, API routes, and tutorial copy.
+- [ ] Level 1: jobs, towns, story quests, NPC encounters, inventory, and basic army management.
+- [ ] Level 2: city contracts, gear upgrades, and the first dungeon preview.
+- [ ] Level 3: PVP hub and duel challenges unlock with a short rules conversation.
+- [ ] Level 4: trading unlocks after inventory and value are explained.
+- [ ] Level 5: party creation and cooperative dungeon entry unlock.
+- [ ] Later levels unlock harder regions, additional city services, dungeon tiers, boss rotations, and advanced social objectives.
+- [ ] Enforce every gate on the server as well as the client; a hidden button is not an authorization rule.
+- [ ] Show locked features in a compact preview with level requirement and one-sentence value, rather than silently hiding the feature.
+
+## Phase 10: Daily And Weekly Reasons To Return
+- [ ] Add a three-slot daily contract board: one combat task, one world/job task, and one social or co-op task. Allow one reroll per day.
+- [ ] Add a rotating regional threat that changes enemy composition and culminates in a shared boss target.
+- [ ] Add a weekly faction oath with several contribution paths so combat, jobs, trade, and co-op players can all progress it.
+- [ ] Add first-win and first-dungeon-clear bonuses with moderate rewards; avoid mandatory multi-hour streak pressure.
+- [ ] Add a seven-day return track with a missed-day buffer and no exclusive combat power.
+- [ ] Add a returning-player briefing after several inactive days: current threats, unfinished story objective, party activity, and one catch-up contract.
+- [ ] Add capped rested job XP or contract progress so returning players can catch up without making daily players irrelevant.
+- [ ] Record completion telemetry for each loop before increasing reward volume or adding more currencies.
+
+## Phase 11: Story Chapters And World Direction
+- [ ] Give every main-story chapter a named guide, a regional conflict, a midpoint fight, and a boss resolution.
+- [ ] Keep each quest objective explicit about the target, location, action, and reward source.
+- [ ] Use quest contacts for authored dialogue; use compact objective cards for routine contracts.
+- [ ] Add visible chapter progress to the quest journal without covering the world map.
+- [ ] Add faction reputation only after at least two factions have distinct rewards and repeatable activities.
+- [ ] Let completed chapters change small world details, NPC lines, or available contracts without deleting required contacts.
+- [ ] Build level-band content in batches: 1-5 onboarding, 6-10 regional mastery, 11-15 veteran systems, then expand the cap only with enough enemies and bosses.
+
+## Phase 12: Multiplayer Scaling And Endgame
+- [ ] Scale NPC formations by player level band, party size, equipment score, and encounter type; never scale directly to every temporary combat spike.
+- [ ] Add difficulty labels based on predicted formation pressure rather than level alone.
+- [ ] Add veteran dungeon modifiers, rotating boss abilities, and optional hard paths before raising raw health totals.
+- [ ] Add seasonal PVP rating resets with cosmetic/status rewards and placement protection for new level-3 players.
+- [ ] Add party and guild goals only after party sessions, chat moderation, and reward validation are reliable.
+- [ ] Keep permanent power sources limited and legible; new systems should expand build choice more often than they increase every stat.
+
 ## Design Rules
 - Singleplayer rewards and random-run resources never transfer into Multiplayer.
 - Multiplayer gear, gold, quests, and minions never affect Singleplayer random-run balance.
 - Every incoming social action should be readable as a cinematic popup first, then a compact notification if ignored.
 - Co-op combat must prioritize clarity: owner names, active player highlight, and action permissions should be obvious before adding extra mechanics.
+
+## Recommended Implementation Order
+1. Finish contextual onboarding spotlights, tutorial replay/skip controls, and journal integration for the implemented opening story chain.
+2. Build the shared unlock registry and apply the level gates consistently to the HUD, modals, and server-side actions.
+3. Complete the shared social-request overlay for trade and party invites, including expiry and duplicate-request handling.
+4. Add the first daily contract board and returning-player briefing using existing jobs, encounters, and quest state.
+5. Refactor battle ownership and synchronization before implementing the first real player-versus-player duel session.

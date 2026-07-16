@@ -38,7 +38,7 @@ import { emitCompletionNotice, type CompletionRewardLine } from '@/lib/completio
 import { emitFxEvent } from '@/lib/fxEvents';
 import { emitMapFogState } from '@/lib/mapFogEvents';
 import { QUEST_NPCS, getAllStoryQuestsSorted, type QuestNpc } from '@/lib/questData';
-import { getStoryDialogSequence } from '@/lib/storyDialogue';
+import { getStoryDialogSequence, type StoryDialogSequence } from '@/lib/storyDialogue';
 import { isDungeonQuestObjective, isPoiQuestObjective, isQuestNpcObjective } from '@/lib/questMarkers';
 import StoryDialogOverlay from './StoryDialogOverlay';
 import { WorldDungeon, formatDungeonTimeRemaining, getActiveDungeons, getRegionForTile } from '@/lib/worldEvents';
@@ -1042,9 +1042,16 @@ export default function MapRenderer({
 
   useEffect(() => {
     const pending = getPendingStoryDialogQuest(currentUser);
-    if (pending && !storyDialogQuestId) {
-      setStoryDialogQuestId(pending.id);
+    if (!pending || storyDialogQuestId) return;
+
+    if (!getStoryDialogSequence(pending.dialogId)) {
+      markStoryQuestIntroSeen(pending.id);
+      const refreshFrame = window.requestAnimationFrame(() => setCurrentUser(getCurrentUser()));
+      return () => window.cancelAnimationFrame(refreshFrame);
     }
+
+    const openFrame = window.requestAnimationFrame(() => setStoryDialogQuestId(pending.id));
+    return () => window.cancelAnimationFrame(openFrame);
   }, [currentUser, storyDialogQuestId]);
 
   useEffect(() => {
@@ -1297,13 +1304,6 @@ export default function MapRenderer({
   }, [actualHeight, actualWidth, cameraX, cameraY, cursorScreen, effectiveZoom, poisData, renderedUserPosition, scaledTileSize]);
 
   const clampZoom = (value: number) => Math.max(minMapZoom, Math.min(MAX_MAP_ZOOM, Number(value.toFixed(2))));
-
-  useEffect(() => {
-    setZoom(current => {
-      const next = Math.max(minMapZoom, Math.min(MAX_MAP_ZOOM, Number(current.toFixed(2))));
-      return next === current ? current : next;
-    });
-  }, [minMapZoom]);
 
   const zoomAroundBasePoint = (
     nextZoomValue: number,
@@ -2483,13 +2483,24 @@ function QuestNpcModal({ npc, onTravel, onClose }: { npc: QuestNpc; onTravel: ()
   const counselStatus = getQuestNpcStatus(user, npc.id);
   const claimed = counselStatus.claimed;
   const atNpc = Boolean(user && isTileInsideFootprint(user.x, user.y, npc.x, npc.y, 2, 2));
-
-  useEffect(() => {
-    if (atNpc) {
-      recordQuestNpcVisit(npc.id);
-      setUser(getCurrentUser());
-    }
-  }, [atNpc, npc.id]);
+  const [showConversation, setShowConversation] = useState(atNpc);
+  const conversation: StoryDialogSequence = useMemo(() => ({
+    id: `quest-npc-conversation-${npc.id}`,
+    kicker: `${npc.town} - ${npc.faction}`,
+    npcName: npc.name,
+    npcTitle: npc.title,
+    npcModelNumber: npc.modelNumber,
+    objective: {
+      label: 'Counsel Task',
+      title: formatQuestRequirementText(npc.requirement),
+      description: `Return to ${npc.name} after the task is complete to claim ${formatQuestNpcRewards(npc.rewards)}.`,
+    },
+    lines: [
+      { speaker: 'npc', text: npc.line },
+      { speaker: 'player', text: 'What do you ask of my banner?' },
+      { speaker: 'npc', text: `${npc.questHook} Prove your command, then return for counsel.` },
+    ],
+  }), [npc]);
 
   const handleClaimCounsel = () => {
     if (!atNpc) {
@@ -2516,6 +2527,18 @@ function QuestNpcModal({ npc, onTravel, onClose }: { npc: QuestNpc; onTravel: ()
   };
 
   return (
+    <>
+    {showConversation && user && (
+      <StoryDialogOverlay
+        sequence={conversation}
+        playerModelNumber={user.selectedModel || 3}
+        onComplete={() => {
+          recordQuestNpcVisit(npc.id);
+          setUser(getCurrentUser());
+          setShowConversation(false);
+        }}
+      />
+    )}
     <div className="world-popup-layer pointer-events-none fixed inset-0 flex items-center justify-center px-4">
       <div
         className="world-popup-panel command-panel vine-frame pointer-events-auto w-full max-w-md overflow-hidden rounded border text-zinc-100"
@@ -2568,6 +2591,15 @@ function QuestNpcModal({ npc, onTravel, onClose }: { npc: QuestNpc; onTravel: ()
             <div className="arcane-label">Counsel Reward</div>
             <div className="mt-1 text-zinc-100">{formatQuestNpcRewards(npc.rewards)}</div>
           </div>
+          {atNpc && (
+            <button
+              type="button"
+              onClick={() => setShowConversation(true)}
+              className="ui-button w-full rounded px-4 py-2 text-xs font-black uppercase"
+            >
+              Speak Again
+            </button>
+          )}
           {notice && (
             <div className="ui-notice rounded border px-3 py-2 text-xs font-bold">
               {notice}
@@ -2590,6 +2622,7 @@ function QuestNpcModal({ npc, onTravel, onClose }: { npc: QuestNpc; onTravel: ()
         </div>
       </div>
     </div>
+    </>
   );
 }
 

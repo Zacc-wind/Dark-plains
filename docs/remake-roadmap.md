@@ -348,6 +348,12 @@
 - [x] Add the new gothic login/register background.
 - [x] Add a Settings toggle/reset for the singleplayer first-run tutorial.
 - [x] Add first-login mode tutorial that asks whether to continue, then explains Singleplayer vs Multiplayer and their separate progression before mode choice.
+- [x] Add multiplayer story introductions as active two-character RPG conversations with player/NPC sprites, active-speaker focus, and a concrete objective handoff.
+- [x] Repair and restructure the first six multiplayer story objectives into job, travel, contact, first combat, second town, and named-threat onboarding.
+- [x] Reuse the conversation presentation for world quest contacts instead of presenting every NPC as a static task panel first.
+- [ ] Add interaction spotlights for the first multiplayer job, town travel, formation confirmation, and battle result claim.
+- [x] Add a replayable multiplayer story journal and a skip-onboarding control that never auto-completes objectives.
+- [ ] Implement the level unlock registry, daily/weekly return loops, and later chapter scaling described in `docs/multiplayer-roadmap.md`.
 - [x] Stop random-run unit-join cinematics from showing the second stat report popup.
 - [x] Visually verify combat overlay controls inside an actual battle after the latest 10x7 board rollback.
 - [x] Implement first-run singleplayer tutorial steps: lobby, draft, route map, formation, first combat controls, reward, shop, and omen.
@@ -359,8 +365,9 @@
 - [x] Add commander spell tutorial scripting: guarantee Ember Dart, spotlight S/M spell controls, force the first commander spell path, highlight the Ember Dart card, and complete the combat tutorial only after the first spell cast.
 - [x] Soften first-run tutorial overlay timing so boss8 and dialog entrances feel slower and more cinematic.
 - [x] Enlarge and recenter the boss8 tutorial guide art, slow the combat coach entrance, and reposition reward/shop/omen tutorial dialogs so they avoid covering the main choice cards.
-- [ ] Add deeper interactive tutorial callouts for first shop purchase, first blessing pick, first combat hover preview, and first damage/retaliation preview.
-- [ ] Add remaining first-combat tutorial callouts for defensive wait/guard, attack action, move action, cancel/selection behavior, and commander focus-mana strategy when mana is intentionally saved.
+- [x] Add deeper interactive tutorial callouts for first shop purchase, first blessing pick, first combat hover preview, and first damage/retaliation preview.
+- [x] Add first-combat movement and attack-confirmation callouts that highlight valid board targets and complete only after the actions are used.
+- [x] Add remaining first-combat tutorial callouts for ordinary Wait versus class effects, movement undo, spell cancel/reselection, and intentional commander mana saving.
 - [x] Add pre-run singleplayer choices: a forced four-choice randomized commander draft plus four run lengths, including a five-fight quick road, with Long Road gated to run level 5 and longer roads giving harder scaling and stronger rewards.
 - [x] Add initial run-only commander stat passives by player model: tank leader, mage leader, healer leader, damage leader, skirmish leader, and durable mixed leader.
 - [x] Add first commander unit-family synergies so each commander buffs matching run units, not only commander stats.

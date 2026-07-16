@@ -53,7 +53,7 @@ export function MilestoneIconTile({
           className="sp-milestone-icon"
           unoptimized
         />
-        {!milestone.unlocked ? <span className="sp-milestone-lock" aria-hidden>🔒</span> : null}
+        {!milestone.unlocked ? <span className="sp-milestone-lock" aria-hidden>Locked</span> : null}
       </div>
       {showTitle ? (
         <span className="sp-milestone-tile-title">{milestone.title}</span>
@@ -76,14 +76,29 @@ export default function RunMilestonesModal({ isOpen, runState, onClose, onClaim 
   if (!isOpen) return null;
 
   const handleClaim = (milestone: RunMilestoneView) => {
-    if (!player || !milestone.unlocked) return;
-    if (isRunMilestoneRewardClaimed(currentRunState, milestone.id)) return;
+    const latestPlayer = getCurrentUser();
+    if (!latestPlayer) {
+      setClaimNotice('Sign in again before claiming this reward.');
+      return;
+    }
+    const latestRunState = getDailyRunState(latestPlayer);
+    const latestMilestone = getRunMilestoneViews(latestRunState).find(view => view.id === milestone.id);
+    if (!latestMilestone?.unlocked) {
+      setClaimNotice('That milestone is not unlocked yet.');
+      return;
+    }
+    if (isRunMilestoneRewardClaimed(latestRunState, milestone.id)) {
+      setClaimNotice('Milestone reward already claimed.');
+      setRefreshKey(value => value + 1);
+      return;
+    }
 
     const result = claimRunMilestoneReward(
-      player,
+      latestPlayer,
       milestone.id,
       getRunMilestoneRewardExp(milestone.id),
-      milestone.unlocked,
+      latestMilestone.unlocked,
+      latestMilestone.claimReward,
     );
 
     setClaimNotice(result.message);
@@ -163,12 +178,17 @@ export default function RunMilestonesModal({ isOpen, runState, onClose, onClaim 
                           {milestone.rewardHint ? (
                             <p className="sp-milestone-card-reward ui-faint">{milestone.rewardHint}</p>
                           ) : null}
+                          {milestone.claimReward ? (
+                            <p className="sp-milestone-card-reward ui-value">
+                              Unlock: {milestone.claimReward}
+                            </p>
+                          ) : null}
                           {milestone.progressLabel ? (
                             <p className="sp-milestone-card-progress ui-value">{milestone.progressLabel}</p>
                           ) : null}
                           {milestone.unlocked ? (
                             <p className="sp-milestone-card-reward ui-faint">
-                              {claimed ? 'Reward claimed' : `Reward: +${rewardExp} run XP`}
+                              {claimed ? 'Reward claimed and active' : `Reward: +${rewardExp} run XP`}
                             </p>
                           ) : null}
                         </div>
