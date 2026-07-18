@@ -192,7 +192,7 @@ export default function POIModal({ poi, onClose, onSelectJob, onTravel }: POIMod
                   <button
                     type="button"
                     onClick={() => handleStartJob(job, index)}
-                    data-multiplayer-tutorial-anchor="job-start"
+                    data-multiplayer-tutorial-anchor={queuedJobs < 4 && !levelLocked ? 'job-start' : undefined}
                     disabled={queuedJobs >= 4 || levelLocked}
                     className="ui-button-primary poi-site-job-action"
                   >

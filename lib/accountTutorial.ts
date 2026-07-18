@@ -14,6 +14,7 @@ export interface AccountTutorials {
 
 const ACCOUNT_TUTORIALS_PREFIX = 'wizardy_account_tutorials';
 const REMOTE_TUTORIALS_KEY = 'tutorials';
+const persistenceQueues = new Map<string, Promise<void>>();
 
 function getLocalKey(username: string): string {
   return `${ACCOUNT_TUTORIALS_PREFIX}_${username.trim().toLowerCase()}`;
@@ -27,16 +28,29 @@ export function readAccountTutorials(username?: string | null): AccountTutorials
 export function writeAccountTutorials(username: string | null | undefined, tutorials: AccountTutorials): void {
   if (!username) return;
   writeGameJson(getLocalKey(username), tutorials);
-  void persistAccountTutorials(username, tutorials);
+  const queueKey = username.trim().toLowerCase();
+  const previous = persistenceQueues.get(queueKey) || Promise.resolve();
+  const queued = previous
+    .catch(() => undefined)
+    .then(() => persistAccountTutorials(username, tutorials));
+  persistenceQueues.set(queueKey, queued);
+  void queued.finally(() => {
+    if (persistenceQueues.get(queueKey) === queued) persistenceQueues.delete(queueKey);
+  });
 }
 
 export function applyRemoteAccountTutorials(username: string, tutorials: AccountTutorials | null | undefined): void {
   if (!username || !tutorials) return;
   const local = readAccountTutorials(username);
+  const remoteMultiplayer = tutorials.multiplayer;
+  const localMultiplayer = local.multiplayer;
+  const multiplayer = (localMultiplayer?.updatedAt || 0) > (remoteMultiplayer?.updatedAt || 0)
+    ? localMultiplayer
+    : remoteMultiplayer ?? localMultiplayer;
   writeGameJson(getLocalKey(username), {
     mode: tutorials.mode ?? local.mode,
     singleplayerRun: tutorials.singleplayerRun ?? local.singleplayerRun,
-    multiplayer: tutorials.multiplayer ?? local.multiplayer,
+    multiplayer,
   });
 }
 

@@ -32,6 +32,18 @@ export const MULTIPLAYER_TUTORIAL_CALLOUT_IDS: MultiplayerTutorialCalloutId[] = 
 ];
 
 export const MULTIPLAYER_TUTORIAL_CHANGE_EVENT = 'wizardy:multiplayer-tutorial-change';
+export const MULTIPLAYER_FIND_WORK_EVENT = 'wizardy:multiplayer-find-work';
+
+export const MULTIPLAYER_TUTORIAL_CALLOUTS_BY_STORY: Record<string, MultiplayerTutorialCalloutId[]> = {
+  'story-01-first-banner': ['jobs-open', 'job-start'],
+  'story-02-candle-road': ['harborview-travel'],
+  'story-04-river-law': [
+    'enemy-risk',
+    'formation-confirm',
+    'commander-loss-warning',
+    'battle-result-claim',
+  ],
+};
 
 export function normalizeMultiplayerTutorialProgress(
   progress: Partial<MultiplayerTutorialProgress> | null | undefined,
@@ -93,10 +105,16 @@ export function completeMultiplayerTutorialCallout(
 
 export function getNextMultiplayerTutorialCallout(
   username: string | null | undefined,
+  activeStoryQuestId?: string | null,
 ): MultiplayerTutorialCalloutId | null {
   const progress = readMultiplayerTutorialProgress(username);
   if (!username || progress.skipped) return null;
-  return MULTIPLAYER_TUTORIAL_CALLOUT_IDS.find(calloutId => !progress.completedCalloutIds.includes(calloutId)) || null;
+  const candidates = activeStoryQuestId === undefined
+    ? MULTIPLAYER_TUTORIAL_CALLOUT_IDS
+    : activeStoryQuestId
+      ? MULTIPLAYER_TUTORIAL_CALLOUTS_BY_STORY[activeStoryQuestId] || []
+      : [];
+  return candidates.find(calloutId => !progress.completedCalloutIds.includes(calloutId)) || null;
 }
 
 export function saveMultiplayerTutorialDialogueLine(

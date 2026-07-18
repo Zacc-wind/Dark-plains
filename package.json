@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
-    "test:tutorial": "vitest run lib/singleplayerTutorial.test.ts",
+    "test:tutorial": "vitest run lib/singleplayerTutorial.test.ts lib/multiplayerTutorial.test.ts",
     "import-assets": "powershell -ExecutionPolicy Bypass -File scripts/import-assets-v2.ps1"
   },
   "dependencies": {

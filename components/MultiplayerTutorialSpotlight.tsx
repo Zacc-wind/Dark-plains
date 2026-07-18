@@ -2,7 +2,7 @@
 
 import { createPortal } from 'react-dom';
 import { useEffect, useState } from 'react';
-import { getCurrentUser } from '@/lib/auth';
+import { getAllStoryQuestsSorted, getCurrentUser, getStoryQuestStatus } from '@/lib/auth';
 import {
   completeMultiplayerTutorialCallout,
   getNextMultiplayerTutorialCallout,
@@ -59,11 +59,33 @@ interface AnchorRect {
   bottom: number;
 }
 
+function getActiveStoryQuestId(): string | null {
+  const user = getCurrentUser();
+  if (!user) return null;
+  const activeStory = getAllStoryQuestsSorted().find((story) => {
+    const status = getStoryQuestStatus(user, story.id);
+    return status.unlocked && !status.claimed;
+  });
+  if (!activeStory) return null;
+
+  return getStoryQuestStatus(user, activeStory.id).complete ? null : activeStory.id;
+}
+
 function getAnchorRect(calloutId: MultiplayerTutorialCalloutId): AnchorRect | null {
-  const anchor = document.querySelector<HTMLElement>(`[data-multiplayer-tutorial-anchor="${calloutId}"]`);
+  const anchor = Array.from(document.querySelectorAll<HTMLElement>(
+    `[data-multiplayer-tutorial-anchor="${calloutId}"]`,
+  )).find((candidate) => {
+    const rect = candidate.getBoundingClientRect();
+    return !candidate.matches(':disabled')
+      && rect.width > 0
+      && rect.height > 0
+      && rect.bottom >= 0
+      && rect.top <= window.innerHeight
+      && rect.right >= 0
+      && rect.left <= window.innerWidth;
+  });
   if (!anchor) return null;
   const rect = anchor.getBoundingClientRect();
-  if (rect.width <= 0 || rect.height <= 0 || rect.bottom < 0 || rect.top > window.innerHeight) return null;
   return {
     top: rect.top,
     left: rect.left,
@@ -84,11 +106,17 @@ function sameRect(left: AnchorRect | null, right: AnchorRect | null): boolean {
 export default function MultiplayerTutorialSpotlight() {
   const [revision, setRevision] = useState(0);
   const [anchorRect, setAnchorRect] = useState<AnchorRect | null>(null);
+  const [activeStoryQuestId, setActiveStoryQuestId] = useState(getActiveStoryQuestId);
   const [suppressed, setSuppressed] = useState(() => (
     typeof window !== 'undefined' && window.matchMedia(MOBILE_TUTORIAL_QUERY).matches
   ));
   const username = getCurrentUser()?.username || null;
-  const calloutId = getNextMultiplayerTutorialCallout(username);
+  const calloutId = getNextMultiplayerTutorialCallout(username, activeStoryQuestId);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => setActiveStoryQuestId(getActiveStoryQuestId()), 1000);
+    return () => window.clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     const mediaQuery = window.matchMedia(MOBILE_TUTORIAL_QUERY);

@@ -47,7 +47,7 @@ Singleplayer and multiplayer keep separate onboarding because their economies an
 - [ ] Add first-use conversations for gear upgrades, trade, party creation, and cooperative dungeon readiness.
 - [x] Add a journal replay list and a single Skip Multiplayer Onboarding action that never grants progress or rewards.
 - [x] Persist active dialogue line and tutorial callout state through Supabase account state.
-- [ ] Add automated opening-chain tests for a fresh account and a returning partially completed account.
+- [x] Add automated opening-chain state tests for a fresh account and a returning partially completed account.
 
 ## Verification Matrix
 

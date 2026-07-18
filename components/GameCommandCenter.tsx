@@ -106,6 +106,7 @@ import {
 import { getSpellIconPath } from '@/lib/spellAssets';
 import {
   completeMultiplayerTutorialCallout,
+  MULTIPLAYER_FIND_WORK_EVENT,
   skipMultiplayerTutorial,
 } from '@/lib/multiplayerTutorial';
 
@@ -991,6 +992,11 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
     setActivePanel(panelId);
     if (secondaryPanelButtons.some(button => button.id === panelId)) setIsSecondaryNavOpen(true);
     setIsCommandOpen(true);
+  };
+
+  const openNearestWorkSite = () => {
+    setIsCommandOpen(false);
+    window.dispatchEvent(new Event(MULTIPLAYER_FIND_WORK_EVENT));
   };
 
   const getPanelSubtitle = (panelId: PanelId): string => {
@@ -2785,6 +2791,22 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
   function renderJobs() {
     return (
       <div className="command-content-grid">
+        <section>
+          <SectionTitle title="Find Work" action="World map" />
+          <p className="ui-muted text-sm font-bold leading-relaxed">
+            Road jobs begin at work sites. Open the nearest site, review its contracts, then add one to your live queue.
+          </p>
+          <button
+            type="button"
+            data-multiplayer-tutorial-anchor="job-start"
+            onClick={openNearestWorkSite}
+            disabled={player.jobQueue.length >= 4}
+            className="ui-button-primary mt-3 w-full rounded px-4 py-3 text-sm font-black disabled:opacity-40"
+          >
+            {player.jobQueue.length >= 4 ? 'Job Queue Full' : 'Find Nearest Work Site'}
+          </button>
+        </section>
+
         <section>
           <SectionTitle title="Road Travel" action="Queue free" />
           {player.traveling ? (

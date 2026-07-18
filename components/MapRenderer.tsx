@@ -51,6 +51,7 @@ import {
   clearMultiplayerTutorialDialogue,
   completeMultiplayerTutorialCallout,
   getMultiplayerTutorialDialogueLine,
+  MULTIPLAYER_FIND_WORK_EVENT,
   saveMultiplayerTutorialDialogueLine,
 } from '@/lib/multiplayerTutorial';
 
@@ -1040,6 +1041,34 @@ export default function MapRenderer({
   const poisData = useMemo(() => getStaticPOIs(), []);
 
   useEffect(() => {
+    const openNearestWorkSite = () => {
+      const user = getCurrentUser();
+      if (!user) return;
+      const nearest = poisData
+        .filter(poi => poi.type !== POIType.TOWN && poi.jobs.length > 0)
+        .sort((left, right) => {
+          const leftOffset = left.type === POIType.CAMPFIRE ? 1 : 2;
+          const rightOffset = right.type === POIType.CAMPFIRE ? 1 : 2;
+          const leftDistance = Math.abs(user.x - (left.x + leftOffset)) + Math.abs(user.y - (left.y + leftOffset));
+          const rightDistance = Math.abs(user.x - (right.x + rightOffset)) + Math.abs(user.y - (right.y + rightOffset));
+          return leftDistance - rightDistance;
+        })[0];
+      if (!nearest) return;
+
+      setSelectedPOI(nearest);
+      setSelectedTown(null);
+      setSelectedEnemy(null);
+      setSelectedDungeon(null);
+      setSelectedQuestNpc(null);
+      setShowPlayerList(false);
+      setPendingTravel(null);
+    };
+
+    window.addEventListener(MULTIPLAYER_FIND_WORK_EVENT, openNearestWorkSite);
+    return () => window.removeEventListener(MULTIPLAYER_FIND_WORK_EVENT, openNearestWorkSite);
+  }, [poisData]);
+
+  useEffect(() => {
     activeBattleEnemyRef.current = activeBattleEnemy;
   }, [activeBattleEnemy]);
 
@@ -1971,9 +2000,10 @@ export default function MapRenderer({
     }
   };
 
-  const handleJobSelect = (poiId: string, job: string) => {
-    console.log(`Selected job "${job}" at POI ${poiId}`);
-    // TODO: Implement job system
+  const handleJobSelect = () => {
+    setSelectedPOI(null);
+    setShowPlayerList(false);
+    setCurrentUser(getCurrentUser());
   };
 
   const handleWheel = (event: WheelEvent<HTMLCanvasElement>) => {
