@@ -23,6 +23,7 @@ import {
   refreshWorldPlayers,
 } from '@/lib/worldPlayers';
 import { playGameSound, preloadGameSounds } from '@/lib/sound';
+import CinematicScrollShell from './CinematicScrollShell';
 
 function getIncomingChallenge(
   challenges: BattleChallenge[],
@@ -171,8 +172,12 @@ export default function PvpChallengeOverlay() {
   };
 
   return (
-    <div className="pvp-challenge-overlay fixed inset-0 z-[90] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
-      <section className="pvp-challenge-card command-panel vine-frame w-full max-w-lg overflow-hidden rounded border text-zinc-100 shadow-2xl">
+    <div className="cinematic-scroll-overlay pvp-challenge-overlay fixed inset-0 z-[90] flex items-center justify-center p-4">
+      <CinematicScrollShell
+        variant="compact"
+        className="pvp-challenge-card w-full max-w-lg text-zinc-100"
+        contentClassName="overflow-hidden"
+      >
         <div className="panel-header border-b px-5 py-4 text-center">
           <div className="arcane-label">Duel Challenge</div>
           <h2 className="fantasy-heading mt-1 text-2xl">Crossed Blades</h2>
@@ -236,7 +241,7 @@ export default function PvpChallengeOverlay() {
             {notice}
           </div>
         )}
-      </section>
+      </CinematicScrollShell>
     </div>
   );
 }

@@ -1,40 +1,51 @@
 'use client';
 
 import Image from 'next/image';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { getPlayerModelPath } from '@/lib/assetLoader';
 import type { StoryDialogSequence } from '@/lib/storyDialogue';
+import CinematicScrollShell from './CinematicScrollShell';
 
 export default function StoryDialogOverlay({
   sequence,
   playerModelNumber,
+  initialLineIndex = 0,
+  onLineChange,
   onComplete,
 }: {
   sequence: StoryDialogSequence;
   playerModelNumber: number;
+  initialLineIndex?: number;
+  onLineChange?: (lineIndex: number) => void;
   onComplete: () => void;
 }) {
-  const [lineIndex, setLineIndex] = useState(0);
+  const [lineIndex, setLineIndex] = useState(() => (
+    Math.min(Math.max(0, Math.floor(initialLineIndex)), Math.max(0, sequence.lines.length - 1))
+  ));
   const finishedRef = useRef(false);
   const line = sequence.lines[lineIndex];
   const isLastLine = lineIndex >= sequence.lines.length - 1;
   const activeSpeaker = line?.speaker || 'npc';
 
-  const finish = () => {
+  useEffect(() => {
+    onLineChange?.(lineIndex);
+  }, [lineIndex, onLineChange]);
+
+  const finish = useCallback(() => {
     if (finishedRef.current) return;
     finishedRef.current = true;
     onComplete();
-  };
+  }, [onComplete]);
 
-  const advance = () => {
+  const advance = useCallback(() => {
     if (finishedRef.current) return;
     if (isLastLine) {
       finish();
       return;
     }
     setLineIndex(current => current + 1);
-  };
+  }, [finish, isLastLine]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -45,7 +56,7 @@ export default function StoryDialogOverlay({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  });
+  }, [advance]);
 
   if (!line) return null;
 
@@ -85,8 +96,9 @@ export default function StoryDialogOverlay({
         </div>
       </div>
 
-      <section
-        className="story-dialog-panel command-panel vine-frame relative w-full max-w-5xl rounded border p-4 sm:p-5"
+      <CinematicScrollShell
+        className="story-dialog-panel w-full max-w-5xl"
+        contentClassName="relative p-4 sm:p-5"
         onClick={event => event.stopPropagation()}
       >
         <div className="story-dialog-panel-glow" aria-hidden="true" />
@@ -130,7 +142,7 @@ export default function StoryDialogOverlay({
             </button>
           </div>
         </div>
-      </section>
+      </CinematicScrollShell>
     </div>
   );
 

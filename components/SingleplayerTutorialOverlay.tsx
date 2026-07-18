@@ -6,6 +6,7 @@ import { createPortal } from 'react-dom';
 import { getPlayerModelPath } from '@/lib/assetLoader';
 import { getCurrentUser } from '@/lib/auth';
 import type { SingleplayerRunTutorialStep } from '@/lib/singleplayerTutorial';
+import CinematicScrollShell from './CinematicScrollShell';
 
 export type TutorialOverlayStep = Omit<SingleplayerRunTutorialStep, 'id'> & {
   id: string;
@@ -101,7 +102,10 @@ export default function SingleplayerTutorialOverlay({
         </div>
       </div>
 
-      <section className="singleplayer-tutorial-dialog command-panel vine-frame relative w-full max-w-5xl rounded border p-4 sm:p-5">
+      <CinematicScrollShell
+        className="singleplayer-tutorial-dialog w-full max-w-5xl"
+        contentClassName="relative p-4 sm:p-5"
+      >
         <div className="singleplayer-tutorial-dialog-glow" aria-hidden="true" />
         <div className="relative z-10 grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
           <div className="min-w-0">
@@ -170,7 +174,7 @@ export default function SingleplayerTutorialOverlay({
             </button>
           </div>
         </div>
-      </section>
+      </CinematicScrollShell>
     </div>
   );
 

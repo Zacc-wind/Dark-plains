@@ -351,7 +351,7 @@
 - [x] Add multiplayer story introductions as active two-character RPG conversations with player/NPC sprites, active-speaker focus, and a concrete objective handoff.
 - [x] Repair and restructure the first six multiplayer story objectives into job, travel, contact, first combat, second town, and named-threat onboarding.
 - [x] Reuse the conversation presentation for world quest contacts instead of presenting every NPC as a static task panel first.
-- [ ] Add interaction spotlights for the first multiplayer job, town travel, formation confirmation, and battle result claim.
+- [x] Add interaction spotlights for the first multiplayer job, town travel, formation confirmation, and battle result claim.
 - [x] Add a replayable multiplayer story journal and a skip-onboarding control that never auto-completes objectives.
 - [ ] Implement the level unlock registry, daily/weekly return loops, and later chapter scaling described in `docs/multiplayer-roadmap.md`.
 - [x] Stop random-run unit-join cinematics from showing the second stat report popup.

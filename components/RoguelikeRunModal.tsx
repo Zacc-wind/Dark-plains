@@ -105,14 +105,19 @@ import {
 } from '@/lib/runMilestones';
 import {
   createSingleplayerRunTutorialStep,
+  markSingleplayerRunRewardTipSeen,
   markSingleplayerRunTutorialStepSeen,
   SINGLEPLAYER_RUN_TUTORIAL_GUIDE_ASSET,
+  SINGLEPLAYER_RUN_TUTORIAL_RESET_EVENT,
   SINGLEPLAYER_RUN_TUTORIAL_STEP_IDS,
   shouldShowSingleplayerRunTutorialStep,
+  shouldShowSingleplayerRunRewardTip,
   skipSingleplayerRunTutorial,
   type SingleplayerRunTutorialStep,
   type SingleplayerRunTutorialStepId,
+  type SingleplayerRunRewardTipId,
 } from '@/lib/singleplayerTutorial';
+import { completeMultiplayerTutorialCallout } from '@/lib/multiplayerTutorial';
 
 type RunMode = 'daily' | 'dungeon' | 'encounter' | 'mpDaily';
 export type RunPhase = 'draft' | 'map' | 'formation' | 'battle' | 'reward' | 'shop' | 'event' | 'complete';
@@ -353,6 +358,7 @@ interface RunCelebration {
   artworkPath: string;
   artworkStyle?: 'item' | 'plain';
   rewards: CompletionRewardLine[];
+  tutorialTip?: SingleplayerRunRewardTipId;
 }
 
 interface DungeonNode {
@@ -951,6 +957,16 @@ function DailyRunModalContent({ onClose, tutorialScope }: { onClose: () => void;
   };
 
   useEffect(() => {
+    if (tutorialScope !== 'singleplayer') return undefined;
+    const handleTutorialReset = () => {
+      setDismissedTutorialStepIds(new Set());
+      setTutorialRefreshKey(key => key + 1);
+    };
+    window.addEventListener(SINGLEPLAYER_RUN_TUTORIAL_RESET_EVENT, handleTutorialReset);
+    return () => window.removeEventListener(SINGLEPLAYER_RUN_TUTORIAL_RESET_EVENT, handleTutorialReset);
+  }, [tutorialScope]);
+
+  useEffect(() => {
     const user = getCurrentUser();
     if (!user) return;
 
@@ -1494,6 +1510,16 @@ function RunController({
   };
 
   useEffect(() => {
+    if (tutorialScope !== 'singleplayer') return undefined;
+    const handleTutorialReset = () => {
+      setDismissedTutorialStepIds(new Set());
+      setTutorialRefreshKey(key => key + 1);
+    };
+    window.addEventListener(SINGLEPLAYER_RUN_TUTORIAL_RESET_EVENT, handleTutorialReset);
+    return () => window.removeEventListener(SINGLEPLAYER_RUN_TUTORIAL_RESET_EVENT, handleTutorialReset);
+  }, [tutorialScope]);
+
+  useEffect(() => {
     document.body.classList.add('daily-run-open');
     window.dispatchEvent(new Event('wizardy:force-main-screen'));
     return () => document.body.classList.remove('daily-run-open');
@@ -1846,6 +1872,9 @@ function RunController({
       { label: 'Run Gold', value: String(session.runGold), tone: 'gold' },
     ];
 
+    if (session.mode === 'encounter' && session.outcome === 'victory') {
+      completeMultiplayerTutorialCallout(getCurrentUser()?.username, 'battle-result-claim');
+    }
     setSession({ ...session, rewardClaimed: true, notice });
 
     if (session.outcome === 'victory') {
@@ -1865,27 +1894,19 @@ function RunController({
   };
 
   const handleStartFormation = () => {
-    setSession(current => {
-      if (!current) return current;
-      const aliveUnits = getAliveRunRoster(current);
-      const formation = mergeFormation(aliveUnits, current.formation, MAX_FIELD_MINIONS);
-      const issue = getRunFormationIssue(current, formation);
+    const aliveUnits = getAliveRunRoster(session);
+    const formation = mergeFormation(aliveUnits, session.formation, MAX_FIELD_MINIONS);
+    const issue = getRunFormationIssue(session, formation);
 
-      if (issue) {
-        return {
-          ...current,
-          formation,
-          notice: issue,
-        };
-      }
+    if (issue) {
+      setSession({ ...session, formation, notice: issue });
+      return;
+    }
 
-      return {
-        ...current,
-        formation,
-        phase: 'battle',
-        notice: undefined,
-      };
-    });
+    if (session.mode === 'encounter') {
+      completeMultiplayerTutorialCallout(getCurrentUser()?.username, 'formation-confirm');
+    }
+    setSession({ ...session, formation, phase: 'battle', notice: undefined });
   };
 
   if (session.phase === 'battle' && session.activeEnemy) {
@@ -3649,6 +3670,7 @@ function CompletionPanel({
             <button
                 type="button"
               onClick={onClaim}
+              data-multiplayer-tutorial-anchor="battle-result-claim"
               disabled={session.rewardClaimed}
                 className="run-completion-action random-run-start ui-button-primary rounded px-5 py-3 text-sm font-black disabled:opacity-40"
             >
@@ -8036,19 +8058,32 @@ function hasFallenMinions(session: RunSession): boolean {
 }
 
 function emitRunCelebrations(celebrations: RunCelebration[]): void {
+  const username = getCurrentUser()?.username || null;
   celebrations.forEach((celebration) => {
+    const showTutorialTip = celebration.tutorialTip
+      ? shouldShowSingleplayerRunRewardTip(username, celebration.tutorialTip)
+      : false;
+    const tutorialCopy = celebration.tutorialTip === 'gear'
+      ? 'Run gear is temporary. Equip it from the formation satchel; it disappears when this road ends.'
+      : celebration.tutorialTip === 'unit-upgrade'
+        ? 'Promotions replace that fighter with its next tier for this run, including its stronger combat stats.'
+        : '';
+
     emitCompletionNotice({
       id: celebration.id,
       kind: celebration.kind === 'unit' ? 'recruit' : celebration.kind === 'gear' ? 'gear' : 'run',
       kicker: celebration.kicker,
       title: celebration.title,
-      description: celebration.description,
+      description: showTutorialTip ? `${celebration.description} ${tutorialCopy}` : celebration.description,
       artworkPath: celebration.artworkPath,
       artworkStyle: celebration.artworkStyle,
       rewards: celebration.rewards,
       completedAt: Date.now(),
       skipBurst: true,
     });
+    if (showTutorialTip && celebration.tutorialTip) {
+      markSingleplayerRunRewardTipSeen(username, celebration.tutorialTip);
+    }
   });
 }
 
@@ -8056,6 +8091,7 @@ function queueRunRewardCelebrations(before: RunSession, after: RunSession, sourc
   const pending = [...(after.pendingRunCelebrations || before.pendingRunCelebrations || [])];
   const beforeEquipmentIds = new Set((before.runEquipment || []).map(item => item.id));
   const beforeUnitIds = new Set(before.minions.map(unit => unit.stack.id));
+  const beforeUnitsById = new Map(before.minions.map(unit => [unit.stack.id, unit]));
   const newEquipment = (after.runEquipment || []).filter(item => !beforeEquipmentIds.has(item.id));
   const newUnits = after.minions.filter(unit => !beforeUnitIds.has(unit.stack.id));
   const createdAt = Date.now();
@@ -8079,6 +8115,7 @@ function queueRunRewardCelebrations(before: RunSession, after: RunSession, sourc
       rewards: statRewards.length > 0
         ? statRewards
         : [{ label: 'Gear', value: formatRunEquipmentSummary(item), tone: 'green' as const }],
+      tutorialTip: before.mode === 'daily' ? 'gear' : undefined,
     };
   });
   const unitCelebrations: RunCelebration[] = newUnits
@@ -8102,7 +8139,32 @@ function queueRunRewardCelebrations(before: RunSession, after: RunSession, sourc
       };
     })
     .filter((item): item is RunCelebration => Boolean(item));
-  const celebrations = [...gearCelebrations, ...unitCelebrations];
+  const upgradeCelebrations: RunCelebration[] = after.minions
+    .map((unit, index): RunCelebration | null => {
+      const previousUnit = beforeUnitsById.get(unit.stack.id);
+      if (!previousUnit || previousUnit.stack.templateId === unit.stack.templateId) return null;
+      const previousTemplate = getMinionTemplate(previousUnit.stack.templateId);
+      const template = getMinionTemplate(unit.stack.templateId);
+      if (!previousTemplate || !template) return null;
+
+      return {
+        id: `run-upgrade-${source.id}-${unit.stack.id}-${createdAt}-${index}`,
+        kind: 'unit',
+        kicker: 'Unit Promoted',
+        title: template.name,
+        description: `${previousTemplate.name} advanced from ${MINION_TIER_LABELS[previousTemplate.tier]} to ${MINION_TIER_LABELS[template.tier]}.`,
+        artworkPath: `${MINION_ICON_BASE}/${template.assetName}`,
+        artworkStyle: 'plain',
+        rewards: [
+          { label: 'Attack', value: String(template.stats.attack), tone: 'green' as const },
+          { label: 'Ward', value: String(template.stats.defense), tone: 'blue' as const },
+          { label: 'Health', value: String(template.stats.health), tone: 'green' as const },
+        ],
+        tutorialTip: before.mode === 'daily' ? 'unit-upgrade' : undefined,
+      };
+    })
+    .filter((item): item is RunCelebration => Boolean(item));
+  const celebrations = [...gearCelebrations, ...unitCelebrations, ...upgradeCelebrations];
 
   if (celebrations.length === 0) return after;
 

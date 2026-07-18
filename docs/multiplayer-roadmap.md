@@ -27,10 +27,10 @@ Turn the current shared world-map prototype into a real multiplayer layer withou
 - [x] Repair the missing First Banner introduction so one absent sequence cannot block every later story scene.
 - [x] Rework the opening chain into a guided path: complete a job, reach Harborview, meet Marshal Orren, win a first battle, reach Riverside, then face the Black Pike threat.
 - [x] Reuse the same conversation stage when speaking to world quest contacts, with the NPC task and reward presented after the dialogue.
-- [ ] Add contextual focus states for the first Jobs menu, town travel action, enemy inspect action, formation confirmation, and battle result claim.
+- [x] Add contextual focus states for the first Jobs menu, town travel action, enemy inspect action, formation confirmation, and battle result claim.
 - [x] Add a journal page that can replay completed story conversations without replaying their rewards.
 - [x] Add a single explicit Skip Onboarding action; skipping marks only tutorial introductions complete and never completes quest objectives.
-- [ ] Persist the exact active dialogue line server-side so a disconnected first-time player resumes cleanly.
+- [x] Persist the exact active dialogue line server-side so a disconnected first-time player resumes cleanly.
 - [ ] Add authored player response choices to selected story scenes; choices may change tone or faction reputation but must not silently block core progression.
 
 ## Phase 2: Social Request Popups

@@ -8,6 +8,7 @@ import { emitFxEvent } from '@/lib/fxEvents';
 import { POI, POIType } from '@/lib/mapData';
 import { buildJobRewardChips } from '@/lib/rewardDisplay';
 import RewardIconStrip from '@/components/RewardIconStrip';
+import { completeMultiplayerTutorialCallout } from '@/lib/multiplayerTutorial';
 
 interface POIModalProps {
   poi: POI | null;
@@ -83,6 +84,7 @@ export default function POIModal({ poi, onClose, onSelectJob, onTravel }: POIMod
     const result = startJob(poi.id, poi.name, jobName, jobIndex, poiTargetX, poiTargetY, poi.type);
     if (result.success) {
       setError('');
+      completeMultiplayerTutorialCallout(user?.username, 'job-start');
       emitFxEvent({ type: isCampfire ? 'heal' : 'job', tone: isCampfire ? 'green' : 'bone', intensity: 0.48 });
       onSelectJob(poi.id, jobName);
       return;
@@ -190,6 +192,7 @@ export default function POIModal({ poi, onClose, onSelectJob, onTravel }: POIMod
                   <button
                     type="button"
                     onClick={() => handleStartJob(job, index)}
+                    data-multiplayer-tutorial-anchor="job-start"
                     disabled={queuedJobs >= 4 || levelLocked}
                     className="ui-button-primary poi-site-job-action"
                   >

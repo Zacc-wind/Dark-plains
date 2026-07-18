@@ -24,8 +24,8 @@ Singleplayer and multiplayer keep separate onboarding because their economies an
 - [x] Explain positional guard versus class-specific Wait actions without presenting ordinary Wait as a hidden defense buff.
 - [x] Require one movement undo and one spell cancel/reselection before those lessons complete.
 - [x] Add a later commander lesson for intentionally saving mana instead of only focusing when mana is insufficient.
-- [ ] Add a compact first-gear and first-unit-upgrade explanation when those rewards first appear.
-- [ ] Add automated progression tests that reset a tutorial account and verify every checkpoint can complete in order.
+- [x] Add a compact first-gear and first-unit-upgrade explanation when those rewards first appear.
+- [x] Add automated progression tests that reset a tutorial account and verify every checkpoint can complete in order.
 
 ## Multiplayer Current Coverage
 
@@ -38,15 +38,15 @@ Singleplayer and multiplayer keep separate onboarding because their economies an
 
 ## Multiplayer Next Tutorial Work
 
-- [ ] Spotlight the Jobs button during First Banner and complete the lesson only after a real job starts.
-- [ ] Spotlight Harborview and the travel action during The Candle Road.
+- [x] Spotlight the Jobs button during First Banner and complete the lesson only after a real job starts.
+- [x] Spotlight Harborview and the travel action during The Candle Road.
 - [ ] Highlight Marshal Orren's quest marker and explain why story contacts can return after earlier quests.
-- [ ] Highlight enemy level, risk label, formation entry, and commander-loss rule before the first world battle.
-- [ ] Add a compact post-battle explanation of reports, wounded/dead persistent units, and reward claims.
+- [x] Highlight enemy level, risk label, formation entry, and commander-loss rule before the first world battle.
+- [x] Add a compact post-battle explanation of reports, wounded/dead persistent units, and reward claims.
 - [ ] Add the level-3 PVP unlock conversation before the PVP hub becomes interactive.
 - [ ] Add first-use conversations for gear upgrades, trade, party creation, and cooperative dungeon readiness.
 - [x] Add a journal replay list and a single Skip Multiplayer Onboarding action that never grants progress or rewards.
-- [ ] Persist active dialogue line and tutorial callout state through Supabase account state.
+- [x] Persist active dialogue line and tutorial callout state through Supabase account state.
 - [ ] Add automated opening-chain tests for a fresh account and a returning partially completed account.
 
 ## Verification Matrix

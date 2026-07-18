@@ -3231,6 +3231,7 @@ function BattlePiece({
     <span
       className={`battle-piece-wrap battle-piece-wrap-${unit.side} ${active ? 'battle-piece-wrap-active' : ''} ${rising ? 'battle-piece-wrap-rising' : ''} ${tutorialFocus ? 'battle-piece-wrap-tutorial-focus' : ''} ${isBleeding ? 'battle-piece-wrap-bleeding' : ''} ${isPoisoned ? 'battle-piece-wrap-poisoned' : ''}`}
       data-battle-target={targetGlow || undefined}
+      data-multiplayer-tutorial-anchor={isCommander && unit.side === 'player' ? 'commander-loss-warning' : undefined}
     >
       <span className="battle-piece-health">
         <span className={unit.side === 'player' ? 'bg-emerald-300' : 'bg-red-300'} style={{ width: `${healthPercent}%` }} />

@@ -7,6 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "test": "vitest run",
+    "test:tutorial": "vitest run lib/singleplayerTutorial.test.ts",
     "import-assets": "powershell -ExecutionPolicy Bypass -File scripts/import-assets-v2.ps1"
   },
   "dependencies": {
@@ -27,6 +29,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.1.10"
   }
 }

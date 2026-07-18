@@ -12,6 +12,8 @@ export type SingleplayerRunTutorialStepId =
   | 'shop'
   | 'omen';
 
+export type SingleplayerRunRewardTipId = 'gear' | 'unit-upgrade';
+
 export interface SingleplayerRunTutorialCard {
   title: string;
   body: string;
@@ -33,12 +35,14 @@ export interface SingleplayerRunTutorialStep {
 
 export interface SingleplayerRunTutorialProgress {
   seenStepIds: SingleplayerRunTutorialStepId[];
+  seenRewardTipIds?: SingleplayerRunRewardTipId[];
   completed: boolean;
   skipped?: boolean;
   updatedAt?: number;
 }
 
 export const SINGLEPLAYER_RUN_TUTORIAL_SETTING_KEY = 'wizardy_singleplayer_run_tutorial_enabled';
+export const SINGLEPLAYER_RUN_TUTORIAL_RESET_EVENT = 'wizardy:singleplayer-run-tutorial-reset';
 export const SINGLEPLAYER_RUN_TUTORIAL_GUIDE_ASSET = '/assets/bosses/boss8.png';
 
 export const SINGLEPLAYER_RUN_TUTORIAL_STEP_IDS: SingleplayerRunTutorialStepId[] = [
@@ -52,6 +56,7 @@ export const SINGLEPLAYER_RUN_TUTORIAL_STEP_IDS: SingleplayerRunTutorialStepId[]
   'shop',
   'omen',
 ];
+export const SINGLEPLAYER_RUN_REWARD_TIP_IDS: SingleplayerRunRewardTipId[] = ['gear', 'unit-upgrade'];
 
 const SINGLEPLAYER_RUN_TUTORIAL_PROGRESS_PREFIX = 'wizardy_singleplayer_run_tutorial_progress';
 
@@ -61,9 +66,12 @@ function getProgressKey(username: string): string {
 
 function normalizeProgress(progress: Partial<SingleplayerRunTutorialProgress> | null | undefined): SingleplayerRunTutorialProgress {
   const validSteps = new Set(SINGLEPLAYER_RUN_TUTORIAL_STEP_IDS);
+  const validRewardTips = new Set(SINGLEPLAYER_RUN_REWARD_TIP_IDS);
   const seenStepIds = Array.from(new Set((progress?.seenStepIds || []).filter((step): step is SingleplayerRunTutorialStepId => validSteps.has(step as SingleplayerRunTutorialStepId))));
+  const seenRewardTipIds = Array.from(new Set((progress?.seenRewardTipIds || []).filter((tip): tip is SingleplayerRunRewardTipId => validRewardTips.has(tip as SingleplayerRunRewardTipId))));
   return {
     seenStepIds,
+    seenRewardTipIds,
     completed: Boolean(progress?.completed) || seenStepIds.length >= SINGLEPLAYER_RUN_TUTORIAL_STEP_IDS.length,
     skipped: Boolean(progress?.skipped),
     updatedAt: progress?.updatedAt,
@@ -82,7 +90,7 @@ export function readSingleplayerRunTutorialProgress(username?: string | null): S
   if (!username) return normalizeProgress(null);
 
   const accountProgress = readAccountTutorials(username).singleplayerRun;
-  if (accountProgress?.completed || (accountProgress?.seenStepIds?.length || 0) > 0) {
+  if (accountProgress) {
     return normalizeProgress(accountProgress);
   }
 
@@ -113,6 +121,7 @@ export function skipSingleplayerRunTutorial(username: string | null | undefined)
   if (!username) return normalizeProgress(null);
   const next = normalizeProgress({
     seenStepIds: SINGLEPLAYER_RUN_TUTORIAL_STEP_IDS,
+    seenRewardTipIds: SINGLEPLAYER_RUN_REWARD_TIP_IDS,
     completed: true,
     skipped: true,
     updatedAt: Date.now(),
@@ -124,12 +133,42 @@ export function skipSingleplayerRunTutorial(username: string | null | undefined)
 }
 
 export function resetSingleplayerRunTutorial(username: string | null | undefined): SingleplayerRunTutorialProgress {
-  const next = normalizeProgress({ seenStepIds: [], completed: false, updatedAt: Date.now() });
+  const next = normalizeProgress({ seenStepIds: [], seenRewardTipIds: [], completed: false, updatedAt: Date.now() });
   if (username) {
     const account = readAccountTutorials(username);
     writeAccountTutorials(username, { ...account, singleplayerRun: next });
   }
   writeSingleplayerRunTutorialEnabled(true);
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent(SINGLEPLAYER_RUN_TUTORIAL_RESET_EVENT, {
+      detail: { username: username || null },
+    }));
+  }
+  return next;
+}
+
+export function shouldShowSingleplayerRunRewardTip(
+  username: string | null | undefined,
+  tipId: SingleplayerRunRewardTipId,
+): boolean {
+  if (!username || !readSingleplayerRunTutorialEnabled()) return false;
+  const progress = readSingleplayerRunTutorialProgress(username);
+  return !progress.skipped && !(progress.seenRewardTipIds || []).includes(tipId);
+}
+
+export function markSingleplayerRunRewardTipSeen(
+  username: string | null | undefined,
+  tipId: SingleplayerRunRewardTipId,
+): SingleplayerRunTutorialProgress {
+  if (!username) return normalizeProgress(null);
+  const current = readSingleplayerRunTutorialProgress(username);
+  const next = normalizeProgress({
+    ...current,
+    seenRewardTipIds: [...(current.seenRewardTipIds || []), tipId],
+    updatedAt: Date.now(),
+  });
+  const account = readAccountTutorials(username);
+  writeAccountTutorials(username, { ...account, singleplayerRun: next });
   return next;
 }
 

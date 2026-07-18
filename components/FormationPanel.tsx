@@ -23,7 +23,9 @@ import {
   type MinionStack,
   type MinionTemplate,
 } from '@/lib/auth';
+import { playGameSound } from '@/lib/sound';
 import { getSpellIconPath } from '@/lib/spellAssets';
+import CinematicScrollShell from './CinematicScrollShell';
 
 type FormationPanelProps = {
   enemyName: string;
@@ -63,8 +65,6 @@ function getFormationSelectionIssue(
 }
 
 export default function FormationPanel({
-  enemyName: _enemyName,
-  enemySubtitle: _enemySubtitle,
   commanderName,
   commanderModel,
   stacks,
@@ -81,7 +81,10 @@ export default function FormationPanel({
   const formation = useMemo(() => mergeFormation(stacks, formationInput, maxFielded), [stacks, formationInput, maxFielded]);
   const [selectedToken, setSelectedToken] = useState<SelectedToken>(stacks[0]?.id || COMMANDER_FORMATION_KEY);
   const [selectedSpellSlot, setSelectedSpellSlot] = useState(0);
+  const [spellbookOpen, setSpellbookOpen] = useState(false);
   const [benchDragActive, setBenchDragActive] = useState(false);
+  const spellbookRef = useRef<HTMLElement>(null);
+  const spellbookTriggerRef = useRef<HTMLElement | null>(null);
   const placedStacks = useMemo(() => getPlacedFormationStacks(stacks, formation), [formation, stacks]);
   const benchedStacks = useMemo(
     () => stacks.filter(stack => !isFormationCellAllowed(formation[stack.id])),
@@ -165,12 +168,80 @@ export default function FormationPanel({
   const knownSpells = knownSpellIds
     .map(spellId => BATTLE_SPELLS.find(spell => spell.id === spellId))
     .filter((spell): spell is BattleSpell => Boolean(spell));
-  const unequippedKnownSpells = useMemo(
-    () => knownSpells.filter(spell => !equippedSpellIds.includes(spell.id)),
-    [knownSpells, equippedSpellIds],
-  );
+
+  const closeSpellbook = useCallback(() => {
+    setSpellbookOpen(false);
+  }, []);
+
+  useEffect(() => {
+    if (!spellbookOpen) return undefined;
+    const dialog = spellbookRef.current;
+    const bodyOverflow = document.body.style.overflow;
+    const bodyPaddingRight = document.body.style.paddingRight;
+    const scrollbarGap = Math.max(0, window.innerWidth - document.documentElement.clientWidth);
+
+    document.body.style.overflow = 'hidden';
+    if (scrollbarGap > 0) document.body.style.paddingRight = `${scrollbarGap}px`;
+
+    const getFocusableElements = () => Array.from(dialog?.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    ) || []).filter(element => !element.hasAttribute('hidden'));
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closeSpellbook();
+        return;
+      }
+
+      if (event.key !== 'Tab') return;
+      const focusable = getFocusableElements();
+      if (focusable.length === 0) {
+        event.preventDefault();
+        dialog?.focus();
+        return;
+      }
+
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    const focusFrame = window.requestAnimationFrame(() => {
+      const selectedSlot = dialog?.querySelector<HTMLElement>('.formation-spellbook-slot-selected');
+      (selectedSlot || getFocusableElements()[0] || dialog)?.focus();
+    });
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.cancelAnimationFrame(focusFrame);
+      window.removeEventListener('keydown', handleKeyDown);
+      document.body.style.overflow = bodyOverflow;
+      document.body.style.paddingRight = bodyPaddingRight;
+      window.requestAnimationFrame(() => spellbookTriggerRef.current?.focus());
+    };
+  }, [closeSpellbook, spellbookOpen]);
+
+  const openSpellbook = (slotIndex = selectedSpellSlot) => {
+    spellbookTriggerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setSelectedSpellSlot(slotIndex);
+    setSpellbookOpen(true);
+    playGameSound('ui.modalOpen', { throttleMs: 120 });
+  };
+
+  const equipSpell = (spellId: string) => {
+    onChangeSpellIds(equipSpellLoadout(equippedSpellIds, selectedSpellSlot, spellId));
+    playGameSound('ui.tab', { throttleMs: 80 });
+  };
 
   return (
+    <>
     <div className="formation-screen-shell">
       <div className="formation-screen-stage">
         <aside className="formation-warband-dock ui-card rounded border">
@@ -372,106 +443,136 @@ export default function FormationPanel({
           </div>
         </section>
 
-        <aside className="formation-spells-dock">
-          <div className="formation-spells-head">
-            <h4 className="formation-spells-title fantasy-heading">King Spells</h4>
-            <p className="formation-spells-subtitle">
-              Loadout slot {selectedSpellSlot + 1} · choose from spellbook to swap
-            </p>
-          </div>
-
-          <div className="formation-spells-stage">
-            <div className="formation-spells-backdrop" aria-hidden="true" />
-            <div className="formation-spells-frame">
-              <p className="formation-spells-section-label">Equipped</p>
-              <div className="formation-spell-slots">
-                {equippedSpellIds.map((spellId, index) => {
-                  const spell = BATTLE_SPELLS.find(item => item.id === spellId);
-                  if (!spell) return null;
-                  return (
-                    <FormationHoverTip
-                      key={`${spellId}-${index}`}
-                      side="left"
-                      popoverClassName="formation-hover-popover-spell"
-                      popover={<SpellTooltipContent spell={spell} equippedSlot={index + 1} />}
-                    >
-                      <button
-                        type="button"
-                        aria-pressed={selectedSpellSlot === index}
-                        aria-label={`${spell.name}, slot ${index + 1}`}
-                        onClick={() => setSelectedSpellSlot(index)}
-                        className={`formation-spell-slot ${getFormationSpellRarityClass(spell.rarity)} ${selectedSpellSlot === index ? 'formation-spell-slot-selected' : ''}`}
-                      >
-                        <span className="formation-spell-slot-art">
-                          <Image src={getSpellIconPath(spell)} alt="" width={104} height={104} className="formation-spell-slot-icon object-contain" unoptimized />
-                        </span>
-                        <span className="formation-spell-slot-copy">
-                          <span className="formation-spell-slot-name">{spell.name}</span>
-                          <span className="formation-spell-slot-meta">
-                            Mana {spell.cost} · {getSpellTargetLabel(spell.target)}
-                          </span>
-                        </span>
-                      </button>
-                    </FormationHoverTip>
-                  );
-                })}
+      </div>
+      <footer className="formation-command-bar">
+        {formationIssue ? (
+          <p className="formation-command-issue font-bold text-amber-100">{formationIssue}</p>
+        ) : (
+          <p className="formation-command-issue ui-faint font-black">Formation ready</p>
+        )}
+        <div className="formation-command-actions">
+          <button type="button" onClick={onBack} className="ui-button rounded px-4 py-2.5 text-xs font-bold">
+            Back
+          </button>
+          <button type="button" onClick={() => openSpellbook()} className="formation-spellbook-command ui-button rounded px-4 py-2.5 text-xs font-black">
+            Spells {equippedSpellIds.length}/4
+          </button>
+          <button
+            type="button"
+            onClick={onStart}
+            data-multiplayer-tutorial-anchor="formation-confirm"
+            disabled={Boolean(formationIssue)}
+            className="ui-button-primary formation-start-battle-btn rounded px-4 py-2.5 text-xs font-black disabled:opacity-40"
+          >
+            Start Battle
+          </button>
+        </div>
+      </footer>
+    </div>
+    {spellbookOpen && typeof document !== 'undefined' && createPortal(
+      <div
+        className="cinematic-scroll-overlay formation-spellbook-overlay fixed inset-0 z-[150] flex items-center justify-center p-3 sm:p-6"
+        role="presentation"
+        onPointerDown={(event) => {
+          if (event.target === event.currentTarget) closeSpellbook();
+        }}
+      >
+        <CinematicScrollShell
+          ref={spellbookRef}
+          variant="spellbook"
+          className="formation-spellbook-scroll"
+          contentClassName="formation-spellbook-content"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="formation-spellbook-title"
+          tabIndex={-1}
+        >
+            <header className="formation-spellbook-header">
+              <div>
+                <p className="formation-spellbook-kicker">King&apos;s Arcana</p>
+                <h2 id="formation-spellbook-title" className="formation-spellbook-title fantasy-heading">Prepare Your Spellbook</h2>
+                <p className="formation-spellbook-subtitle">Select one of four battle slots, then choose any known spell below.</p>
               </div>
-
-              <p className="formation-spells-section-label formation-spells-section-label-book">Spellbook</p>
-              <div className="formation-known-spells">
-                {unequippedKnownSpells.length > 0 ? unequippedKnownSpells.map(spell => (
-                  <FormationHoverTip
-                    key={spell.id}
-                    side="left"
-                    popoverClassName="formation-hover-popover-spell"
-                    popover={<SpellTooltipContent spell={spell} />}
-                  >
-                    <button
-                      type="button"
-                      onClick={() => onChangeSpellIds(equipSpellLoadout(equippedSpellIds, selectedSpellSlot, spell.id))}
-                      className={`formation-known-spell ${getFormationSpellRarityClass(spell.rarity)}`}
-                    >
-                      <span className="formation-known-spell-art">
-                        <Image src={getSpellIconPath(spell)} alt="" width={88} height={88} className="formation-known-spell-icon object-contain" unoptimized />
-                      </span>
-                      <span className="formation-known-spell-copy">
-                        <span className="formation-known-spell-name">{spell.name}</span>
-                        <span className="formation-known-spell-meta">Mana {spell.cost} · {getSpellTargetLabel(spell.target)}</span>
-                      </span>
-                    </button>
-                  </FormationHoverTip>
-                )) : (
-                  <p className="formation-spell-pool-empty ui-faint col-span-full text-center text-[10px] font-bold">
-                    All known spells are equipped.
-                  </p>
-                )}
-              </div>
-            </div>
-          </div>
-
-          <div className="formation-spells-actions">
-            {formationIssue ? (
-              <p className="formation-spells-issue font-bold text-amber-100">{formationIssue}</p>
-            ) : (
-              <p className="formation-spells-issue ui-faint font-black">Formation ready</p>
-            )}
-            <div className="formation-spells-action-buttons">
-              <button type="button" onClick={onBack} className="ui-button rounded px-4 py-2.5 text-xs font-bold">
-                Back
-              </button>
               <button
                 type="button"
-                onClick={onStart}
-                disabled={Boolean(formationIssue)}
-                className="ui-button-primary formation-start-battle-btn rounded px-4 py-2.5 text-xs font-black disabled:opacity-40"
+                className="formation-spellbook-close"
+                aria-label="Close spellbook"
+                title="Close spellbook"
+                onClick={closeSpellbook}
               >
-                Start Battle
+                &times;
               </button>
+            </header>
+
+            <div className="formation-spellbook-slot-grid" aria-label="Equipped spell slots">
+              {equippedSpellIds.map((spellId, index) => {
+                const spell = BATTLE_SPELLS.find(item => item.id === spellId);
+                if (!spell) return null;
+                return (
+                  <button
+                    key={`${spellId}-overlay-${index}`}
+                    type="button"
+                    aria-pressed={selectedSpellSlot === index}
+                    onClick={() => {
+                      setSelectedSpellSlot(index);
+                      playGameSound('ui.clickSoft', { throttleMs: 60 });
+                    }}
+                    className={`formation-spellbook-slot ${selectedSpellSlot === index ? 'formation-spellbook-slot-selected' : ''}`}
+                  >
+                    <span className="formation-spellbook-slot-number">{index + 1}</span>
+                    <Image src={getSpellIconPath(spell)} alt="" width={84} height={84} className="formation-spellbook-slot-icon object-contain" unoptimized />
+                    <span className="formation-spellbook-slot-copy">
+                      <strong>{spell.name}</strong>
+                      <small>Mana {spell.cost} / {getSpellTargetLabel(spell.target)}</small>
+                    </span>
+                  </button>
+                );
+              })}
             </div>
-          </div>
-        </aside>
-      </div>
-    </div>
+
+            <div className="formation-spellbook-library-head">
+              <div>
+                <p className="formation-spellbook-kicker">Known Spells</p>
+                <h3 className="formation-spellbook-library-title fantasy-heading">Replace Slot {selectedSpellSlot + 1}</h3>
+              </div>
+              <span className="formation-spellbook-count">{knownSpells.length} known</span>
+            </div>
+
+            <div className="formation-spellbook-library">
+              {knownSpells.map(spell => {
+                const equippedIndex = equippedSpellIds.indexOf(spell.id);
+                const selected = equippedIndex === selectedSpellSlot;
+                return (
+                  <button
+                    key={`${spell.id}-library`}
+                    type="button"
+                    aria-pressed={selected}
+                    onClick={() => equipSpell(spell.id)}
+                    className={`formation-spellbook-choice ${getFormationSpellRarityClass(spell.rarity)} ${selected ? 'formation-spellbook-choice-selected' : ''}`}
+                  >
+                    <span className="formation-spellbook-choice-art">
+                      <Image src={getSpellIconPath(spell)} alt="" width={104} height={104} className="object-contain" unoptimized />
+                    </span>
+                    <span className="formation-spellbook-choice-copy">
+                      <span className="formation-spellbook-choice-topline">
+                        <strong>{spell.name}</strong>
+                        <span>Mana {spell.cost}</span>
+                      </span>
+                      <small>{getSpellTargetLabel(spell.target)} / {spell.rarity}</small>
+                      <span>{spell.description}</span>
+                    </span>
+                    {equippedIndex >= 0 && (
+                      <span className="formation-spellbook-equipped-mark">Slot {equippedIndex + 1}</span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+        </CinematicScrollShell>
+      </div>,
+      document.body,
+    )}
+    </>
   );
 }
 
@@ -658,44 +759,6 @@ function getSpellTargetLabel(target: BattleSpell['target']): string {
 
 function getFormationSpellRarityClass(rarity: BattleSpell['rarity']): string {
   return `formation-spell-rarity-${rarity}`;
-}
-
-function SpellTooltipContent({ spell, equippedSlot }: { spell: BattleSpell; equippedSlot?: number }) {
-  const rarityClass = spell.rarity === 'legendary'
-    ? 'formation-spell-tip-tag-legendary'
-    : spell.rarity === 'rare'
-      ? 'formation-spell-tip-tag-rare'
-      : 'formation-spell-tip-tag-common';
-  const targetLabel = getSpellTargetLabel(spell.target);
-
-  return (
-    <div className="formation-spell-tip">
-      <div className="formation-spell-tip-hero">
-        <span className="formation-spell-tip-icon">
-          <Image
-            src={getSpellIconPath(spell)}
-            alt=""
-            width={80}
-            height={80}
-            className="formation-spell-tip-icon-image object-contain"
-            unoptimized
-          />
-        </span>
-        <div className="formation-spell-tip-heading">
-          <div className="formation-spell-tip-title fantasy-heading">{spell.name}</div>
-          <div className="formation-spell-tip-tags">
-            <span className={`formation-spell-tip-tag ${rarityClass}`}>{spell.rarity}</span>
-            <span className="formation-spell-tip-tag">{targetLabel}</span>
-            <span className="formation-spell-tip-tag formation-spell-tip-mana">Mana {spell.cost}</span>
-            {equippedSlot ? (
-              <span className="formation-spell-tip-tag formation-spell-tip-slot">Slot {equippedSlot}</span>
-            ) : null}
-          </div>
-        </div>
-      </div>
-      <p className="formation-spell-tip-description">{spell.description}</p>
-    </div>
-  );
 }
 
 function EmptySlotTooltipContent({ slotNumber }: { slotNumber: number }) {

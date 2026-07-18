@@ -12,6 +12,7 @@ import CompletionOverlay from '@/components/CompletionOverlay';
 import ThreeFxOverlay from '@/components/ThreeFxOverlay';
 import MapFogOverlay from '@/components/MapFogOverlay';
 import PvpChallengeOverlay from '@/components/PvpChallengeOverlay';
+import MultiplayerTutorialSpotlight from '@/components/MultiplayerTutorialSpotlight';
 import { writeGameMode } from '@/lib/gameMode';
 
 export default function GamePage() {
@@ -64,6 +65,7 @@ export default function GamePage() {
       <PlayerModelSelector isOpen={showAvatar} onClose={() => setShowAvatar(false)} />
       <CompletionOverlay />
       <PvpChallengeOverlay />
+      <MultiplayerTutorialSpotlight />
     </div>
   );
 }

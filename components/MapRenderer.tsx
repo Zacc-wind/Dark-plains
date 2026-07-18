@@ -46,6 +46,13 @@ import POIModal from './POIModal';
 import TownModal from './TownModal';
 import PlayerListModal from './PlayerListModal';
 import { DungeonRunModal, EncounterRunModal, getEncounterRunBattleCount } from './RoguelikeRunModal';
+import CinematicScrollShell from './CinematicScrollShell';
+import {
+  clearMultiplayerTutorialDialogue,
+  completeMultiplayerTutorialCallout,
+  getMultiplayerTutorialDialogueLine,
+  saveMultiplayerTutorialDialogueLine,
+} from '@/lib/multiplayerTutorial';
 
 // POI image mapping
 const POI_IMAGE_PATHS: Record<POIType, string> = {
@@ -1990,7 +1997,11 @@ export default function MapRenderer({
 
   const confirmPendingTravel = () => {
     if (!currentUser || !pendingTravel || currentUser.traveling) return;
+    const completesHarborviewTravel = pendingTravel.kind === 'town' && pendingTravel.label === 'Harborview';
     beginTravel(pendingTravel.targetX, pendingTravel.targetY);
+    if (completesHarborviewTravel) {
+      completeMultiplayerTutorialCallout(currentUser.username, 'harborview-travel');
+    }
   };
 
   const claimMainStoryReward = (questId: string): { success: boolean; error?: string } => {
@@ -2178,7 +2189,12 @@ export default function MapRenderer({
           key={sequence.id}
           sequence={sequence}
           playerModelNumber={currentUser.selectedModel || 3}
+          initialLineIndex={getMultiplayerTutorialDialogueLine(currentUser.username, sequence.id)}
+          onLineChange={(lineIndex) => {
+            saveMultiplayerTutorialDialogueLine(currentUser.username, sequence.id, lineIndex);
+          }}
           onComplete={() => {
+            clearMultiplayerTutorialDialogue(currentUser.username, sequence.id);
             markStoryQuestIntroSeen(storyDialogQuestId);
             setStoryDialogQuestId(null);
             setCurrentUser(getCurrentUser());
@@ -2419,8 +2435,10 @@ function TravelConfirmModal({
 
   return (
     <div className="world-popup-layer pointer-events-none fixed inset-x-0 bottom-24 flex justify-center px-4">
-      <section
-        className="travel-confirm-card world-popup-panel command-panel vine-frame pointer-events-auto w-full max-w-md rounded border p-4 text-zinc-100"
+      <CinematicScrollShell
+        variant="compact"
+        className="travel-confirm-card world-popup-panel pointer-events-auto w-full max-w-md text-zinc-100"
+        contentClassName="p-3"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="flex items-start justify-between gap-4">
@@ -2464,6 +2482,7 @@ function TravelConfirmModal({
                 }
                 onConfirm();
               }}
+              data-multiplayer-tutorial-anchor={pendingTravel.kind === 'town' && pendingTravel.label === 'Harborview' ? 'harborview-travel' : undefined}
               className="ui-button-primary rounded px-4 py-2 text-xs font-black"
             >
               {activeJobCount > 0
@@ -2472,7 +2491,7 @@ function TravelConfirmModal({
             </button>
           </div>
         </div>
-      </section>
+      </CinematicScrollShell>
     </div>
   );
 }
@@ -2692,9 +2711,14 @@ function EnemyScoutModal({
                 {enemy.story || preview?.summary || 'Scout data unavailable.'}
               </p>
               {preview && (
-                <span className={`mt-3 inline-flex rounded border px-3 py-1 text-xs font-black uppercase ${toneClass}`}>
+                <button
+                  type="button"
+                  data-multiplayer-tutorial-anchor="enemy-risk"
+                  onClick={() => completeMultiplayerTutorialCallout(currentUser?.username, 'enemy-risk')}
+                  className={`mt-3 inline-flex rounded border px-3 py-1 text-xs font-black uppercase ${toneClass}`}
+                >
                   {preview.label}
-                </span>
+                </button>
               )}
             </div>
           </div>

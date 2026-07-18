@@ -1,6 +1,7 @@
 import { readGameJson, writeGameJson } from '@/lib/gameStore';
 import type { ModeTutorialProgress } from '@/lib/modeTutorial';
 import type { SingleplayerRunTutorialProgress } from '@/lib/singleplayerTutorial';
+import type { MultiplayerTutorialProgress } from '@/lib/multiplayerTutorial';
 import { isSupabaseConfigured } from '@/lib/supabase/config';
 import { saveRemoteGameSession } from '@/lib/supabase/playerRepository';
 import { createClient } from '@/lib/supabase/client';
@@ -8,6 +9,7 @@ import { createClient } from '@/lib/supabase/client';
 export interface AccountTutorials {
   mode?: ModeTutorialProgress;
   singleplayerRun?: SingleplayerRunTutorialProgress;
+  multiplayer?: MultiplayerTutorialProgress;
 }
 
 const ACCOUNT_TUTORIALS_PREFIX = 'wizardy_account_tutorials';
@@ -34,6 +36,7 @@ export function applyRemoteAccountTutorials(username: string, tutorials: Account
   writeGameJson(getLocalKey(username), {
     mode: tutorials.mode ?? local.mode,
     singleplayerRun: tutorials.singleplayerRun ?? local.singleplayerRun,
+    multiplayer: tutorials.multiplayer ?? local.multiplayer,
   });
 }
 

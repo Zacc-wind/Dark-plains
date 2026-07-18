@@ -104,6 +104,10 @@ import {
   preloadGameSounds,
 } from '@/lib/sound';
 import { getSpellIconPath } from '@/lib/spellAssets';
+import {
+  completeMultiplayerTutorialCallout,
+  skipMultiplayerTutorial,
+} from '@/lib/multiplayerTutorial';
 
 type PanelId = 'overview' | 'character' | 'inventory' | 'minions' | 'spells' | 'jobs' | 'quests' | 'social' | 'settings' | 'runs' | 'leaderboards' | 'history';
 type PanelIconName = 'overview' | 'character' | 'inventory' | 'minions' | 'spells' | 'jobs' | 'quests' | 'social' | 'settings' | 'runs' | 'leaderboards' | 'history';
@@ -981,6 +985,9 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
   const panelTitle = panelButtons.find(button => button.id === activePanel)?.label || 'Overview';
 
   const openPanel = (panelId: PanelId) => {
+    if (!showRandomRun && panelId === 'jobs') {
+      completeMultiplayerTutorialCallout(player.username, 'jobs-open');
+    }
     setActivePanel(panelId);
     if (secondaryPanelButtons.some(button => button.id === panelId)) setIsSecondaryNavOpen(true);
     setIsCommandOpen(true);
@@ -1156,7 +1163,11 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
               player={player}
               onClose={() => setShowStoryJournal(false)}
               onPlayerRefresh={() => setUser(getCurrentUser())}
-              onSkipOnboarding={skipMultiplayerOnboarding}
+              onSkipOnboarding={() => {
+                const result = skipMultiplayerOnboarding();
+                if (result.success) skipMultiplayerTutorial(player.username);
+                return result;
+              }}
             />
           )}
           <MultiplayerHubModal
@@ -3258,6 +3269,7 @@ function CommandNavGroup({
         <button
           key={button.id}
           onClick={() => onOpen(button.id)}
+          data-multiplayer-tutorial-anchor={button.id === 'jobs' ? 'jobs-open' : undefined}
           className={`command-center-tab flex items-center gap-3 rounded border px-3 py-3 text-left transition ${
             activePanel === button.id
               ? 'rail-button-active'
