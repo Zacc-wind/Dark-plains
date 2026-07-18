@@ -39,6 +39,7 @@
 - Blessing reroll now has a short dice/reroll transition before choices swap.
 - First-login mode select now has a cinematic gate tutorial that asks whether to continue, then explains Singleplayer and Multiplayer as separate progression tracks before the player chooses.
 - Multiplayer planning has been split into `docs/multiplayer-roadmap.md` covering request popups, party UI, duels, trades, co-op dungeons, combat ownership, and database readiness.
+- Unified multiplayer content, level progression, non-expiring Chronicle, and singleplayer discovery planning lives in `docs/progression-content-roadmap.md`.
 - Known rough edges: enemy commander spell-to-player-turn sequencing still needs natural-fight QA, run reward/shop/omen animations still need pacing review across a full run, and Thorn Ward still uses the Warding Prayer spell icon until a unique icon is generated.
 
 ## Current Polish Sprint

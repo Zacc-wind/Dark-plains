@@ -1,5 +1,7 @@
 # Multiplayer Roadmap
 
+Detailed progression, chapter production, level-path, Chronicle, and retention execution now lives in `docs/progression-content-roadmap.md`. This file remains the source of truth for multiplayer sessions, social flows, combat ownership, and deployment readiness.
+
 ## Goal
 Turn the current shared world-map prototype into a real multiplayer layer without mixing it with singleplayer run progression. Multiplayer owns the persistent commander profile: world position, gear, gold, minions, quests, friends, parties, duels, trades, and cooperative dungeons.
 
@@ -135,8 +137,9 @@ Turn the current shared world-map prototype into a real multiplayer layer withou
 - Co-op combat must prioritize clarity: owner names, active player highlight, and action permissions should be obvious before adding extra mechanics.
 
 ## Recommended Implementation Order
-1. Finish contextual onboarding spotlights, tutorial replay/skip controls, and journal integration for the implemented opening story chain.
-2. Build the shared unlock registry and apply the level gates consistently to the HUD, modals, and server-side actions.
-3. Complete the shared social-request overlay for trade and party invites, including expiry and duplicate-request handling.
-4. Add the first daily contract board and returning-player briefing using existing jobs, encounters, and quest state.
-5. Refactor battle ownership and synchronization before implementing the first real player-versus-player duel session.
+1. Add the shared genuine-action event foundation and Campaign/Progression shell described in `docs/progression-content-roadmap.md`.
+2. Finish the level 1-5 First Banner chapter, Black Pike capstone, and level 3/4/5 unlock conversations.
+3. Complete the shared social-request overlay for trade and party invites, then add the first regional threat and rested catch-up rules.
+4. Pilot the free Black Pike Ledger Chronicle using only implemented and validated activities.
+5. Refactor battle ownership and synchronization before implementing real player-versus-player and cooperative sessions.
+6. Produce levels 6-30 as complete five-level content bands, one chapter at a time.

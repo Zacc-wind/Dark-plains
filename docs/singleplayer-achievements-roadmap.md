@@ -1,5 +1,7 @@
 # Singleplayer Run Achievements & Unlocks Roadmap
 
+The detailed achievement-driven spell discovery, unit blueprint, migration, and Run Archive plan lives in `docs/progression-content-roadmap.md`. It is plan-only until the current multiplayer progression/content batch is stable.
+
 ## Goal
 Build a dedicated singleplayer progression layer on top of random runs, separate from multiplayer world-map progress (`User` profile vs `User.dailyRun`).
 
@@ -45,6 +47,14 @@ Build a dedicated singleplayer progression layer on top of random runs, separate
 - [ ] Optional cosmetic titles for commander in run lobby.
 - [ ] Optional run-start blessings unlocked by achievements (small meta bonuses only).
 - [ ] Export achievement summary to run completion report screen.
+
+## Phase 5B - Achievement-Driven Discovery
+- [ ] Split singleplayer spell ownership from multiplayer `User.knownSpellIds` without relocking existing players.
+- [ ] Replace the random permanent spell chance with deterministic achievement and boss rewards.
+- [ ] Add singleplayer-owned unlocked spell ids, unit blueprint ids, timestamps, sources, and idempotent migration state.
+- [ ] Gate 4 Tier I sidegrades, 8 Tier II units, and 8 Tier III specialists behind visible deeds.
+- [ ] Guarantee a newly unlocked spell or unit appears within the next two valid run offer nodes.
+- [ ] Keep run shops temporary: unlocking expands the future run pool instead of granting a complete build.
 
 ## Phase 6 — Database Readiness
 - [ ] Mirror achievement tables in `docs/database-deployment-plan.md`.
