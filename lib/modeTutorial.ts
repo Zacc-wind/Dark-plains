@@ -2,6 +2,7 @@ import { readAccountTutorials, writeAccountTutorials } from '@/lib/accountTutori
 import { readGameJson } from '@/lib/gameStore';
 import type { SingleplayerRunTutorialCard, SingleplayerRunTutorialStep } from '@/lib/singleplayerTutorial';
 import { SINGLEPLAYER_RUN_TUTORIAL_GUIDE_ASSET } from '@/lib/singleplayerTutorial';
+import { MULTIPLAYER_UNLOCK_REGISTRY } from '@/lib/multiplayerUnlocks';
 
 export type ModeTutorialStepId =
   | 'mode-tutorial-choice'
@@ -119,11 +120,11 @@ export function createModeTutorialStep(id: ModeTutorialStepId): ModeTutorialStep
       speakerTitle: 'World Tutor',
       title: 'Multiplayer is the shared world map.',
       body: 'Travel between towns, meet players, take quests, collect persistent gear, form parties, and prepare for duels, trades, and cooperative dungeons.',
-      hint: 'Choose this when you want social progression and the persistent commander profile.',
+      hint: `PVP opens at level ${MULTIPLAYER_UNLOCK_REGISTRY['pvp-hub'].minLevel}, trading at level ${MULTIPLAYER_UNLOCK_REGISTRY.trading.minLevel}, and parties at level ${MULTIPLAYER_UNLOCK_REGISTRY.party.minLevel}.`,
       continueLabel: 'Choose Mode',
       cards: makeCards([
         { title: 'Persistent Commander', body: 'Gear, gold, quests, and army belong to the world-map profile.', iconPath: '/assets/icons/loot-chest.png' },
-        { title: 'Social Play', body: 'Friends, parties, trades, and challenges live here.', iconPath: '/assets/icons/gold.png' },
+        { title: 'Social Unlocks', body: 'Friends start open; duels, trades, and parties unlock as the commander levels.', iconPath: '/assets/icons/gold.png' },
         { title: 'Co-op Dungeons', body: 'Parties will fight longer roads together.', iconPath: '/assets/icons/attack.png' },
       ]),
     },

@@ -46,6 +46,8 @@ import { emitFxEvent } from '@/lib/fxEvents';
 import { POI } from '@/lib/mapData';
 import { getGearSetById } from '@/lib/gearSets';
 import { formatEquipmentRarityLabel, RUN_EQUIPMENT_SLOT_LABELS } from '@/lib/runEquipment';
+import { getMultiplayerUnlockStatus, type MultiplayerUnlockStatus } from '@/lib/multiplayerUnlocks';
+import MultiplayerFeatureLock from '@/components/MultiplayerFeatureLock';
 
 interface TownModalProps {
   town: POI | null;
@@ -155,10 +157,13 @@ export default function TownModal({ town, onClose, onTravel }: TownModalProps) {
     ...(user && atTown ? [user] : []),
     ...getPlayersAtLocation(town.x, town.y).filter(player => player.username !== user?.username),
   ];
-  const townServices: Array<{ key: TownServiceKey; label: string; detail: string }> = [
-    { key: 'quests', label: 'Board', detail: `${cityQuests.length} contracts` },
+  const cityContractsUnlock = getMultiplayerUnlockStatus('city-contracts', user);
+  const forgeUnlock = getMultiplayerUnlockStatus('gear-upgrades', user);
+  const tradingUnlock = getMultiplayerUnlockStatus('trading', user);
+  const townServices: Array<{ key: TownServiceKey; label: string; detail: string; unlock?: MultiplayerUnlockStatus }> = [
+    { key: 'quests', label: 'Board', detail: cityContractsUnlock.unlocked ? `${cityQuests.length} contracts` : `Lv ${cityContractsUnlock.minLevel}`, unlock: cityContractsUnlock },
     { key: 'shop', label: 'Shop', detail: `${offers.length} offers` },
-    { key: 'blacksmith', label: 'Forge', detail: `${forgeEquipment.length} gear` },
+    { key: 'blacksmith', label: 'Forge', detail: forgeUnlock.unlocked ? `${forgeEquipment.length} gear` : `Lv ${forgeUnlock.minLevel}`, unlock: forgeUnlock },
     { key: 'players', label: 'Players', detail: `${townPlayers.length} here` },
   ];
 
@@ -360,7 +365,7 @@ export default function TownModal({ town, onClose, onTravel }: TownModalProps) {
                   key={service.key}
                   type="button"
                   onClick={() => setActiveService(service.key)}
-                  className={`town-service-tab rounded px-3 py-2 ${activeService === service.key ? 'town-service-tab-active' : ''}`}
+                  className={`town-service-tab rounded px-3 py-2 ${activeService === service.key ? 'town-service-tab-active' : ''} ${service.unlock && !service.unlock.unlocked ? 'town-service-tab-locked' : ''}`}
                 >
                   <span className="block text-sm font-black text-zinc-100">{service.label}</span>
                   <span className="ui-faint block text-[10px] font-black uppercase">{service.detail}</span>
@@ -372,13 +377,15 @@ export default function TownModal({ town, onClose, onTravel }: TownModalProps) {
             <div className="command-panel vine-frame town-service-panel rounded border text-zinc-100">
               <TownSectionHeader title="Quest Board" meta={`${cityQuests.length} contracts`} />
               <div className="town-service-body no-scrollbar">
-                <CityQuestBoardPanel
-                  quests={cityQuests}
-                  user={user}
-                  atTown={atTown}
-                  onAccept={handleAcceptQuest}
-                  onClaim={handleClaimQuest}
-                />
+                {cityContractsUnlock.unlocked ? (
+                  <CityQuestBoardPanel
+                    quests={cityQuests}
+                    user={user}
+                    atTown={atTown}
+                    onAccept={handleAcceptQuest}
+                    onClaim={handleClaimQuest}
+                  />
+                ) : <MultiplayerFeatureLock status={cityContractsUnlock} compact />}
               </div>
             </div>
             )}
@@ -387,7 +394,7 @@ export default function TownModal({ town, onClose, onTravel }: TownModalProps) {
             <div className="command-panel vine-frame town-service-panel rounded border text-zinc-100">
               <TownSectionHeader title="Shop" meta={`${user?.gold || 0} gold`} />
               <div className="town-service-body no-scrollbar space-y-3">
-                <TownShopTabs active={activeShopSection} onChange={setActiveShopSection} />
+                <TownShopTabs active={activeShopSection} onChange={setActiveShopSection} tradingUnlock={tradingUnlock} />
                 {activeShopSection === 'buy' && (
                   <TownBuyGrid
                     offers={offers}
@@ -396,7 +403,7 @@ export default function TownModal({ town, onClose, onTravel }: TownModalProps) {
                     onBuy={handleBuy}
                   />
                 )}
-                {activeShopSection === 'exchange' && (
+                {activeShopSection === 'exchange' && tradingUnlock.unlocked && (
                   <TownExchangePanel
                     offers={TRADE_EXCHANGE_OFFERS}
                     inventory={user?.inventory || []}
@@ -404,6 +411,9 @@ export default function TownModal({ town, onClose, onTravel }: TownModalProps) {
                     atTown={atTown}
                     onExchange={handleTradeExchange}
                   />
+                )}
+                {activeShopSection === 'exchange' && !tradingUnlock.unlocked && (
+                  <MultiplayerFeatureLock status={tradingUnlock} compact />
                 )}
                 {activeShopSection === 'sell' && (
                   <TownSellPanel
@@ -431,15 +441,17 @@ export default function TownModal({ town, onClose, onTravel }: TownModalProps) {
                 meta={`${user?.inventory?.find(item => item.id === 'rare-gem')?.quantity || 0} gems`}
               />
               <div className="town-service-body no-scrollbar">
-                <BlacksmithPanel
-                  equipment={forgeEquipment}
-                  selectedItem={selectedForgeItem}
-                  socketQuote={forgeSocketQuote}
-                  atTown={atTown}
-                  onSelect={setSelectedForgeItemId}
-                  onAddBonus={handleAddForgeBonus}
-                  onUpgradeBonus={handleUpgradeForgeBonus}
-                />
+                {forgeUnlock.unlocked ? (
+                  <BlacksmithPanel
+                    equipment={forgeEquipment}
+                    selectedItem={selectedForgeItem}
+                    socketQuote={forgeSocketQuote}
+                    atTown={atTown}
+                    onSelect={setSelectedForgeItemId}
+                    onAddBonus={handleAddForgeBonus}
+                    onUpgradeBonus={handleUpgradeForgeBonus}
+                  />
+                ) : <MultiplayerFeatureLock status={forgeUnlock} compact />}
               </div>
             </div>
             )}
@@ -458,7 +470,15 @@ export default function TownModal({ town, onClose, onTravel }: TownModalProps) {
   );
 }
 
-function TownShopTabs({ active, onChange }: { active: TownShopSection; onChange: (section: TownShopSection) => void }) {
+function TownShopTabs({
+  active,
+  onChange,
+  tradingUnlock,
+}: {
+  active: TownShopSection;
+  onChange: (section: TownShopSection) => void;
+  tradingUnlock: MultiplayerUnlockStatus;
+}) {
   const tabs: Array<{ id: TownShopSection; label: string }> = [
     { id: 'buy', label: 'Buy' },
     { id: 'exchange', label: 'Exchange' },
@@ -472,9 +492,9 @@ function TownShopTabs({ active, onChange }: { active: TownShopSection; onChange:
           key={tab.id}
           type="button"
           onClick={() => onChange(tab.id)}
-          className={`town-shop-tab rounded ${active === tab.id ? 'town-shop-tab-active' : ''}`}
+          className={`town-shop-tab rounded ${active === tab.id ? 'town-shop-tab-active' : ''} ${tab.id === 'exchange' && !tradingUnlock.unlocked ? 'town-shop-tab-locked' : ''}`}
         >
-          {tab.label}
+          {tab.id === 'exchange' && !tradingUnlock.unlocked ? `${tab.label} Lv ${tradingUnlock.minLevel}` : tab.label}
         </button>
       ))}
     </div>

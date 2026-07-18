@@ -22124,6 +22124,301 @@ button.vine-frame::before,
   }
 }
 
+.multiplayer-feature-lock {
+  display: grid;
+  grid-template-columns: 3rem minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.9rem;
+  min-height: 7.5rem;
+  padding: 1rem;
+  border: 1px solid rgba(214, 190, 139, 0.2);
+  border-radius: 6px;
+  background: rgba(7, 10, 12, 0.72);
+}
+
+.multiplayer-feature-lock-compact {
+  min-height: 6rem;
+}
+
+.multiplayer-feature-lock-icon {
+  display: grid;
+  width: 3rem;
+  height: 3rem;
+  place-items: center;
+  border: 1px solid rgba(230, 200, 139, 0.34);
+  border-radius: 50%;
+  color: rgba(246, 220, 164, 0.9);
+  background: rgba(18, 13, 12, 0.84);
+  font-family: Georgia, serif;
+  font-size: 1.1rem;
+  font-weight: 900;
+}
+
+.multiplayer-feature-lock-title {
+  margin-top: 0.15rem;
+  font-size: 1.2rem;
+}
+
+.multiplayer-feature-lock-copy {
+  margin-top: 0.25rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.multiplayer-feature-lock-level {
+  padding: 0.45rem 0.65rem;
+  font-size: 0.68rem;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.town-service-tab-locked,
+.town-shop-tab-locked {
+  border-color: rgba(214, 190, 139, 0.16);
+  color: var(--ui-muted);
+}
+
+.multiplayer-contracts-shell {
+  background:
+    linear-gradient(180deg, rgba(20, 24, 24, 0.97), rgba(6, 9, 11, 0.99));
+}
+
+.multiplayer-returning-briefing {
+  background: rgba(74, 48, 25, 0.2);
+}
+
+.multiplayer-briefing-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.multiplayer-briefing-grid > div {
+  min-width: 0;
+  padding: 0.7rem 0.8rem;
+  border-left: 2px solid rgba(234, 192, 105, 0.4);
+  background: rgba(7, 10, 12, 0.5);
+}
+
+.multiplayer-briefing-grid span,
+.multiplayer-oath-progress span {
+  display: block;
+  color: var(--ui-faint);
+  font-size: 0.62rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.multiplayer-briefing-grid strong {
+  display: block;
+  margin-top: 0.2rem;
+  overflow-wrap: anywhere;
+  color: var(--ui-text);
+  font-size: 0.78rem;
+}
+
+.multiplayer-contract-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.8rem;
+}
+
+.multiplayer-contract-card {
+  display: flex;
+  min-height: 16.5rem;
+  flex-direction: column;
+  padding: 0.9rem;
+}
+
+.multiplayer-contract-card-head {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+}
+
+.multiplayer-contract-title {
+  margin-top: 0.1rem;
+  font-size: 1rem;
+  line-height: 1.12;
+}
+
+.multiplayer-contract-description {
+  min-height: 3.6rem;
+  margin-top: 0.75rem;
+  font-size: 0.76rem;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.multiplayer-contract-rewards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-top: 0.75rem;
+  color: rgba(242, 211, 141, 0.9);
+  font-size: 0.68rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.multiplayer-contract-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 0.75fr) minmax(0, 1fr);
+  gap: 0.55rem;
+  margin-top: auto;
+  padding-top: 0.8rem;
+}
+
+.multiplayer-weekly-oath {
+  background: rgba(37, 46, 55, 0.22);
+}
+
+.multiplayer-weekly-oath-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 1rem;
+}
+
+.multiplayer-oath-progress {
+  text-align: right;
+}
+
+.multiplayer-oath-progress strong {
+  display: block;
+  color: rgba(213, 231, 238, 0.95);
+  font-family: Georgia, serif;
+  font-size: 1.75rem;
+}
+
+.multiplayer-oath-paths {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
+  gap: 0.6rem;
+}
+
+.multiplayer-oath-paths > span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.65rem 0.8rem;
+  border: 1px solid rgba(190, 211, 220, 0.15);
+  border-radius: 5px;
+  color: var(--ui-muted);
+  background: rgba(8, 12, 15, 0.56);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.multiplayer-oath-paths strong {
+  color: var(--ui-text);
+}
+
+.multiplayer-return-days {
+  display: grid;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+.multiplayer-return-day {
+  display: grid;
+  min-height: 3.6rem;
+  place-items: center;
+  padding: 0.45rem;
+  border: 1px solid rgba(209, 215, 218, 0.13);
+  border-radius: 5px;
+  color: var(--ui-faint);
+  background: rgba(6, 9, 11, 0.62);
+  text-align: center;
+}
+
+.multiplayer-return-day small {
+  font-size: 0.58rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.multiplayer-return-day strong {
+  color: inherit;
+  font-size: 0.7rem;
+}
+
+.multiplayer-return-day-visited {
+  border-color: rgba(105, 195, 148, 0.38);
+  color: rgba(177, 237, 204, 0.94);
+  background: rgba(30, 79, 57, 0.22);
+}
+
+@media (max-width: 900px) {
+  .multiplayer-briefing-grid,
+  .multiplayer-contract-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .multiplayer-contract-card:last-child {
+    grid-column: 1 / -1;
+  }
+
+  .multiplayer-oath-paths {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .multiplayer-oath-paths button {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 620px) {
+  .multiplayer-contracts-overlay {
+    padding: 0;
+  }
+
+  .multiplayer-contracts-shell {
+    width: 100vw;
+    max-height: 100dvh;
+    min-height: 100dvh;
+    border-radius: 0;
+  }
+
+  .multiplayer-briefing-grid,
+  .multiplayer-contract-grid,
+  .multiplayer-weekly-oath-main,
+  .multiplayer-oath-paths {
+    grid-template-columns: 1fr;
+  }
+
+  .multiplayer-contract-card:last-child,
+  .multiplayer-oath-paths button {
+    grid-column: auto;
+  }
+
+  .multiplayer-oath-progress {
+    text-align: left;
+  }
+
+  .multiplayer-return-days {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 620px) {
+  .multiplayer-feature-lock {
+    grid-template-columns: 2.6rem minmax(0, 1fr);
+  }
+
+  .multiplayer-feature-lock-icon {
+    width: 2.6rem;
+    height: 2.6rem;
+  }
+
+  .multiplayer-feature-lock-level {
+    grid-column: 1 / -1;
+    justify-self: stretch;
+    text-align: center;
+  }
+}
+
 @media (max-width: 820px), (pointer: coarse) {
   .multiplayer-tutorial-layer {
     display: none;

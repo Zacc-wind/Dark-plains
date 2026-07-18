@@ -353,7 +353,7 @@
 - [x] Reuse the conversation presentation for world quest contacts instead of presenting every NPC as a static task panel first.
 - [x] Add interaction spotlights for the first multiplayer job, town travel, formation confirmation, and battle result claim.
 - [x] Add a replayable multiplayer story journal and a skip-onboarding control that never auto-completes objectives.
-- [ ] Implement the level unlock registry, daily/weekly return loops, and later chapter scaling described in `docs/multiplayer-roadmap.md`.
+- [ ] Implement the level unlock registry, daily/weekly return loops, and later chapter scaling described in `docs/multiplayer-roadmap.md`. Registry, daily orders, weekly oath, return track, and returning briefing are complete; later chapter scaling remains.
 - [x] Stop random-run unit-join cinematics from showing the second stat report popup.
 - [x] Visually verify combat overlay controls inside an actual battle after the latest 10x7 board rollback.
 - [x] Implement first-run singleplayer tutorial steps: lobby, draft, route map, formation, first combat controls, reward, shop, and omen.

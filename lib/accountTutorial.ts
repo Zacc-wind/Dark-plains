@@ -34,9 +34,10 @@ export function writeAccountTutorials(username: string | null | undefined, tutor
     .catch(() => undefined)
     .then(() => persistAccountTutorials(username, tutorials));
   persistenceQueues.set(queueKey, queued);
-  void queued.finally(() => {
+  const cleanup = () => {
     if (persistenceQueues.get(queueKey) === queued) persistenceQueues.delete(queueKey);
-  });
+  };
+  void queued.then(cleanup, cleanup);
 }
 
 export function applyRemoteAccountTutorials(username: string, tutorials: AccountTutorials | null | undefined): void {

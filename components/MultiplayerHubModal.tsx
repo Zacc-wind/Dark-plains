@@ -34,6 +34,8 @@ import {
   worldMapPlayerToUser,
   type WorldMapPlayer,
 } from '@/lib/worldPlayers';
+import { getMultiplayerUnlockStatus } from '@/lib/multiplayerUnlocks';
+import MultiplayerFeatureLock from '@/components/MultiplayerFeatureLock';
 
 interface PvpHubModalProps {
   isOpen: boolean;
@@ -145,6 +147,27 @@ export default function MultiplayerHubModal({ isOpen, onClose }: PvpHubModalProp
   }, [isOpen, onlineEnabled]);
 
   if (!isOpen) return null;
+
+  const pvpUnlock = getMultiplayerUnlockStatus('pvp-hub', currentUser);
+  if (!pvpUnlock.unlocked) {
+    return (
+      <div className="pvp-hub-overlay fixed inset-0 z-[70] flex items-center justify-center bg-black/72 p-4" onClick={onClose}>
+        <section
+          className="pvp-hub-shell command-panel vine-frame w-[min(40rem,calc(100vw-2rem))] overflow-hidden rounded border text-zinc-100 shadow-2xl"
+          onClick={(event) => event.stopPropagation()}
+        >
+          <div className="panel-header flex items-center justify-between gap-4 border-b px-5 py-4">
+            <div>
+              <p className="arcane-label">Ranked Duels</p>
+              <h2 className="fantasy-heading text-2xl">PVP Preview</h2>
+            </div>
+            <button type="button" onClick={onClose} className="ui-button rounded px-3 py-2 text-xs font-black">Close</button>
+          </div>
+          <div className="p-5"><MultiplayerFeatureLock status={pvpUnlock} /></div>
+        </section>
+      </div>
+    );
+  }
 
   const refreshChallenges = async () => {
     if (!onlineEnabled) {

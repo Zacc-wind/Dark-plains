@@ -13,6 +13,8 @@ import PveHubModal from './PveHubModal';
 import ChatLiveFeed from './ChatLiveFeed';
 import GameSettingsPanel from './GameSettingsPanel';
 import StoryJournalModal from './StoryJournalModal';
+import MultiplayerFeatureLock from './MultiplayerFeatureLock';
+import MultiplayerContractsModal from './MultiplayerContractsModal';
 import {
   ActivityEntry,
   AllocatableStat,
@@ -54,6 +56,7 @@ import {
   getJobTimeRemaining,
   getLeaderboardBoards,
   getMinionTemplate,
+  getMultiplayerEngagementView,
   getOrderedMinions,
   getPartyMembers,
   getRareGemCount,
@@ -79,10 +82,12 @@ import {
   promotePartyMember,
   removeFriend,
   removePlayerFromParty,
+  recordCurrentMultiplayerEngagementEvent,
   sendFriendRequest,
   sendSocialChatMessage,
   skipMultiplayerOnboarding,
   toggleMinionFielded,
+  touchCurrentMultiplayerEngagement,
   unequipItem,
   upgradeInventoryCapacity,
   activateInventoryItem,
@@ -109,6 +114,7 @@ import {
   MULTIPLAYER_FIND_WORK_EVENT,
   skipMultiplayerTutorial,
 } from '@/lib/multiplayerTutorial';
+import { getMultiplayerUnlockStatus } from '@/lib/multiplayerUnlocks';
 
 type PanelId = 'overview' | 'character' | 'inventory' | 'minions' | 'spells' | 'jobs' | 'quests' | 'social' | 'settings' | 'runs' | 'leaderboards' | 'history';
 type PanelIconName = 'overview' | 'character' | 'inventory' | 'minions' | 'spells' | 'jobs' | 'quests' | 'social' | 'settings' | 'runs' | 'leaderboards' | 'history';
@@ -514,11 +520,13 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
   const [showPveHub, setShowPveHub] = useState(false);
   const [showMpDailyRun, setShowMpDailyRun] = useState(false);
   const [showStoryJournal, setShowStoryJournal] = useState(false);
+  const [showMultiplayerContracts, setShowMultiplayerContracts] = useState(false);
   const [isMapActionRailCompact, setIsMapActionRailCompact] = useState(true);
   const [isPartyDetailsOpen, setIsPartyDetailsOpen] = useState(false);
   const [partyInviteDraft, setPartyInviteDraft] = useState('');
   const lastActivityNoticeId = useRef<string | null>(null);
   const router = useRouter();
+  const engagementDayKey = new Date(now).toDateString();
 
   useEffect(() => {
     preloadGameSounds();
@@ -608,10 +616,18 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
   }, []);
 
   useEffect(() => {
+    if (showRandomRun) return;
+    const engagement = touchCurrentMultiplayerEngagement();
+    if (engagement?.pendingBriefing) setShowMultiplayerContracts(true);
+    setUser(getCurrentUser());
+  }, [engagementDayKey, showRandomRun]);
+
+  useEffect(() => {
     const handleForceMainScreen = () => {
       setIsCommandOpen(false);
       setShowDailyRun(false);
       setShowStoryJournal(false);
+      setShowMultiplayerContracts(false);
       setActivePanel('overview');
       setArmySwapSourceId(null);
       setNotice('');
@@ -718,6 +734,10 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
     .sort((left, right) => left.username.localeCompare(right.username));
   const activePveSpawns = getActivePveSpawnCount(player);
   const gearSetSummaries = getActiveGearSetSummaries(player);
+  const engagementView = getMultiplayerEngagementView(player, now);
+  const pvpUnlock = getMultiplayerUnlockStatus('pvp-hub', player);
+  const pveUnlock = getMultiplayerUnlockStatus('dungeon-preview', player);
+  const partyUnlock = getMultiplayerUnlockStatus('party', player);
 
   const getEquippedItem = (slot: EquipmentSlot) => {
     const equipmentId = equippedSlots[slot];
@@ -749,6 +769,7 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
 
   const applySocialResult = (result: { success: boolean; message?: string; error?: string }) => {
     playGameSound(result.success ? 'social.accept' : 'social.decline', { throttleMs: 120 });
+    if (result.success) recordCurrentMultiplayerEngagementEvent('social-action');
     setTemporaryNotice(result.message || result.error || (result.success ? 'Social action complete.' : 'Social action failed.'));
     setUser(getCurrentUser());
   };
@@ -763,6 +784,7 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
     const result = sendSocialChatMessage(chatChannel, chatDraft);
     if (result.success) {
       setChatDraft('');
+      recordCurrentMultiplayerEngagementEvent('social-action');
       setUser(getCurrentUser());
       return;
     }
@@ -1184,6 +1206,14 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
             isOpen={showPveHub}
             onClose={() => setShowPveHub(false)}
           />
+          {showMultiplayerContracts && (
+            <MultiplayerContractsModal
+              isOpen
+              now={now}
+              onClose={() => setShowMultiplayerContracts(false)}
+              onPlayerRefresh={() => setUser(getCurrentUser())}
+            />
+          )}
           <MpDailyDungeonModal
             isOpen={showMpDailyRun}
             onClose={() => setShowMpDailyRun(false)}
@@ -1360,18 +1390,43 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
             <button
               type="button"
               onClick={() => {
+                emitFxEvent({ type: 'quest', tone: 'gold', intensity: 0.5 });
+                setShowMultiplayerContracts(true);
+              }}
+              className={`map-action-button ${engagementView?.claimableCount ? 'map-action-button-primary' : ''}`}
+              title="Open daily and weekly multiplayer orders"
+            >
+              <span className="map-action-icon relative overflow-hidden">
+                <Image
+                  src="/assets/icons/xp.png"
+                  alt=""
+                  fill
+                  className="object-contain p-1"
+                  style={{ imageRendering: 'pixelated' }}
+                />
+              </span>
+              <span className="map-action-copy">
+                <span className="map-action-label">Orders</span>
+                <span className="map-action-detail">Daily contracts & weekly oath</span>
+              </span>
+              <span className="map-action-badge">{engagementView?.claimableCount ? `${engagementView.claimableCount} ready` : 'Daily'}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
                 emitFxEvent({ type: 'attack', tone: 'gold', intensity: 0.62 });
                 setShowMultiplayerHub(true);
               }}
               className="map-action-button map-action-button-primary"
-              title="Open PVP hub"
+              title={pvpUnlock.unlocked ? 'Open PVP hub' : pvpUnlock.requirement}
             >
               <span className="map-action-icon">⚔</span>
               <span className="map-action-copy">
                 <span className="map-action-label">PVP</span>
-                <span className="map-action-detail">Ranked duels</span>
+                <span className="map-action-detail">{pvpUnlock.unlocked ? 'Ranked duels' : pvpUnlock.requirement}</span>
               </span>
-              <span className="map-action-badge">Live</span>
+              <span className="map-action-badge">{pvpUnlock.unlocked ? 'Live' : `Lv ${pvpUnlock.minLevel}`}</span>
             </button>
 
             <button
@@ -1381,7 +1436,7 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
                 setShowPveHub(true);
               }}
               className="map-action-button"
-              title="Open PVE intel"
+              title={pveUnlock.unlocked ? 'Open PVE intel' : pveUnlock.requirement}
             >
               <span className="map-action-icon relative overflow-hidden">
                 <Image
@@ -1394,9 +1449,9 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
               </span>
               <span className="map-action-copy">
                 <span className="map-action-label">PVE</span>
-                <span className="map-action-detail">Dungeons & bosses</span>
+                <span className="map-action-detail">{pveUnlock.unlocked ? 'Dungeons & bosses' : pveUnlock.requirement}</span>
               </span>
-              <span className="map-action-badge">{activePveSpawns}</span>
+              <span className="map-action-badge">{pveUnlock.unlocked ? activePveSpawns : `Lv ${pveUnlock.minLevel}`}</span>
             </button>
           </>
         )}
@@ -1470,7 +1525,7 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
   }
 
   function renderPartyStrip() {
-    if (!socialState.party) return null;
+    if (!partyUnlock.unlocked || !socialState.party) return null;
 
     const currentIsInvited = partyInvites.some(username => username.toLowerCase() === player.username.toLowerCase());
     const leaderUsername = socialState.party.leaderUsername;
@@ -1547,7 +1602,7 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
 
   function renderPartyDetailsPopover() {
     const party = socialState.party;
-    if (!party || !isPartyDetailsOpen) return null;
+    if (!partyUnlock.unlocked || !party || !isPartyDetailsOpen) return null;
 
     const currentUsername = player.username.toLowerCase();
     const isLeader = party.leaderUsername.toLowerCase() === currentUsername;
@@ -1725,7 +1780,9 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
             title="Party"
             action={socialState.party ? `${partyMembers.length}/${MAX_PARTY_SIZE}` : 'Solo'}
           />
-          {socialState.party ? (
+          {!partyUnlock.unlocked ? (
+            <MultiplayerFeatureLock status={partyUnlock} compact />
+          ) : socialState.party ? (
             <div className="space-y-3">
               <div className="grid gap-2">
                 {partyMembers.map(member => (

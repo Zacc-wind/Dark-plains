@@ -34,6 +34,25 @@ import {
   normalizePvpRatingState,
   type PvpRatingState,
 } from './pvpRating';
+import { requireMultiplayerUnlock } from './multiplayerUnlocks';
+import {
+  claimMultiplayerDailyContract as claimMultiplayerDailyContractState,
+  claimMultiplayerWeeklyOath as claimMultiplayerWeeklyOathState,
+  dismissMultiplayerReturningBriefing as dismissMultiplayerReturningBriefingState,
+  getMultiplayerDailyContracts,
+  getMultiplayerEngagementClaimableCount,
+  getMultiplayerReturnTrack,
+  getMultiplayerWeeklyOath,
+  normalizeMultiplayerEngagementState,
+  recordMultiplayerEngagementEvent,
+  rerollMultiplayerDailyContract as rerollMultiplayerDailyContractState,
+  touchMultiplayerEngagement as touchMultiplayerEngagementState,
+  type MultiplayerContractView,
+  type MultiplayerEngagementEventKind,
+  type MultiplayerEngagementState,
+  type MultiplayerReturnTrackView,
+  type MultiplayerWeeklyOathView,
+} from './multiplayerEngagement';
 
 export { CITY_QUESTS, QUEST_NPCS, STORY_CHAPTERS, getAllStoryQuestsSorted, getCityQuestTemplate, getRotatingCityQuests };
 export { TRAVEL_EVENT_CONTENT_COUNTS };
@@ -423,6 +442,7 @@ export interface User {
   spellUnlockVersion?: number;
   social?: SocialState;
   pvpRating?: PvpRatingState;
+  multiplayerEngagement?: MultiplayerEngagementState;
 }
 
 export type { PvpRatingState };
@@ -1424,6 +1444,8 @@ export function getCityQuestStatus(
 export function acceptCityQuest(questId: string, townName: string): { success: boolean; error?: string } {
   const currentUser = getCurrentUser();
   if (!currentUser) return { success: false, error: 'Not logged in.' };
+  const unlock = requireMultiplayerUnlock('city-contracts', currentUser);
+  if (!unlock.allowed) return { success: false, error: unlock.error };
 
   const quest = getRotatingCityQuests(townName).find(item => item.id === questId);
   if (!quest) return { success: false, error: 'That contract is not on this city board right now.' };
@@ -2410,6 +2432,8 @@ export function removeFriend(username: string): { success: boolean; message?: st
 export function invitePlayerToParty(targetUsername: string): { success: boolean; message?: string; error?: string } {
   const current = getCurrentUser();
   if (!current) return { success: false, error: 'Login required.' };
+  const unlock = requireMultiplayerUnlock('party', current);
+  if (!unlock.allowed) return { success: false, error: unlock.error };
 
   const users = getUsers();
   const currentIndex = findUserIndex(users, current.username);
@@ -2417,6 +2441,10 @@ export function invitePlayerToParty(targetUsername: string): { success: boolean;
   if (currentIndex === -1 || targetIndex === -1) return { success: false, error: 'Player not found.' };
 
   const target = users[targetIndex];
+  const targetUnlock = requireMultiplayerUnlock('party', target);
+  if (!targetUnlock.allowed) {
+    return { success: false, error: `${target.username} must reach level 5 before joining a party.` };
+  }
   if (normalizeUsername(target.username) === normalizeUsername(current.username)) {
     return { success: false, error: 'You are already in your party.' };
   }
@@ -2472,6 +2500,8 @@ export function invitePlayerToParty(targetUsername: string): { success: boolean;
 export function acceptPartyInvite(): { success: boolean; message?: string; error?: string } {
   const current = getCurrentUser();
   if (!current) return { success: false, error: 'Login required.' };
+  const unlock = requireMultiplayerUnlock('party', current);
+  if (!unlock.allowed) return { success: false, error: unlock.error };
 
   const users = getUsers();
   const currentIndex = findUserIndex(users, current.username);
@@ -3299,6 +3329,8 @@ export function sellMinion(minionId: string): InventoryActionResult {
 export function performTradeExchange(exchangeId: string): InventoryActionResult {
   const currentUser = getCurrentUser();
   if (!currentUser) return { success: false, error: 'No active user.' };
+  const unlock = requireMultiplayerUnlock('trading', currentUser);
+  if (!unlock.allowed) return { success: false, error: unlock.error };
 
   const offer = TRADE_EXCHANGE_OFFERS.find(exchange => exchange.id === exchangeId);
   if (!offer) return { success: false, error: 'Exchange not found.' };
@@ -3745,6 +3777,8 @@ export function addEquipmentSocketBonus(equipmentId: string): {
 } {
   const currentUser = getCurrentUser();
   if (!currentUser) return { success: false, error: 'Not logged in.' };
+  const unlock = requireMultiplayerUnlock('gear-upgrades', currentUser);
+  if (!unlock.allowed) return { success: false, error: unlock.error };
 
   const equipment = (currentUser.equipment || []).find(item => item.id === equipmentId);
   if (!equipment) return { success: false, error: 'Equipment not found.' };
@@ -3790,6 +3824,8 @@ export function upgradeEquipmentSocketBonus(equipmentId: string, bonusId: string
 } {
   const currentUser = getCurrentUser();
   if (!currentUser) return { success: false, error: 'Not logged in.' };
+  const unlock = requireMultiplayerUnlock('gear-upgrades', currentUser);
+  if (!unlock.allowed) return { success: false, error: unlock.error };
 
   const equipment = (currentUser.equipment || []).find(item => item.id === equipmentId);
   if (!equipment) return { success: false, error: 'Equipment not found.' };
@@ -4184,6 +4220,7 @@ export function register(username: string, password: string): { success: boolean
     dailyRun: normalizeDailyRunState(),
     mpDailyDungeon: normalizeMpDailyDungeonState(),
     pvpRating: createDefaultPvpRatingState(),
+    multiplayerEngagement: normalizeMultiplayerEngagementState(null, username),
     knownSpellIds: DEFAULT_KNOWN_SPELL_IDS,
     equippedSpellIds: DEFAULT_EQUIPPED_SPELL_IDS,
     spellUnlockVersion: 1,
@@ -4390,6 +4427,10 @@ export function getCurrentUser(): User | null {
   parsedUser.dailyRun = normalizeDailyRunState(parsedUser.dailyRun);
   parsedUser.mpDailyDungeon = normalizeMpDailyDungeonState(parsedUser.mpDailyDungeon);
   parsedUser.pvpRating = normalizePvpRatingState(parsedUser.pvpRating);
+  parsedUser.multiplayerEngagement = normalizeMultiplayerEngagementState(
+    parsedUser.multiplayerEngagement,
+    parsedUser.username,
+  );
 
   parsedUser.dailyQuests = normalizeDailyQuests(parsedUser.dailyQuests);
   
@@ -4427,6 +4468,157 @@ export function updateCurrentUser(updates: Partial<User>): void {
   if (isSupabaseAuthEnabled()) {
     void persistCurrentUserToSupabase();
   }
+}
+
+export interface MultiplayerEngagementView {
+  state: MultiplayerEngagementState;
+  dailyContracts: MultiplayerContractView[];
+  weeklyOath: MultiplayerWeeklyOathView;
+  returnTrack: MultiplayerReturnTrackView;
+  claimableCount: number;
+}
+
+export function getMultiplayerEngagementView(
+  user: User | null = getCurrentUser(),
+  now = Date.now(),
+): MultiplayerEngagementView | null {
+  if (!user) return null;
+  const state = normalizeMultiplayerEngagementState(user.multiplayerEngagement, user.username, now);
+  return {
+    state,
+    dailyContracts: getMultiplayerDailyContracts(state, user.username, now),
+    weeklyOath: getMultiplayerWeeklyOath(state, user.username, now),
+    returnTrack: getMultiplayerReturnTrack(state, user.username, now),
+    claimableCount: getMultiplayerEngagementClaimableCount(state, user.username, now),
+  };
+}
+
+export function touchCurrentMultiplayerEngagement(now = Date.now()): MultiplayerEngagementState | null {
+  const currentUser = getCurrentUser();
+  if (!currentUser) return null;
+  const state = touchMultiplayerEngagementState(
+    currentUser.multiplayerEngagement,
+    currentUser.username,
+    now,
+  );
+  if (JSON.stringify(state) !== JSON.stringify(currentUser.multiplayerEngagement)) {
+    updateCurrentUser({ multiplayerEngagement: state });
+  }
+  return state;
+}
+
+export function recordCurrentMultiplayerEngagementEvent(
+  kind: MultiplayerEngagementEventKind,
+  now = Date.now(),
+): MultiplayerEngagementState | null {
+  const currentUser = getCurrentUser();
+  if (!currentUser) return null;
+  const state = recordMultiplayerEngagementEvent(
+    currentUser.multiplayerEngagement,
+    currentUser.username,
+    kind,
+    now,
+  );
+  updateCurrentUser({ multiplayerEngagement: state });
+  return state;
+}
+
+export function rerollCurrentMultiplayerDailyContract(
+  contractId: string,
+  now = Date.now(),
+): { success: boolean; error?: string } {
+  const currentUser = getCurrentUser();
+  if (!currentUser) return { success: false, error: 'Not logged in.' };
+  const result = rerollMultiplayerDailyContractState(
+    currentUser.multiplayerEngagement,
+    currentUser.username,
+    contractId,
+    now,
+  );
+  if (result.success) updateCurrentUser({ multiplayerEngagement: result.state });
+  return { success: result.success, error: result.error };
+}
+
+export function claimCurrentMultiplayerDailyContract(
+  contractId: string,
+  now = Date.now(),
+): { success: boolean; rewards?: RewardSummary; error?: string } {
+  const currentUser = getCurrentUser();
+  if (!currentUser) return { success: false, error: 'Not logged in.' };
+  const result = claimMultiplayerDailyContractState(
+    currentUser.multiplayerEngagement,
+    currentUser.username,
+    contractId,
+    now,
+  );
+  if (!result.success || !result.contract) return { success: false, error: result.error };
+
+  const rewards: RewardSummary = {
+    gold: result.contract.rewardGold,
+    exp: result.contract.rewardExp,
+  };
+  updateCurrentUser({
+    multiplayerEngagement: result.state,
+    gold: currentUser.gold + result.contract.rewardGold,
+    exp: currentUser.exp + result.contract.rewardExp,
+    activityLog: pushActivityEntry(currentUser.activityLog, {
+      id: `activity-daily-contract-${result.contract.id}-${now}`,
+      type: 'quest',
+      title: result.contract.title,
+      source: 'Daily Order Board',
+      completedAt: now,
+      rewards,
+      description: 'Daily multiplayer order claimed.',
+    }),
+  });
+  levelUp();
+  return { success: true, rewards };
+}
+
+export function claimCurrentMultiplayerWeeklyOath(
+  now = Date.now(),
+): { success: boolean; rewards?: RewardSummary; error?: string } {
+  const currentUser = getCurrentUser();
+  if (!currentUser) return { success: false, error: 'Not logged in.' };
+  const result = claimMultiplayerWeeklyOathState(
+    currentUser.multiplayerEngagement,
+    currentUser.username,
+    now,
+  );
+  if (!result.success) return { success: false, error: result.error };
+
+  const rewards: RewardSummary = {
+    gold: result.oath.rewardGold,
+    exp: result.oath.rewardExp,
+  };
+  updateCurrentUser({
+    multiplayerEngagement: result.state,
+    gold: currentUser.gold + result.oath.rewardGold,
+    exp: currentUser.exp + result.oath.rewardExp,
+    activityLog: pushActivityEntry(currentUser.activityLog, {
+      id: `activity-weekly-oath-${result.oath.id}-${now}`,
+      type: 'quest',
+      title: result.oath.title,
+      source: 'Weekly Faction Oath',
+      completedAt: now,
+      rewards,
+      description: 'Weekly multiplayer contribution oath claimed.',
+    }),
+  });
+  levelUp();
+  return { success: true, rewards };
+}
+
+export function dismissCurrentMultiplayerReturningBriefing(now = Date.now()): void {
+  const currentUser = getCurrentUser();
+  if (!currentUser) return;
+  updateCurrentUser({
+    multiplayerEngagement: dismissMultiplayerReturningBriefingState(
+      currentUser.multiplayerEngagement,
+      currentUser.username,
+      now,
+    ),
+  });
 }
 
 export function logout(): void {

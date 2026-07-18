@@ -91,25 +91,25 @@ Turn the current shared world-map prototype into a real multiplayer layer withou
 - [ ] Add server-side validation for trade completion and combat actions before deployment.
 
 ## Phase 9: Progression Gates And Unlock Communication
-- [ ] Define one shared unlock registry consumed by HUD buttons, modal guards, API routes, and tutorial copy.
-- [ ] Level 1: jobs, towns, story quests, NPC encounters, inventory, and basic army management.
-- [ ] Level 2: city contracts, gear upgrades, and the first dungeon preview.
-- [ ] Level 3: PVP hub and duel challenges unlock with a short rules conversation.
-- [ ] Level 4: trading unlocks after inventory and value are explained.
-- [ ] Level 5: party creation and cooperative dungeon entry unlock.
+- [x] Define one shared unlock registry consumed by HUD buttons, modal guards, API routes, and tutorial copy.
+- [x] Level 1: jobs, towns, story quests, NPC encounters, inventory, and basic army management.
+- [x] Level 2: city contracts, gear upgrades, and the first dungeon preview.
+- [ ] Level 3: PVP hub and duel challenges unlock with a short rules conversation. The shared gate and API enforcement are complete; the authored conversation remains.
+- [x] Level 4: trading unlocks after inventory and value are explained.
+- [ ] Level 5: party creation and cooperative dungeon entry unlock. Party creation is gated; the cooperative dungeon session is not implemented yet.
 - [ ] Later levels unlock harder regions, additional city services, dungeon tiers, boss rotations, and advanced social objectives.
 - [ ] Enforce every gate on the server as well as the client; a hidden button is not an authorization rule.
-- [ ] Show locked features in a compact preview with level requirement and one-sentence value, rather than silently hiding the feature.
+- [x] Show locked features in a compact preview with level requirement and one-sentence value, rather than silently hiding the feature.
 
 ## Phase 10: Daily And Weekly Reasons To Return
-- [ ] Add a three-slot daily contract board: one combat task, one world/job task, and one social or co-op task. Allow one reroll per day.
+- [x] Add a three-slot daily contract board: one combat task, one world/job task, and one social or co-op task. Allow one reroll per day.
 - [ ] Add a rotating regional threat that changes enemy composition and culminates in a shared boss target.
-- [ ] Add a weekly faction oath with several contribution paths so combat, jobs, trade, and co-op players can all progress it.
+- [x] Add a weekly faction oath with several contribution paths so combat, jobs, trade, and co-op players can all progress it.
 - [ ] Add first-win and first-dungeon-clear bonuses with moderate rewards; avoid mandatory multi-hour streak pressure.
-- [ ] Add a seven-day return track with a missed-day buffer and no exclusive combat power.
-- [ ] Add a returning-player briefing after several inactive days: current threats, unfinished story objective, party activity, and one catch-up contract.
+- [x] Add a seven-day return track with a missed-day buffer and no exclusive combat power.
+- [x] Add a returning-player briefing after several inactive days: current threats, unfinished story objective, party activity, and one catch-up contract.
 - [ ] Add capped rested job XP or contract progress so returning players can catch up without making daily players irrelevant.
-- [ ] Record completion telemetry for each loop before increasing reward volume or adding more currencies.
+- [x] Record completion telemetry for each loop before increasing reward volume or adding more currencies.
 
 ## Phase 11: Story Chapters And World Direction
 - [ ] Give every main-story chapter a named guide, a regional conflict, a midpoint fight, and a boss resolution.

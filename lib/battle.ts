@@ -17,6 +17,7 @@ import { readGameJson, removeGameStorageItem, writeGameJson } from './gameStore'
 import { MAP_CONFIG, POIType, TileType, getStaticMap, getStaticPOIs } from './mapData';
 import { BOSS_PROFILES, type BossProfile } from './bosses';
 import { COMMANDER_FORMATION_KEY } from './formation';
+import { requireMultiplayerUnlock } from './multiplayerUnlocks';
 
 export type BattleSide = 'player' | 'enemy';
 export type BattleStatus = 'active' | 'victory' | 'defeat' | 'recruited';
@@ -270,6 +271,13 @@ export function canChallengePlayer(
 ): { allowed: boolean; reason?: string; warning?: string } {
   if (!challenger || !target || challenger.username === target.username) {
     return { allowed: false, reason: 'No valid opponent selected.' };
+  }
+
+  const challengerUnlock = requireMultiplayerUnlock('pvp-challenges', challenger);
+  if (!challengerUnlock.allowed) return { allowed: false, reason: challengerUnlock.error };
+  const targetUnlock = requireMultiplayerUnlock('pvp-challenges', target);
+  if (!targetUnlock.allowed) {
+    return { allowed: false, reason: `${target.username} must reach level 3 before accepting duels.` };
   }
 
   const challengerLevel = challenger.stats?.level || 1;
@@ -3718,6 +3726,7 @@ export function createBattleChallenge(targetUsername: string): BattleChallenge |
 export function confirmBattleChallenge(challengeId: string): BattleChallenge | null {
   const currentUser = getCurrentUser();
   if (!currentUser) return null;
+  if (!requireMultiplayerUnlock('pvp-challenges', currentUser).allowed) return null;
 
   const challenges = getBattleChallenges();
   const challenge = challenges.find(item => item.id === challengeId && item.status === 'pending');

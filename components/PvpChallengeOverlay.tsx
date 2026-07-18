@@ -5,7 +5,6 @@ import { useEffect, useState } from 'react';
 import {
   acceptBattleChallenge,
   BattleChallenge,
-  confirmBattleChallenge,
   declineBattleChallenge,
   getBattleChallengeTimeRemaining,
   getBattleChallenges,
@@ -138,8 +137,8 @@ export default function PvpChallengeOverlay() {
       if (onlineEnabled) {
         await updateOnlineBattleChallenge(incoming.id, 'accept');
       } else {
-        acceptBattleChallenge(incoming.id);
-        confirmBattleChallenge(incoming.id);
+        const accepted = acceptBattleChallenge(incoming.id);
+        if (!accepted) throw new Error('Duel challenges unlock at level 3.');
       }
       await refreshChallenges();
       playGameSound('social.accept', { throttleMs: 120 });

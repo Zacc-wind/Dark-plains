@@ -11,6 +11,7 @@ import {
 import { isValidGameUsername, usernameToAuthEmail } from '@/lib/supabase/username';
 
 const CURRENT_USER_KEY = 'pirate_game_current_user';
+let playerPersistenceQueue: Promise<void> = Promise.resolve();
 
 export function isSupabaseAuthEnabled(): boolean {
   return isSupabaseConfigured();
@@ -105,17 +106,23 @@ export async function hydrateLocalUserFromSession(): Promise<User | null> {
   return sessionUser;
 }
 
-export async function persistCurrentUserToSupabase(): Promise<void> {
-  if (!isSupabaseConfigured()) return;
+export function persistCurrentUserToSupabase(): Promise<void> {
+  if (!isSupabaseConfigured()) return Promise.resolve();
 
   const localUser = getCurrentUser();
-  if (!localUser) return;
+  if (!localUser) return Promise.resolve();
 
-  const supabase = createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return;
+  playerPersistenceQueue = playerPersistenceQueue
+    .catch(() => undefined)
+    .then(async () => {
+      const supabase = createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      await saveRemotePlayer(localUser, user.id);
+    })
+    .catch(() => undefined);
 
-  await saveRemotePlayer(localUser, user.id);
+  return playerPersistenceQueue;
 }
 
 export async function bootstrapSupabaseSession(): Promise<boolean> {

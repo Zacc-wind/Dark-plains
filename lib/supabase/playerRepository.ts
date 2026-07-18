@@ -1,6 +1,19 @@
 import type { User } from '@/lib/auth';
 import { createClient } from '@/lib/supabase/client';
 
+const remoteWriteQueues = new Map<string, Promise<void>>();
+
+function enqueueRemoteWrite(userId: string, operation: () => Promise<void>): Promise<void> {
+  const previous = remoteWriteQueues.get(userId) || Promise.resolve();
+  const queued = previous.catch(() => undefined).then(operation);
+  remoteWriteQueues.set(userId, queued);
+  const cleanup = () => {
+    if (remoteWriteQueues.get(userId) === queued) remoteWriteQueues.delete(userId);
+  };
+  void queued.then(cleanup, cleanup);
+  return queued;
+}
+
 export interface PlayerStateRow {
   user_id: string;
   level: number;
@@ -66,7 +79,9 @@ export function userToPlayerStateRow(user: User, userId: string): PlayerStateRow
     social: user.social,
     activity_log: user.activityLog || [],
     spell_unlock_version: user.spellUnlockVersion || 1,
-    game_sessions: {},
+    game_sessions: user.multiplayerEngagement
+      ? { multiplayerEngagement: user.multiplayerEngagement }
+      : {},
     updated_at: new Date().toISOString(),
   };
 }
@@ -100,6 +115,7 @@ export function playerStateRowToUser(row: PlayerStateRow, profile: ProfileRow): 
     equippedSpellIds: row.equipped_spell_ids,
     spellUnlockVersion: row.spell_unlock_version,
     social: row.social,
+    multiplayerEngagement: row.game_sessions?.multiplayerEngagement as User['multiplayerEngagement'],
   };
 }
 
@@ -118,62 +134,66 @@ export async function fetchRemotePlayer(userId: string): Promise<{ profile: Prof
   return { profile, state: state as PlayerStateRow };
 }
 
-export async function saveRemotePlayer(user: User, userId: string): Promise<void> {
-  const supabase = createClient();
+export function saveRemotePlayer(user: User, userId: string): Promise<void> {
+  return enqueueRemoteWrite(userId, async () => {
+    const supabase = createClient();
 
-  const { data: existingState, error: readError } = await supabase
-    .from('player_states')
-    .select('game_sessions')
-    .eq('user_id', userId)
-    .maybeSingle();
+    const { data: existingState, error: readError } = await supabase
+      .from('player_states')
+      .select('game_sessions')
+      .eq('user_id', userId)
+      .maybeSingle();
 
-  if (readError) throw readError;
+    if (readError) throw readError;
 
-  const row = userToPlayerStateRow(user, userId);
-  row.game_sessions = {
-    ...((existingState?.game_sessions as Record<string, unknown> | null) || {}),
-    ...row.game_sessions,
-  };
+    const row = userToPlayerStateRow(user, userId);
+    row.game_sessions = {
+      ...((existingState?.game_sessions as Record<string, unknown> | null) || {}),
+      ...row.game_sessions,
+    };
 
-  const { error: profileError } = await supabase
-    .from('profiles')
-    .update({
-      username: user.username,
-      selected_model: user.selectedModel,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', userId);
+    const { error: profileError } = await supabase
+      .from('profiles')
+      .update({
+        username: user.username,
+        selected_model: user.selectedModel,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', userId);
 
-  if (profileError) throw profileError;
+    if (profileError) throw profileError;
 
-  const { error: stateError } = await supabase
-    .from('player_states')
-    .upsert(row, { onConflict: 'user_id' });
+    const { error: stateError } = await supabase
+      .from('player_states')
+      .upsert(row, { onConflict: 'user_id' });
 
-  if (stateError) throw stateError;
+    if (stateError) throw stateError;
+  });
 }
 
-export async function saveRemoteGameSession(userId: string, key: string, value: unknown): Promise<void> {
-  const supabase = createClient();
-  const { data, error: readError } = await supabase
-    .from('player_states')
-    .select('game_sessions')
-    .eq('user_id', userId)
-    .maybeSingle();
+export function saveRemoteGameSession(userId: string, key: string, value: unknown): Promise<void> {
+  return enqueueRemoteWrite(userId, async () => {
+    const supabase = createClient();
+    const { data, error: readError } = await supabase
+      .from('player_states')
+      .select('game_sessions')
+      .eq('user_id', userId)
+      .maybeSingle();
 
-  if (readError) throw readError;
+    if (readError) throw readError;
 
-  const sessions = {
-    ...((data?.game_sessions as Record<string, unknown> | null) || {}),
-    [key]: value,
-  };
+    const sessions = {
+      ...((data?.game_sessions as Record<string, unknown> | null) || {}),
+      [key]: value,
+    };
 
-  const { error } = await supabase
-    .from('player_states')
-    .update({ game_sessions: sessions, updated_at: new Date().toISOString() })
-    .eq('user_id', userId);
+    const { error } = await supabase
+      .from('player_states')
+      .update({ game_sessions: sessions, updated_at: new Date().toISOString() })
+      .eq('user_id', userId);
 
-  if (error) throw error;
+    if (error) throw error;
+  });
 }
 
 export async function readRemoteGameSession<T>(userId: string, key: string): Promise<T | null> {

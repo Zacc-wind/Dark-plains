@@ -4,6 +4,8 @@ import Image from 'next/image';
 import { useEffect, useMemo, useState } from 'react';
 import { getCurrentUser } from '@/lib/auth';
 import { getWorldPveIntel, type PveIntelEntry, type PveRewardLine } from '@/lib/worldPveIntel';
+import { getMultiplayerUnlockStatus } from '@/lib/multiplayerUnlocks';
+import MultiplayerFeatureLock from '@/components/MultiplayerFeatureLock';
 
 interface PveHubModalProps {
   isOpen: boolean;
@@ -108,7 +110,7 @@ export default function PveHubModal({ isOpen, onClose }: PveHubModalProps) {
 
   const pveIntel = useMemo(
     () => (isOpen ? getWorldPveIntel(currentUser, now) : []),
-    [currentUser, isOpen, now, username],
+    [currentUser, isOpen, now],
   );
 
   useEffect(() => {
@@ -118,6 +120,27 @@ export default function PveHubModal({ isOpen, onClose }: PveHubModalProps) {
   }, [isOpen]);
 
   if (!isOpen) return null;
+
+  const pveUnlock = getMultiplayerUnlockStatus('dungeon-preview', currentUser);
+  if (!pveUnlock.unlocked) {
+    return (
+      <div className="pve-hub-overlay fixed inset-0 z-[70] flex items-center justify-center bg-black/72 p-4" onClick={onClose}>
+        <section
+          className="pve-hub-shell command-panel vine-frame w-[min(40rem,calc(100vw-2rem))] overflow-hidden rounded border text-zinc-100 shadow-2xl"
+          onClick={(event) => event.stopPropagation()}
+        >
+          <div className="panel-header flex items-center justify-between gap-4 border-b px-5 py-4">
+            <div>
+              <p className="arcane-label">World Map Threats</p>
+              <h2 className="fantasy-heading text-2xl">PVE Preview</h2>
+            </div>
+            <button type="button" onClick={onClose} className="ui-button rounded px-3 py-2 text-xs font-black">Close</button>
+          </div>
+          <div className="p-5"><MultiplayerFeatureLock status={pveUnlock} /></div>
+        </section>
+      </div>
+    );
+  }
 
   return (
     <div

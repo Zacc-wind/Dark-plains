@@ -2,6 +2,7 @@ import { apiNotConfigured, apiOk } from '@/lib/apiResponses';
 import type { BattleChallenge, BattleChallengeStatus } from '@/lib/battle';
 import { isSupabaseConfigured } from '@/lib/supabase/config';
 import { createClient } from '@/lib/supabase/server';
+import { requireMultiplayerUnlock } from '@/lib/multiplayerUnlocks';
 
 export const dynamic = 'force-dynamic';
 
@@ -115,6 +116,17 @@ async function getChallengeRow(supabase: SupabaseServerClient, challengeId: stri
   return data as PvpChallengeRow | null;
 }
 
+async function getPlayerLevel(supabase: SupabaseServerClient, userId: string): Promise<number> {
+  const { data, error } = await supabase
+    .from('player_states')
+    .select('level')
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (error) throw error;
+  return Number(data?.level) || 1;
+}
+
 export async function PATCH(request: Request, context: RouteContext) {
   if (!isSupabaseConfigured()) {
     return apiNotConfigured('PVP challenge API');
@@ -142,6 +154,13 @@ export async function PATCH(request: Request, context: RouteContext) {
   }
 
   try {
+    if (action === 'confirm' || action === 'accept') {
+      const unlock = requireMultiplayerUnlock('pvp-challenges', await getPlayerLevel(supabase, userId));
+      if (!unlock.allowed) {
+        return Response.json({ ok: false, error: unlock.error, deploymentMode: 'database' }, { status: 403 });
+      }
+    }
+
     const row = await getChallengeRow(supabase, id);
     if (!row) {
       return Response.json({ ok: false, error: 'Challenge was not found.', deploymentMode: 'database' }, { status: 404 });

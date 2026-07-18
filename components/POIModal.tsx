@@ -2,7 +2,7 @@
 
 import Image from 'next/image';
 import { useEffect, useState } from 'react';
-import { getCurrentUser, getJobRewardPreview, getJobTravelDurationMs, JOB_DURATION_LABELS, startJob } from '@/lib/auth';
+import { getCurrentUser, getJobRewardPreview, getJobTravelDurationMs, JOB_DURATION_LABELS, recordCurrentMultiplayerEngagementEvent, startJob } from '@/lib/auth';
 import { ASSET_PATHS } from '@/lib/assetLoader';
 import { emitFxEvent } from '@/lib/fxEvents';
 import { POI, POIType } from '@/lib/mapData';
@@ -85,6 +85,7 @@ export default function POIModal({ poi, onClose, onSelectJob, onTravel }: POIMod
     if (result.success) {
       setError('');
       completeMultiplayerTutorialCallout(user?.username, 'job-start');
+      recordCurrentMultiplayerEngagementEvent('job-start');
       emitFxEvent({ type: isCampfire ? 'heal' : 'job', tone: isCampfire ? 'green' : 'bone', intensity: 0.48 });
       onSelectJob(poi.id, jobName);
       return;

@@ -2,6 +2,7 @@ import { apiNotConfigured, apiOk } from '@/lib/apiResponses';
 import type { BattleChallenge, BattleChallengeStatus } from '@/lib/battle';
 import { isSupabaseConfigured } from '@/lib/supabase/config';
 import { createClient } from '@/lib/supabase/server';
+import { requireMultiplayerUnlock } from '@/lib/multiplayerUnlocks';
 
 export const dynamic = 'force-dynamic';
 
@@ -62,6 +63,17 @@ async function getProfileByUsername(supabase: SupabaseServerClient, username: st
 
   if (error) throw error;
   return data as ProfileRow | null;
+}
+
+async function getPlayerLevel(supabase: SupabaseServerClient, userId: string): Promise<number> {
+  const { data, error } = await supabase
+    .from('player_states')
+    .select('level')
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (error) throw error;
+  return Number(data?.level) || 1;
 }
 
 async function hydrateChallengeRows(
@@ -191,6 +203,23 @@ export async function POST(request: Request) {
 
     if (targetProfile.id === userId) {
       return Response.json({ ok: false, error: 'You cannot challenge yourself.', deploymentMode: 'database' }, { status: 400 });
+    }
+
+    const [challengerLevel, targetLevel] = await Promise.all([
+      getPlayerLevel(supabase, userId),
+      getPlayerLevel(supabase, targetProfile.id),
+    ]);
+    const challengerUnlock = requireMultiplayerUnlock('pvp-challenges', challengerLevel);
+    if (!challengerUnlock.allowed) {
+      return Response.json({ ok: false, error: challengerUnlock.error, deploymentMode: 'database' }, { status: 403 });
+    }
+    const targetUnlock = requireMultiplayerUnlock('pvp-challenges', targetLevel);
+    if (!targetUnlock.allowed) {
+      return Response.json({
+        ok: false,
+        error: `${targetProfile.username} must reach level 3 before accepting duels.`,
+        deploymentMode: 'database',
+      }, { status: 403 });
     }
 
     const { data: existingRows, error: existingError } = await supabase

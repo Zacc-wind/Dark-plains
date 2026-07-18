@@ -74,6 +74,7 @@ import {
   levelUp,
   makeInventoryItem,
   recordDailyRunCompletionState,
+  recordCurrentMultiplayerEngagementEvent,
   rollInventoryBonusDrops,
   updateCurrentUser,
 } from '@/lib/auth';
@@ -1874,6 +1875,9 @@ function RunController({
 
     if (session.mode === 'encounter' && session.outcome === 'victory') {
       completeMultiplayerTutorialCallout(getCurrentUser()?.username, 'battle-result-claim');
+      recordCurrentMultiplayerEngagementEvent('battle-win');
+    } else if ((session.mode === 'dungeon' || session.mode === 'mpDaily') && session.outcome === 'victory') {
+      recordCurrentMultiplayerEngagementEvent('dungeon-clear');
     }
     setSession({ ...session, rewardClaimed: true, notice });
 
