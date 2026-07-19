@@ -1,10 +1,41 @@
 export type MultiplayerContractCategory = 'combat' | 'world' | 'social';
-export type MultiplayerEngagementEventKind = 'battle-win' | 'job-start' | 'social-action' | 'dungeon-clear';
+export type MultiplayerEngagementEventKind =
+  | 'job-started'
+  | 'job-completed'
+  | 'travel-completed'
+  | 'enemy-inspected'
+  | 'battle-won'
+  | 'battle-result-claimed'
+  | 'story-quest-completed'
+  | 'city-contract-completed'
+  | 'boss-defeated'
+  | 'dungeon-cleared'
+  | 'chat-sent'
+  | 'friend-action'
+  | 'party-action'
+  | 'trade-completed'
+  | 'pvp-completed'
+  | 'coop-completed'
+  | 'social-action';
+export type LegacyMultiplayerEngagementEventKind = 'battle-win' | 'job-start' | 'dungeon-clear';
+export type MultiplayerEngagementEventInputKind = MultiplayerEngagementEventKind | LegacyMultiplayerEngagementEventKind;
+
+export interface MultiplayerEngagementEventInput {
+  id?: string;
+  kind: MultiplayerEngagementEventInputKind;
+  occurredAt?: number;
+  contextId?: string;
+  targetId?: string;
+}
 
 export interface MultiplayerEngagementEvent {
   id: string;
   kind: MultiplayerEngagementEventKind;
   occurredAt: number;
+  recordedAt: number;
+  actorUsername: string;
+  contextId?: string;
+  targetId?: string;
 }
 
 export interface MultiplayerEngagementTelemetry {
@@ -21,6 +52,7 @@ export interface ReturningPlayerBriefingState {
 }
 
 export interface MultiplayerEngagementState {
+  version: number;
   dateKey: string;
   weekKey: string;
   contractVariants: Record<MultiplayerContractCategory, number>;
@@ -39,7 +71,7 @@ export interface MultiplayerContractView {
   category: MultiplayerContractCategory;
   title: string;
   description: string;
-  eventKind: MultiplayerEngagementEventKind;
+  eventKinds: MultiplayerEngagementEventKind[];
   target: number;
   progress: number;
   complete: boolean;
@@ -74,7 +106,7 @@ interface MultiplayerContractTemplate {
   category: MultiplayerContractCategory;
   title: string;
   description: string;
-  eventKind: MultiplayerEngagementEventKind;
+  eventKinds: MultiplayerEngagementEventKind[];
   target: number;
   rewardGold: number;
   rewardExp: number;
@@ -84,12 +116,36 @@ interface MultiplayerContractTemplate {
 const DAY_MS = 24 * 60 * 60 * 1000;
 const EVENT_RETENTION_MS = 15 * DAY_MS;
 const RETURN_DAY_RETENTION_MS = 30 * DAY_MS;
+export const MULTIPLAYER_ENGAGEMENT_VERSION = 2;
 const VALID_EVENT_KINDS = new Set<MultiplayerEngagementEventKind>([
-  'battle-win',
-  'job-start',
+  'job-started',
+  'job-completed',
+  'travel-completed',
+  'enemy-inspected',
+  'battle-won',
+  'battle-result-claimed',
+  'story-quest-completed',
+  'city-contract-completed',
+  'boss-defeated',
+  'dungeon-cleared',
+  'chat-sent',
+  'friend-action',
+  'party-action',
+  'trade-completed',
+  'pvp-completed',
+  'coop-completed',
   'social-action',
-  'dungeon-clear',
 ]);
+const LEGACY_EVENT_KIND_MAP: Record<LegacyMultiplayerEngagementEventKind, MultiplayerEngagementEventKind> = {
+  'battle-win': 'battle-result-claimed',
+  'job-start': 'job-started',
+  'dungeon-clear': 'dungeon-cleared',
+};
+const WEEKLY_CONTRIBUTION_KINDS: Record<MultiplayerContractCategory, Set<MultiplayerEngagementEventKind>> = {
+  combat: new Set(['battle-result-claimed', 'dungeon-cleared', 'pvp-completed', 'coop-completed']),
+  world: new Set(['job-started', 'story-quest-completed', 'city-contract-completed']),
+  social: new Set(['social-action', 'chat-sent', 'friend-action', 'party-action', 'trade-completed']),
+};
 export const MULTIPLAYER_CONTRACT_CATEGORIES: MultiplayerContractCategory[] = ['combat', 'world', 'social'];
 
 const CONTRACT_TEMPLATES: Record<MultiplayerContractCategory, MultiplayerContractTemplate[]> = {
@@ -99,7 +155,7 @@ const CONTRACT_TEMPLATES: Record<MultiplayerContractCategory, MultiplayerContrac
       category: 'combat',
       title: 'Road Victory',
       description: 'Win one world-map encounter and claim its battle report.',
-      eventKind: 'battle-win',
+      eventKinds: ['battle-result-claimed'],
       target: 1,
       rewardGold: 40,
       rewardExp: 25,
@@ -110,7 +166,7 @@ const CONTRACT_TEMPLATES: Record<MultiplayerContractCategory, MultiplayerContrac
       category: 'combat',
       title: 'Double Patrol',
       description: 'Win two world-map encounters before the board resets.',
-      eventKind: 'battle-win',
+      eventKinds: ['battle-result-claimed'],
       target: 2,
       rewardGold: 65,
       rewardExp: 40,
@@ -123,7 +179,7 @@ const CONTRACT_TEMPLATES: Record<MultiplayerContractCategory, MultiplayerContrac
       category: 'world',
       title: 'Sign a Road Order',
       description: 'Start one real job from a world work site.',
-      eventKind: 'job-start',
+      eventKinds: ['job-started'],
       target: 1,
       rewardGold: 35,
       rewardExp: 25,
@@ -134,7 +190,7 @@ const CONTRACT_TEMPLATES: Record<MultiplayerContractCategory, MultiplayerContrac
       category: 'world',
       title: 'Working Road',
       description: 'Start two real jobs from world work sites.',
-      eventKind: 'job-start',
+      eventKinds: ['job-started'],
       target: 2,
       rewardGold: 55,
       rewardExp: 35,
@@ -147,7 +203,7 @@ const CONTRACT_TEMPLATES: Record<MultiplayerContractCategory, MultiplayerContrac
       category: 'social',
       title: 'Signal the Company',
       description: 'Send chat, answer a friend request, or complete a party action.',
-      eventKind: 'social-action',
+      eventKinds: ['social-action', 'chat-sent', 'friend-action', 'party-action', 'trade-completed'],
       target: 1,
       rewardGold: 30,
       rewardExp: 25,
@@ -158,7 +214,7 @@ const CONTRACT_TEMPLATES: Record<MultiplayerContractCategory, MultiplayerContrac
       category: 'social',
       title: 'Keep the Network',
       description: 'Complete two chat, friend, or party actions.',
-      eventKind: 'social-action',
+      eventKinds: ['social-action', 'chat-sent', 'friend-action', 'party-action', 'trade-completed'],
       target: 2,
       rewardGold: 50,
       rewardExp: 35,
@@ -233,6 +289,20 @@ function normalizeTelemetry(value?: Partial<MultiplayerEngagementTelemetry>): Mu
   };
 }
 
+function normalizeEventKind(value: unknown): MultiplayerEngagementEventKind | null {
+  if (typeof value !== 'string') return null;
+  if (VALID_EVENT_KINDS.has(value as MultiplayerEngagementEventKind)) {
+    return value as MultiplayerEngagementEventKind;
+  }
+  return LEGACY_EVENT_KIND_MAP[value as LegacyMultiplayerEngagementEventKind] || null;
+}
+
+function normalizeOptionalEventId(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const normalized = value.trim().slice(0, 160);
+  return normalized || undefined;
+}
+
 export function normalizeMultiplayerEngagementState(
   state: Partial<MultiplayerEngagementState> | null | undefined,
   username: string,
@@ -250,10 +320,28 @@ export function normalizeMultiplayerEngagementState(
       ? Math.max(0, Number(value)) % CONTRACT_TEMPLATES[category].length
       : generatedVariants[category];
   };
+  const seenEventIds = new Set<string>();
   const events = (state?.events || [])
-    .filter(event => VALID_EVENT_KINDS.has(event.kind) && Number.isFinite(event.occurredAt))
+    .map(event => {
+      const kind = normalizeEventKind(event.kind);
+      const id = normalizeOptionalEventId(event.id);
+      if (!kind || !id || !Number.isFinite(event.occurredAt) || seenEventIds.has(id)) return null;
+      seenEventIds.add(id);
+      const normalizedEvent: MultiplayerEngagementEvent = {
+        id,
+        kind,
+        occurredAt: event.occurredAt,
+        recordedAt: Number.isFinite(event.recordedAt) ? event.recordedAt : event.occurredAt,
+        actorUsername: normalizeOptionalEventId(event.actorUsername) || username.trim() || 'unknown',
+      };
+      const contextId = normalizeOptionalEventId(event.contextId);
+      const targetId = normalizeOptionalEventId(event.targetId);
+      if (contextId) normalizedEvent.contextId = contextId;
+      if (targetId) normalizedEvent.targetId = targetId;
+      return normalizedEvent;
+    })
+    .filter((event): event is MultiplayerEngagementEvent => Boolean(event))
     .filter(event => event.occurredAt >= now - EVENT_RETENTION_MS && event.occurredAt <= now + 60_000)
-    .map(event => ({ id: String(event.id), kind: event.kind, occurredAt: event.occurredAt }))
     .sort((left, right) => left.occurredAt - right.occurredAt)
     .slice(-160);
   const returnDays = Array.from(new Set((state?.returnDays || []).filter(value => (
@@ -269,6 +357,7 @@ export function normalizeMultiplayerEngagementState(
     : undefined;
 
   return {
+    version: MULTIPLAYER_ENGAGEMENT_VERSION,
     dateKey,
     weekKey,
     contractVariants: {
@@ -301,7 +390,7 @@ export function getMultiplayerDailyContracts(
     const template = CONTRACT_TEMPLATES[category][normalized.contractVariants[category]];
     const id = `${normalized.dateKey}:${template.id}`;
     const progress = normalized.events.filter(event => (
-      event.kind === template.eventKind && event.occurredAt >= dayStart
+      template.eventKinds.includes(event.kind) && event.occurredAt >= dayStart
     )).length;
     return {
       ...template,
@@ -316,14 +405,29 @@ export function getMultiplayerDailyContracts(
 export function recordMultiplayerEngagementEvent(
   state: Partial<MultiplayerEngagementState> | null | undefined,
   username: string,
-  kind: MultiplayerEngagementEventKind,
+  eventInput: MultiplayerEngagementEventInput | MultiplayerEngagementEventInputKind,
   now = Date.now(),
 ): MultiplayerEngagementState {
   const normalized = normalizeMultiplayerEngagementState(state, username, now);
+  const input = typeof eventInput === 'string' ? { kind: eventInput } : eventInput;
+  const kind = normalizeEventKind(input.kind);
+  if (!kind) return normalized;
   const sequence = normalized.telemetry.eventsRecorded + 1;
+  const occurredAt = Number.isFinite(input.occurredAt) ? Number(input.occurredAt) : now;
+  const id = normalizeOptionalEventId(input.id) || `${kind}-${occurredAt}-${sequence}`;
+  if (normalized.events.some(event => event.id === id)) return normalized;
+
   return normalizeMultiplayerEngagementState({
     ...normalized,
-    events: [...normalized.events, { id: `${kind}-${now}-${sequence}`, kind, occurredAt: now }],
+    events: [...normalized.events, {
+      id,
+      kind,
+      occurredAt,
+      recordedAt: now,
+      actorUsername: username.trim() || 'unknown',
+      contextId: normalizeOptionalEventId(input.contextId),
+      targetId: normalizeOptionalEventId(input.targetId),
+    }],
     telemetry: { ...normalized.telemetry, eventsRecorded: sequence },
   }, username, now);
 }
@@ -388,9 +492,9 @@ export function getMultiplayerWeeklyOath(
   const weekStart = dateKeyToStart(normalized.weekKey);
   const weeklyEvents = normalized.events.filter(event => event.occurredAt >= weekStart);
   const contributions = {
-    combat: weeklyEvents.filter(event => event.kind === 'battle-win' || event.kind === 'dungeon-clear').length,
-    world: weeklyEvents.filter(event => event.kind === 'job-start').length,
-    social: weeklyEvents.filter(event => event.kind === 'social-action').length,
+    combat: weeklyEvents.filter(event => WEEKLY_CONTRIBUTION_KINDS.combat.has(event.kind)).length,
+    world: weeklyEvents.filter(event => WEEKLY_CONTRIBUTION_KINDS.world.has(event.kind)).length,
+    social: weeklyEvents.filter(event => WEEKLY_CONTRIBUTION_KINDS.social.has(event.kind)).length,
   };
   const target = 8;
   const progress = contributions.combat + contributions.world + contributions.social;

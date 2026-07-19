@@ -48,7 +48,8 @@ import {
   rerollMultiplayerDailyContract as rerollMultiplayerDailyContractState,
   touchMultiplayerEngagement as touchMultiplayerEngagementState,
   type MultiplayerContractView,
-  type MultiplayerEngagementEventKind,
+  type MultiplayerEngagementEventInput,
+  type MultiplayerEngagementEventInputKind,
   type MultiplayerEngagementState,
   type MultiplayerReturnTrackView,
   type MultiplayerWeeklyOathView,
@@ -1574,6 +1575,18 @@ export function claimCityQuestReward(questId: string): {
     minions: mergeMinionStacks(currentUser.minions || [], reward.minions),
     knownSpellIds: spellUnlock.knownSpellIds,
     cityQuests: updatedCityQuests,
+    multiplayerEngagement: recordMultiplayerEngagementEvent(
+      currentUser.multiplayerEngagement,
+      currentUser.username,
+      {
+        id: `city-contract-completed:${quest.id}`,
+        kind: 'city-contract-completed',
+        occurredAt: completedAt,
+        contextId: quest.town,
+        targetId: quest.id,
+      },
+      completedAt,
+    ),
     activityLog: pushActivityEntry(currentUser.activityLog, {
       id: `activity-city-quest-${quest.id}-${completedAt}`,
       type: 'quest',
@@ -1757,6 +1770,18 @@ export function claimStoryQuestReward(questId: string): {
       ...storyQuests.filter(item => item.questId !== questId),
       { questId, claimed: true, completedAt, introSeen: true },
     ],
+    multiplayerEngagement: recordMultiplayerEngagementEvent(
+      currentUser.multiplayerEngagement,
+      currentUser.username,
+      {
+        id: `story-quest-completed:${quest.id}`,
+        kind: 'story-quest-completed',
+        occurredAt: completedAt,
+        contextId: quest.chapter,
+        targetId: quest.id,
+      },
+      completedAt,
+    ),
     activityLog: pushActivityEntry(currentUser.activityLog, {
       id: `activity-story-quest-${quest.id}-${completedAt}`,
       type: 'quest',
@@ -4508,7 +4533,7 @@ export function touchCurrentMultiplayerEngagement(now = Date.now()): Multiplayer
 }
 
 export function recordCurrentMultiplayerEngagementEvent(
-  kind: MultiplayerEngagementEventKind,
+  event: MultiplayerEngagementEventInput | MultiplayerEngagementEventInputKind,
   now = Date.now(),
 ): MultiplayerEngagementState | null {
   const currentUser = getCurrentUser();
@@ -4516,7 +4541,7 @@ export function recordCurrentMultiplayerEngagementEvent(
   const state = recordMultiplayerEngagementEvent(
     currentUser.multiplayerEngagement,
     currentUser.username,
-    kind,
+    event,
     now,
   );
   updateCurrentUser({ multiplayerEngagement: state });
@@ -4831,6 +4856,18 @@ export function checkTravelComplete(): boolean {
       y: currentUser.traveling.targetY,
       traveling: null,
       activityLog: arrivalActivityLog,
+      multiplayerEngagement: recordMultiplayerEngagementEvent(
+        currentUser.multiplayerEngagement,
+        currentUser.username,
+        {
+          id: `travel-completed:${currentUser.traveling.eventSeed || currentUser.traveling.startTime}`,
+          kind: 'travel-completed',
+          occurredAt: completedAt,
+          contextId: arrivalPoi?.id || 'world-map',
+          targetId: `${currentUser.traveling.targetX}:${currentUser.traveling.targetY}`,
+        },
+        completedAt,
+      ),
     });
     return true;
   }
@@ -5040,7 +5077,7 @@ export function getJobRewardPreview(jobIndex: number, poiType?: string): JobRewa
   };
 }
 
-export function startJob(poiId: string, poiName: string, jobName: string, jobIndex: number, poiX: number, poiY: number, poiType?: string): { success: boolean; error?: string } {
+export function startJob(poiId: string, poiName: string, jobName: string, jobIndex: number, poiX: number, poiY: number, poiType?: string): { success: boolean; jobId?: string; error?: string } {
   const currentUser = getCurrentUser();
   if (!currentUser) return { success: false, error: 'Not logged in' };
 
@@ -5058,7 +5095,8 @@ export function startJob(poiId: string, poiName: string, jobName: string, jobInd
   // Determine where the player will be when this job starts
   let startX = currentUser.x;
   let startY = currentUser.y;
-  let jobStartTime = Date.now();
+  const queuedAt = Date.now();
+  let jobStartTime = queuedAt;
   
   // If there are jobs in the queue, this job starts after the last one completes
   if (currentUser.jobQueue.length > 0) {
@@ -5090,7 +5128,7 @@ export function startJob(poiId: string, poiName: string, jobName: string, jobInd
   const guaranteedItems = rewardPreview.items?.map(item => ({ ...item })) || [];
 
   const newJob: JobState = {
-    id: `job-${Date.now()}-${Math.random()}`,
+    id: `job-${queuedAt}-${Math.random()}`,
     poiId,
     poiName,
     jobName,
@@ -5118,9 +5156,23 @@ export function startJob(poiId: string, poiName: string, jobName: string, jobInd
   };
 
   const updatedQueue = [...currentUser.jobQueue, newJob];
-  updateCurrentUser({ jobQueue: updatedQueue });
+  updateCurrentUser({
+    jobQueue: updatedQueue,
+    multiplayerEngagement: recordMultiplayerEngagementEvent(
+      currentUser.multiplayerEngagement,
+      currentUser.username,
+      {
+        id: `job-started:${newJob.id}`,
+        kind: 'job-started',
+        occurredAt: queuedAt,
+        contextId: poiId,
+        targetId: newJob.id,
+      },
+      queuedAt,
+    ),
+  });
 
-  return { success: true };
+  return { success: true, jobId: newJob.id };
 }
 
 export function updateJobTravelProgress(): void {
@@ -5324,6 +5376,20 @@ export function checkJobsComplete(): void {
       minions: updatedMinions,
       cityQuests: updatedCityQuests,
       activityLog: updatedActivityLog,
+      multiplayerEngagement: firstJob
+        ? recordMultiplayerEngagementEvent(
+            currentUser.multiplayerEngagement,
+            currentUser.username,
+            {
+              id: `job-completed:${firstJob.id}`,
+              kind: 'job-completed',
+              occurredAt: now,
+              contextId: firstJob.poiId,
+              targetId: firstJob.id,
+            },
+            now,
+          )
+        : currentUser.multiplayerEngagement,
     });
   }
 }

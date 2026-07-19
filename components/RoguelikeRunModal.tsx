@@ -1875,9 +1875,30 @@ function RunController({
 
     if (session.mode === 'encounter' && session.outcome === 'victory') {
       completeMultiplayerTutorialCallout(getCurrentUser()?.username, 'battle-result-claim');
-      recordCurrentMultiplayerEngagementEvent('battle-win');
+      recordCurrentMultiplayerEngagementEvent({
+        id: `battle-result-claimed:${session.id}`,
+        kind: 'battle-result-claimed',
+        occurredAt: completedAt,
+        contextId: session.encounterEnemy?.spawnRegionId || 'world-encounter',
+        targetId: session.encounterEnemy?.id || session.id,
+      }, completedAt);
+      if (session.encounterEnemy?.bossId) {
+        recordCurrentMultiplayerEngagementEvent({
+          id: `boss-defeated:${session.encounterEnemy.bossId}:${session.id}`,
+          kind: 'boss-defeated',
+          occurredAt: completedAt,
+          contextId: session.encounterEnemy.spawnRegionId || 'world-boss',
+          targetId: session.encounterEnemy.bossId,
+        }, completedAt);
+      }
     } else if ((session.mode === 'dungeon' || session.mode === 'mpDaily') && session.outcome === 'victory') {
-      recordCurrentMultiplayerEngagementEvent('dungeon-clear');
+      recordCurrentMultiplayerEngagementEvent({
+        id: `dungeon-cleared:${session.id}`,
+        kind: 'dungeon-cleared',
+        occurredAt: completedAt,
+        contextId: session.mode,
+        targetId: session.dungeon?.id || session.id,
+      }, completedAt);
     }
     setSession({ ...session, rewardClaimed: true, notice });
 

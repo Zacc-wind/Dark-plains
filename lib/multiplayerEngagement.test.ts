@@ -29,12 +29,21 @@ describe('multiplayer engagement loops', () => {
     let state = normalizeMultiplayerEngagementState(null, 'Banner', NOW);
     const combat = getMultiplayerDailyContracts(state, 'Banner', NOW).find(contract => contract.category === 'combat')!;
 
-    state = recordMultiplayerEngagementEvent(state, 'Banner', 'job-start', NOW + 1);
+    state = recordMultiplayerEngagementEvent(state, 'Banner', {
+      id: 'job-started:job-1',
+      kind: 'job-started',
+      contextId: 'harbor-farm',
+      targetId: 'job-1',
+    }, NOW + 1);
     expect(getMultiplayerDailyContracts(state, 'Banner', NOW + 1).find(contract => contract.id === combat.id)?.progress).toBe(0);
     expect(claimMultiplayerDailyContract(state, 'Banner', combat.id, NOW + 1).success).toBe(false);
 
     for (let count = 0; count < combat.target; count += 1) {
-      state = recordMultiplayerEngagementEvent(state, 'Banner', 'battle-win', NOW + 10 + count);
+      state = recordMultiplayerEngagementEvent(state, 'Banner', {
+        id: `battle-result-claimed:encounter-${count}`,
+        kind: 'battle-result-claimed',
+        targetId: `enemy-${count}`,
+      }, NOW + 10 + count);
     }
     const claimed = claimMultiplayerDailyContract(state, 'Banner', combat.id, NOW + 20);
     expect(claimed.success).toBe(true);
@@ -56,7 +65,7 @@ describe('multiplayer engagement loops', () => {
 
   it('shares weekly progress across combat, world, and social contribution paths', () => {
     let state = normalizeMultiplayerEngagementState(null, 'WeeklyBanner', NOW);
-    const kinds = ['battle-win', 'job-start', 'social-action', 'dungeon-clear'] as const;
+    const kinds = ['battle-result-claimed', 'job-started', 'friend-action', 'dungeon-cleared'] as const;
     for (let index = 0; index < 8; index += 1) {
       state = recordMultiplayerEngagementEvent(state, 'WeeklyBanner', kinds[index % kinds.length], NOW + index);
     }
@@ -67,6 +76,48 @@ describe('multiplayer engagement loops', () => {
     const claimed = claimMultiplayerWeeklyOath(state, 'WeeklyBanner', NOW + 20);
     expect(claimed.success).toBe(true);
     expect(claimMultiplayerWeeklyOath(claimed.state, 'WeeklyBanner', NOW + 21).success).toBe(false);
+  });
+
+  it('stores contextual events once when the same genuine action is reported twice', () => {
+    const input = {
+      id: 'story-quest-completed:story-01-first-banner',
+      kind: 'story-quest-completed' as const,
+      occurredAt: NOW,
+      contextId: 'chapter-1',
+      targetId: 'story-01-first-banner',
+    };
+    const first = recordMultiplayerEngagementEvent(null, 'ContextBanner', input, NOW + 5);
+    const duplicate = recordMultiplayerEngagementEvent(first, 'ContextBanner', input, NOW + 10);
+
+    expect(duplicate.events).toHaveLength(1);
+    expect(duplicate.telemetry.eventsRecorded).toBe(1);
+    expect(duplicate.events[0]).toMatchObject({
+      ...input,
+      kind: 'story-quest-completed',
+      actorUsername: 'ContextBanner',
+      recordedAt: NOW + 5,
+    });
+  });
+
+  it('migrates retained legacy event names into canonical semantic events', () => {
+    const legacy = {
+      dateKey: '2026-07-20',
+      weekKey: '2026-07-20',
+      events: [
+        { id: 'old-battle', kind: 'battle-win', occurredAt: NOW },
+        { id: 'old-job', kind: 'job-start', occurredAt: NOW + 1 },
+        { id: 'old-dungeon', kind: 'dungeon-clear', occurredAt: NOW + 2 },
+      ],
+    } as unknown as Parameters<typeof normalizeMultiplayerEngagementState>[0];
+
+    const normalized = normalizeMultiplayerEngagementState(legacy, 'LegacyBanner', NOW + 10);
+    expect(normalized.version).toBe(2);
+    expect(normalized.events.map(event => event.kind)).toEqual([
+      'battle-result-claimed',
+      'job-started',
+      'dungeon-cleared',
+    ]);
+    expect(normalized.events.every(event => event.actorUsername === 'LegacyBanner')).toBe(true);
   });
 
   it('creates and dismisses a briefing after three inactive days', () => {

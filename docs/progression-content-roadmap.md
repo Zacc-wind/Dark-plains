@@ -416,8 +416,8 @@ Do not make every achievement a power grant. Players need goals after the gamepl
 
 ### Multiplayer Now
 
-1. `MP-C0 Event foundation`: add semantic genuine-action events, idempotent consumers, definition versions, and tests.
-2. `MP-C1 Progression UI`: ship Campaign and Progression with Orders, Campaign, and Level Path tabs first; merge the existing contracts and journal entry points into it.
+1. `MP-C0 Event foundation` - complete: semantic genuine-action events, idempotent receipts, legacy normalization, definition versioning, and tests.
+2. `MP-C1 Progression UI` - first slice complete: Campaign and Progression now unifies Orders, Campaign, and Level Path with six chapter bands and registry-backed unlock previews.
 3. `MP-C2 Levels 1-5`: complete The First Banner chapter, add the Black Pike capstone, level 3/4/5 unlock conversations, chapter progress, and balanced early rewards.
 4. `MP-C3 Social and return completion`: finish trade/party request overlays, regional threat, first-win/dungeon bonuses, and rested catch-up.
 5. `MP-C4 Chronicle pilot`: add the internal 20-rank Black Pike Ledger using only implemented, genuine actions.
@@ -436,16 +436,18 @@ Do not make every achievement a power grant. Players need goals after the gamepl
 6. `SP-D5 Blessings and mastery`: add small run-start blessings, titles, advanced commander identities, and challenge records.
 7. `SP-D6 Database and boards`: mirror achievements, split leaderboards, and add server-backed records when deployment work resumes.
 
-## First Implementation Batch
+## First Implementation Batch - Complete 2026-07-19
 
 The next code batch should be intentionally smaller than this roadmap:
 
-1. Define the expanded multiplayer event vocabulary and tests.
-2. Add chapter display metadata without changing existing quest ids or completion state.
-3. Build the Campaign and Progression modal shell with Orders, Campaign, and Level Path tabs.
-4. Move existing daily/weekly/return UI and story journal access into that shell.
-5. Add a next-unlock panel backed only by `MULTIPLAYER_UNLOCK_REGISTRY`.
-6. Verify reload, genuine-action progress, keyboard/mobile layout, and old tutorial saves before writing new chapter rewards.
+1. [x] Define the expanded multiplayer event vocabulary and tests.
+2. [x] Add chapter display metadata without changing existing quest ids or completion state.
+3. [x] Build the Campaign and Progression modal shell with Orders, Campaign, and Level Path tabs.
+4. [x] Move existing daily/weekly/return UI and story journal access into that shell.
+5. [x] Add a next-unlock panel backed only by `MULTIPLAYER_UNLOCK_REGISTRY`.
+6. [x] Verify reload, genuine-action progress, keyboard/mobile layout, and old tutorial saves before writing new chapter rewards.
+
+The next implementation batch is `MP-C2`: finish the level 1-5 First Banner chapter as a complete playable band before adding the Chronicle pilot.
 
 ## Definition Of Done For Every Progression Slice
 

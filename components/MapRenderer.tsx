@@ -27,6 +27,7 @@ import {
   getStoryQuestStatus,
   getPendingStoryDialogQuest,
   markStoryQuestIntroSeen,
+  recordCurrentMultiplayerEngagementEvent,
   recordQuestNpcVisit,
   updateJobTravelProgress,
   isPartyMember as isSocialPartyMember,
@@ -2744,7 +2745,15 @@ function EnemyScoutModal({
                 <button
                   type="button"
                   data-multiplayer-tutorial-anchor="enemy-risk"
-                  onClick={() => completeMultiplayerTutorialCallout(currentUser?.username, 'enemy-risk')}
+                  onClick={() => {
+                    completeMultiplayerTutorialCallout(currentUser?.username, 'enemy-risk');
+                    recordCurrentMultiplayerEngagementEvent({
+                      id: `enemy-inspected:${enemy.id}`,
+                      kind: 'enemy-inspected',
+                      contextId: enemy.spawnRegionId || 'world-map',
+                      targetId: enemy.id,
+                    });
+                  }}
                   className={`mt-3 inline-flex rounded border px-3 py-1 text-xs font-black uppercase ${toneClass}`}
                 >
                   {preview.label}

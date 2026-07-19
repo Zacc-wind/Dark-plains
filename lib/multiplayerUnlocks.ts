@@ -28,6 +28,13 @@ export interface MultiplayerUnlockStatus extends MultiplayerUnlockDefinition {
   requirement: string;
 }
 
+export interface MultiplayerUnlockLevelGroup {
+  level: number;
+  unlocked: boolean;
+  current: boolean;
+  features: MultiplayerUnlockStatus[];
+}
+
 export type MultiplayerLevelSubject = number | {
   stats?: { level?: number } | null;
 } | null | undefined;
@@ -152,4 +159,32 @@ export function requireMultiplayerUnlock(
   return status.unlocked
     ? { allowed: true }
     : { allowed: false, error: `${status.title} unlocks at level ${status.minLevel}.` };
+}
+
+export function getMultiplayerUnlockLevelGroups(
+  subject: MultiplayerLevelSubject,
+): MultiplayerUnlockLevelGroup[] {
+  const level = getMultiplayerSubjectLevel(subject);
+  const definitions = Object.values(MULTIPLAYER_UNLOCK_REGISTRY);
+  const levels = Array.from(new Set(definitions.map(definition => definition.minLevel))).sort((left, right) => left - right);
+  return levels.map(pathLevel => ({
+    level: pathLevel,
+    unlocked: level >= pathLevel,
+    current: level === pathLevel,
+    features: definitions
+      .filter(definition => definition.minLevel === pathLevel)
+      .map(definition => getMultiplayerUnlockStatus(definition.id, subject)),
+  }));
+}
+
+export function getNextMultiplayerUnlocks(
+  subject: MultiplayerLevelSubject,
+  limit = 3,
+): MultiplayerUnlockStatus[] {
+  const level = getMultiplayerSubjectLevel(subject);
+  return Object.values(MULTIPLAYER_UNLOCK_REGISTRY)
+    .filter(definition => definition.minLevel > level)
+    .sort((left, right) => left.minLevel - right.minLevel || left.title.localeCompare(right.title))
+    .slice(0, Math.max(0, Math.floor(limit)))
+    .map(definition => getMultiplayerUnlockStatus(definition.id, subject));
 }

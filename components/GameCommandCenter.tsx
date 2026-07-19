@@ -12,9 +12,8 @@ import MultiplayerHubModal from './MultiplayerHubModal';
 import PveHubModal from './PveHubModal';
 import ChatLiveFeed from './ChatLiveFeed';
 import GameSettingsPanel from './GameSettingsPanel';
-import StoryJournalModal from './StoryJournalModal';
 import MultiplayerFeatureLock from './MultiplayerFeatureLock';
-import MultiplayerContractsModal from './MultiplayerContractsModal';
+import MultiplayerProgressionModal, { type MultiplayerProgressionTab } from './MultiplayerProgressionModal';
 import {
   ActivityEntry,
   AllocatableStat,
@@ -519,8 +518,8 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
   const [showMultiplayerHub, setShowMultiplayerHub] = useState(false);
   const [showPveHub, setShowPveHub] = useState(false);
   const [showMpDailyRun, setShowMpDailyRun] = useState(false);
-  const [showStoryJournal, setShowStoryJournal] = useState(false);
-  const [showMultiplayerContracts, setShowMultiplayerContracts] = useState(false);
+  const [showMultiplayerProgression, setShowMultiplayerProgression] = useState(false);
+  const [multiplayerProgressionTab, setMultiplayerProgressionTab] = useState<MultiplayerProgressionTab>('orders');
   const [isMapActionRailCompact, setIsMapActionRailCompact] = useState(true);
   const [isPartyDetailsOpen, setIsPartyDetailsOpen] = useState(false);
   const [partyInviteDraft, setPartyInviteDraft] = useState('');
@@ -618,7 +617,10 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
   useEffect(() => {
     if (showRandomRun) return;
     const engagement = touchCurrentMultiplayerEngagement();
-    if (engagement?.pendingBriefing) setShowMultiplayerContracts(true);
+    if (engagement?.pendingBriefing) {
+      setMultiplayerProgressionTab('orders');
+      setShowMultiplayerProgression(true);
+    }
     setUser(getCurrentUser());
   }, [engagementDayKey, showRandomRun]);
 
@@ -626,8 +628,7 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
     const handleForceMainScreen = () => {
       setIsCommandOpen(false);
       setShowDailyRun(false);
-      setShowStoryJournal(false);
-      setShowMultiplayerContracts(false);
+      setShowMultiplayerProgression(false);
       setActivePanel('overview');
       setArmySwapSourceId(null);
       setNotice('');
@@ -640,7 +641,11 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
   useEffect(() => {
     const handleOpenCommandPanel = (event: Event) => {
       const panel = (event as CustomEvent<{ panel?: unknown }>).detail?.panel;
-      setActivePanel(isPanelId(panel) ? panel : 'overview');
+      const nextPanel = isPanelId(panel) ? panel : 'overview';
+      if (!showRandomRun && nextPanel === 'jobs') {
+        completeMultiplayerTutorialCallout(user?.username, 'jobs-open');
+      }
+      setActivePanel(nextPanel);
       setShowDailyRun(false);
       setIsCommandOpen(true);
       emitFxEvent({ type: 'interface', tone: 'bone', intensity: 0.36 });
@@ -648,7 +653,7 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
 
     window.addEventListener('wizardy:open-command-panel', handleOpenCommandPanel);
     return () => window.removeEventListener('wizardy:open-command-panel', handleOpenCommandPanel);
-  }, []);
+  }, [showRandomRun, user?.username]);
 
   useEffect(() => {
     if (!showRandomRun) return;
@@ -767,24 +772,49 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
     window.setTimeout(() => setNotice(''), 3000);
   };
 
-  const applySocialResult = (result: { success: boolean; message?: string; error?: string }) => {
+  const openMultiplayerProgression = (tab: MultiplayerProgressionTab) => {
+    setMultiplayerProgressionTab(tab);
+    setShowMultiplayerProgression(true);
+  };
+
+  const applySocialResult = (
+    result: { success: boolean; message?: string; error?: string },
+    event?: { kind: 'friend-action' | 'party-action' | 'social-action'; targetId?: string },
+  ) => {
     playGameSound(result.success ? 'social.accept' : 'social.decline', { throttleMs: 120 });
-    if (result.success) recordCurrentMultiplayerEngagementEvent('social-action');
+    if (result.success) {
+      recordCurrentMultiplayerEngagementEvent({
+        kind: event?.kind || 'social-action',
+        contextId: 'command-center',
+        targetId: event?.targetId,
+      });
+    }
     setTemporaryNotice(result.message || result.error || (result.success ? 'Social action complete.' : 'Social action failed.'));
     setUser(getCurrentUser());
+  };
+
+  const applyPartyResult = (result: { success: boolean; message?: string; error?: string }, targetId?: string) => {
+    applySocialResult(result, { kind: 'party-action', targetId });
+  };
+
+  const applyFriendResult = (result: { success: boolean; message?: string; error?: string }, targetId?: string) => {
+    applySocialResult(result, { kind: 'friend-action', targetId });
   };
 
   const handleAddFriend = () => {
     const result = sendFriendRequest(friendSearch);
     if (result.success) setFriendSearch('');
-    applySocialResult(result);
+    applyFriendResult(result, friendSearch.trim());
   };
 
   const handleSendChat = () => {
     const result = sendSocialChatMessage(chatChannel, chatDraft);
     if (result.success) {
       setChatDraft('');
-      recordCurrentMultiplayerEngagementEvent('social-action');
+      recordCurrentMultiplayerEngagementEvent({
+        kind: 'chat-sent',
+        contextId: chatChannel,
+      });
       setUser(getCurrentUser());
       return;
     }
@@ -795,7 +825,7 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
   const handleInvitePartyPlayer = () => {
     const result = invitePlayerToParty(partyInviteDraft);
     if (result.success) setPartyInviteDraft('');
-    applySocialResult(result);
+    applyPartyResult(result, partyInviteDraft.trim());
   };
 
   const openPartyChat = () => {
@@ -1186,10 +1216,13 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
       )}
       {!showRandomRun && (
         <>
-          {showStoryJournal && (
-            <StoryJournalModal
+          {showMultiplayerProgression && (
+            <MultiplayerProgressionModal
+              isOpen
+              initialTab={multiplayerProgressionTab}
+              now={now}
               player={player}
-              onClose={() => setShowStoryJournal(false)}
+              onClose={() => setShowMultiplayerProgression(false)}
               onPlayerRefresh={() => setUser(getCurrentUser())}
               onSkipOnboarding={() => {
                 const result = skipMultiplayerOnboarding();
@@ -1206,14 +1239,6 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
             isOpen={showPveHub}
             onClose={() => setShowPveHub(false)}
           />
-          {showMultiplayerContracts && (
-            <MultiplayerContractsModal
-              isOpen
-              now={now}
-              onClose={() => setShowMultiplayerContracts(false)}
-              onPlayerRefresh={() => setUser(getCurrentUser())}
-            />
-          )}
           <MpDailyDungeonModal
             isOpen={showMpDailyRun}
             onClose={() => setShowMpDailyRun(false)}
@@ -1391,10 +1416,10 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
               type="button"
               onClick={() => {
                 emitFxEvent({ type: 'quest', tone: 'gold', intensity: 0.5 });
-                setShowMultiplayerContracts(true);
+                openMultiplayerProgression('orders');
               }}
               className={`map-action-button ${engagementView?.claimableCount ? 'map-action-button-primary' : ''}`}
-              title="Open daily and weekly multiplayer orders"
+              title="Open campaign, orders, and level progression"
             >
               <span className="map-action-icon relative overflow-hidden">
                 <Image
@@ -1406,10 +1431,10 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
                 />
               </span>
               <span className="map-action-copy">
-                <span className="map-action-label">Orders</span>
-                <span className="map-action-detail">Daily contracts & weekly oath</span>
+                <span className="map-action-label">Campaign</span>
+                <span className="map-action-detail">Orders, story & level path</span>
               </span>
-              <span className="map-action-badge">{engagementView?.claimableCount ? `${engagementView.claimableCount} ready` : 'Daily'}</span>
+              <span className="map-action-badge">{engagementView?.claimableCount ? `${engagementView.claimableCount} ready` : `Lv ${player.stats.level}`}</span>
             </button>
 
             <button
@@ -1573,7 +1598,7 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
           {currentIsInvited && (
             <button
               type="button"
-              onClick={() => applySocialResult(acceptPartyInvite())}
+              onClick={() => applyPartyResult(acceptPartyInvite())}
               className="party-map-strip-button party-map-strip-button-primary"
             >
               Join
@@ -1639,7 +1664,7 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
             </p>
             <button
               type="button"
-              onClick={() => applySocialResult(acceptPartyInvite())}
+              onClick={() => applyPartyResult(acceptPartyInvite())}
               className="party-details-action party-details-action-primary"
             >
               Join Party
@@ -1674,14 +1699,14 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
                       <span className="party-details-member-actions">
                         <button
                           type="button"
-                          onClick={() => applySocialResult(promotePartyMember(member.username))}
+                          onClick={() => applyPartyResult(promotePartyMember(member.username), member.username)}
                           className="party-details-mini-action"
                         >
                           Lead
                         </button>
                         <button
                           type="button"
-                          onClick={() => applySocialResult(removePlayerFromParty(member.username))}
+                          onClick={() => applyPartyResult(removePlayerFromParty(member.username), member.username)}
                           className="party-details-mini-action party-details-mini-danger"
                         >
                           Kick
@@ -1703,7 +1728,7 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
                       {isLeader && (
                         <button
                           type="button"
-                          onClick={() => applySocialResult(removePlayerFromParty(username))}
+                          onClick={() => applyPartyResult(removePlayerFromParty(username), username)}
                           aria-label={`Cancel invite to ${username}`}
                         >
                           X
@@ -1757,7 +1782,7 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
               </button>
               <button
                 type="button"
-                onClick={() => applySocialResult(leaveParty())}
+                onClick={() => applyPartyResult(leaveParty())}
                 className="party-details-action party-details-action-danger"
               >
                 Leave Party
@@ -1816,7 +1841,7 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
               {isInvitedToParty ? (
                 <button
                   type="button"
-                  onClick={() => applySocialResult(acceptPartyInvite())}
+                  onClick={() => applyPartyResult(acceptPartyInvite())}
                   className="ui-button-primary w-full rounded px-3 py-2 text-xs font-black"
                 >
                   Join Party
@@ -1824,7 +1849,7 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
               ) : (
                 <button
                   type="button"
-                  onClick={() => applySocialResult(leaveParty())}
+                  onClick={() => applyPartyResult(leaveParty())}
                   className="ui-button w-full rounded px-3 py-2 text-xs font-black"
                 >
                   Leave Party
@@ -1866,14 +1891,14 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     type="button"
-                    onClick={() => applySocialResult(acceptFriendRequest(request.username))}
+                    onClick={() => applyFriendResult(acceptFriendRequest(request.username), request.username)}
                     className="ui-button-primary rounded px-2 py-2 text-xs font-black"
                   >
                     Accept
                   </button>
                   <button
                     type="button"
-                    onClick={() => applySocialResult(declineFriendRequest(request.username))}
+                    onClick={() => applyFriendResult(declineFriendRequest(request.username), request.username)}
                     className="ui-button rounded px-2 py-2 text-xs font-black"
                   >
                     Decline
@@ -1894,14 +1919,14 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
                   <div className="flex shrink-0 gap-2">
                     <button
                       type="button"
-                      onClick={() => applySocialResult(invitePlayerToParty(friend.username))}
+                      onClick={() => applyPartyResult(invitePlayerToParty(friend.username), friend.username)}
                       className="ui-button rounded px-2 py-2 text-[10px] font-black"
                     >
                       Invite
                     </button>
                     <button
                       type="button"
-                      onClick={() => applySocialResult(removeFriend(friend.username))}
+                      onClick={() => applyFriendResult(removeFriend(friend.username), friend.username)}
                       className="ui-button rounded px-2 py-2 text-[10px] font-black"
                     >
                       Remove
@@ -1946,7 +1971,7 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
                     <div className="flex shrink-0 gap-2">
                       <button
                         type="button"
-                        onClick={() => applySocialResult(sendFriendRequest(candidate.username))}
+                        onClick={() => applyFriendResult(sendFriendRequest(candidate.username), candidate.username)}
                         disabled={Boolean(friend)}
                         className="ui-button rounded px-2 py-2 text-[10px] font-black disabled:opacity-35"
                       >
@@ -1954,7 +1979,7 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
                       </button>
                       <button
                         type="button"
-                        onClick={() => applySocialResult(invitePlayerToParty(candidate.username))}
+                        onClick={() => applyPartyResult(invitePlayerToParty(candidate.username), candidate.username)}
                         className="ui-button rounded px-2 py-2 text-[10px] font-black"
                       >
                         Party
@@ -2958,10 +2983,10 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
             <div className="flex justify-end">
               <button
                 type="button"
-                onClick={() => setShowStoryJournal(true)}
+                onClick={() => openMultiplayerProgression('campaign')}
                 className="ui-button rounded px-3 py-2 text-xs font-black"
               >
-                Open Story Journal
+                Open Campaign
               </button>
             </div>
             {visibleStoryQuests.length === 0 && <EmptyState text="No active story step. Level up or claim ready rewards." />}

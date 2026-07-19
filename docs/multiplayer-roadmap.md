@@ -137,8 +137,8 @@ Turn the current shared world-map prototype into a real multiplayer layer withou
 - Co-op combat must prioritize clarity: owner names, active player highlight, and action permissions should be obvious before adding extra mechanics.
 
 ## Recommended Implementation Order
-1. Add the shared genuine-action event foundation and Campaign/Progression shell described in `docs/progression-content-roadmap.md`.
-2. Finish the level 1-5 First Banner chapter, Black Pike capstone, and level 3/4/5 unlock conversations.
+1. [x] Add the shared genuine-action event foundation and Campaign/Progression shell described in `docs/progression-content-roadmap.md`.
+2. [ ] Finish the level 1-5 First Banner chapter, Black Pike capstone, and level 3/4/5 unlock conversations.
 3. Complete the shared social-request overlay for trade and party invites, then add the first regional threat and rested catch-up rules.
 4. Pilot the free Black Pike Ledger Chronicle using only implemented and validated activities.
 5. Refactor battle ownership and synchronization before implementing real player-versus-player and cooperative sessions.

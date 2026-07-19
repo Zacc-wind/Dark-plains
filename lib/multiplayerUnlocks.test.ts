@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   getMultiplayerSubjectLevel,
+  getMultiplayerUnlockLevelGroups,
   getMultiplayerUnlockStatus,
+  getNextMultiplayerUnlocks,
   MULTIPLAYER_UNLOCK_REGISTRY,
   requireMultiplayerUnlock,
 } from '@/lib/multiplayerUnlocks';
@@ -35,5 +37,16 @@ describe('multiplayer unlock registry', () => {
       error: 'Party Creation unlocks at level 5.',
     });
     expect(requireMultiplayerUnlock('party', { stats: { level: 5 } })).toEqual({ allowed: true });
+  });
+
+  it('builds a stable level path and previews only later implemented unlocks', () => {
+    const groups = getMultiplayerUnlockLevelGroups({ stats: { level: 3 } });
+    expect(groups.map(group => group.level)).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(groups.find(group => group.level === 3)?.current).toBe(true);
+    expect(groups.find(group => group.level === 4)?.unlocked).toBe(false);
+    expect(getNextMultiplayerUnlocks({ stats: { level: 3 } }, 2).map(item => item.id)).toEqual([
+      'trading',
+      'coop-dungeons',
+    ]);
   });
 });
