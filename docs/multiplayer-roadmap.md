@@ -12,7 +12,7 @@ Turn the current shared world-map prototype into a real multiplayer layer withou
 - [x] First-pass PVP challenge API route contracts exist.
 - [x] Supabase-backed profiles, presence, and online PVP challenge transport exist.
 - [x] Main-story introductions can open as two-character RPG conversations on the world map.
-- [ ] Challenge, trade, and party flows need polished in-game request popups and acceptance UX.
+- [x] Challenge, trade, and party flows have in-game request popups and acceptance UX in the local multiplayer prototype. Server-backed synchronization remains deployment work.
 - [ ] Player-vs-player combat still needs a real two-player battle session model.
 - [ ] Cooperative dungeon combat still needs multi-commander formation, turn order, and ownership rules.
 
@@ -38,7 +38,7 @@ Turn the current shared world-map prototype into a real multiplayer layer withou
 ## Phase 2: Social Request Popups
 - [x] Add a shared `SocialRequestOverlay` component for incoming requests. Party invitations use it now; the typed contract already reserves trade requests for the validated trade session.
 - [x] Challenge request popup: sword icon burst, challenger sprite/name, accept/decline buttons, timeout state.
-- [ ] Trade request popup: gold icon burst, requester sprite/name, accept/decline buttons, timeout state. Do not expose acceptance until it opens a real `TradeSession`.
+- [x] Trade request popup: requester portrait/name, accept/decline buttons, timeout state, request sound, and direct handoff into a real `TradeSession`.
 - [x] Party invite popup: banner/group presentation, leader name, party size, accept/decline buttons, outside/Escape dismissal, and timeout cleanup.
 - [x] Add request sounds: challenge received, trade received, party invite received, accept, decline.
 - [x] Store request state with ids, sender, receiver, createdAt, expiresAt, status, and payload.
@@ -61,11 +61,11 @@ Turn the current shared world-map prototype into a real multiplayer layer withou
 - [ ] Add anti-grief checks: level gap warning, safe zones if needed, decline without penalty.
 
 ## Phase 5: Trading
-- [ ] Add `TradeSession` state: initiator, receiver, offers, locks, accepted flags, completed/cancelled.
-- [ ] Trade gold and allowed inventory/gear only; never trade singleplayer run resources.
-- [ ] Add two-column trade window with both players' offers, lock state, and final accept confirmation.
-- [ ] Validate ownership at completion so stale local state cannot duplicate items.
-- [ ] Add trade history activity entries for both players.
+- [x] Add versioned `TradeSession` state: initiator, receiver, offers, locks, accepted flags, expiry, completed/cancelled status.
+- [x] Trade gold, non-quest inventory, and unequipped gear only; spells, minions, quest items, equipped gear, and singleplayer resources never enter the session.
+- [x] Add a responsive two-column trade window with editable own offer, read-only opposing offer, lock invalidation, and separate final confirmation.
+- [x] Validate live ownership, gold, equipped state, duplicate gear ids, and receiver gear capacity atomically at completion in the local authoritative action layer.
+- [x] Add mirrored trade history and idempotent `trade-completed` engagement receipts for both players.
 
 ## Phase 6: Cooperative Dungeons
 - [ ] Add `CoopDungeonSession` state: party id, members, dungeon level, route nodes, bosses, shared seed, current chamber.
@@ -107,7 +107,7 @@ Turn the current shared world-map prototype into a real multiplayer layer withou
 - [x] Add a three-slot daily contract board: one combat task, one world/job task, and one social or co-op task. Allow one reroll per day.
 - [x] Add a rotating regional threat that changes enemy composition and culminates in a deterministic weekly named boss target.
 - [x] Add a weekly faction oath with several contribution paths so combat, jobs, trade, and co-op players can all progress it.
-- [ ] Add first-win and first-dungeon-clear bonuses with moderate rewards; avoid mandatory multi-hour streak pressure.
+- [x] Add duplicate-safe daily first-win and first-dungeon-clear bonuses with moderate gold/XP rewards and genuine receipt requirements.
 - [x] Add a seven-day return track with a missed-day buffer and no exclusive combat power.
 - [x] Add a returning-player briefing after several inactive days: current threats, unfinished story objective, party activity, and one catch-up contract.
 - [x] Add capped rested job XP or contract progress so returning players can catch up without making daily players irrelevant. Returning players receive at most three +25% job-XP charges, each capped at 50 XP.
@@ -140,7 +140,7 @@ Turn the current shared world-map prototype into a real multiplayer layer withou
 1. [x] Add the shared genuine-action event foundation and Campaign/Progression shell described in `docs/progression-content-roadmap.md`.
 2. [x] Finish the level 1-5 First Banner chapter, Black Pike capstone, and level 3/4/5 unlock conversations.
 3. [x] Complete the shared request lifecycle and party invite overlay, then add the first regional threat and rested catch-up rules.
-4. Implement the validated `TradeSession` and its request popup, then add first-win and first-dungeon-clear bonuses.
+4. [x] Implement the validated local `TradeSession`, request popup, and first-win/first-dungeon-clear bonuses.
 5. Pilot the free Black Pike Ledger Chronicle using only implemented and validated activities.
 6. Refactor battle ownership and synchronization before implementing real player-versus-player and cooperative sessions.
 7. Produce levels 6-30 as complete five-level content bands, one chapter at a time.

@@ -51,6 +51,7 @@ export interface MultiplayerEngagementTelemetry {
   briefingsShown: number;
   regionalThreatClaims: number;
   restedJobBonusesUsed: number;
+  firstCompletionBonusClaims: number;
 }
 
 export interface ReturningPlayerBriefingState {
@@ -67,6 +68,7 @@ export interface MultiplayerEngagementState {
   rerollUsed: boolean;
   weeklyClaimed: boolean;
   claimedRegionalThreatIds: string[];
+  claimedFirstCompletionBonusIds: string[];
   restedJobCharges: number;
   events: MultiplayerEngagementEvent[];
   telemetry: MultiplayerEngagementTelemetry;
@@ -110,6 +112,23 @@ export interface MultiplayerReturnTrackView {
   days: Array<{ dateKey: string; visited: boolean }>;
 }
 
+export type MultiplayerFirstCompletionBonusId = 'first-win' | 'first-dungeon';
+
+export interface MultiplayerFirstCompletionBonusView {
+  id: string;
+  bonusId: MultiplayerFirstCompletionBonusId;
+  title: string;
+  description: string;
+  eventKind: MultiplayerEngagementEventKind;
+  minLevel: number;
+  unlocked: boolean;
+  complete: boolean;
+  claimed: boolean;
+  rewardGold: number;
+  rewardExp: number;
+  iconPath: string;
+}
+
 interface MultiplayerContractTemplate {
   id: string;
   category: MultiplayerContractCategory;
@@ -125,7 +144,7 @@ interface MultiplayerContractTemplate {
 const DAY_MS = 24 * 60 * 60 * 1000;
 const EVENT_RETENTION_MS = 15 * DAY_MS;
 const RETURN_DAY_RETENTION_MS = 30 * DAY_MS;
-export const MULTIPLAYER_ENGAGEMENT_VERSION = 3;
+export const MULTIPLAYER_ENGAGEMENT_VERSION = 4;
 export const MULTIPLAYER_RESTED_JOB_BONUS_PERCENT = 25;
 export const MULTIPLAYER_MAX_RESTED_JOB_CHARGES = 3;
 const VALID_EVENT_KINDS = new Set<MultiplayerEngagementEventKind>([
@@ -158,6 +177,29 @@ const WEEKLY_CONTRIBUTION_KINDS: Record<MultiplayerContractCategory, Set<Multipl
   social: new Set(['social-action', 'chat-sent', 'friend-action', 'party-action', 'trade-completed']),
 };
 export const MULTIPLAYER_CONTRACT_CATEGORIES: MultiplayerContractCategory[] = ['combat', 'world', 'social'];
+
+const FIRST_COMPLETION_BONUSES: Array<Omit<MultiplayerFirstCompletionBonusView, 'id' | 'unlocked' | 'complete' | 'claimed'>> = [
+  {
+    bonusId: 'first-win',
+    title: 'First Victory',
+    description: 'Claim the first genuine battle report of the day.',
+    eventKind: 'battle-result-claimed',
+    minLevel: 1,
+    rewardGold: 45,
+    rewardExp: 25,
+    iconPath: '/assets/icons/attack.png',
+  },
+  {
+    bonusId: 'first-dungeon',
+    title: 'First Dungeon Clear',
+    description: 'Complete and claim one multiplayer dungeon run today.',
+    eventKind: 'dungeon-cleared',
+    minLevel: 2,
+    rewardGold: 90,
+    rewardExp: 45,
+    iconPath: '/assets/icons/loot-chest.png',
+  },
+];
 
 const CONTRACT_TEMPLATES: Record<MultiplayerContractCategory, MultiplayerContractTemplate[]> = {
   combat: [
@@ -299,6 +341,7 @@ function normalizeTelemetry(value?: Partial<MultiplayerEngagementTelemetry>): Mu
     briefingsShown: Math.max(0, Math.floor(value?.briefingsShown || 0)),
     regionalThreatClaims: Math.max(0, Math.floor(value?.regionalThreatClaims || 0)),
     restedJobBonusesUsed: Math.max(0, Math.floor(value?.restedJobBonusesUsed || 0)),
+    firstCompletionBonusClaims: Math.max(0, Math.floor(value?.firstCompletionBonusClaims || 0)),
   };
 }
 
@@ -385,6 +428,9 @@ export function normalizeMultiplayerEngagementState(
     weeklyClaimed: sameWeek && Boolean(state?.weeklyClaimed),
     claimedRegionalThreatIds: sameWeek
       ? Array.from(new Set((state?.claimedRegionalThreatIds || []).filter(id => typeof id === 'string')))
+      : [],
+    claimedFirstCompletionBonusIds: sameDate
+      ? Array.from(new Set((state?.claimedFirstCompletionBonusIds || []).filter(id => typeof id === 'string')))
       : [],
     restedJobCharges: Math.min(
       MULTIPLAYER_MAX_RESTED_JOB_CHARGES,
@@ -623,6 +669,62 @@ export function getMultiplayerEngagementClaimableCount(
     .filter(contract => contract.complete && !contract.claimed).length;
   const weekly = getMultiplayerWeeklyOath(state, username, now);
   return daily + (weekly.complete && !weekly.claimed ? 1 : 0);
+}
+
+export function getMultiplayerFirstCompletionBonuses(
+  state: Partial<MultiplayerEngagementState> | null | undefined,
+  username: string,
+  level: number,
+  now = Date.now(),
+): MultiplayerFirstCompletionBonusView[] {
+  const normalized = normalizeMultiplayerEngagementState(state, username, now);
+  const dayStart = dateKeyToStart(normalized.dateKey);
+  const playerLevel = Math.max(1, Math.floor(level || 1));
+  return FIRST_COMPLETION_BONUSES.map(definition => {
+    const id = `${normalized.dateKey}:${definition.bonusId}`;
+    const unlocked = playerLevel >= definition.minLevel;
+    const complete = unlocked && normalized.events.some(event => (
+      event.kind === definition.eventKind && event.occurredAt >= dayStart
+    ));
+    return {
+      ...definition,
+      id,
+      unlocked,
+      complete,
+      claimed: normalized.claimedFirstCompletionBonusIds.includes(id),
+    };
+  });
+}
+
+export function claimMultiplayerFirstCompletionBonus(
+  state: Partial<MultiplayerEngagementState> | null | undefined,
+  username: string,
+  level: number,
+  bonusId: MultiplayerFirstCompletionBonusId,
+  now = Date.now(),
+): { success: boolean; state: MultiplayerEngagementState; bonus: MultiplayerFirstCompletionBonusView; error?: string } {
+  const normalized = normalizeMultiplayerEngagementState(state, username, now);
+  const bonus = getMultiplayerFirstCompletionBonuses(normalized, username, level, now)
+    .find(candidate => candidate.bonusId === bonusId);
+  if (!bonus) {
+    throw new Error(`Unknown multiplayer completion bonus: ${bonusId}`);
+  }
+  if (!bonus.unlocked) return { success: false, state: normalized, bonus, error: `${bonus.title} unlocks at level ${bonus.minLevel}.` };
+  if (bonus.claimed) return { success: false, state: normalized, bonus, error: `${bonus.title} already claimed today.` };
+  if (!bonus.complete) return { success: false, state: normalized, bonus, error: `${bonus.title} is not complete.` };
+
+  return {
+    success: true,
+    bonus,
+    state: normalizeMultiplayerEngagementState({
+      ...normalized,
+      claimedFirstCompletionBonusIds: [...normalized.claimedFirstCompletionBonusIds, bonus.id],
+      telemetry: {
+        ...normalized.telemetry,
+        firstCompletionBonusClaims: normalized.telemetry.firstCompletionBonusClaims + 1,
+      },
+    }, username, now),
+  };
 }
 
 export function getMultiplayerRegionalThreat(

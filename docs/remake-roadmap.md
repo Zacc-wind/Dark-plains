@@ -262,7 +262,7 @@
 - [x] Add map-side social presence markers that do not clutter combat/quest markers.
 - [x] Draft proper multiplayer implementation plan for challenge popups, trade popups, party UI, player duels, co-op dungeons, and multi-owner combat.
 - [x] Add cinematic incoming challenge popup with sword icon, challenger identity, accept/decline, timeout, and sound.
-- [ ] Add cinematic incoming trade popup with gold icon, requester identity, accept/decline, timeout, and sound.
+- [x] Add cinematic incoming trade popup with requester identity, accept/decline, timeout, sound, and handoff into the validated local trade session.
 - [x] Add compact party HUD map strip with member status, pending invites, and party chat shortcut.
 - [x] Add a party details popover from the map strip with promote, leave, invite, kick, and party-chat actions.
 - [ ] Implement real player-vs-player duel sessions with both sides controlled by humans and opponent commander names shown in combat.

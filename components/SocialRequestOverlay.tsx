@@ -3,7 +3,9 @@
 import Image from 'next/image';
 import { useEffect, useRef, useState } from 'react';
 import {
+  acceptPlayerTradeRequest,
   acceptPartyInvite,
+  declinePlayerTradeRequest,
   declinePartyInvite,
   expireCurrentSocialRequests,
   getCurrentUser,
@@ -85,19 +87,21 @@ export default function SocialRequestOverlay() {
   const dismiss = () => setDismissedIds(ids => ids.includes(incoming.id) ? ids : [...ids, incoming.id]);
 
   const handleResponse = (response: 'accept' | 'decline') => {
-    if (busy || incoming.kind !== 'party') return;
+    if (busy) return;
     setBusy(true);
     setNotice('');
-    const result = response === 'accept'
-      ? acceptPartyInvite(incoming.id)
-      : declinePartyInvite(incoming.id);
+    const result = incoming.kind === 'party'
+      ? response === 'accept' ? acceptPartyInvite(incoming.id) : declinePartyInvite(incoming.id)
+      : response === 'accept' ? acceptPlayerTradeRequest(incoming.id) : declinePlayerTradeRequest(incoming.id);
     if (result.success) {
-      recordCurrentMultiplayerEngagementEvent({
-        id: `party-action:${incoming.id}:${response}`,
-        kind: 'party-action',
-        contextId: 'social-request',
-        targetId: incoming.senderUsername,
-      });
+      if (incoming.kind === 'party') {
+        recordCurrentMultiplayerEngagementEvent({
+          id: `party-action:${incoming.id}:${response}`,
+          kind: 'party-action',
+          contextId: 'social-request',
+          targetId: incoming.senderUsername,
+        });
+      }
       playGameSound(response === 'accept' ? 'social.accept' : 'social.decline', { throttleMs: 120 });
       setDismissedIds(ids => ids.includes(incoming.id) ? ids : [...ids, incoming.id]);
       setRevision(value => value + 1);
@@ -159,30 +163,24 @@ export default function SocialRequestOverlay() {
               </div>
             </div>
 
-            {incoming.kind === 'party' ? (
-              <div className="grid grid-cols-2 gap-3 border-t px-5 py-4">
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => handleResponse('decline')}
-                  className="ui-button-danger rounded px-4 py-3 text-sm font-black disabled:opacity-40"
-                >
-                  Decline
-                </button>
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => handleResponse('accept')}
-                  className="ui-button-primary rounded px-4 py-3 text-sm font-black disabled:opacity-40"
-                >
-                  Join Party
-                </button>
-              </div>
-            ) : (
-              <div className="border-t px-5 py-4 text-center text-xs font-bold text-amber-100">
-                Player exchanges remain locked until the validated trade session opens.
-              </div>
-            )}
+            <div className="grid grid-cols-2 gap-3 border-t px-5 py-4">
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => handleResponse('decline')}
+                className="ui-button-danger rounded px-4 py-3 text-sm font-black disabled:opacity-40"
+              >
+                Decline
+              </button>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => handleResponse('accept')}
+                className="ui-button-primary rounded px-4 py-3 text-sm font-black disabled:opacity-40"
+              >
+                {incoming.kind === 'party' ? 'Join Party' : 'Open Trade'}
+              </button>
+            </div>
             {notice && <div className="ui-notice border-t px-5 py-3 text-center text-xs font-bold">{notice}</div>}
           </section>
         </CinematicScrollShell>

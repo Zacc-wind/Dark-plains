@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
   claimMultiplayerDailyContract,
+  claimMultiplayerFirstCompletionBonus,
   claimMultiplayerRegionalThreat,
   claimMultiplayerWeeklyOath,
   consumeMultiplayerRestedJobBonus,
   dismissMultiplayerReturningBriefing,
   getMultiplayerDailyContracts,
+  getMultiplayerFirstCompletionBonuses,
   getMultiplayerReturnTrack,
   getMultiplayerRegionalThreat,
   getMultiplayerWeeklyOath,
@@ -114,7 +116,7 @@ describe('multiplayer engagement loops', () => {
     } as unknown as Parameters<typeof normalizeMultiplayerEngagementState>[0];
 
     const normalized = normalizeMultiplayerEngagementState(legacy, 'LegacyBanner', NOW + 10);
-    expect(normalized.version).toBe(3);
+    expect(normalized.version).toBe(4);
     expect(normalized.events.map(event => event.kind)).toEqual([
       'battle-result-claimed',
       'job-started',
@@ -147,6 +149,40 @@ describe('multiplayer engagement loops', () => {
     const final = consumeMultiplayerRestedJobBonus(capped.state, 'RestedBanner', 40, NOW + 3);
     expect(final.state.restedJobCharges).toBe(0);
     expect(consumeMultiplayerRestedJobBonus(final.state, 'RestedBanner', 40, NOW + 4).consumed).toBe(false);
+  });
+
+  it('claims each daily first-completion bonus once from its genuine event', () => {
+    let state = normalizeMultiplayerEngagementState(null, 'FirstBonusBanner', NOW);
+    expect(getMultiplayerFirstCompletionBonuses(state, 'FirstBonusBanner', 1, NOW)).toMatchObject([
+      { bonusId: 'first-win', complete: false, claimed: false, unlocked: true },
+      { bonusId: 'first-dungeon', complete: false, claimed: false, unlocked: false },
+    ]);
+
+    state = recordMultiplayerEngagementEvent(state, 'FirstBonusBanner', {
+      id: 'first-real-win',
+      kind: 'battle-result-claimed',
+      contextId: 'western-vigil',
+    }, NOW + 1);
+    let bonuses = getMultiplayerFirstCompletionBonuses(state, 'FirstBonusBanner', 2, NOW + 2);
+    expect(bonuses[0].complete).toBe(true);
+    expect(bonuses[1].complete).toBe(false);
+    const firstWin = claimMultiplayerFirstCompletionBonus(state, 'FirstBonusBanner', 2, 'first-win', NOW + 3);
+    expect(firstWin.success).toBe(true);
+    expect(claimMultiplayerFirstCompletionBonus(firstWin.state, 'FirstBonusBanner', 2, 'first-win', NOW + 4).success).toBe(false);
+
+    state = recordMultiplayerEngagementEvent(firstWin.state, 'FirstBonusBanner', {
+      id: 'first-real-dungeon',
+      kind: 'dungeon-cleared',
+      contextId: 'daily-dungeon',
+    }, NOW + 5);
+    const dungeon = claimMultiplayerFirstCompletionBonus(state, 'FirstBonusBanner', 2, 'first-dungeon', NOW + 6);
+    expect(dungeon.success).toBe(true);
+    bonuses = getMultiplayerFirstCompletionBonuses(dungeon.state, 'FirstBonusBanner', 2, NOW + 7);
+    expect(bonuses.every(bonus => bonus.claimed)).toBe(true);
+
+    const tomorrow = NOW + DAY;
+    expect(getMultiplayerFirstCompletionBonuses(dungeon.state, 'FirstBonusBanner', 2, tomorrow)
+      .every(bonus => !bonus.claimed && !bonus.complete)).toBe(true);
   });
 
   it('completes and claims a regional threat only from matching regional receipts', () => {

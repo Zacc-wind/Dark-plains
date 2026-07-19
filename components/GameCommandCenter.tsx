@@ -35,12 +35,14 @@ import {
   assignMinionToBattleSlot,
   allocateStatPoint,
   cancelJob,
+  cancelPlayerTradeSession,
   cancelTravel,
   claimQuestReward,
   equipItem,
   equipBattleSpellSet,
   getBalancedQuestExp,
   getCurrentUser,
+  getCurrentPlayerTradeSession,
   getDailyRunLeaderboard,
   getDailyRunState,
   getDailyRunStatus,
@@ -82,6 +84,7 @@ import {
   removeFriend,
   removePlayerFromParty,
   recordCurrentMultiplayerEngagementEvent,
+  requestPlayerTrade,
   sendFriendRequest,
   sendSocialChatMessage,
   skipMultiplayerOnboarding,
@@ -114,6 +117,7 @@ import {
   skipMultiplayerTutorial,
 } from '@/lib/multiplayerTutorial';
 import { getMultiplayerUnlockStatus } from '@/lib/multiplayerUnlocks';
+import { TRADE_SESSION_OPEN_EVENT } from '@/lib/tradeSessions';
 
 type PanelId = 'overview' | 'character' | 'inventory' | 'minions' | 'spells' | 'jobs' | 'quests' | 'social' | 'settings' | 'runs' | 'leaderboards' | 'history';
 type PanelIconName = 'overview' | 'character' | 'inventory' | 'minions' | 'spells' | 'jobs' | 'quests' | 'social' | 'settings' | 'runs' | 'leaderboards' | 'history';
@@ -743,6 +747,8 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
   const pvpUnlock = getMultiplayerUnlockStatus('pvp-hub', player);
   const pveUnlock = getMultiplayerUnlockStatus('dungeon-preview', player);
   const partyUnlock = getMultiplayerUnlockStatus('party', player);
+  const tradingUnlock = getMultiplayerUnlockStatus('trading', player);
+  const activeTradeSession = getCurrentPlayerTradeSession(player, now);
 
   const getEquippedItem = (slot: EquipmentSlot) => {
     const equipmentId = equippedSlots[slot];
@@ -799,6 +805,16 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
 
   const applyFriendResult = (result: { success: boolean; message?: string; error?: string }, targetId?: string) => {
     applySocialResult(result, { kind: 'friend-action', targetId });
+  };
+
+  const applyTradeResult = (result: { success: boolean; message?: string; error?: string }) => {
+    playGameSound(result.success ? 'social.accept' : 'social.decline', { throttleMs: 120 });
+    setTemporaryNotice(result.message || result.error || (result.success ? 'Trade action complete.' : 'Trade action failed.'));
+    setUser(getCurrentUser());
+  };
+
+  const openActiveTrade = () => {
+    window.dispatchEvent(new Event(TRADE_SESSION_OPEN_EVENT));
   };
 
   const handleAddFriend = () => {
@@ -1801,6 +1817,11 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
   function renderSocial() {
     const isInvitedToParty = partyInvites.some(username => username.toLowerCase() === player.username.toLowerCase());
     const visibleCandidates = socialCandidates.slice(0, 8);
+    const tradeOtherUsername = activeTradeSession
+      ? activeTradeSession.initiatorUsername.toLowerCase() === player.username.toLowerCase()
+        ? activeTradeSession.receiverUsername
+        : activeTradeSession.initiatorUsername
+      : '';
 
     return (
       <div className="social-panel-grid">
@@ -1862,6 +1883,44 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
             </div>
           ) : (
             <EmptyState text="No party. Invite a nearby player or friend." />
+          )}
+        </section>
+
+        <section className="ui-card rounded border p-4">
+          <SectionTitle title="Player Exchange" action={activeTradeSession ? activeTradeSession.status : 'Secure'} />
+          {!tradingUnlock.unlocked ? (
+            <MultiplayerFeatureLock status={tradingUnlock} compact />
+          ) : activeTradeSession ? (
+            <div className="space-y-3">
+              <div className="social-row rounded px-3 py-3">
+                <p className="arcane-label">{activeTradeSession.status === 'pending' ? 'Request Pending' : 'Trade Active'}</p>
+                <p className="mt-1 text-sm font-black text-zinc-100">{tradeOtherUsername}</p>
+                <p className="ui-muted mt-1 text-xs font-bold">
+                  {activeTradeSession.status === 'pending'
+                    ? 'The exchange opens when the invited commander accepts.'
+                    : `Offer version ${activeTradeSession.version} is ready for review.`}
+                </p>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  disabled={activeTradeSession.status !== 'active'}
+                  onClick={openActiveTrade}
+                  className="ui-button-primary rounded px-3 py-2 text-xs font-black disabled:opacity-35"
+                >
+                  Open Trade
+                </button>
+                <button
+                  type="button"
+                  onClick={() => applyTradeResult(cancelPlayerTradeSession(activeTradeSession.id))}
+                  className="ui-button-danger rounded px-3 py-2 text-xs font-black"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : (
+            <EmptyState text="Choose Trade beside an eligible player to send a protected exchange request." />
           )}
         </section>
 
@@ -1987,6 +2046,14 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
                         className="ui-button rounded px-2 py-2 text-[10px] font-black"
                       >
                         Party
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => applyTradeResult(requestPlayerTrade(candidate.username))}
+                        disabled={!tradingUnlock.unlocked || (candidate.stats?.level || 1) < tradingUnlock.minLevel || Boolean(activeTradeSession)}
+                        className="ui-button rounded px-2 py-2 text-[10px] font-black disabled:opacity-35"
+                      >
+                        Trade
                       </button>
                     </div>
                   </div>

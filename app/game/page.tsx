@@ -13,6 +13,7 @@ import ThreeFxOverlay from '@/components/ThreeFxOverlay';
 import MapFogOverlay from '@/components/MapFogOverlay';
 import PvpChallengeOverlay from '@/components/PvpChallengeOverlay';
 import SocialRequestOverlay from '@/components/SocialRequestOverlay';
+import TradeSessionOverlay from '@/components/TradeSessionOverlay';
 import MultiplayerTutorialSpotlight from '@/components/MultiplayerTutorialSpotlight';
 import { writeGameMode } from '@/lib/gameMode';
 
@@ -67,6 +68,7 @@ export default function GamePage() {
       <CompletionOverlay />
       <PvpChallengeOverlay />
       <SocialRequestOverlay />
+      <TradeSessionOverlay />
       <MultiplayerTutorialSpotlight />
     </div>
   );

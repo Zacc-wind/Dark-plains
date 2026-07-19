@@ -44,13 +44,30 @@ import {
   type SocialRequestStatus,
 } from './socialRequests';
 import {
+  TRADE_REQUEST_TTL_MS,
+  activateTradeSession as activateTradeSessionState,
+  confirmTradeSession as confirmTradeSessionState,
+  createTradeSession,
+  getCurrentTradeSession as getCurrentTradeSessionState,
+  getTradeOffer,
+  getTradeSessionSide,
+  normalizeTradeSessions,
+  setTradeSessionLock as setTradeSessionLockState,
+  setTradeSessionStatus,
+  updateTradeSessionOffer as updateTradeSessionOfferState,
+  type TradeOffer,
+  type TradeSession,
+} from './tradeSessions';
+import {
   claimMultiplayerDailyContract as claimMultiplayerDailyContractState,
+  claimMultiplayerFirstCompletionBonus as claimMultiplayerFirstCompletionBonusState,
   claimMultiplayerRegionalThreat as claimMultiplayerRegionalThreatState,
   claimMultiplayerWeeklyOath as claimMultiplayerWeeklyOathState,
   consumeMultiplayerRestedJobBonus,
   dismissMultiplayerReturningBriefing as dismissMultiplayerReturningBriefingState,
   getMultiplayerDailyContracts,
   getMultiplayerEngagementClaimableCount,
+  getMultiplayerFirstCompletionBonuses,
   getMultiplayerReturnTrack,
   getMultiplayerRegionalThreat,
   getMultiplayerWeeklyOath,
@@ -62,6 +79,8 @@ import {
   type MultiplayerEngagementEventInput,
   type MultiplayerEngagementEventInputKind,
   type MultiplayerEngagementState,
+  type MultiplayerFirstCompletionBonusId,
+  type MultiplayerFirstCompletionBonusView,
   type MultiplayerReturnTrackView,
   type MultiplayerWeeklyOathView,
 } from './multiplayerEngagement';
@@ -410,6 +429,7 @@ export interface SocialState {
   friends: FriendRecord[];
   party?: PartyState;
   requests?: SocialRequestRecord[];
+  tradeSessions?: TradeSession[];
 }
 
 export interface SocialChatMessage {
@@ -2287,10 +2307,12 @@ function normalizeSocialStateForUser(user: Pick<User, 'username' | 'social'> | n
 
   const party = normalizePartyState(user?.social?.party, ownUsername);
   const requests = normalizeSocialRequests(user?.social?.requests);
+  const tradeSessions = normalizeTradeSessions(user?.social?.tradeSessions);
   return {
     friends: Array.from(friendMap.values()),
     ...(party ? { party } : {}),
     ...(requests.length > 0 ? { requests } : {}),
+    ...(tradeSessions.length > 0 ? { tradeSessions } : {}),
   };
 }
 
@@ -2390,6 +2412,24 @@ function upsertSocialRequestForUsers(users: User[], request: SocialRequestRecord
   });
 }
 
+function upsertTradeSessionForUsers(users: User[], session: TradeSession): User[] {
+  const participants = new Set([
+    normalizeUsername(session.initiatorUsername),
+    normalizeUsername(session.receiverUsername),
+  ]);
+  return users.map(user => {
+    if (!participants.has(normalizeUsername(user.username))) return user;
+    const social = getSocialState(user);
+    return setUserSocial(user, {
+      ...social,
+      tradeSessions: normalizeTradeSessions([
+        session,
+        ...(social.tradeSessions || []).filter(existing => existing.id !== session.id),
+      ]),
+    });
+  });
+}
+
 function respondToSocialRequestForUsers(
   users: User[],
   request: SocialRequestRecord,
@@ -2424,7 +2464,8 @@ function reconcileExpiredSocialRequests(users: User[], now = Date.now()): User[]
   let nextUsers = users.map(user => {
     const social = getSocialState(user);
     const requests = normalizeSocialRequests(social.requests, now);
-    return setUserSocial(user, { ...social, requests });
+    const tradeSessions = normalizeTradeSessions(social.tradeSessions, now);
+    return setUserSocial(user, { ...social, requests, tradeSessions });
   });
   const expiredPartyRequests = new Map<string, SocialRequestRecord>();
 
@@ -2476,6 +2517,14 @@ export function getIncomingSocialRequests(
 ): SocialRequestRecord[] {
   if (!user) return [];
   return getIncomingSocialRequestRecords(getSocialState(user).requests, user.username, now);
+}
+
+export function getCurrentPlayerTradeSession(
+  user: Pick<User, 'username' | 'social'> | null | undefined = getCurrentUser(),
+  now = Date.now(),
+): TradeSession | undefined {
+  if (!user) return undefined;
+  return getCurrentTradeSessionState(getSocialState(user).tradeSessions, user.username, now);
 }
 
 export function getFriendRecord(user: Pick<User, 'username' | 'social'> | null | undefined, username: string): FriendRecord | undefined {
@@ -2852,6 +2901,341 @@ export function removePlayerFromParty(targetUsername: string): { success: boolea
     success: true,
     message: removedMember ? `${removedMember} removed from party.` : `Invite to ${removedInvite} cancelled.`,
   };
+}
+
+export interface PlayerTradeActionResult {
+  success: boolean;
+  message?: string;
+  error?: string;
+  session?: TradeSession;
+  completed?: boolean;
+}
+
+function isTradeOfferEmpty(offer: TradeOffer): boolean {
+  return offer.gold <= 0 && offer.items.length === 0 && offer.equipmentIds.length === 0;
+}
+
+function validatePlayerTradeOffer(user: User, offer: TradeOffer): string | undefined {
+  if (offer.gold > user.gold) return `${user.username} no longer has enough gold for this offer.`;
+
+  for (const offeredItem of offer.items) {
+    const inventoryItem = (user.inventory || []).find(item => item.id === offeredItem.itemId);
+    if (!inventoryItem || inventoryItem.quantity < offeredItem.quantity) {
+      return `${user.username} no longer owns the offered item quantity.`;
+    }
+    const definition = getInventoryItemDefinition(offeredItem.itemId);
+    if (definition?.kind === 'quest' || inventoryItem.kind === 'quest') {
+      return 'Quest items cannot be traded.';
+    }
+  }
+
+  const equippedIds = new Set(Object.values(user.equippedSlots || {}).filter(Boolean));
+  for (const equipmentId of offer.equipmentIds) {
+    if (!(user.equipment || []).some(item => item.id === equipmentId)) {
+      return `${user.username} no longer owns the offered gear.`;
+    }
+    if (equippedIds.has(equipmentId)) return 'Equipped gear cannot be traded.';
+  }
+
+  return undefined;
+}
+
+function getTradeInventoryItems(user: User, offer: TradeOffer): InventoryItem[] {
+  return offer.items.map(offeredItem => {
+    const inventoryItem = (user.inventory || []).find(item => item.id === offeredItem.itemId);
+    return normalizeInventoryItem({
+      ...(inventoryItem || makeInventoryItem(offeredItem.itemId)),
+      quantity: offeredItem.quantity,
+    });
+  });
+}
+
+function describeTradeOffer(user: User, offer: TradeOffer): string {
+  const parts: string[] = [];
+  if (offer.gold > 0) parts.push(`${offer.gold} gold`);
+  offer.items.forEach(item => {
+    const name = (user.inventory || []).find(candidate => candidate.id === item.itemId)?.name
+      || getInventoryItemDefinition(item.itemId)?.name
+      || item.itemId;
+    parts.push(`${item.quantity} ${name}`);
+  });
+  offer.equipmentIds.forEach(id => {
+    parts.push((user.equipment || []).find(item => item.id === id)?.name || 'gear');
+  });
+  return parts.join(', ') || 'nothing';
+}
+
+function getTradeSessionFromUser(user: User, sessionId: string, now = Date.now()): TradeSession | undefined {
+  return normalizeTradeSessions(getSocialState(user).tradeSessions, now)
+    .find(session => session.id === sessionId && getTradeSessionSide(session, user.username));
+}
+
+export function requestPlayerTrade(targetUsername: string, now = Date.now()): PlayerTradeActionResult {
+  const current = getCurrentUser();
+  if (!current) return { success: false, error: 'Login required.' };
+  const unlock = requireMultiplayerUnlock('trading', current);
+  if (!unlock.allowed) return { success: false, error: unlock.error };
+
+  const users = reconcileExpiredSocialRequests(getUsers(), now);
+  const currentIndex = findUserIndex(users, current.username);
+  const targetIndex = findUserIndex(users, targetUsername);
+  if (currentIndex === -1 || targetIndex === -1) return { success: false, error: 'Player not found.' };
+  const target = users[targetIndex];
+  if (normalizeUsername(current.username) === normalizeUsername(target.username)) {
+    return { success: false, error: 'You cannot trade with yourself.' };
+  }
+  const targetUnlock = requireMultiplayerUnlock('trading', target);
+  if (!targetUnlock.allowed) return { success: false, error: `${target.username} must reach level 4 before trading.` };
+
+  const currentSession = getCurrentTradeSessionState(getSocialState(users[currentIndex]).tradeSessions, current.username, now);
+  const targetSession = getCurrentTradeSessionState(getSocialState(target).tradeSessions, target.username, now);
+  if (currentSession) return { success: false, error: 'Finish or cancel your current trade first.' };
+  if (targetSession) return { success: false, error: `${target.username} is already handling another trade.` };
+
+  const session = createTradeSession(current.username, target.username, now);
+  const request = createSocialRequest({
+    kind: 'trade',
+    senderUsername: current.username,
+    receiverUsername: target.username,
+    payload: { tradeSessionId: session.id },
+    now,
+    ttlMs: TRADE_REQUEST_TTL_MS,
+  });
+  let nextUsers = upsertTradeSessionForUsers(users, session);
+  nextUsers = upsertSocialRequestForUsers(nextUsers, request);
+  persistUsersWithCurrent(nextUsers, current.username);
+  return { success: true, message: `Trade request sent to ${target.username}.`, session };
+}
+
+export function acceptPlayerTradeRequest(requestId: string, now = Date.now()): PlayerTradeActionResult {
+  const current = getCurrentUser();
+  if (!current) return { success: false, error: 'Login required.' };
+  const unlock = requireMultiplayerUnlock('trading', current);
+  if (!unlock.allowed) return { success: false, error: unlock.error };
+
+  const users = reconcileExpiredSocialRequests(getUsers(), now);
+  const currentIndex = findUserIndex(users, current.username);
+  if (currentIndex === -1) return { success: false, error: 'Player not found.' };
+  const request = getIncomingSocialRequests(users[currentIndex], now)
+    .find(candidate => candidate.id === requestId && candidate.kind === 'trade');
+  if (!request?.payload?.tradeSessionId) return { success: false, error: 'Trade request expired or was withdrawn.' };
+
+  const session = getTradeSessionFromUser(users[currentIndex], request.payload.tradeSessionId, now);
+  if (!session) return { success: false, error: 'Trade session not found.' };
+  const activation = activateTradeSessionState(session, current.username, now);
+  if (!activation.success) return { success: false, error: activation.error, session: activation.session };
+
+  let nextUsers = respondToSocialRequestForUsers(users, request, 'accepted', now);
+  nextUsers = upsertTradeSessionForUsers(nextUsers, activation.session);
+  persistUsersWithCurrent(nextUsers, current.username);
+  return { success: true, message: `Trade opened with ${request.senderUsername}.`, session: activation.session };
+}
+
+export function declinePlayerTradeRequest(requestId: string, now = Date.now()): PlayerTradeActionResult {
+  const current = getCurrentUser();
+  if (!current) return { success: false, error: 'Login required.' };
+  const users = reconcileExpiredSocialRequests(getUsers(), now);
+  const currentIndex = findUserIndex(users, current.username);
+  if (currentIndex === -1) return { success: false, error: 'Player not found.' };
+  const request = getIncomingSocialRequests(users[currentIndex], now)
+    .find(candidate => candidate.id === requestId && candidate.kind === 'trade');
+  if (!request?.payload?.tradeSessionId) return { success: false, error: 'Trade request expired or was withdrawn.' };
+  const session = getTradeSessionFromUser(users[currentIndex], request.payload.tradeSessionId, now);
+  if (!session) return { success: false, error: 'Trade session not found.' };
+
+  const cancelled = setTradeSessionStatus(session, 'cancelled', now, current.username);
+  let nextUsers = respondToSocialRequestForUsers(users, request, 'declined', now);
+  nextUsers = upsertTradeSessionForUsers(nextUsers, cancelled);
+  persistUsersWithCurrent(nextUsers, current.username);
+  return { success: true, message: 'Trade request declined.', session: cancelled };
+}
+
+export function cancelPlayerTradeSession(sessionId: string, now = Date.now()): PlayerTradeActionResult {
+  const current = getCurrentUser();
+  if (!current) return { success: false, error: 'Login required.' };
+  const users = reconcileExpiredSocialRequests(getUsers(), now);
+  const currentIndex = findUserIndex(users, current.username);
+  if (currentIndex === -1) return { success: false, error: 'Player not found.' };
+  const session = getTradeSessionFromUser(users[currentIndex], sessionId, now);
+  if (!session || !['pending', 'active'].includes(session.status)) {
+    return { success: false, error: 'Trade session is no longer active.' };
+  }
+
+  const cancelled = setTradeSessionStatus(session, 'cancelled', now, current.username);
+  let nextUsers = upsertTradeSessionForUsers(users, cancelled);
+  const request = getSocialState(users[currentIndex]).requests?.find(candidate => (
+    candidate.kind === 'trade' && candidate.payload?.tradeSessionId === session.id && candidate.status === 'pending'
+  ));
+  if (request) nextUsers = setSocialRequestStatusForUsers(nextUsers, request.id, 'cancelled', now);
+  persistUsersWithCurrent(nextUsers, current.username);
+  return { success: true, message: 'Trade cancelled.', session: cancelled };
+}
+
+export function updateCurrentPlayerTradeOffer(
+  sessionId: string,
+  offer: Partial<TradeOffer>,
+  expectedVersion?: number,
+  now = Date.now(),
+): PlayerTradeActionResult {
+  const current = getCurrentUser();
+  if (!current) return { success: false, error: 'Login required.' };
+  const users = reconcileExpiredSocialRequests(getUsers(), now);
+  const currentIndex = findUserIndex(users, current.username);
+  if (currentIndex === -1) return { success: false, error: 'Player not found.' };
+  const session = getTradeSessionFromUser(users[currentIndex], sessionId, now);
+  if (!session) return { success: false, error: 'Trade session not found.' };
+  if (expectedVersion !== undefined && session.version !== expectedVersion) {
+    return { success: false, error: 'Trade changed. Review the latest offers before editing.', session };
+  }
+
+  const update = updateTradeSessionOfferState(session, current.username, offer, now);
+  if (!update.success) return { success: false, error: update.error, session: update.session };
+  const ownOffer = getTradeOffer(update.session, current.username);
+  const validationError = ownOffer ? validatePlayerTradeOffer(users[currentIndex], ownOffer) : 'Trade participant not found.';
+  if (validationError) return { success: false, error: validationError, session };
+
+  const nextUsers = upsertTradeSessionForUsers(users, update.session);
+  persistUsersWithCurrent(nextUsers, current.username);
+  return { success: true, message: 'Trade offer updated.', session: update.session };
+}
+
+export function setCurrentPlayerTradeLock(
+  sessionId: string,
+  locked: boolean,
+  expectedVersion?: number,
+  now = Date.now(),
+): PlayerTradeActionResult {
+  const current = getCurrentUser();
+  if (!current) return { success: false, error: 'Login required.' };
+  const users = reconcileExpiredSocialRequests(getUsers(), now);
+  const currentIndex = findUserIndex(users, current.username);
+  if (currentIndex === -1) return { success: false, error: 'Player not found.' };
+  const session = getTradeSessionFromUser(users[currentIndex], sessionId, now);
+  if (!session) return { success: false, error: 'Trade session not found.' };
+  if (expectedVersion !== undefined && session.version !== expectedVersion) {
+    return { success: false, error: 'Trade changed. Review the latest offers before locking.', session };
+  }
+  if (locked) {
+    const ownOffer = getTradeOffer(session, current.username);
+    const validationError = ownOffer ? validatePlayerTradeOffer(users[currentIndex], ownOffer) : 'Trade participant not found.';
+    if (validationError) return { success: false, error: validationError, session };
+  }
+
+  const update = setTradeSessionLockState(session, current.username, locked, now);
+  if (!update.success) return { success: false, error: update.error, session: update.session };
+  const nextUsers = upsertTradeSessionForUsers(users, update.session);
+  persistUsersWithCurrent(nextUsers, current.username);
+  return { success: true, message: locked ? 'Offer locked.' : 'Offer unlocked.', session: update.session };
+}
+
+export function confirmCurrentPlayerTrade(
+  sessionId: string,
+  expectedVersion?: number,
+  now = Date.now(),
+): PlayerTradeActionResult {
+  const current = getCurrentUser();
+  if (!current) return { success: false, error: 'Login required.' };
+  const users = reconcileExpiredSocialRequests(getUsers(), now);
+  const currentIndex = findUserIndex(users, current.username);
+  if (currentIndex === -1) return { success: false, error: 'Player not found.' };
+  const session = getTradeSessionFromUser(users[currentIndex], sessionId, now);
+  if (!session) return { success: false, error: 'Trade session not found.' };
+  if (expectedVersion !== undefined && session.version !== expectedVersion) {
+    return { success: false, error: 'Trade changed. Review the latest offers before confirming.', session };
+  }
+
+  const confirmation = confirmTradeSessionState(session, current.username, now);
+  if (!confirmation.success) return { success: false, error: confirmation.error, session: confirmation.session };
+  if (!confirmation.readyToComplete) {
+    const nextUsers = upsertTradeSessionForUsers(users, confirmation.session);
+    persistUsersWithCurrent(nextUsers, current.username);
+    return { success: true, message: 'Trade confirmed. Waiting for the other commander.', session: confirmation.session };
+  }
+
+  const initiatorIndex = findUserIndex(users, confirmation.session.initiatorUsername);
+  const receiverIndex = findUserIndex(users, confirmation.session.receiverUsername);
+  if (initiatorIndex === -1 || receiverIndex === -1) return { success: false, error: 'Trade participant not found.' };
+  const initiator = users[initiatorIndex];
+  const receiver = users[receiverIndex];
+  const initiatorError = validatePlayerTradeOffer(initiator, confirmation.session.initiatorOffer);
+  const receiverError = validatePlayerTradeOffer(receiver, confirmation.session.receiverOffer);
+  if (initiatorError || receiverError) return { success: false, error: initiatorError || receiverError, session };
+  if (isTradeOfferEmpty(confirmation.session.initiatorOffer) && isTradeOfferEmpty(confirmation.session.receiverOffer)) {
+    return { success: false, error: 'At least one item, gear piece, or gold offer is required.', session };
+  }
+
+  const initiatorIncomingGear = (receiver.equipment || []).filter(item => confirmation.session.receiverOffer.equipmentIds.includes(item.id));
+  const receiverIncomingGear = (initiator.equipment || []).filter(item => confirmation.session.initiatorOffer.equipmentIds.includes(item.id));
+  const initiatorGearAfter = getGearUsedSlots(initiator) - confirmation.session.initiatorOffer.equipmentIds.length + initiatorIncomingGear.length;
+  const receiverGearAfter = getGearUsedSlots(receiver) - confirmation.session.receiverOffer.equipmentIds.length + receiverIncomingGear.length;
+  if (initiatorGearAfter > getInventorySlotCapacity(initiator)) return { success: false, error: `${initiator.username} has no gear storage for this trade.`, session };
+  if (receiverGearAfter > getInventorySlotCapacity(receiver)) return { success: false, error: `${receiver.username} has no gear storage for this trade.`, session };
+  const initiatorOwnedGearIds = new Set((initiator.equipment || []).map(item => item.id));
+  const receiverOwnedGearIds = new Set((receiver.equipment || []).map(item => item.id));
+  if (initiatorIncomingGear.some(item => initiatorOwnedGearIds.has(item.id)) || receiverIncomingGear.some(item => receiverOwnedGearIds.has(item.id))) {
+    return { success: false, error: 'Duplicate gear ownership detected. Trade cancelled for safety.', session };
+  }
+
+  const initiatorIncomingItems = getTradeInventoryItems(receiver, confirmation.session.receiverOffer);
+  const receiverIncomingItems = getTradeInventoryItems(initiator, confirmation.session.initiatorOffer);
+  const completedSession = setTradeSessionStatus(confirmation.session, 'completed', now);
+  const initiatorSent = describeTradeOffer(initiator, confirmation.session.initiatorOffer);
+  const receiverSent = describeTradeOffer(receiver, confirmation.session.receiverOffer);
+
+  let nextUsers = users.map(user => {
+    const isInitiator = normalizeUsername(user.username) === normalizeUsername(initiator.username);
+    const isReceiver = normalizeUsername(user.username) === normalizeUsername(receiver.username);
+    if (!isInitiator && !isReceiver) return user;
+
+    const ownOffer = isInitiator ? confirmation.session.initiatorOffer : confirmation.session.receiverOffer;
+    const otherOffer = isInitiator ? confirmation.session.receiverOffer : confirmation.session.initiatorOffer;
+    const incomingItems = isInitiator ? initiatorIncomingItems : receiverIncomingItems;
+    const incomingGear = isInitiator ? initiatorIncomingGear : receiverIncomingGear;
+    const otherUsername = isInitiator ? receiver.username : initiator.username;
+    let inventory = user.inventory || [];
+    ownOffer.items.forEach(item => {
+      inventory = removeInventoryItem(inventory, item.itemId, item.quantity);
+    });
+    inventory = addInventoryItems(inventory, incomingItems);
+    const outgoingGear = new Set(ownOffer.equipmentIds);
+    const equipment = [...(user.equipment || []).filter(item => !outgoingGear.has(item.id)), ...incomingGear];
+    const rewards: RewardSummary = {
+      gold: otherOffer.gold || undefined,
+      goldLoss: ownOffer.gold || undefined,
+      items: incomingItems.length > 0 ? incomingItems : undefined,
+      equipment: incomingGear.length > 0 ? incomingGear : undefined,
+    };
+    return {
+      ...user,
+      gold: user.gold - ownOffer.gold + otherOffer.gold,
+      inventory,
+      equipment,
+      activityLog: pushActivityEntry(user.activityLog, {
+        id: `activity-player-trade-${completedSession.id}-${normalizeUsername(user.username)}`,
+        type: 'item',
+        title: `Trade with ${otherUsername}`,
+        source: 'Player Exchange',
+        completedAt: now,
+        rewards,
+        description: `Sent ${isInitiator ? initiatorSent : receiverSent}; received ${isInitiator ? receiverSent : initiatorSent}.`,
+      }),
+      multiplayerEngagement: recordMultiplayerEngagementEvent(
+        user.multiplayerEngagement,
+        user.username,
+        {
+          id: `trade-completed:${completedSession.id}`,
+          kind: 'trade-completed',
+          occurredAt: now,
+          contextId: 'player-exchange',
+          targetId: otherUsername,
+        },
+        now,
+      ),
+    };
+  });
+  nextUsers = upsertTradeSessionForUsers(nextUsers, completedSession);
+  persistUsersWithCurrent(nextUsers, current.username);
+  return { success: true, completed: true, message: 'Trade completed and recorded for both commanders.', session: completedSession };
 }
 
 export function getPartyMembers(user: Pick<User, 'username' | 'social'> | null | undefined = getCurrentUser()): User[] {
@@ -4699,6 +5083,7 @@ export interface MultiplayerEngagementView {
   weeklyOath: MultiplayerWeeklyOathView;
   returnTrack: MultiplayerReturnTrackView;
   regionalThreat: RegionalThreatView;
+  firstCompletionBonuses: MultiplayerFirstCompletionBonusView[];
   claimableCount: number;
 }
 
@@ -4709,14 +5094,17 @@ export function getMultiplayerEngagementView(
   if (!user) return null;
   const state = normalizeMultiplayerEngagementState(user.multiplayerEngagement, user.username, now);
   const regionalThreat = getMultiplayerRegionalThreat(state, user.username, user.stats.level, now);
+  const firstCompletionBonuses = getMultiplayerFirstCompletionBonuses(state, user.username, user.stats.level, now);
   return {
     state,
     dailyContracts: getMultiplayerDailyContracts(state, user.username, now),
     weeklyOath: getMultiplayerWeeklyOath(state, user.username, now),
     returnTrack: getMultiplayerReturnTrack(state, user.username, now),
     regionalThreat,
+    firstCompletionBonuses,
     claimableCount: getMultiplayerEngagementClaimableCount(state, user.username, now)
-      + (regionalThreat.complete && !regionalThreat.claimed ? 1 : 0),
+      + (regionalThreat.complete && !regionalThreat.claimed ? 1 : 0)
+      + firstCompletionBonuses.filter(bonus => bonus.complete && !bonus.claimed).length,
   };
 }
 
@@ -4796,6 +5184,43 @@ export function claimCurrentMultiplayerDailyContract(
       completedAt: now,
       rewards,
       description: 'Daily multiplayer order claimed.',
+    }),
+  });
+  levelUp();
+  return { success: true, rewards };
+}
+
+export function claimCurrentMultiplayerFirstCompletionBonus(
+  bonusId: MultiplayerFirstCompletionBonusId,
+  now = Date.now(),
+): { success: boolean; rewards?: RewardSummary; error?: string } {
+  const currentUser = getCurrentUser();
+  if (!currentUser) return { success: false, error: 'Not logged in.' };
+  const result = claimMultiplayerFirstCompletionBonusState(
+    currentUser.multiplayerEngagement,
+    currentUser.username,
+    currentUser.stats.level,
+    bonusId,
+    now,
+  );
+  if (!result.success) return { success: false, error: result.error };
+
+  const rewards: RewardSummary = {
+    gold: result.bonus.rewardGold,
+    exp: result.bonus.rewardExp,
+  };
+  updateCurrentUser({
+    multiplayerEngagement: result.state,
+    gold: currentUser.gold + result.bonus.rewardGold,
+    exp: currentUser.exp + result.bonus.rewardExp,
+    activityLog: pushActivityEntry(currentUser.activityLog, {
+      id: `activity-first-completion-${result.bonus.id}-${now}`,
+      type: 'quest',
+      title: result.bonus.title,
+      source: 'First Completion Board',
+      completedAt: now,
+      rewards,
+      description: 'Daily first-completion bonus claimed.',
     }),
   });
   levelUp();

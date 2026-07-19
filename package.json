@@ -9,7 +9,7 @@
     "lint": "eslint",
     "test": "vitest run",
     "test:tutorial": "vitest run lib/singleplayerTutorial.test.ts lib/multiplayerTutorial.test.ts",
-    "test:multiplayer": "vitest run lib/multiplayerUnlocks.test.ts lib/multiplayerEngagement.test.ts lib/multiplayerProgression.test.ts lib/multiplayerTutorial.test.ts lib/multiplayerFirstBanner.test.ts lib/multiplayerRegionalThreat.test.ts lib/socialRequests.test.ts lib/socialParty.test.ts",
+    "test:multiplayer": "vitest run lib/multiplayerUnlocks.test.ts lib/multiplayerEngagement.test.ts lib/multiplayerProgression.test.ts lib/multiplayerTutorial.test.ts lib/multiplayerFirstBanner.test.ts lib/multiplayerRegionalThreat.test.ts lib/socialRequests.test.ts lib/socialParty.test.ts lib/tradeSessions.test.ts lib/tradeAuth.test.ts",
     "import-assets": "powershell -ExecutionPolicy Bypass -File scripts/import-assets-v2.ps1"
   },
   "dependencies": {

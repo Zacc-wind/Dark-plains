@@ -4,6 +4,7 @@ import Image from 'next/image';
 import { useState } from 'react';
 import {
   claimCurrentMultiplayerDailyContract,
+  claimCurrentMultiplayerFirstCompletionBonus,
   claimCurrentMultiplayerRegionalThreat,
   claimCurrentMultiplayerWeeklyOath,
   dismissCurrentMultiplayerReturningBriefing,
@@ -93,6 +94,22 @@ export default function MultiplayerOrdersPanel({ now, onPlayerRefresh, onOpenPve
         kicker: 'Faction Oath',
         title: view.weeklyOath.title,
         description: 'Your weekly contribution reward was recorded.',
+        rewards: rewardLines(result.rewards),
+      });
+    }
+    refresh();
+  };
+
+  const handleFirstCompletionClaim = (bonus: typeof view.firstCompletionBonuses[number]) => {
+    const result = claimCurrentMultiplayerFirstCompletionBonus(bonus.bonusId, now);
+    setNotice(result.success ? `${bonus.title} claimed.` : result.error || `Could not claim ${bonus.title}.`);
+    if (result.success) {
+      emitCompletionNotice({
+        id: `first-completion-${bonus.id}-${now}`,
+        kind: 'quest',
+        kicker: 'Daily Momentum',
+        title: bonus.title,
+        description: 'The first-completion reward was added to your commander.',
         rewards: rewardLines(result.rewards),
       });
     }
@@ -214,6 +231,45 @@ export default function MultiplayerOrdersPanel({ now, onPlayerRefresh, onOpenPve
               </article>
             );
           })}
+        </div>
+      </section>
+
+      <section className="border-t px-5 py-5">
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <p className="arcane-label">Daily Momentum</p>
+            <h3 className="fantasy-heading text-xl">First Completions</h3>
+          </div>
+          <span className="ui-pill rounded border px-3 py-1 text-[10px] font-black uppercase">Resets daily</span>
+        </div>
+        <div className="mt-4 grid gap-3 md:grid-cols-2">
+          {view.firstCompletionBonuses.map(bonus => (
+            <article key={bonus.id} className="ui-card flex min-w-0 flex-col rounded border p-4">
+              <div className="flex items-start gap-3">
+                <span className="ui-icon-frame relative h-11 w-11 shrink-0 overflow-hidden rounded border">
+                  <Image src={bonus.iconPath} alt="" fill sizes="44px" className="object-contain p-1.5" unoptimized />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <h4 className="fantasy-heading text-base">{bonus.title}</h4>
+                  <p className="ui-muted mt-1 text-xs font-bold">{bonus.description}</p>
+                </div>
+                <span className="ui-pill shrink-0 rounded border px-2 py-1 text-[10px] font-black uppercase">
+                  {!bonus.unlocked ? `Lv ${bonus.minLevel}` : bonus.claimed ? 'Claimed' : bonus.complete ? 'Ready' : 'Open'}
+                </span>
+              </div>
+              <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+                <p className="ui-accent text-xs font-black">{bonus.rewardGold} gold + {bonus.rewardExp} XP</p>
+                <button
+                  type="button"
+                  disabled={!bonus.complete || bonus.claimed}
+                  onClick={() => handleFirstCompletionClaim(bonus)}
+                  className="ui-button-primary rounded px-4 py-2 text-xs font-black disabled:opacity-35"
+                >
+                  {bonus.claimed ? 'Claimed' : bonus.complete ? 'Claim Bonus' : bonus.unlocked ? 'In Progress' : `Reach Level ${bonus.minLevel}`}
+                </button>
+              </div>
+            </article>
+          ))}
         </div>
       </section>
 
