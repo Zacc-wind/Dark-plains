@@ -14,7 +14,7 @@ Turn the current shared world-map prototype into a real multiplayer layer withou
 - [x] Main-story introductions can open as two-character RPG conversations on the world map.
 - [x] Challenge, trade, and party flows have in-game request popups and acceptance UX in the local multiplayer prototype. Server-backed synchronization remains deployment work.
 - [x] The Black Pike Ledger Chronicle pilot provides 20 permanent free-track ranks driven by capped, genuine multiplayer action receipts.
-- [ ] Player-vs-player combat still needs a real two-player battle session model.
+- [x] Player-vs-player combat has a versioned local two-player duel session with captured rosters, formation readiness, ownership-checked actions, timeout passing, and idempotent rating settlement. Database transport remains deployment work.
 - [ ] Cooperative dungeon combat still needs multi-commander formation, turn order, and ownership rules.
 
 ## Phase 1: First-Login Mode Tutorial
@@ -52,14 +52,14 @@ Turn the current shared world-map prototype into a real multiplayer layer withou
 - [x] Add party state validation: max 4 players, one leader, no duplicate invites, no player in two parties.
 
 ## Phase 4: Player Duels
-- [ ] Add `PvpDuelSession` state: challenger, defender, acceptedAt, phase, seed, combat snapshot, result.
-- [ ] Build a duel formation screen for both players using their persistent commanders and selected fielded minions.
-- [ ] Use existing battle engine with two human-controlled sides instead of AI side control.
-- [ ] Add turn ownership: only the player who owns the active commander/unit can act.
-- [ ] Add timeout auto-wait/auto-pass so duels cannot stall forever.
-- [ ] Show opponent nickname over their commander in combat.
-- [ ] Add duel result screen with no random-run rewards; use agreed PVP rules only.
-- [ ] Add anti-grief checks: level gap warning, safe zones if needed, decline without penalty.
+- [x] Add `PvpDuelSession` state: challenger, defender, acceptedAt, phase, seed, combat snapshot, result.
+- [x] Build a duel formation screen for both players using their persistent commanders and selected fielded minions.
+- [x] Use existing battle engine with two human-controlled sides instead of AI side control.
+- [x] Add turn ownership: only the player who owns the active commander/unit can act.
+- [x] Add timeout auto-wait/auto-pass so duels cannot stall forever.
+- [x] Show opponent nickname over their commander in combat.
+- [x] Add duel result screen with no random-run rewards; use agreed PVP rules only.
+- [x] Add anti-grief checks: level gap warning, decline/cancel without penalty before combat, explicit forfeit after combat starts.
 
 ## Phase 5: Trading
 - [x] Add versioned `TradeSession` state: initiator, receiver, offers, locks, accepted flags, expiry, completed/cancelled status.
@@ -82,10 +82,10 @@ Turn the current shared world-map prototype into a real multiplayer layer withou
 
 ## Phase 7: Multiplayer Combat Engine Refactor
 - [ ] Generalize battle sides from `player` vs `enemy` into combat teams with ownership metadata.
-- [ ] Add `ownerUsername` to commanders and units.
-- [ ] Keep AI only for NPC-owned units; human-owned units wait for that player input.
-- [ ] Make BattleModal capable of read-only spectator state for party members when it is not their turn.
-- [ ] Add action synchronization hooks so browser/database-backed play can replace local prototype state later.
+- [x] Add `ownerUsername` and `teamId` to commanders and units while preserving legacy side rendering.
+- [x] Keep AI only for NPC-owned units; human-owned units wait for that player input.
+- [x] Make BattleModal capable of controlled and read-only states when the local player does not own the active unit.
+- [x] Add revisioned action synchronization hooks with action receipts so database-backed play can replace local prototype storage later.
 
 ## Phase 8: Database Readiness
 - [ ] Mirror friends, parties, chat, challenges, trades, duel sessions, and co-op dungeon sessions in the database plan.
@@ -142,6 +142,6 @@ Turn the current shared world-map prototype into a real multiplayer layer withou
 2. [x] Finish the level 1-5 First Banner chapter, Black Pike capstone, and level 3/4/5 unlock conversations.
 3. [x] Complete the shared request lifecycle and party invite overlay, then add the first regional threat and rested catch-up rules.
 4. [x] Implement the validated local `TradeSession`, request popup, and first-win/first-dungeon-clear bonuses.
-5. Pilot the free Black Pike Ledger Chronicle using only implemented and validated activities.
-6. Refactor battle ownership and synchronization before implementing real player-versus-player and cooperative sessions.
+5. [x] Pilot the free Black Pike Ledger Chronicle using only implemented and validated activities.
+6. [ ] Complete multiplayer sessions: local duel ownership and synchronization are implemented; cooperative formation/turn ownership and database transport remain.
 7. Produce levels 6-30 as complete five-level content bands, one chapter at a time.

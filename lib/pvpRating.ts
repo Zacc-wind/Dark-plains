@@ -8,6 +8,7 @@ export interface PvpRatingState {
   lossStreak: number;
   wins: number;
   losses: number;
+  processedDuelIds?: string[];
 }
 
 export interface PvpRatingDelta {
@@ -24,6 +25,7 @@ export function createDefaultPvpRatingState(): PvpRatingState {
     lossStreak: 0,
     wins: 0,
     losses: 0,
+    processedDuelIds: [],
   };
 }
 
@@ -37,6 +39,11 @@ export function normalizePvpRatingState(state?: Partial<PvpRatingState> | null):
     lossStreak: Math.max(0, Math.floor(state.lossStreak ?? base.lossStreak)),
     wins: Math.max(0, Math.floor(state.wins ?? base.wins)),
     losses: Math.max(0, Math.floor(state.losses ?? base.losses)),
+    processedDuelIds: Array.from(new Set((state.processedDuelIds || [])
+      .filter(id => typeof id === 'string')
+      .map(id => id.trim().slice(0, 180))
+      .filter(Boolean)))
+      .slice(0, 200),
   };
 }
 
@@ -90,6 +97,7 @@ export function applyPvpRatingWin(state: PvpRatingState, delta: PvpRatingDelta):
     lossStreak: 0,
     wins: state.wins + 1,
     losses: state.losses,
+    processedDuelIds: [...(state.processedDuelIds || [])],
   };
 }
 
@@ -100,6 +108,7 @@ export function applyPvpRatingLoss(state: PvpRatingState, delta: PvpRatingDelta)
     lossStreak: state.lossStreak + 1,
     wins: state.wins,
     losses: state.losses + 1,
+    processedDuelIds: [...(state.processedDuelIds || [])],
   };
 }
 

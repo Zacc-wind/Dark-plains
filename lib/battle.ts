@@ -30,6 +30,8 @@ import { getRegionalThreatBossEnemyId } from './multiplayerRegionalThreat';
 export type BattleSide = 'player' | 'enemy';
 export type BattleStatus = 'active' | 'victory' | 'defeat' | 'recruited';
 export type BattleUnitKind = 'commander' | 'minion';
+export type BattleMode = 'npc' | 'pvp' | 'coop';
+export type BattleParticipantController = 'human' | 'ai';
 export type BattleSpellTarget = 'enemy' | 'ally' | 'none';
 export type PlayerModelNumber = 1 | 2 | 3 | 4 | 5 | 6;
 export type EnemyAiPersonality = 'balanced' | 'aggressive' | 'defensive' | 'arcane' | 'boss';
@@ -124,6 +126,8 @@ export interface BattleRatingPreview {
 export interface BattleUnit {
   id: string;
   side: BattleSide;
+  teamId?: string;
+  ownerUsername?: string;
   kind: BattleUnitKind;
   name: string;
   assetPath: string;
@@ -150,6 +154,13 @@ export interface BattleUnit {
     movementPenalty: number;
     speedPenalty: number;
   };
+}
+
+export interface BattleParticipant {
+  username: string;
+  side: BattleSide;
+  teamId: string;
+  controller: BattleParticipantController;
 }
 
 export type MinionSupportAbilityId = 'bell-march' | 'void-ward';
@@ -197,6 +208,10 @@ export interface BattleRecruitOffer {
 
 export interface BattleState {
   id: string;
+  mode?: BattleMode;
+  participants?: BattleParticipant[];
+  revision?: number;
+  processedActionIds?: string[];
   enemy: WorldEnemy;
   mapTemplateId: string;
   mapName: string;
@@ -221,6 +236,38 @@ export interface BattleState {
   bonusMoveAwayFrom?: BoardCell;
   supportAuras?: Record<string, BattleSupportAura>;
   createdAt: number;
+}
+
+export type SynchronizedBattleActionType =
+  | 'move'
+  | 'bonus-move'
+  | 'skip-bonus-move'
+  | 'attack'
+  | 'heal'
+  | 'wait'
+  | 'support'
+  | 'focus-mana'
+  | 'cast-spell'
+  | 'timeout-pass';
+
+export interface SynchronizedBattleAction {
+  id: string;
+  type: SynchronizedBattleActionType;
+  actorUsername: string;
+  expectedRevision: number;
+  unitId?: string;
+  targetId?: string;
+  spellId?: string;
+  x?: number;
+  y?: number;
+  createdAt: number;
+}
+
+export interface ApplySynchronizedBattleActionResult {
+  success: boolean;
+  state: BattleState;
+  duplicate?: boolean;
+  error?: string;
 }
 
 export interface BattleChallenge {
@@ -252,9 +299,29 @@ export interface CreateNpcBattleOptions {
   playerFormation?: Record<string, BoardCell>;
 }
 
+export interface CreatePvpBattleOptions {
+  battleId?: string;
+  challengerStacks?: MinionStack[];
+  defenderStacks?: MinionStack[];
+  challengerFormation?: Record<string, BoardCell>;
+  defenderFormation?: Record<string, BoardCell>;
+  turnTimeLimitMs?: number;
+  now?: number;
+}
+
+export interface BattleUserProfile {
+  username: string;
+  stats: CharacterStats;
+  selectedModel: number;
+  x: number;
+  y: number;
+  minions: MinionStack[];
+}
+
 const CHALLENGES_KEY = 'pirate_game_battle_challenges';
 const DEFEATED_WORLD_ENEMIES_KEY = 'pirate_game_defeated_world_enemies';
 const WORLD_ENEMY_SNAPSHOT_KEY = 'pirate_game_world_enemy_snapshot';
+const BATTLE_ACTION_RECEIPT_LIMIT = 240;
 export const BATTLE_CONFIRM_WINDOW_MS = 60 * 1000;
 export const TURN_TIME_LIMIT_MS = 2 * 60 * 1000;
 export const MAX_PVP_DOWNCHALLENGE_LEVEL_GAP = 5;
@@ -1206,7 +1273,7 @@ export const BATTLE_TERRAIN_DESCRIPTIONS: Record<BattleTerrainType, string> = {
   holyGround: 'Consecrated footing. Healers restore more health here.',
 };
 
-function selectBattleMapTemplate(user: User, enemy: WorldEnemy): BattleMapTemplate {
+function selectBattleMapTemplate(user: Pick<User, 'username'>, enemy: WorldEnemy): BattleMapTemplate {
   if (enemy.personality === 'boss') {
     return BATTLE_MAP_TEMPLATES.find(template => template.tags.includes('boss')) || BATTLE_MAP_TEMPLATES[0];
   }
@@ -1552,7 +1619,7 @@ function makeEnemyCommanderStats(level: number, enemy?: Pick<WorldEnemy, 'person
   };
 }
 
-function getPlayerBattleStacks(user: User): MinionStack[] {
+function getPlayerBattleStacks(user: Pick<User, 'minions'>): MinionStack[] {
   if (user.minions.length > 0) return getFieldedMinions(user);
 
   return [
@@ -1576,7 +1643,7 @@ function getMinionPower(stack: MinionStack): number {
   );
 }
 
-function getUserBattleRating(user: User): number {
+function getUserBattleRating(user: BattleUserProfile): number {
   const modifiers = getBattleModifiers(user.stats);
   const commanderScore =
     user.stats.maxHealth +
@@ -1604,7 +1671,7 @@ function getEnemyBattleRating(enemy: WorldEnemy, enemyStats: CharacterStats): nu
   return commanderScore + minionScore;
 }
 
-export function getBattleRatingPreview(user: User, enemy: WorldEnemy): BattleRatingPreview {
+export function getBattleRatingPreview(user: BattleUserProfile, enemy: WorldEnemy): BattleRatingPreview {
   const enemyStats = makeEnemyCommanderStats(enemy.level, enemy);
   const playerRating = getUserBattleRating(user);
   const enemyRating = getEnemyBattleRating(enemy, enemyStats);
@@ -1672,7 +1739,7 @@ function cloneRecruitMinion(stack: MinionStack, enemy: WorldEnemy, index: number
   };
 }
 
-function createRecruitOffer(user: User, enemy: WorldEnemy, enemyStats: CharacterStats): BattleRecruitOffer | undefined {
+function createRecruitOffer(user: BattleUserProfile, enemy: WorldEnemy, enemyStats: CharacterStats): BattleRecruitOffer | undefined {
   if (enemy.personality === 'boss') return undefined;
   if (enemy.level > user.stats.level + 1) return undefined;
 
@@ -1694,7 +1761,7 @@ function createRecruitOffer(user: User, enemy: WorldEnemy, enemyStats: Character
   };
 }
 
-export function createNpcBattleState(user: User, enemy: WorldEnemy, options: CreateNpcBattleOptions = {}): BattleState {
+export function createNpcBattleState(user: User | BattleUserProfile, enemy: WorldEnemy, options: CreateNpcBattleOptions = {}): BattleState {
   const battleMap = selectBattleMapTemplate(user, enemy);
   const playerStats = options.playerStats || user.stats;
   const playerModifiers = getBattleModifiers(playerStats);
@@ -1752,7 +1819,17 @@ export function createNpcBattleState(user: User, enemy: WorldEnemy, options: Cre
       .filter((unit): unit is BattleUnit => Boolean(unit)),
   ];
 
-  const units = [...playerUnits, ...enemyUnits];
+  const units = [
+    ...playerUnits.map(unit => ({
+      ...unit,
+      teamId: 'player',
+      ownerUsername: user.username,
+    })),
+    ...enemyUnits.map(unit => ({
+      ...unit,
+      teamId: 'enemy',
+    })),
+  ];
   const openingTurnOrder = getTurnOrder(units);
   const firstUnit = openingTurnOrder[0];
   const openingLog = [
@@ -1773,6 +1850,13 @@ export function createNpcBattleState(user: User, enemy: WorldEnemy, options: Cre
 
   const initialState: BattleState = {
     id: `battle-${enemy.id}-${Date.now()}`,
+    mode: 'npc',
+    participants: [
+      { username: user.username, side: 'player', teamId: 'player', controller: 'human' },
+      { username: enemy.name, side: 'enemy', teamId: 'enemy', controller: 'ai' },
+    ],
+    revision: 0,
+    processedActionIds: [],
     enemy,
     mapTemplateId: battleMap.id,
     mapName: battleMap.name,
@@ -1794,6 +1878,123 @@ export function createNpcBattleState(user: User, enemy: WorldEnemy, options: Cre
     bossSpecialRounds: bossBattle ? {} : undefined,
     bossSpecialUses: bossBattle ? {} : undefined,
     createdAt: Date.now(),
+  };
+
+  return grantCommanderMana(initialState, firstUnit);
+}
+
+export function createPvpBattleState(
+  challenger: BattleUserProfile,
+  defender: BattleUserProfile,
+  options: CreatePvpBattleOptions = {},
+): BattleState {
+  const now = options.now ?? Date.now();
+  const battleId = options.battleId || `pvp-${challenger.username}-${defender.username}-${now}`;
+  const challengerStacks = (options.challengerStacks || getPlayerBattleStacks(challenger)).slice(0, MAX_FIELD_MINIONS);
+  const defenderStacks = (options.defenderStacks || getPlayerBattleStacks(defender)).slice(0, MAX_FIELD_MINIONS);
+  const opponent: WorldEnemy = {
+    id: `duel-opponent-${battleId}`,
+    name: defender.username,
+    subtitle: `Level ${defender.stats.level} rival commander`,
+    x: defender.x,
+    y: defender.y,
+    level: defender.stats.level,
+    modelNumber: (defender.selectedModel || 3) as PlayerModelNumber,
+    personality: 'balanced',
+    minions: defenderStacks,
+  };
+  const baseState = createNpcBattleState(challenger, opponent, {
+    playerStacks: challengerStacks,
+    playerStats: challenger.stats,
+    playerName: challenger.username,
+    playerModelNumber: challenger.selectedModel,
+    playerFormation: options.challengerFormation,
+    suppressRecruitOffer: true,
+  });
+  const battleMap = BATTLE_MAP_TEMPLATES.find(template => template.id === baseState.mapTemplateId)
+    || BATTLE_MAP_TEMPLATES[0];
+  const defenderModifiers = getBattleModifiers(defender.stats);
+  const occupiedCells = new Set(
+    baseState.units
+      .filter(unit => unit.side === 'player')
+      .map(unit => getCellKey(unit)),
+  );
+  const defenderCommanderFormation = options.defenderFormation?.[COMMANDER_FORMATION_KEY];
+  const mirroredCommanderCell = isValidPlayerFormationCell(battleMap, defenderCommanderFormation)
+    ? { x: battleMap.boardWidth - 1 - defenderCommanderFormation.x, y: defenderCommanderFormation.y }
+    : undefined;
+  const defenderCommanderSpawn = claimSpawnCell(
+    mirroredCommanderCell ? [mirroredCommanderCell, ...battleMap.enemySpawns] : battleMap.enemySpawns,
+    getSpawnCell(battleMap.enemySpawns, 0, { x: battleMap.boardWidth - 1, y: 3 }),
+    occupiedCells,
+    battleMap,
+  );
+  const defenderUnits: BattleUnit[] = [
+    {
+      ...makeCommanderUnit(
+        'enemy',
+        defender.username,
+        defender.selectedModel || 3,
+        defender.stats,
+        defenderCommanderSpawn.x,
+        defenderCommanderSpawn.y,
+      ),
+      teamId: 'defender',
+      ownerUsername: defender.username,
+    },
+    ...defenderStacks
+      .map((stack, index): BattleUnit | null => {
+        const formationCell = options.defenderFormation?.[stack.id];
+        const mirroredCell = isValidPlayerFormationCell(battleMap, formationCell)
+          ? { x: battleMap.boardWidth - 1 - formationCell.x, y: formationCell.y }
+          : undefined;
+        const fallbackSpawn = getEnemyFormationSpawn(battleMap, opponent, index);
+        const spawn = claimSpawnCell(
+          mirroredCell ? [mirroredCell, ...battleMap.enemySpawns.slice(1)] : battleMap.enemySpawns.slice(1),
+          fallbackSpawn,
+          occupiedCells,
+          battleMap,
+        );
+        const unit = makeMinionUnit(stack, 'enemy', spawn.x, spawn.y, defenderModifiers);
+        return unit ? { ...unit, teamId: 'defender', ownerUsername: defender.username } : null;
+      })
+      .filter((unit): unit is BattleUnit => Boolean(unit)),
+  ];
+  const challengerUnits = baseState.units
+    .filter(unit => unit.side === 'player')
+    .map(unit => ({ ...unit, teamId: 'challenger', ownerUsername: challenger.username }));
+  const units = [...challengerUnits, ...defenderUnits];
+  const openingTurnOrder = getTurnOrder(units);
+  const firstUnit = openingTurnOrder[0];
+  const initialState: BattleState = {
+    ...baseState,
+    id: battleId,
+    mode: 'pvp',
+    participants: [
+      { username: challenger.username, side: 'player', teamId: 'challenger', controller: 'human' },
+      { username: defender.username, side: 'enemy', teamId: 'defender', controller: 'human' },
+    ],
+    revision: 0,
+    processedActionIds: [],
+    enemy: opponent,
+    units,
+    activeUnitId: firstUnit.id,
+    turnQueue: openingTurnOrder.slice(1).map(unit => unit.id),
+    round: 1,
+    status: 'active',
+    mana: { player: 0, enemy: 0 },
+    turnStartedAt: now,
+    turnTimeLimitMs: Math.max(15_000, options.turnTimeLimitMs || TURN_TIME_LIMIT_MS),
+    log: [createBattleLogEntry(
+      { round: 1 },
+      `${challenger.username} and ${defender.username} raise their duel banners at ${baseState.mapName}.`,
+      { action: 'system' },
+    )],
+    recruitOffer: undefined,
+    bossPhase: undefined,
+    bossSpecialRounds: undefined,
+    bossSpecialUses: undefined,
+    createdAt: now,
   };
 
   return grantCommanderMana(initialState, firstUnit);
@@ -1825,7 +2026,8 @@ function applySlowDebuff(unit: BattleUnit, movementPenalty: number, speedPenalty
 
 function clearSlowDebuff(unit: BattleUnit): BattleUnit {
   if (!unit.slowDebuff) return unit;
-  const { slowDebuff: _removed, ...rest } = unit;
+  const { slowDebuff, ...rest } = unit;
+  void slowDebuff;
   return rest;
 }
 
@@ -3800,6 +4002,196 @@ export function runEnemyBattleTurn(state: BattleState): BattleState {
   }
 
   return waitBattleUnit(currentState, activeUnit.id);
+}
+
+function normalizeBattleUsername(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+export function getBattleActiveOwnerUsername(state: BattleState): string | null {
+  const activeUnit = getActiveUnit(state);
+  if (!activeUnit) return null;
+  if (activeUnit.ownerUsername) return activeUnit.ownerUsername;
+
+  const participant = state.participants?.find(item => (
+    item.side === activeUnit.side && item.controller === 'human'
+  ));
+  return participant?.username || null;
+}
+
+export function canUserControlBattleUnit(
+  state: BattleState,
+  username: string,
+  unit: BattleUnit | undefined = getActiveUnit(state),
+): boolean {
+  if (!unit || state.status !== 'active') return false;
+  const normalizedUsername = normalizeBattleUsername(username);
+  if (!normalizedUsername) return false;
+
+  if (unit.ownerUsername) {
+    return normalizeBattleUsername(unit.ownerUsername) === normalizedUsername;
+  }
+
+  const participant = state.participants?.find(item => (
+    item.side === unit.side
+    && item.controller === 'human'
+    && normalizeBattleUsername(item.username) === normalizedUsername
+  ));
+  if (participant) return true;
+
+  return state.mode !== 'pvp' && state.mode !== 'coop' && unit.side === 'player';
+}
+
+export function shouldRunBattleAi(state: BattleState): boolean {
+  const activeUnit = getActiveUnit(state);
+  if (!activeUnit || state.status !== 'active' || activeUnit.ownerUsername) return false;
+
+  const sideParticipants = state.participants?.filter(item => item.side === activeUnit.side) || [];
+  if (sideParticipants.length > 0) {
+    return sideParticipants.every(item => item.controller === 'ai');
+  }
+
+  return activeUnit.side === 'enemy';
+}
+
+function finishSynchronizedBattleAction(
+  state: BattleState,
+  nextState: BattleState,
+  actionId: string,
+): BattleState {
+  const processedActionIds = Array.from(new Set([
+    actionId,
+    ...(state.processedActionIds || []),
+  ])).slice(0, BATTLE_ACTION_RECEIPT_LIMIT);
+
+  return {
+    ...nextState,
+    revision: Math.max(0, Math.floor(state.revision || 0)) + 1,
+    processedActionIds,
+  };
+}
+
+export function applySynchronizedBattleAction(
+  state: BattleState,
+  action: SynchronizedBattleAction,
+  now = Date.now(),
+): ApplySynchronizedBattleActionResult {
+  const actionId = action.id.trim().slice(0, 180);
+  if (!actionId) return { success: false, state, error: 'Battle action id is required.' };
+
+  if ((state.processedActionIds || []).includes(actionId)) {
+    return { success: true, state, duplicate: true };
+  }
+  if (state.status !== 'active') {
+    return { success: false, state, error: 'Battle is no longer active.' };
+  }
+
+  const revision = Math.max(0, Math.floor(state.revision || 0));
+  if (Math.floor(action.expectedRevision) !== revision) {
+    return { success: false, state, error: 'Battle state changed. Refresh before acting again.' };
+  }
+
+  const activeUnit = getActiveUnit(state);
+  if (!activeUnit) return { success: false, state, error: 'No active battle unit was found.' };
+
+  const actorUsername = action.actorUsername.trim();
+  const participant = state.participants?.find(item => (
+    normalizeBattleUsername(item.username) === normalizeBattleUsername(actorUsername)
+  ));
+  if (state.participants?.length && !participant) {
+    return { success: false, state, error: 'Player is not part of this battle.' };
+  }
+
+  if (action.type === 'timeout-pass') {
+    if (now < state.turnStartedAt + state.turnTimeLimitMs) {
+      return { success: false, state, error: 'The active turn has not timed out.' };
+    }
+    const timeoutState = isBonusMovePending(state, activeUnit)
+      ? skipBonusBattleMove(state, activeUnit.id)
+      : waitBattleUnit(state, activeUnit.id, `${activeUnit.name}'s turn timed out.`);
+    return {
+      success: true,
+      state: finishSynchronizedBattleAction(state, timeoutState, actionId),
+    };
+  }
+
+  if (!canUserControlBattleUnit(state, actorUsername, activeUnit)) {
+    const owner = getBattleActiveOwnerUsername(state);
+    return {
+      success: false,
+      state,
+      error: owner ? `It is ${owner}'s turn.` : 'You do not control the active unit.',
+    };
+  }
+  if (action.unitId && action.unitId !== activeUnit.id) {
+    return { success: false, state, error: 'Only the active unit can act.' };
+  }
+
+  let nextState = state;
+  switch (action.type) {
+    case 'move': {
+      if (!Number.isInteger(action.x) || !Number.isInteger(action.y)) break;
+      const movedState = moveBattleUnit(state, activeUnit.id, Number(action.x), Number(action.y));
+      if (movedState === state) break;
+      nextState = canSkirmishAttackAfterMove(movedState, activeUnit.id)
+        ? { ...movedState, turnStartedAt: now }
+        : advanceBattleTurn(movedState);
+      break;
+    }
+    case 'bonus-move':
+      if (!Number.isInteger(action.x) || !Number.isInteger(action.y)) break;
+      nextState = moveBonusBattleUnit(state, activeUnit.id, Number(action.x), Number(action.y));
+      break;
+    case 'skip-bonus-move':
+      nextState = skipBonusBattleMove(state, activeUnit.id);
+      break;
+    case 'attack': {
+      if (!action.targetId) break;
+      const attackedState = attackBattleUnit(state, activeUnit.id, action.targetId);
+      if (attackedState === state) break;
+      const attackerAfterAttack = attackedState.units.find(unit => (
+        unit.id === activeUnit.id && unit.currentHealth > 0
+      ));
+      nextState = attackerAfterAttack && isBonusMovePending(attackedState, attackerAfterAttack)
+        ? attackedState
+        : advanceBattleTurn(attackedState);
+      break;
+    }
+    case 'heal': {
+      const healTarget = action.targetId
+        ? state.units.find(unit => unit.id === action.targetId && unit.currentHealth > 0)
+        : undefined;
+      if (!healTarget || !canHeal(activeUnit, healTarget)) break;
+      const healedState = healBattleUnit(state, activeUnit.id, healTarget.id);
+      if (healedState === state) break;
+      nextState = advanceBattleTurn(healedState);
+      break;
+    }
+    case 'wait':
+      nextState = waitBattleUnit(state, activeUnit.id);
+      break;
+    case 'support':
+      if (!getMinionSupportAbility(activeUnit)) break;
+      nextState = applyMinionSupportAbility(state, activeUnit.id);
+      break;
+    case 'focus-mana':
+      if (activeUnit.kind !== 'commander') break;
+      nextState = focusCommanderMana(state, activeUnit.id);
+      break;
+    case 'cast-spell':
+      if (!action.spellId || activeUnit.kind !== 'commander') break;
+      nextState = castBattleSpell(state, action.spellId, action.targetId);
+      break;
+  }
+
+  if (nextState === state) {
+    return { success: false, state, error: 'That action is not valid in the current battle state.' };
+  }
+
+  return {
+    success: true,
+    state: finishSynchronizedBattleAction(state, nextState, actionId),
+  };
 }
 
 type StoredBattleChallenge = Omit<BattleChallenge, 'status' | 'confirmedBy'> & {

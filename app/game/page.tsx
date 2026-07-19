@@ -15,6 +15,7 @@ import PvpChallengeOverlay from '@/components/PvpChallengeOverlay';
 import SocialRequestOverlay from '@/components/SocialRequestOverlay';
 import TradeSessionOverlay from '@/components/TradeSessionOverlay';
 import MultiplayerTutorialSpotlight from '@/components/MultiplayerTutorialSpotlight';
+import PvpDuelSessionOverlay from '@/components/PvpDuelSessionOverlay';
 import { writeGameMode } from '@/lib/gameMode';
 
 export default function GamePage() {
@@ -69,6 +70,7 @@ export default function GamePage() {
       <PvpChallengeOverlay />
       <SocialRequestOverlay />
       <TradeSessionOverlay />
+      <PvpDuelSessionOverlay />
       <MultiplayerTutorialSpotlight />
     </div>
   );

@@ -422,7 +422,7 @@ Do not make every achievement a power grant. Players need goals after the gamepl
 3. `MP-C2 Levels 1-5` - complete: The First Banner is an eight-step playable chapter with a persistent named threat, level-five Black Pike capstone, genuine post-boss return, rank briefings, chapter presentation, and focused tests.
 4. `MP-C3 Social and return completion` - complete: shared request records, party/trade invitation overlays, a versioned local `TradeSession`, the first rotating regional threat, daily first-completion bonuses, and rested job catch-up all use genuine action receipts and duplicate-safe claims.
 5. `MP-C4 Chronicle pilot` - complete: the internal 20-rank Black Pike Ledger uses an idempotent accumulated event ledger, capped genuine-action Renown, duplicate-safe claims, permanent honors, migration tests, and a responsive progression tab.
-6. `MP-C5 Multiplayer sessions`: refactor combat ownership, then ship real duel and first co-op dungeon sessions.
+6. `MP-C5 Multiplayer sessions` - in progress: combat ownership, synchronized action receipts, and complete local duel sessions are implemented; first co-op dungeon sessions and database transport remain.
 7. `MP-C6 Levels 6-10`: ship The Drowned Moonwell, Moonbridge contracts, Mother Cindervein, first reputation track, and dungeon tier II.
 8. `MP-C7 Public Chronicle`: expand the validated pilot to 40 ranks, archive support, full reward presentation, and entitlement history.
 9. `MP-C8 Levels 11-30`: produce one complete five-level chapter at a time. Do not implement all remaining quest text in one untested batch.
@@ -475,7 +475,16 @@ The next code batch should be intentionally smaller than this roadmap:
 5. [x] Add the responsive Chronicle tab with rank states, reward presentation, exact source rules, and acquired lore/cosmetic honors.
 6. [x] Test thresholds, contribution caps, duplicate receipts, claims, entitlements, and reload normalization.
 
-The next implementation batch is `MP-C5`: move combat ownership into real session records, then use that foundation for complete duel and first co-op dungeon sessions.
+## Fifth Implementation Batch - Duel Slice Complete 2026-07-19
+
+1. [x] Add battle mode, participant, team, and unit-owner metadata without breaking legacy NPC saves or side rendering.
+2. [x] Add revisioned synchronized battle actions with active-owner checks, duplicate receipts, stale-write rejection, equipped-spell validation, and participant-triggered timeout passing.
+3. [x] Add a versioned `PvpDuelSession` with immutable combat profiles, independent formation confirmations, shared combat snapshot, explicit result, expiry, cancellation, and forfeit states.
+4. [x] Route accepted local challenges into the existing formation and battle surfaces with two human-owned sides and no NPC AI turns.
+5. [x] Add controlled/read-only BattleModal support, visible commander owner names, no campaign loot or health penalties, and a claimable duel result.
+6. [x] Make rating settlement and `pvp-completed` engagement receipts idempotent by duel id, including reload normalization tests.
+
+The remaining `MP-C5` work is the first cooperative dungeon session: party readiness, collaborative eight-unit formation, up to four commanders, owner-only turns, and shared route/result state. Database-backed duel and co-op transport remains deployment work.
 
 ## Definition Of Done For Every Progression Slice
 

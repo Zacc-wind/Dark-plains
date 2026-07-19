@@ -405,7 +405,7 @@ export default function MultiplayerHubModal({ isOpen, onClose }: PvpHubModalProp
 
                   {challenge?.status === 'ready' && (
                     <div className="ui-rarity-rare mt-3 rounded border px-3 py-2 text-xs font-black">
-                      Duel Ready — launch from the world map when both sides are set.
+                      Duel ready - your formation opens on the world map.
                     </div>
                   )}
 

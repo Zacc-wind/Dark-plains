@@ -7065,7 +7065,9 @@ export function getPvpRating(user: Pick<User, 'pvpRating'> | null | undefined = 
 export function recordPvpDuelOutcome(
   winnerUsername: string,
   loserUsername: string,
-): { success: boolean; delta?: ReturnType<typeof calculatePvpRatingDelta> } {
+  duelId?: string,
+  now = Date.now(),
+): { success: boolean; duplicate?: boolean; delta?: ReturnType<typeof calculatePvpRatingDelta> } {
   const winnerKey = normalizeUsername(winnerUsername);
   const loserKey = normalizeUsername(loserUsername);
   if (!winnerKey || !loserKey || winnerKey === loserKey) {
@@ -7081,25 +7083,71 @@ export function recordPvpDuelOutcome(
 
   const winnerRating = normalizePvpRatingState(users[winnerIndex].pvpRating);
   const loserRating = normalizePvpRatingState(users[loserIndex].pvpRating);
+  const duelReceiptId = duelId?.trim().slice(0, 180);
+  if (
+    duelReceiptId
+    && (
+      winnerRating.processedDuelIds?.includes(duelReceiptId)
+      || loserRating.processedDuelIds?.includes(duelReceiptId)
+    )
+  ) {
+    return { success: true, duplicate: true };
+  }
   const delta = calculatePvpRatingDelta(winnerRating, loserRating);
 
   users[winnerIndex] = {
     ...users[winnerIndex],
-    pvpRating: applyPvpRatingWin(winnerRating, delta),
+    pvpRating: {
+      ...applyPvpRatingWin(winnerRating, delta),
+      processedDuelIds: duelReceiptId
+        ? [duelReceiptId, ...(winnerRating.processedDuelIds || [])].slice(0, 200)
+        : winnerRating.processedDuelIds,
+    },
   };
   users[loserIndex] = {
     ...users[loserIndex],
-    pvpRating: applyPvpRatingLoss(loserRating, delta),
+    pvpRating: {
+      ...applyPvpRatingLoss(loserRating, delta),
+      processedDuelIds: duelReceiptId
+        ? [duelReceiptId, ...(loserRating.processedDuelIds || [])].slice(0, 200)
+        : loserRating.processedDuelIds,
+    },
   };
+  if (duelReceiptId) {
+    const winnerEngagement = recordUserMultiplayerEvent(users[winnerIndex], {
+      id: `pvp-completed-${duelReceiptId}-${winnerKey}`,
+      kind: 'pvp-completed',
+      occurredAt: now,
+      contextId: duelReceiptId,
+      targetId: users[loserIndex].username,
+    }, now);
+    const loserEngagement = recordUserMultiplayerEvent(users[loserIndex], {
+      id: `pvp-completed-${duelReceiptId}-${loserKey}`,
+      kind: 'pvp-completed',
+      occurredAt: now,
+      contextId: duelReceiptId,
+      targetId: users[winnerIndex].username,
+    }, now);
+    users[winnerIndex] = { ...users[winnerIndex], ...winnerEngagement };
+    users[loserIndex] = { ...users[loserIndex], ...loserEngagement };
+  }
   saveUsers(users);
 
   const sessionUser = readGameJson<User | null>(CURRENT_USER_KEY, null);
   if (sessionUser) {
     const currentKey = normalizeUsername(sessionUser.username);
     if (currentKey === winnerKey) {
-      updateCurrentUser({ pvpRating: users[winnerIndex].pvpRating });
+      updateCurrentUser({
+        pvpRating: users[winnerIndex].pvpRating,
+        multiplayerEngagement: users[winnerIndex].multiplayerEngagement,
+        multiplayerChronicle: users[winnerIndex].multiplayerChronicle,
+      });
     } else if (currentKey === loserKey) {
-      updateCurrentUser({ pvpRating: users[loserIndex].pvpRating });
+      updateCurrentUser({
+        pvpRating: users[loserIndex].pvpRating,
+        multiplayerEngagement: users[loserIndex].multiplayerEngagement,
+        multiplayerChronicle: users[loserIndex].multiplayerChronicle,
+      });
     }
   }
 

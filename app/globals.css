@@ -18596,6 +18596,32 @@ button.vine-frame::before,
   pointer-events: none;
 }
 
+.battle-piece-owner {
+  position: absolute;
+  left: 50%;
+  top: 0.08rem;
+  z-index: 7;
+  max-width: 92%;
+  transform: translateX(-50%);
+  overflow: hidden;
+  border: 1px solid rgba(232, 217, 184, 0.28);
+  border-radius: 0.18rem;
+  padding: 0.04rem 0.2rem;
+  background: rgba(3, 5, 6, 0.82);
+  color: rgba(255, 248, 231, 0.92);
+  font-size: 0.58rem;
+  font-weight: 900;
+  line-height: 1.1;
+  letter-spacing: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.battle-piece-health-owned {
+  top: 0.92rem;
+}
+
 .battle-piece-health span {
   display: block;
   height: 100%;

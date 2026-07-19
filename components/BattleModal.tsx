@@ -7,8 +7,10 @@ import {
   BATTLE_SPELLS,
   BATTLE_TERRAIN_LABELS,
   BattleLogEntry,
+  BattleSide,
   BattleState,
   BattleSpell,
+  SynchronizedBattleActionType,
   BattleTerrainType,
   BattleUnit,
   WorldEnemy,
@@ -20,6 +22,7 @@ import {
   canMoveTo,
   canRetaliateAfterAttack,
   canSkirmishAttackAfterMove,
+  canUserControlBattleUnit,
   castBattleSpell,
   createNpcBattleState,
   getBattleSpellLogStyle,
@@ -31,6 +34,7 @@ import {
   BOSS_SPECIAL_PRESENTATION_MS,
   BOSS_SPECIAL_SUMMON_REVEAL_MS,
   getBattleLogPresentationMs,
+  getBattleActiveOwnerUsername,
   getRecentPresentationLogEntry,
   hasDefeatedLogTarget,
   pickFreshPresentationLogEntry,
@@ -54,6 +58,7 @@ import {
   moveBattleUnit,
   moveBonusBattleUnit,
   runEnemyBattleTurn,
+  shouldRunBattleAi,
   applyMinionSupportAbility,
   skipBonusBattleMove,
   waitBattleUnit,
@@ -93,7 +98,7 @@ import {
   readCombatSpeedSetting,
 } from '@/lib/combatSettings';
 import { emitFxEvent, type FxEventType } from '@/lib/fxEvents';
-import { readGameJson, writeGameJson } from '@/lib/gameStore';
+import { readGameJson } from '@/lib/gameStore';
 import { playGameSound, preloadGameSounds, type GameSoundId } from '@/lib/sound';
 import { getSpellIconPath } from '@/lib/spellAssets';
 import CombatThreeFxLayer from './CombatThreeFxLayer';
@@ -107,6 +112,13 @@ import {
 interface BattleModalProps {
   enemy: WorldEnemy;
   onClose: () => void;
+  initialBattleState?: BattleState;
+  battleState?: BattleState;
+  localUsername?: string;
+  readOnly?: boolean;
+  onBattleStateChange?: (battle: BattleState) => void;
+  onBattleAction?: (action: BattleModalActionRequest) => BattleModalActionResponse;
+  onRetreatRequest?: () => void;
   playerStacks?: MinionStack[];
   playerStats?: CharacterStats;
   playerFormation?: Record<string, { x: number; y: number }>;
@@ -118,6 +130,21 @@ interface BattleModalProps {
   tutorialStep?: SingleplayerRunTutorialStep | null;
   onTutorialContinue?: (stepId: SingleplayerRunTutorialStepId) => void;
   onTutorialSkip?: () => void;
+}
+
+export interface BattleModalActionRequest {
+  type: SynchronizedBattleActionType;
+  unitId?: string;
+  targetId?: string;
+  spellId?: string;
+  x?: number;
+  y?: number;
+}
+
+export interface BattleModalActionResponse {
+  success: boolean;
+  battle?: BattleState;
+  error?: string;
 }
 
 type BattleCueTone = 'player' | 'enemy' | 'neutral' | 'danger' | 'victory';
@@ -216,8 +243,6 @@ interface BattleSpeedConfig {
   playerDelayMs: number;
 }
 
-/** Shared spell icon / unit presentation window for every spell cast. */
-const SPELL_PRESENTATION_MS = 2300;
 const SPELL_NOTICE_MS = 1450;
 const BATTLE_MOVE_TRANSIT_MS = 900;
 const BATTLE_ROUND_INTRO_MS = 1250;
@@ -334,6 +359,13 @@ const CONFIRM_MOVE_SETTING_KEY = 'pirate_game_confirm_move_enabled';
 export default function BattleModal({
   enemy,
   onClose,
+  initialBattleState,
+  battleState: controlledBattleState,
+  localUsername,
+  readOnly = false,
+  onBattleStateChange,
+  onBattleAction,
+  onRetreatRequest,
   playerStacks,
   playerStats,
   playerFormation,
@@ -345,7 +377,8 @@ export default function BattleModal({
   onTutorialContinue,
   onTutorialSkip,
 }: BattleModalProps) {
-  const [battle, setBattle] = useState<BattleState | null>(() => {
+  const [internalBattle, setBattle] = useState<BattleState | null>(() => {
+    if (initialBattleState) return initialBattleState;
     const user = getCurrentUser();
     return user ? createNpcBattleState(user, enemy, {
       playerStacks,
@@ -355,6 +388,11 @@ export default function BattleModal({
       suppressRecruitOffer: !persistentResults,
     }) : null;
   });
+  const battle = controlledBattleState || internalBattle;
+  const battleUsername = localUsername || getCurrentUser()?.username || '';
+  const localBattleSide = battle?.participants?.find(participant => (
+    participant.username.toLowerCase() === battleUsername.toLowerCase()
+  ))?.side || 'player';
   const [selectedSpellId, setSelectedSpellId] = useState<string | null>(null);
   const [isSpellMenuOpen, setIsSpellMenuOpen] = useState(false);
   const [battleSpeed] = useState<CombatSpeed>(() => readCombatSpeedSetting());
@@ -384,7 +422,7 @@ export default function BattleModal({
   const [hoveredCell, setHoveredCell] = useState<{ x: number; y: number } | null>(null);
   const [hoverCursor, setHoverCursor] = useState<{ x: number; y: number } | null>(null);
   const [pendingMoveUndo, setPendingMoveUndo] = useState<BattleState | null>(null);
-  const [confirmMoveEnabled, setConfirmMoveEnabled] = useState(() => readGameJson(CONFIRM_MOVE_SETTING_KEY, false));
+  const [confirmMoveEnabled] = useState(() => readGameJson(CONFIRM_MOVE_SETTING_KEY, false));
   const [indicatorMode] = useState(() => readCombatIndicatorMode());
   const [combatTutorialIntroDismissed, setCombatTutorialIntroDismissed] = useState(false);
   const [combatTutorialUnitWaitSeen, setCombatTutorialUnitWaitSeen] = useState(false);
@@ -419,7 +457,7 @@ export default function BattleModal({
   const lastPresentedRound = useRef(0);
   const activeSpellNoticeRef = useRef<BattleSpellCastNoticeData | null>(null);
   const queuedTurnBanner = useRef<BattleTurnBannerData | null>(null);
-  const lastTurnBannerSide = useRef<BattleUnit['side'] | null>(null);
+  const lastTurnBannerKey = useRef<string | null>(null);
   const lastSoundLogEntryId = useRef<string | null>(null);
   const processedBattleLogIds = useRef<Set<string>>(new Set());
   const rewardClaimed = useRef(false);
@@ -435,6 +473,25 @@ export default function BattleModal({
     ? Array.from(new Set(['ember-dart', ...baseActiveSpellIds])).slice(0, 4)
     : baseActiveSpellIds;
   const availableSpells = BATTLE_SPELLS.filter(spell => activeSpellIds.includes(spell.id)).slice(0, 4);
+  const resolveBattleAction = useCallback((
+    request: BattleModalActionRequest,
+    localAction: () => BattleState,
+  ): BattleState | null => {
+    if (!onBattleAction) return localAction();
+    const result = onBattleAction(request);
+    if (result.success && result.battle) return result.battle;
+    setBattleCue({
+      headline: 'Command Rejected',
+      detail: result.error || 'The duel state changed. Try again.',
+      tone: 'neutral',
+    });
+    playGameSound('ui.clickSoft', { throttleMs: 120 });
+    return null;
+  }, [onBattleAction]);
+
+  useEffect(() => {
+    if (battle) onBattleStateChange?.(battle);
+  }, [battle, onBattleStateChange]);
 
   useEffect(() => {
     preloadGameSounds(BATTLE_PRELOAD_SOUND_IDS);
@@ -612,7 +669,7 @@ export default function BattleModal({
     let scheduleTimer: number | null = null;
 
     if (!battle || battle.status !== 'active') {
-      lastTurnBannerSide.current = null;
+      lastTurnBannerKey.current = null;
       queuedTurnBanner.current = null;
       activeSpellNoticeRef.current = null;
       scheduleTimer = window.setTimeout(() => setTurnBanner(null), 0);
@@ -622,19 +679,22 @@ export default function BattleModal({
     }
 
     const active = getActiveUnit(battle);
-    if (!active || lastTurnBannerSide.current === active.side) {
+    const bannerKey = active ? `${battle.round}:${active.id}` : '';
+    if (!active || lastTurnBannerKey.current === bannerKey) {
       return () => {
         if (scheduleTimer) window.clearTimeout(scheduleTimer);
       };
     }
 
-    lastTurnBannerSide.current = active.side;
+    lastTurnBannerKey.current = bannerKey;
+    const isLocalTurn = canUserControlBattleUnit(battle, battleUsername, active);
+    const ownerUsername = getBattleActiveOwnerUsername(battle);
     const id = `${battle.id}-${battle.round}-${battle.activeUnitId}-${active.side}`;
     const banner = {
       id,
-      side: active.side,
-      title: active.side === 'enemy' ? 'Enemy Turn' : 'Your Turn',
-      detail: active.side === 'enemy' ? `${active.name} advances.` : `${active.name} is ready.`,
+      side: isLocalTurn ? 'player' as const : 'enemy' as const,
+      title: isLocalTurn ? 'Your Turn' : ownerUsername ? `${ownerUsername}'s Turn` : 'Enemy Turn',
+      detail: isLocalTurn ? `${active.name} is ready.` : `${active.name} advances.`,
     };
     scheduleTimer = window.setTimeout(() => {
       if (spellCastNotice || activeSpellNoticeRef.current || bossLastStandCueRef.current || bossSpecialCueRef.current) {
@@ -647,7 +707,7 @@ export default function BattleModal({
     return () => {
       if (scheduleTimer) window.clearTimeout(scheduleTimer);
     };
-  }, [battle, queueOrShowTurnBanner, spellCastNotice]);
+  }, [battle, battleUsername, queueOrShowTurnBanner, spellCastNotice]);
 
   useEffect(() => {
     if (!battle) return;
@@ -809,7 +869,7 @@ export default function BattleModal({
       window.clearTimeout(pinTimer);
       window.clearTimeout(timer);
     };
-  }, [battle?.log]);
+  }, [battle]);
 
   useEffect(() => {
     if (!battle || battle.status !== 'active') return;
@@ -817,7 +877,7 @@ export default function BattleModal({
     if (battle.recruitOffer && !battle.recruitOffer.declined && !battle.recruitOffer.accepted) return;
 
     const activeUnit = getActiveUnit(battle);
-    if (!activeUnit || activeUnit.side !== 'enemy') return;
+    if (!activeUnit || !shouldRunBattleAi(battle)) return;
 
     const isEnemyCommander = activeUnit.kind === 'commander';
     const enemyDelayMs = ENEMY_BATTLE_PACE.delayBeforeMs + (isEnemyCommander ? ENEMY_BATTLE_PACE.commanderDelayBonusMs : 0);
@@ -862,25 +922,35 @@ export default function BattleModal({
     if (battle.recruitOffer && !battle.recruitOffer.declined && !battle.recruitOffer.accepted) return;
 
     const activeUnit = getActiveUnit(battle);
-    if (!activeUnit || activeUnit.side !== 'player') return;
+    const isHumanSessionParticipant = Boolean(
+      (battle.mode === 'pvp' || battle.mode === 'coop')
+      && battle.participants?.some(participant => (
+        participant.controller === 'human'
+        && participant.username.toLowerCase() === battleUsername.toLowerCase()
+      )),
+    );
+    if (
+      !activeUnit
+      || readOnly
+      || (!isHumanSessionParticipant && !canUserControlBattleUnit(battle, battleUsername, activeUnit))
+    ) return;
     const remaining = getTurnTimeRemaining(battle, Date.now());
 
     const timeout = window.setTimeout(() => {
       setPendingMoveUndo(null);
-      setBattle(current => {
-        const currentActiveUnit = current ? getActiveUnit(current) : undefined;
-        if (!current || !currentActiveUnit || currentActiveUnit.side !== 'player') return current;
-        setSelectedSpellId(null);
-        setIsSpellMenuOpen(false);
-        if (isBonusMovePending(current, currentActiveUnit)) {
-          return skipBonusBattleMove(current, currentActiveUnit.id);
-        }
-        return waitBattleUnit(current, currentActiveUnit.id, `${currentActiveUnit.name}'s turn timed out.`);
-      });
+      setSelectedSpellId(null);
+      setIsSpellMenuOpen(false);
+      const nextBattle = resolveBattleAction(
+        { type: 'timeout-pass', unitId: activeUnit.id },
+        () => isBonusMovePending(battle, activeUnit)
+          ? skipBonusBattleMove(battle, activeUnit.id)
+          : waitBattleUnit(battle, activeUnit.id, `${activeUnit.name}'s turn timed out.`),
+      );
+      if (nextBattle) setBattle(nextBattle);
     }, remaining);
 
     return () => window.clearTimeout(timeout);
-  }, [battle]);
+  }, [battle, battleUsername, readOnly, resolveBattleAction]);
 
   useEffect(() => {
     if (!battle || rewardClaimed.current) return;
@@ -970,7 +1040,11 @@ export default function BattleModal({
 
       if (!battle || battle.status !== 'active' || isResolvingAction) return;
       const keyboardActiveUnit = getActiveUnit(battle);
-      if (!keyboardActiveUnit || keyboardActiveUnit.side !== 'player') return;
+      if (
+        !keyboardActiveUnit
+        || readOnly
+        || !canUserControlBattleUnit(battle, battleUsername, keyboardActiveUnit)
+      ) return;
       const keyboardCombatTutorialActive = isCombatTutorialStep && combatTutorialIntroDismissed;
       const keyboardTutorialSpell = availableSpells.find(spell => spell.id === 'ember-dart')
         || availableSpells.find(spell => spell.target === 'enemy')
@@ -985,7 +1059,7 @@ export default function BattleModal({
       const keyboardNeedsMana = Boolean(
         keyboardMustCastTutorialSpell &&
         keyboardTutorialSpell &&
-        getBattleMana(battle, 'player') < keyboardTutorialSpell.cost
+        getBattleMana(battle, localBattleSide) < keyboardTutorialSpell.cost
       );
       const blockCommanderTutorialShortcut = (action: 'focus' | 'wait') => {
         if (keyboardCombatTutorialActive && combatTutorialCommanderSpellCast && !combatTutorialManaSaveSeen) {
@@ -1011,7 +1085,11 @@ export default function BattleModal({
         setIsSpellMenuOpen(false);
         setPendingMoveUndo(null);
         if (isBonusMovePending(battle, keyboardActiveUnit)) {
-          setBattle(skipBonusBattleMove(battle, keyboardActiveUnit.id));
+          const nextBattle = resolveBattleAction(
+            { type: 'skip-bonus-move', unitId: keyboardActiveUnit.id },
+            () => skipBonusBattleMove(battle, keyboardActiveUnit.id),
+          );
+          if (nextBattle) setBattle(nextBattle);
           return;
         }
         const supportAbility = getMinionSupportAbility(keyboardActiveUnit);
@@ -1020,9 +1098,13 @@ export default function BattleModal({
           else if (keyboardActiveUnit.healing > 0) setCombatTutorialHealerBlessingSeen(true);
           else setCombatTutorialUnitWaitSeen(true);
         }
-        setBattle(supportAbility
-          ? applyMinionSupportAbility(battle, keyboardActiveUnit.id)
-          : waitBattleUnit(battle, keyboardActiveUnit.id));
+        const nextBattle = resolveBattleAction(
+          { type: supportAbility ? 'support' : 'wait', unitId: keyboardActiveUnit.id },
+          () => supportAbility
+            ? applyMinionSupportAbility(battle, keyboardActiveUnit.id)
+            : waitBattleUnit(battle, keyboardActiveUnit.id),
+        );
+        if (nextBattle) setBattle(nextBattle);
       }
 
       if (event.key.toLowerCase() === 'f' && keyboardActiveUnit.kind === 'commander') {
@@ -1034,7 +1116,11 @@ export default function BattleModal({
         if (keyboardCombatTutorialActive && combatTutorialCommanderSpellCast) {
           setCombatTutorialManaSaveSeen(true);
         }
-        setBattle(focusCommanderMana(battle, keyboardActiveUnit.id));
+        const nextBattle = resolveBattleAction(
+          { type: 'focus-mana', unitId: keyboardActiveUnit.id },
+          () => focusCommanderMana(battle, keyboardActiveUnit.id),
+        );
+        if (nextBattle) setBattle(nextBattle);
       }
 
       if (event.key.toLowerCase() === 's' && keyboardActiveUnit.kind === 'commander') {
@@ -1052,11 +1138,18 @@ export default function BattleModal({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [availableSpells, battle, combatTutorialCommanderSpellCast, combatTutorialIntroDismissed, combatTutorialManaSaveSeen, isCombatTutorialStep, isResolvingAction, selectedSpellId]);
+  }, [availableSpells, battle, battleUsername, combatTutorialCommanderSpellCast, combatTutorialIntroDismissed, combatTutorialManaSaveSeen, isCombatTutorialStep, isResolvingAction, localBattleSide, readOnly, resolveBattleAction, selectedSpellId]);
 
   const recruitOfferPending = Boolean(battle?.recruitOffer && !battle.recruitOffer.declined && !battle.recruitOffer.accepted);
   const activeUnit = battle ? getActiveUnit(battle) : undefined;
-  const isPlayerTurn = !roundIntroActive && !recruitOfferPending && activeUnit?.side === 'player' && battle?.status === 'active';
+  const isPlayerTurn = Boolean(
+    !readOnly
+    && !roundIntroActive
+    && !recruitOfferPending
+    && battle
+    && activeUnit
+    && canUserControlBattleUnit(battle, battleUsername, activeUnit)
+  );
   const playerActionTargetIds = useMemo(() => {
     const healIds = new Set<string>();
     const strikeIds = new Set<string>();
@@ -1079,7 +1172,7 @@ export default function BattleModal({
     pendingMoveUndo &&
     battle?.status === 'active' &&
     pendingMoveUndo.activeUnitId === battle.activeUnitId &&
-    activeUnit?.side === 'player'
+    isPlayerTurn
   );
   const canAttackAfterPendingMove = Boolean(
     canUndoMove &&
@@ -1120,7 +1213,7 @@ export default function BattleModal({
     isResolvingAction,
     selectedSpell,
     isSpellMenuOpen,
-    battleMana: getBattleMana(battle, 'player'),
+    battleMana: getBattleMana(battle, localBattleSide),
     tutorialSpell,
     hasAttackTarget: playerActionTargetIds.strikeIds.size > 0,
     hasMoveTarget: hasTutorialMoveTarget,
@@ -1145,7 +1238,7 @@ export default function BattleModal({
   const commanderTutorialNeedsMana = Boolean(
     mustCastCommanderTutorialSpell &&
     tutorialSpell &&
-    getBattleMana(battle, 'player') < tutorialSpell.cost
+    getBattleMana(battle, localBattleSide) < tutorialSpell.cost
   );
   const combatTutorialOrbFocus = combatTutorialStage?.orbFocus;
 
@@ -1279,11 +1372,17 @@ export default function BattleModal({
     const bonusMoveActive = isBonusMovePending(battle, activeUnit);
     if (bonusMoveActive) {
       if (!unitAtCell && canBonusMoveTo(battle, activeUnit, x, y)) {
-        queuePlayerAction(moveBonusBattleUnit(battle, activeUnit.id, x, y), {
-          headline: 'Step Away',
-          detail: '',
-          tone: 'player',
-        });
+        const nextBattle = resolveBattleAction(
+          { type: 'bonus-move', unitId: activeUnit.id, x, y },
+          () => moveBonusBattleUnit(battle, activeUnit.id, x, y),
+        );
+        if (nextBattle) {
+          queuePlayerAction(nextBattle, {
+            headline: 'Step Away',
+            detail: '',
+            tone: 'player',
+          });
+        }
       }
       return;
     }
@@ -1302,7 +1401,16 @@ export default function BattleModal({
           return;
         }
         setSelectedSpellId(null);
-        const nextBattle = castBattleSpell(battle, selectedSpell.id, unitAtCell.id);
+        const nextBattle = resolveBattleAction(
+          {
+            type: 'cast-spell',
+            unitId: activeUnit.id,
+            targetId: unitAtCell.id,
+            spellId: selectedSpell.id,
+          },
+          () => castBattleSpell(battle, selectedSpell.id, unitAtCell.id),
+        );
+        if (!nextBattle) return;
         if (mustCastCommanderTutorialSpell && selectedSpell.id === tutorialSpell?.id) {
           recordCombatCommanderSpellTutorialCast();
         }
@@ -1332,33 +1440,59 @@ export default function BattleModal({
     }
 
     if (unitAtCell && !canUndoMove && canHeal(activeUnit, unitAtCell)) {
-      queuePlayerAction(advanceBattleTurn(healBattleUnit(battle, activeUnit.id, unitAtCell.id)), {
-        headline: 'Healing',
-        detail: '',
-        tone: 'player',
-      });
+      const nextBattle = resolveBattleAction(
+        { type: 'heal', unitId: activeUnit.id, targetId: unitAtCell.id },
+        () => advanceBattleTurn(healBattleUnit(battle, activeUnit.id, unitAtCell.id)),
+      );
+      if (nextBattle) {
+        queuePlayerAction(nextBattle, {
+          headline: 'Healing',
+          detail: '',
+          tone: 'player',
+        });
+      }
       return;
     }
 
     if (unitAtCell && (!canUndoMove || canAttackAfterPendingMove) && canAttack(activeUnit, unitAtCell)) {
       if (combatTutorialActive) setCombatTutorialAttackActionSeen(true);
-      const attackedBattle = attackBattleUnit(battle, activeUnit.id, unitAtCell.id);
-      const attackerAfterAttack = attackedBattle.units.find(unit => unit.id === activeUnit.id && unit.currentHealth > 0);
-      queuePlayerAction(
-        attackerAfterAttack && isBonusMovePending(attackedBattle, attackerAfterAttack)
-          ? attackedBattle
-          : advanceBattleTurn(attackedBattle),
-        {
+      const nextBattle = resolveBattleAction(
+        { type: 'attack', unitId: activeUnit.id, targetId: unitAtCell.id },
+        () => {
+          const attackedBattle = attackBattleUnit(battle, activeUnit.id, unitAtCell.id);
+          const attackerAfterAttack = attackedBattle.units.find(unit => unit.id === activeUnit.id && unit.currentHealth > 0);
+          return attackerAfterAttack && isBonusMovePending(attackedBattle, attackerAfterAttack)
+            ? attackedBattle
+            : advanceBattleTurn(attackedBattle);
+        },
+      );
+      if (nextBattle) {
+        queuePlayerAction(nextBattle, {
         headline: 'Strike',
         detail: '',
         tone: 'danger',
-        }
-      );
+        });
+      }
       return;
     }
 
     if (!unitAtCell && !canUndoMove && canMoveTo(battle, activeUnit, x, y)) {
       if (combatTutorialActive) setCombatTutorialMoveSeen(true);
+      if (onBattleAction) {
+        const synchronizedMove = resolveBattleAction(
+          { type: 'move', unitId: activeUnit.id, x, y },
+          () => moveBattleUnit(battle, activeUnit.id, x, y),
+        );
+        if (synchronizedMove) {
+          const stillActive = synchronizedMove.activeUnitId === activeUnit.id;
+          queuePlayerAction(synchronizedMove, {
+            headline: 'Move',
+            detail: stillActive ? 'Strike from the new position.' : '',
+            tone: 'player',
+          });
+        }
+        return;
+      }
       const movedBattle = moveBattleUnit(battle, activeUnit.id, x, y);
       const skirmishAttackReady = canSkirmishAttackAfterMove(movedBattle, activeUnit.id);
       const moveResultBattle = skirmishAttackReady
@@ -1421,11 +1555,17 @@ export default function BattleModal({
     if (shouldBlockCommanderTutorialNonSpell('wait')) return;
     setSelectedSpellId(null);
     if (activeUnit && isBonusMovePending(battle, activeUnit)) {
-      queuePlayerAction(skipBonusBattleMove(battle, activeUnit.id), {
-        headline: 'Hold',
-        detail: '',
-        tone: 'neutral',
-      });
+      const nextBattle = resolveBattleAction(
+        { type: 'skip-bonus-move', unitId: activeUnit.id },
+        () => skipBonusBattleMove(battle, activeUnit.id),
+      );
+      if (nextBattle) {
+        queuePlayerAction(nextBattle, {
+          headline: 'Hold',
+          detail: '',
+          tone: 'neutral',
+        });
+      }
       return;
     }
     const supportAbility = getMinionSupportAbility(activeUnit);
@@ -1435,13 +1575,20 @@ export default function BattleModal({
       else if (priestCharge) setCombatTutorialHealerBlessingSeen(true);
       else setCombatTutorialUnitWaitSeen(true);
     }
-    queuePlayerAction(supportAbility && activeUnit
-      ? applyMinionSupportAbility(battle, activeUnit.id)
-      : waitBattleUnit(battle, activeUnit?.id || ''), {
-      headline: supportAbility ? supportAbility.name : priestCharge ? 'Blessing Charged' : 'Hold',
-      detail: '',
-      tone: supportAbility || priestCharge ? 'player' : 'neutral',
-    });
+    if (!activeUnit) return;
+    const nextBattle = resolveBattleAction(
+      { type: supportAbility ? 'support' : 'wait', unitId: activeUnit.id },
+      () => supportAbility
+        ? applyMinionSupportAbility(battle, activeUnit.id)
+        : waitBattleUnit(battle, activeUnit.id),
+    );
+    if (nextBattle) {
+      queuePlayerAction(nextBattle, {
+        headline: supportAbility ? supportAbility.name : priestCharge ? 'Blessing Charged' : 'Hold',
+        detail: '',
+        tone: supportAbility || priestCharge ? 'player' : 'neutral',
+      });
+    }
   };
 
   const handleFocusMana = () => {
@@ -1451,11 +1598,17 @@ export default function BattleModal({
     if (combatTutorialActive && combatTutorialCommanderSpellCast) {
       setCombatTutorialManaSaveSeen(true);
     }
-    queuePlayerAction(focusCommanderMana(battle, activeUnit.id), {
-      headline: 'Focus Mana',
-      detail: '',
-      tone: 'player',
-    });
+    const nextBattle = resolveBattleAction(
+      { type: 'focus-mana', unitId: activeUnit.id },
+      () => focusCommanderMana(battle, activeUnit.id),
+    );
+    if (nextBattle) {
+      queuePlayerAction(nextBattle, {
+        headline: 'Focus Mana',
+        detail: '',
+        tone: 'player',
+      });
+    }
   };
 
   const handleSpellClick = (spell: BattleSpell) => {
@@ -1471,7 +1624,7 @@ export default function BattleModal({
       return;
     }
 
-    if (getBattleMana(battle, 'player') < spell.cost) {
+    if (getBattleMana(battle, localBattleSide) < spell.cost) {
       setSelectedSpellId(null);
       setIsSpellMenuOpen(true);
       playGameSound('ui.clickSoft', { throttleMs: 120 });
@@ -1482,7 +1635,13 @@ export default function BattleModal({
     if (spell.target === 'none') {
       setSelectedSpellId(null);
       setIsSpellMenuOpen(false);
-      const nextBattle = castBattleSpell(battle, spell.id);
+      const activeCommander = getActiveUnit(battle);
+      if (!activeCommander) return;
+      const nextBattle = resolveBattleAction(
+        { type: 'cast-spell', unitId: activeCommander.id, spellId: spell.id },
+        () => castBattleSpell(battle, spell.id),
+      );
+      if (!nextBattle) return;
       if (mustCastCommanderTutorialSpell && spell.id === tutorialSpell?.id) {
         recordCombatCommanderSpellTutorialCast();
       }
@@ -1575,6 +1734,10 @@ export default function BattleModal({
 
   const handleRetreat = () => {
     if (!battle || battle.status !== 'active') return;
+    if (onRetreatRequest) {
+      onRetreatRequest();
+      return;
+    }
     setPendingMoveUndo(null);
     setBattle({
       ...battle,
@@ -1761,7 +1924,7 @@ export default function BattleModal({
                   stage={combatTutorialStage}
                   unit={activeUnit}
                   spell={tutorialSpell}
-                  mana={getBattleMana(battle, 'player')}
+                  mana={getBattleMana(battle, localBattleSide)}
                   nudge={combatTutorialNudge}
                   onSkip={onTutorialSkip}
                 />
@@ -1770,6 +1933,7 @@ export default function BattleModal({
                 <div className={`battle-spell-popover ${combatTutorialStage?.id === 'commander-select-spell' ? 'battle-spell-popover-tutorial' : ''}`}>
                   <BattleSpellMenu
                     battle={battle}
+                    side={localBattleSide}
                     spells={availableSpells}
                     selectedSpellId={selectedSpellId}
                     isResolvingAction={isResolvingAction}
@@ -2400,6 +2564,7 @@ function BattleTurnBanner({ banner }: { banner: BattleTurnBannerData }) {
 
 function BattleSpellMenu({
   battle,
+  side,
   spells,
   selectedSpellId,
   isResolvingAction,
@@ -2408,6 +2573,7 @@ function BattleSpellMenu({
   onClose,
 }: {
   battle: BattleState;
+  side: BattleSide;
   spells: BattleSpell[];
   selectedSpellId: string | null;
   isResolvingAction: boolean;
@@ -2415,7 +2581,7 @@ function BattleSpellMenu({
   onSpellClick: (spell: BattleSpell) => void;
   onClose: () => void;
 }) {
-  const mana = getBattleMana(battle, 'player');
+  const mana = getBattleMana(battle, side);
 
   return (
     <section className="battle-spell-menu command-panel vine-frame mt-2 rounded border p-4 text-zinc-100">
@@ -2884,7 +3050,7 @@ function BattleCommandRail({
               <span className="battle-command-unit-copy">
                 <span className="battle-command-unit-name">{shortBattleUnitName(activeUnit.name, 18)}</span>
                 <span className="battle-command-unit-meta">
-                  {activeUnit.side === 'player' ? 'Ally' : 'Enemy'}
+                  {activeUnit.ownerUsername ? `Controlled by ${activeUnit.ownerUsername}` : activeUnit.side === 'player' ? 'Ally' : 'Enemy'}
                   {activeUnit.kind === 'commander' ? ' - Commander' : ''}
                 </span>
               </span>
@@ -3233,7 +3399,10 @@ function BattlePiece({
       data-battle-target={targetGlow || undefined}
       data-multiplayer-tutorial-anchor={isCommander && unit.side === 'player' ? 'commander-loss-warning' : undefined}
     >
-      <span className="battle-piece-health">
+      {isCommander && unit.ownerUsername && (
+        <span className="battle-piece-owner">{shortBattleUnitName(unit.ownerUsername, 14)}</span>
+      )}
+      <span className={`battle-piece-health ${isCommander && unit.ownerUsername ? 'battle-piece-health-owned' : ''}`}>
         <span className={unit.side === 'player' ? 'bg-emerald-300' : 'bg-red-300'} style={{ width: `${healthPercent}%` }} />
       </span>
       {unit.chargedHeal && (
@@ -4056,15 +4225,8 @@ function getBattleLogNumericAmount(entry: BattleLogEntry): number {
   return amountMatch ? Number.parseInt(amountMatch[1], 10) : 0;
 }
 
-function getBattleLogPrimaryTarget(battle: BattleState, entry: BattleLogEntry): BattleUnit | undefined {
-  return entry.targetIds
-    ?.map(targetId => battle.units.find(unit => unit.id === targetId))
-    .find((unit): unit is BattleUnit => Boolean(unit));
-}
-
 function getAttackImpactSound(battle: BattleState, entry: BattleLogEntry): GameSoundId {
   const actor = entry.actorId ? battle.units.find(unit => unit.id === entry.actorId) : undefined;
-  const target = getBattleLogPrimaryTarget(battle, entry);
   const amount = getBattleLogNumericAmount(entry);
 
   if (actor?.kind === 'commander' || amount >= 12) return 'combat.meleeHeavy';
@@ -4492,7 +4654,12 @@ function getDefaultBattleCue({
   }
 
   if (!isPlayerTurn) {
-    return { headline: 'Enemy Turn', detail: '', tone: 'enemy' };
+    const ownerUsername = getBattleActiveOwnerUsername(battle);
+    return {
+      headline: ownerUsername ? `${ownerUsername}'s Turn` : 'Enemy Turn',
+      detail: ownerUsername ? 'Waiting for their command.' : '',
+      tone: 'enemy',
+    };
   }
 
   if (selectedSpell) {
