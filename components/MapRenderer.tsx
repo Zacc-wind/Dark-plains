@@ -2451,9 +2451,24 @@ function MainQuestTracker({
   const objectiveLabel = status.complete
     ? 'Story reward ready to claim.'
     : getStoryRequirementLabel(activeStory);
+  const activeCityQuests = (currentUser.cityQuests || [])
+    .map(cityQuest => {
+      const template = getCityQuestTemplate(cityQuest.questId);
+      return template ? { template, status: getCityQuestStatus(currentUser, cityQuest.questId) } : null;
+    })
+    .filter((quest): quest is NonNullable<typeof quest> => Boolean(quest && !quest.status.claimed))
+    .slice(0, 2);
+  const activeDailyQuests = (currentUser.dailyQuests?.quests || [])
+    .filter(quest => !quest.claimed)
+    .slice(0, 2);
+  const activeOrderCount = activeCityQuests.length + activeDailyQuests.length;
 
   return (
-    <aside className="main-quest-tracker main-quest-guide command-panel vine-frame pointer-events-auto fixed left-4 top-24 z-40 w-[min(24rem,calc(100vw-2rem))] rounded border p-4 text-zinc-100">
+    <CinematicScrollShell
+      variant="compact"
+      className="main-quest-tracker main-quest-guide pointer-events-auto fixed left-4 top-24 z-40 w-[min(27rem,calc(100vw-2rem))] text-zinc-100"
+      contentClassName="main-quest-tracker-content p-3"
+    >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="arcane-label">Main Quest</div>
@@ -2514,8 +2529,38 @@ function MainQuestTracker({
         <span>{status.unlocked ? `${status.progress}/${status.required}` : 'Locked'}</span>
         <span>{targetPoi ? targetPoi.name : targetQuestNpc ? targetQuestNpc.name : targetEnemy ? targetEnemy.name : status.complete ? 'Ready' : actionPanel}</span>
       </div>
+      {activeOrderCount > 0 && (
+        <div className="main-quest-orders mt-3 border-t border-[rgba(232,217,184,0.16)] pt-2">
+          <div className="mb-1 flex items-center justify-between gap-2">
+            <span className="arcane-label">Active Orders</span>
+            <span className="ui-faint text-[10px] font-black">{activeOrderCount}</span>
+          </div>
+          {[...activeCityQuests.map(quest => ({
+            id: `city-${quest.template.id}`,
+            name: quest.template.name,
+            progress: `${quest.status.progress}/${quest.status.required}`,
+            ready: quest.status.complete,
+          })), ...activeDailyQuests.map(quest => ({
+            id: `daily-${quest.id}`,
+            name: quest.name,
+            progress: `${quest.progress}/${quest.requirement.count}`,
+            ready: quest.progress >= quest.requirement.count,
+          }))].map(order => (
+            <button
+              key={order.id}
+              type="button"
+              onClick={() => openCommandPanel('quests')}
+              className="main-quest-order-row"
+              title={`Open ${order.name}`}
+            >
+              <span>{order.name}</span>
+              <strong>{order.ready ? 'Ready' : order.progress}</strong>
+            </button>
+          ))}
+        </div>
+      )}
       {claimError && <div className="mt-2 text-xs font-black text-red-100">{claimError}</div>}
-    </aside>
+    </CinematicScrollShell>
   );
 }
 

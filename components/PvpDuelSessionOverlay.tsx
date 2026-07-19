@@ -126,7 +126,8 @@ export default function PvpDuelSessionOverlay() {
           stacks={snapshot.minions}
           formation={currentFormation}
           spellIds={currentSpellIds}
-          knownSpellIds={snapshot.knownSpellIds}
+        knownSpellIds={snapshot.knownSpellIds}
+        organizedRoster
           onChangeFormation={setFormation}
           onChangeSpellIds={setSpellIds}
           onStart={() => {

@@ -38,6 +38,7 @@ type FormationPanelProps = {
   formation: Record<string, BoardCell>;
   spellIds: string[];
   knownSpellIds: string[];
+  organizedRoster?: boolean;
   onChangeFormation: (formation: Record<string, BoardCell>) => void;
   onChangeSpellIds: (spellIds: string[]) => void;
   onStart: () => void;
@@ -73,6 +74,7 @@ export default function FormationPanel({
   formation: formationInput,
   spellIds,
   knownSpellIds,
+  organizedRoster = false,
   onChangeFormation,
   onChangeSpellIds,
   onStart,
@@ -83,6 +85,7 @@ export default function FormationPanel({
   const [selectedSpellSlot, setSelectedSpellSlot] = useState(0);
   const [spellbookOpen, setSpellbookOpen] = useState(false);
   const [benchDragActive, setBenchDragActive] = useState(false);
+  const [rosterSort, setRosterSort] = useState<'tier' | 'class' | 'name'>('tier');
   const spellbookRef = useRef<HTMLElement>(null);
   const spellbookTriggerRef = useRef<HTMLElement | null>(null);
   const placedStacks = useMemo(() => getPlacedFormationStacks(stacks, formation), [formation, stacks]);
@@ -90,6 +93,25 @@ export default function FormationPanel({
     () => stacks.filter(stack => !isFormationCellAllowed(formation[stack.id])),
     [formation, stacks],
   );
+  const sortRosterStacks = useCallback((entries: MinionStack[]) => {
+    if (!organizedRoster) return entries;
+    const tierRank = { tier1: 1, tier2: 2, tier3: 3 } as const;
+    return [...entries].sort((left, right) => {
+      const leftTemplate = getMinionTemplate(left.templateId);
+      const rightTemplate = getMinionTemplate(right.templateId);
+      if (rosterSort === 'tier') {
+        const tierDifference = (tierRank[rightTemplate?.tier || 'tier1'] || 0) - (tierRank[leftTemplate?.tier || 'tier1'] || 0);
+        if (tierDifference !== 0) return tierDifference;
+      }
+      if (rosterSort === 'class') {
+        const classDifference = (leftTemplate?.class || '').localeCompare(rightTemplate?.class || '');
+        if (classDifference !== 0) return classDifference;
+      }
+      return (leftTemplate?.name || left.templateId).localeCompare(rightTemplate?.name || right.templateId);
+    });
+  }, [organizedRoster, rosterSort]);
+  const displayedPlacedStacks = useMemo(() => sortRosterStacks(placedStacks), [placedStacks, sortRosterStacks]);
+  const displayedBenchedStacks = useMemo(() => sortRosterStacks(benchedStacks), [benchedStacks, sortRosterStacks]);
   const formationIssue = getFormationSelectionIssue(formation, placedStacks, maxFielded);
   const equippedSpellIds = spellIds.length === 4 ? spellIds : [...spellIds, 'arcane-bolt', 'sanctified-mend', 'ember-dart'].slice(0, 4);
 
@@ -257,6 +279,20 @@ export default function FormationPanel({
             </span>
           </div>
           <div className="formation-warband-list">
+            {organizedRoster && (
+              <div className="formation-roster-sort" aria-label="Sort warband">
+                {(['tier', 'class', 'name'] as const).map(option => (
+                  <button
+                    key={option}
+                    type="button"
+                    onClick={() => setRosterSort(option)}
+                    className={rosterSort === option ? 'formation-roster-sort-active' : ''}
+                  >
+                    {option}
+                  </button>
+                ))}
+              </div>
+            )}
             <FormationHoverTip side="right" popover={<CommanderTooltipContent commanderName={commanderName} />}>
               <button
                 type="button"
@@ -282,7 +318,7 @@ export default function FormationPanel({
             {placedStacks.length > 0 && (
               <div className="formation-warband-section">
                 <div className="formation-warband-section-label">On field</div>
-                {placedStacks.map(stack => (
+                {displayedPlacedStacks.map(stack => (
                   <WarbandStackCard
                     key={stack.id}
                     stack={stack}
@@ -299,7 +335,7 @@ export default function FormationPanel({
             {benchedStacks.length > 0 && (
               <div className="formation-warband-section">
                 <div className="formation-warband-section-label">Bench</div>
-                {benchedStacks.map(stack => (
+                {displayedBenchedStacks.map(stack => (
                   <WarbandStackCard
                     key={stack.id}
                     stack={stack}

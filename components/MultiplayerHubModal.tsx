@@ -36,6 +36,7 @@ import {
 } from '@/lib/worldPlayers';
 import { getMultiplayerUnlockStatus } from '@/lib/multiplayerUnlocks';
 import MultiplayerFeatureLock from '@/components/MultiplayerFeatureLock';
+import CinematicScrollShell from '@/components/CinematicScrollShell';
 
 interface PvpHubModalProps {
   isOpen: boolean;
@@ -152,8 +153,9 @@ export default function MultiplayerHubModal({ isOpen, onClose }: PvpHubModalProp
   if (!pvpUnlock.unlocked) {
     return (
       <div className="pvp-hub-overlay fixed inset-0 z-[70] flex items-center justify-center bg-black/72 p-4" onClick={onClose}>
-        <section
-          className="pvp-hub-shell command-panel vine-frame w-[min(40rem,calc(100vw-2rem))] overflow-hidden rounded border text-zinc-100 shadow-2xl"
+        <CinematicScrollShell
+          variant="surface"
+          className="pvp-hub-shell w-[min(40rem,calc(100vw-2rem))] overflow-hidden text-zinc-100"
           onClick={(event) => event.stopPropagation()}
         >
           <div className="panel-header flex items-center justify-between gap-4 border-b px-5 py-4">
@@ -164,7 +166,7 @@ export default function MultiplayerHubModal({ isOpen, onClose }: PvpHubModalProp
             <button type="button" onClick={onClose} className="ui-button rounded px-3 py-2 text-xs font-black">Close</button>
           </div>
           <div className="p-5"><MultiplayerFeatureLock status={pvpUnlock} /></div>
-        </section>
+        </CinematicScrollShell>
       </div>
     );
   }
@@ -261,11 +263,13 @@ export default function MultiplayerHubModal({ isOpen, onClose }: PvpHubModalProp
 
   return (
     <div
-      className="pvp-hub-overlay fixed inset-0 z-[70] flex items-center justify-center bg-black/72 p-4 backdrop-blur-sm"
+      className="pvp-hub-overlay fixed inset-0 z-[70] flex items-center justify-center bg-black/72 p-4"
       onClick={onClose}
     >
-      <section
-        className="pvp-hub-shell command-panel vine-frame flex max-h-[min(44rem,calc(100dvh-2rem))] w-[min(52rem,calc(100vw-2rem))] flex-col overflow-hidden rounded border text-zinc-100 shadow-2xl"
+      <CinematicScrollShell
+        variant="surface"
+        className="pvp-hub-shell flex max-h-[min(48rem,calc(100dvh-1rem))] w-[min(58rem,calc(100vw-1rem))] flex-col overflow-hidden text-zinc-100"
+        contentClassName="flex min-h-0 flex-1 flex-col"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="panel-header flex shrink-0 items-start justify-between gap-4 border-b px-5 py-4">
@@ -460,7 +464,7 @@ export default function MultiplayerHubModal({ isOpen, onClose }: PvpHubModalProp
             </div>
           )}
         </div>
-      </section>
+      </CinematicScrollShell>
     </div>
   );
 }

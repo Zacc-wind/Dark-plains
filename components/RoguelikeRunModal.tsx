@@ -7,6 +7,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import BattleModal from './BattleModal';
 import FormationPanel from './FormationPanel';
 import SingleplayerTutorialOverlay from './SingleplayerTutorialOverlay';
+import CinematicScrollShell from './CinematicScrollShell';
 import {
   BATTLE_SPELLS,
   BoardCell,
@@ -1468,6 +1469,7 @@ function RunController({
     enemyName: string;
     artworkPath: string;
   } | null>(null);
+  const [retreatConfirmOpen, setRetreatConfirmOpen] = useState(false);
   const isFormationPhase = session.phase === 'formation';
   const isMapPhase = session.phase === 'map';
   const isDraftPhase = session.phase === 'draft';
@@ -2034,6 +2036,7 @@ function RunController({
                 formation={session.formation}
                 spellIds={session.spellIds}
                 knownSpellIds={session.knownSpellIds}
+                organizedRoster={session.mode !== 'daily'}
                 onChangeFormation={(formation) => setSession(current => current ? { ...current, formation } : current)}
                 onChangeSpellIds={(spellIds) => setSession(current => current ? { ...current, spellIds: spellIds.slice(0, 4) } : current)}
                 onStart={handleStartFormation}
@@ -2086,7 +2089,45 @@ function RunController({
             )}
           </main>
         </div>
+        {isMapPhase && (
+          <button
+            type="button"
+            onClick={() => setRetreatConfirmOpen(true)}
+            className="run-map-retreat-button ui-button-danger"
+          >
+            Retreat
+          </button>
+        )}
       </section>
+      {retreatConfirmOpen && (
+        <div className="run-retreat-confirm-layer" onMouseDown={() => setRetreatConfirmOpen(false)}>
+          <CinematicScrollShell
+            variant="compact"
+            className="run-retreat-confirm-scroll w-[min(30rem,calc(100vw-1rem))]"
+            contentClassName="p-4"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <p className="arcane-label">End Attempt</p>
+            <h3 className="fantasy-heading mt-1 text-xl">Retreat from this road?</h3>
+            <p className="ui-muted mt-2 text-sm font-bold">The run ends now and unclaimed run rewards are lost.</p>
+            <div className="mt-4 flex justify-end gap-2">
+              <button type="button" onClick={() => setRetreatConfirmOpen(false)} className="ui-button rounded px-4 py-2 text-xs font-black">
+                Stay
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setRetreatConfirmOpen(false);
+                  setSession(current => current ? abandonRunCombat(current) : current);
+                }}
+                className="ui-button-danger rounded px-4 py-2 text-xs font-black"
+              >
+                End Run
+              </button>
+            </div>
+          </CinematicScrollShell>
+        </div>
+      )}
     </div>
   );
 }
@@ -3992,6 +4033,25 @@ function RunRoster({
 }) {
   const aliveCount = getAliveRunRoster(session).length;
   const showGearPanel = session.mode === 'daily' && Boolean(onEquipGear && onUnequipGear);
+  const organizedRoster = session.mode !== 'daily';
+  const [rosterSort, setRosterSort] = useState<'tier' | 'class' | 'name'>('tier');
+  const tierRank = { tier1: 1, tier2: 2, tier3: 3 } as const;
+  const displayedMinions = organizedRoster
+    ? [...session.minions].sort((left, right) => {
+        if (left.alive !== right.alive) return left.alive ? -1 : 1;
+        const leftTemplate = getMinionTemplate(left.stack.templateId);
+        const rightTemplate = getMinionTemplate(right.stack.templateId);
+        if (rosterSort === 'tier') {
+          const tierDifference = (tierRank[rightTemplate?.tier || 'tier1'] || 0) - (tierRank[leftTemplate?.tier || 'tier1'] || 0);
+          if (tierDifference !== 0) return tierDifference;
+        }
+        if (rosterSort === 'class') {
+          const classDifference = (leftTemplate?.class || '').localeCompare(rightTemplate?.class || '');
+          if (classDifference !== 0) return classDifference;
+        }
+        return (leftTemplate?.name || left.stack.templateId).localeCompare(rightTemplate?.name || right.stack.templateId);
+      })
+    : session.minions;
 
   return (
     <aside className={`run-roster-aside flex min-h-0 flex-col gap-3 ${variant === 'map' ? 'run-roster-aside-map' : ''}`}>
@@ -4000,6 +4060,20 @@ function RunRoster({
           <h3 className="fantasy-heading text-sm font-black">Run Roster</h3>
           <span className="ui-faint text-xs font-bold">{aliveCount}/{session.minions.length}</span>
         </div>
+        {organizedRoster && (
+          <div className="run-roster-sort" aria-label="Sort run roster">
+            {(['tier', 'class', 'name'] as const).map(option => (
+              <button
+                key={option}
+                type="button"
+                onClick={() => setRosterSort(option)}
+                className={rosterSort === option ? 'run-roster-sort-active' : ''}
+              >
+                {option}
+              </button>
+            ))}
+          </div>
+        )}
 
           {session.minions.length === 0 ? (
           <div className="ui-empty rounded border border-dashed px-3 py-4 text-center text-xs font-bold">
@@ -4007,7 +4081,7 @@ function RunRoster({
             </div>
           ) : (
           <div className="run-roster-rows" role="list">
-            {session.minions.map(unit => {
+            {displayedMinions.map(unit => {
               const template = getMinionTemplate(unit.stack.templateId);
               if (!template) return null;
               return <RunRosterListItem key={unit.stack.id} unit={unit} template={template} />;

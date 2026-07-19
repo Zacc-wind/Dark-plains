@@ -163,9 +163,12 @@ export default function MultiplayerTutorialSpotlight() {
     anchorRect.left + anchorRect.width / 2 - panelWidth / 2,
   ));
   const placeBelow = anchorRect.bottom + 180 < window.innerHeight;
-  const panelTop = placeBelow
+  const defaultPanelTop = placeBelow
     ? anchorRect.bottom + 10
     : Math.max(12, anchorRect.top - 170);
+  const panelTop = calloutId === 'harborview-travel'
+    ? Math.max(12, anchorRect.top - 260)
+    : defaultPanelTop;
 
   return createPortal(
     <div className="multiplayer-tutorial-layer" aria-live="polite">

@@ -1,6 +1,6 @@
 # Multiplayer Roadmap
 
-Detailed progression, chapter production, level-path, Chronicle, and retention execution now lives in `docs/progression-content-roadmap.md`. This file remains the source of truth for multiplayer sessions, social flows, combat ownership, and deployment readiness.
+Detailed progression, chapter production, level-path, Chronicle, and retention execution now lives in `docs/progression-content-roadmap.md`. Enemy, equipment, quest-item, and generation prompts live in `docs/content-asset-generation-plan.md`. This file remains the source of truth for multiplayer sessions, social flows, combat ownership, and deployment readiness.
 
 ## Goal
 Turn the current shared world-map prototype into a real multiplayer layer without mixing it with singleplayer run progression. Multiplayer owns the persistent commander profile: world position, gear, gold, minions, quests, friends, parties, duels, trades, and cooperative dungeons.
@@ -15,7 +15,8 @@ Turn the current shared world-map prototype into a real multiplayer layer withou
 - [x] Challenge, trade, and party flows have in-game request popups and acceptance UX in the local multiplayer prototype. Server-backed synchronization remains deployment work.
 - [x] The Black Pike Ledger Chronicle pilot provides 20 permanent free-track ranks driven by capped, genuine multiplayer action receipts.
 - [x] Player-vs-player combat has a versioned local two-player duel session with captured rosters, formation readiness, ownership-checked actions, timeout passing, and idempotent rating settlement. Database transport remains deployment work.
-- [ ] Cooperative dungeon combat still needs multi-commander formation, turn order, and ownership rules.
+- [x] Cooperative combat now has a tested duo battle snapshot: two human owners, five minions each, a 15x9 raid arena, morale turn order, 15-second turns, four full-health boss phases, and protected boss spell damage. Party readiness, formation UI, settlement, and database transport remain.
+- [x] PVE intel exposes two deterministic co-op boss incursions per five-hour cycle without routing them through the solo encounter flow.
 
 ## Phase 1: First-Login Mode Tutorial
 - [x] Add a first-login mode tutorial before the user can choose Singleplayer or Multiplayer.
@@ -69,16 +70,44 @@ Turn the current shared world-map prototype into a real multiplayer layer withou
 - [x] Add mirrored trade history and idempotent `trade-completed` engagement receipts for both players.
 
 ## Phase 6: Cooperative Dungeons
-- [ ] Add `CoopDungeonSession` state: party id, members, dungeon level, route nodes, bosses, shared seed, current chamber.
+- [x] Add the first `coop` battle-state contract with two human commanders, owned units, one AI raid team, synchronized actions, and a 15-second timeout.
+- [x] Add a dedicated 15x9 raid arena with separate deployment wings and five non-commander field slots per player.
+- [x] Add a four-phase boss contract: full health on every phase transition, escalating attack/defense/magic, refreshed boss abilities, and high raid loot metadata.
+- [x] Add two deterministic raid bosses per five-hour rotation and show them in PVE intel.
+- [ ] Add `CoopRaidSession` state: party id, two members, readiness, formations, shared combat revision, result, and claim receipts.
+- [ ] Build collaborative duo formation; each player places only their own five field units and confirms independently.
+- [ ] Add idempotent raid settlement, per-player loot, disconnect recovery, forfeit/abandon rules, and database transport.
+- [ ] Add map interaction only after party readiness can prevent the old solo encounter path from opening a raid.
+- [ ] Add the longer `CoopDungeonSession`: party id, members, dungeon level, route nodes, bosses, shared seed, and current chamber.
 - [ ] Dungeon levels scale from 1 to 15, with longer routes as level rises.
 - [ ] Level 1 dungeons should be about 4-10 fights; high-level dungeons can reach around 30 fights with multiple bosses.
-- [ ] Co-op formation supports up to 4 commanders.
-- [ ] Total fielded non-commander unit cap is 8 across the party.
-- [ ] Formation draft is collaborative: players place their own units one by one until the shared cap is filled.
-- [ ] Each player controls only their commander and owned units during combat.
-- [ ] Turn order interleaves commanders and units normally, but the UI must clearly show whose turn it is.
+- [ ] Consider four-player veteran dungeons only after the duo raid is reliable; do not make the first session solve both scales.
+- [x] Each player controls only their commander and owned units during combat.
+- [x] Turn order interleaves commanders and units by morale/speed; the combat UI still needs a stronger active-owner banner for co-op.
 - [ ] Show player nickname above each commander on the combat grid.
 - [ ] Co-op dungeons should have more hard roads, stronger enemy formations, and boss mechanics tuned for multiple commanders.
+
+## Phase 6B: Multiplayer UI Simplification
+- [x] Remove full-screen world-popup blur and replace the semi-opaque scroll asset with a transparent-edge derivative.
+- [x] Use the scroll frame as an outer shell for map commands, Campaign, Progression, PVP, PVE, town services, HUD resources, quest tracking, and dramatic confirmations.
+- [x] Keep dense lists as compact dark interiors inside the frame; do not texture every row or card as parchment.
+- [x] Put Commander, Gear, and Army directly on the world-map command rail and remove those destinations from the general Menu.
+- [x] Reduce the Menu to Overview, Jobs, Spells, Social, and Settings; keep Chat independent.
+- [x] Show active city and daily orders under the main quest tracker with one direct route to Orders.
+- [x] Sort multiplayer formation and run rosters by tier, class, or name while leaving singleplayer roster behavior unchanged.
+- [x] Add a bottom-right retreat action and confirmation to both singleplayer and multiplayer run maps.
+- [ ] Recompose each town service into a concise service header, primary action, price/reward row, and inventory/result list; remove repeated explanatory paragraphs.
+- [ ] Finish visual QA at 1920x1080, 2560x1440, 3840x2160, and 390x844 after all shell conversions settle.
+
+## Phase 6C: Economy And Recruitment Balance
+- [x] Replace 20-second/1-minute/5-minute/15-minute jobs with 1-minute/10-minute/30-minute/1-hour jobs.
+- [x] Reduce baseline job gold and XP to 30 percent of the previous values; rare gems are available only on the one-hour tier.
+- [x] Move random gear thresholds to 10/30/60 minutes and keep the best rarity rolls on the longest job.
+- [ ] Tune campaign rewards so a normal chapter step grants no more than about 80 percent of the intended level requirement.
+- [ ] Add level-band reward curves for jobs, contracts, PVE, PVP, and co-op so later levels remain useful without trivializing early progression.
+- [ ] Restrict town recruitment to one deterministic weekly Tier I offer in most towns and one or two weekly Tier II specialist markets.
+- [ ] Make daily/weekly objectives and authored achievements the primary reliable unit sources; keep job-board recruitment uncommon.
+- [x] Cap direct player spell damage against boss commanders at 18 percent of max health, and at 10 percent in four-phase co-op raids.
 
 ## Phase 7: Multiplayer Combat Engine Refactor
 - [ ] Generalize battle sides from `player` vs `enemy` into combat teams with ownership metadata.
@@ -143,5 +172,6 @@ Turn the current shared world-map prototype into a real multiplayer layer withou
 3. [x] Complete the shared request lifecycle and party invite overlay, then add the first regional threat and rested catch-up rules.
 4. [x] Implement the validated local `TradeSession`, request popup, and first-win/first-dungeon-clear bonuses.
 5. [x] Pilot the free Black Pike Ledger Chronicle using only implemented and validated activities.
-6. [ ] Complete multiplayer sessions: local duel ownership and synchronization are implemented; cooperative formation/turn ownership and database transport remain.
-7. Produce levels 6-30 as complete five-level content bands, one chapter at a time.
+6. [ ] Complete multiplayer sessions: local duel ownership/synchronization and the co-op battle foundation are implemented; duo readiness, formation, settlement, and database transport remain.
+7. [ ] Finish the concise town-service pass and verify the new scroll-shell composition at all target viewports.
+8. Produce levels 6-30 as complete five-level content bands, one chapter at a time.

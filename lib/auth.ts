@@ -5730,13 +5730,14 @@ export function getTravelProgress(): number {
 
 // Job duration mapping (in milliseconds) — same tiers for every POI
 export const JOB_WORK_DURATIONS_MS = [
-  20 * 1000,       // 20 seconds
-  1 * 60 * 1000,   // 1 minute
-  5 * 60 * 1000,   // 5 minutes
-  15 * 60 * 1000,  // 15 minutes
+  1 * 60 * 1000,
+  10 * 60 * 1000,
+  30 * 60 * 1000,
+  60 * 60 * 1000,
 ] as const;
 
-export const JOB_DURATION_LABELS = ['20 sec', '1 min', '5 min', '15 min'] as const;
+export const JOB_DURATION_LABELS = ['1 min', '10 min', '30 min', '1 hour'] as const;
+export const JOB_REWARD_MULTIPLIER = 0.3;
 
 const JOB_DURATIONS = JOB_WORK_DURATIONS_MS;
 
@@ -5865,12 +5866,12 @@ export function getJobRewardPreview(jobIndex: number, poiType?: string): JobRewa
   const itemId = profile.itemIds?.[safeIndex] || null;
   const equipmentRarity = profile.equipmentRarities?.[safeIndex] || undefined;
   const minionTier = profile.minionTiers?.[safeIndex] || undefined;
-  const rareGems = profile.rareGems?.[safeIndex] || 0;
+  const rareGems = safeIndex === JOB_DURATIONS.length - 1 ? profile.rareGems?.[safeIndex] || 0 : 0;
   const healthRestore = profile.healthRestore?.[safeIndex] || 0;
 
   return {
-    gold: profile.gold[safeIndex] || 0,
-    exp: profile.exp[safeIndex] || 0,
+    gold: profile.gold[safeIndex] > 0 ? Math.max(1, Math.round(profile.gold[safeIndex] * JOB_REWARD_MULTIPLIER)) : 0,
+    exp: profile.exp[safeIndex] > 0 ? Math.max(1, Math.round(profile.exp[safeIndex] * JOB_REWARD_MULTIPLIER)) : 0,
     rareGems: rareGems > 0 ? rareGems : undefined,
     healthRestore: healthRestore > 0 ? healthRestore : undefined,
     items: itemId ? [makeInventoryItem(itemId)] : undefined,
@@ -6101,7 +6102,7 @@ export function checkJobsComplete(): void {
       itemsEarned.push(...rollInventoryBonusDrops(currentUser.stats.level || 1, 'job'));
       
       // Generate equipment drop
-      const droppedEquipment = generateEquipment(firstJob.duration, undefined, getEquipmentDropBonus(currentUser));
+      const droppedEquipment = generateEquipment(firstJob.workDuration, undefined, getEquipmentDropBonus(currentUser));
       if (droppedEquipment) {
         equipmentEarned.push(droppedEquipment);
       }
@@ -6117,7 +6118,7 @@ export function checkJobsComplete(): void {
       }
       
       // Update daily quest progress
-      updateQuestProgress(firstJob.duration);
+      updateQuestProgress(firstJob.workDuration);
       
       // Remove completed job from queue
       updatedQueue.shift();
@@ -6431,15 +6432,16 @@ export function generateEquipment(jobDuration: number, forcedRarity?: EquipmentR
     
     // Determine rarity based on percentages
     if (random < 2) {
-      // Can only drop from longest job tier (15 min work)
-      if (jobDuration < 15 * 60 * 1000) return null;
+      if (jobDuration < JOB_WORK_DURATIONS_MS[3]) return null;
       rarity = 'legendary';
     } else if (random < 7 + bonus * 0.2) { // 2 + 5, with small lucky bump
-      if (jobDuration < 15 * 60 * 1000) return null;
+      if (jobDuration < JOB_WORK_DURATIONS_MS[3]) return null;
       rarity = 'epic';
     } else if (random < 19 + bonus * 0.55) { // 7 + 12, with lucky bump
+      if (jobDuration < JOB_WORK_DURATIONS_MS[2]) return null;
       rarity = 'rare';
     } else if (random < 44 + bonus) { // 19 + 25, with lucky bump
+      if (jobDuration < JOB_WORK_DURATIONS_MS[1]) return null;
       rarity = 'decent';
     } else {
       return null; // No drop
@@ -6505,11 +6507,11 @@ function rollMinionTier(workDuration: number, playerLevel: number): MinionTier |
   const roll = Math.random();
   const tier2Unlocked = playerLevel >= 5;
   const tier3Unlocked = playerLevel >= 10;
-  const rates = workDuration >= 15 * 60 * 1000
+  const rates = workDuration >= JOB_WORK_DURATIONS_MS[3]
     ? { tier1: 0.009, tier2: 0.0018, tier3: 0.0003 }
-    : workDuration >= 5 * 60 * 1000
+    : workDuration >= JOB_WORK_DURATIONS_MS[2]
       ? { tier1: 0.005, tier2: 0.001, tier3: 0.0001 }
-      : workDuration >= 1 * 60 * 1000
+      : workDuration >= JOB_WORK_DURATIONS_MS[1]
         ? { tier1: 0.0022, tier2: 0.0002, tier3: 0 }
         : { tier1: 0.0004, tier2: 0, tier3: 0 };
   const tier3Chance = tier3Unlocked ? rates.tier3 : 0;

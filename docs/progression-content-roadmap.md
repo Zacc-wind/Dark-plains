@@ -61,7 +61,9 @@ This document is the execution plan for progression, retention, narrative conten
 
 ## Shared UI Direction
 
-Dense progression screens keep the compact dark operational style. Gothic scroll surfaces remain reserved for tutorials, story conversations, the formation spellbook, and dramatic confirmations.
+Multiplayer uses the gothic scroll as a recognizable outer frame for map commands, town services, Campaign, Progression, PVP, PVE, the HUD resource bar, quest tracking, tutorials, story conversations, the formation spellbook, and dramatic confirmations. Dense lists remain compact dark operational interiors inside that frame; individual rows and cards do not become parchment. The transparent-edge asset, no-blur overlay rule, and aspect-safe frame prevent black corners, stretched artwork, and expensive full-screen blur.
+
+The world-map command rail exposes `Commander`, `Gear`, and `Army` directly beside `Menu`, `Chat`, `Campaign`, `PVP`, and `PVE`. The general Menu owns only Overview, Jobs, Spells, Social, and Settings. The main quest tracker also lists the most urgent city and daily orders, so players do not search separate menus to learn what to do next.
 
 ### Multiplayer Campaign And Progression
 
@@ -422,7 +424,7 @@ Do not make every achievement a power grant. Players need goals after the gamepl
 3. `MP-C2 Levels 1-5` - complete: The First Banner is an eight-step playable chapter with a persistent named threat, level-five Black Pike capstone, genuine post-boss return, rank briefings, chapter presentation, and focused tests.
 4. `MP-C3 Social and return completion` - complete: shared request records, party/trade invitation overlays, a versioned local `TradeSession`, the first rotating regional threat, daily first-completion bonuses, and rested job catch-up all use genuine action receipts and duplicate-safe claims.
 5. `MP-C4 Chronicle pilot` - complete: the internal 20-rank Black Pike Ledger uses an idempotent accumulated event ledger, capped genuine-action Renown, duplicate-safe claims, permanent honors, migration tests, and a responsive progression tab.
-6. `MP-C5 Multiplayer sessions` - in progress: combat ownership, synchronized action receipts, and complete local duel sessions are implemented; first co-op dungeon sessions and database transport remain.
+6. `MP-C5 Multiplayer sessions` - in progress: combat ownership, synchronized action receipts, complete local duel sessions, and the tested duo raid battle foundation are implemented. Party readiness, collaborative formation, raid settlement, and database transport remain.
 7. `MP-C6 Levels 6-10`: ship The Drowned Moonwell, Moonbridge contracts, Mother Cindervein, first reputation track, and dungeon tier II.
 8. `MP-C7 Public Chronicle`: expand the validated pilot to 40 ranks, archive support, full reward presentation, and entitlement history.
 9. `MP-C8 Levels 11-30`: produce one complete five-level chapter at a time. Do not implement all remaining quest text in one untested batch.
@@ -484,7 +486,18 @@ The next code batch should be intentionally smaller than this roadmap:
 5. [x] Add controlled/read-only BattleModal support, visible commander owner names, no campaign loot or health penalties, and a claimable duel result.
 6. [x] Make rating settlement and `pvp-completed` engagement receipts idempotent by duel id, including reload normalization tests.
 
-The remaining `MP-C5` work is the first cooperative dungeon session: party readiness, collaborative eight-unit formation, up to four commanders, owner-only turns, and shared route/result state. Database-backed duel and co-op transport remains deployment work.
+## Sixth Implementation Batch - UI, Economy, And Duo Raid Foundation - In Progress 2026-07-19
+
+1. [x] Remove world-popup blur and switch scroll shells to a transparent-edge gothic asset.
+2. [x] Move Commander, Gear, and Army to the map rail; simplify Menu and expand the quest tracker with active orders.
+3. [x] Apply scroll framing to multiplayer command, progression, PVP, PVE, town, HUD, and quest surfaces while preserving dark compact list interiors.
+4. [x] Add multiplayer-only roster sorting and a confirmed retreat action to run maps.
+5. [x] Rebalance jobs to 1/10/30/60 minutes, 30 percent baseline gold/XP, gems only at 60 minutes, and later gear/drop thresholds.
+6. [x] Add the duo raid battle foundation: 15x9 board, two owners, five minions each, morale order, 15-second turns, four full-health phases, two bosses per five-hour cycle, and boss spell caps.
+7. [ ] Add duo readiness, collaborative formation, result settlement, reconnect recovery, and server-backed session transport.
+8. [ ] Complete the concise town-service content pass and viewport QA.
+
+The remaining `MP-C5` work is the first complete cooperative raid session: party readiness, two independent five-unit formations, owner-only turns, shared result state, per-player claims, recovery, and database transport. Four-player route dungeons are a later scale step, not a requirement for the first reliable co-op release.
 
 ## Definition Of Done For Every Progression Slice
 
@@ -496,7 +509,7 @@ The remaining `MP-C5` work is the first cooperative dungeon session: party readi
 - Multiplayer and singleplayer ownership never cross.
 - The feature works at 1920x1080, 2560x1440, 3840x2160, and 390x844.
 - Keyboard focus, Escape, outside dismissal where appropriate, and reduced motion are verified.
-- No dense hub is converted to parchment and no scroll artwork covers content.
+- Dense hubs retain dark compact interiors even when the multiplayer outer shell uses the gothic scroll; no artwork covers content.
 - Telemetry exists before reward volume or grind requirements are increased.
 
 ## Success Measures

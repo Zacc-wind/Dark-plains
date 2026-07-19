@@ -107,7 +107,7 @@ export interface WorldEnemy {
   spawnedAt?: number;
   expiresAt?: number;
   spawnRegionId?: string;
-  spawnKind?: 'regional' | 'nearby' | 'world-boss' | 'story-boss' | 'regional-threat';
+  spawnKind?: 'regional' | 'nearby' | 'world-boss' | 'story-boss' | 'regional-threat' | 'coop-boss';
   lootMultiplier?: number;
   requiredPlayerLevel?: number;
 }
@@ -229,7 +229,8 @@ export interface BattleState {
   turnTimeLimitMs: number;
   log: BattleLogEntry[];
   recruitOffer?: BattleRecruitOffer;
-  bossPhase?: 1 | 2;
+  bossPhase?: number;
+  bossPhaseCount?: number;
   bossSpecialRounds?: Record<string, number>;
   bossSpecialUses?: Record<string, number>;
   bonusMoveUnitId?: string;
@@ -309,6 +310,14 @@ export interface CreatePvpBattleOptions {
   now?: number;
 }
 
+export interface CreateCoopBattleOptions {
+  battleId?: string;
+  hostStacks?: MinionStack[];
+  allyStacks?: MinionStack[];
+  turnTimeLimitMs?: number;
+  now?: number;
+}
+
 export interface BattleUserProfile {
   username: string;
   stats: CharacterStats;
@@ -324,6 +333,11 @@ const WORLD_ENEMY_SNAPSHOT_KEY = 'pirate_game_world_enemy_snapshot';
 const BATTLE_ACTION_RECEIPT_LIMIT = 240;
 export const BATTLE_CONFIRM_WINDOW_MS = 60 * 1000;
 export const TURN_TIME_LIMIT_MS = 2 * 60 * 1000;
+export const COOP_TURN_TIME_LIMIT_MS = 15 * 1000;
+export const COOP_PLAYER_FIELD_MINIONS = 5;
+export const COOP_BOSS_PHASES = 4;
+export const COOP_BOSS_CYCLE_MS = 5 * 60 * 60 * 1000;
+export const COOP_BOSSES_PER_CYCLE = 2;
 export const MAX_PVP_DOWNCHALLENGE_LEVEL_GAP = 5;
 export const WORLD_ENEMY_CAP = 30;
 const BLEED_BASE_DAMAGE = 2;
@@ -500,6 +514,47 @@ const BATTLE_MAP_TEMPLATES: BattleMapTemplate[] = [
     enemySpawns: ENEMY_SPAWNS,
   },
 ];
+
+const COOP_BOARD_WIDTH = 15;
+const COOP_BOARD_HEIGHT = 9;
+const COOP_HOST_SPAWNS: BoardCell[] = [
+  { x: 0, y: 2 },
+  { x: 0, y: 0 }, { x: 1, y: 0 }, { x: 0, y: 1 }, { x: 1, y: 1 }, { x: 1, y: 2 },
+];
+const COOP_ALLY_SPAWNS: BoardCell[] = [
+  { x: 0, y: 6 },
+  { x: 0, y: 8 }, { x: 1, y: 8 }, { x: 0, y: 7 }, { x: 1, y: 7 }, { x: 1, y: 6 },
+];
+const COOP_ENEMY_SPAWNS: BoardCell[] = [
+  { x: 14, y: 4 },
+  { x: 14, y: 0 }, { x: 13, y: 0 }, { x: 14, y: 1 }, { x: 13, y: 1 },
+  { x: 14, y: 2 }, { x: 13, y: 2 }, { x: 14, y: 6 }, { x: 13, y: 6 },
+  { x: 14, y: 7 }, { x: 13, y: 7 }, { x: 14, y: 8 }, { x: 13, y: 8 },
+];
+
+export const COOP_BOSS_MAP: BattleMapTemplate = {
+  id: 'coop-eclipse-arena',
+  name: 'Grand Eclipse Arena',
+  description: 'An expanded raid field with two allied deployment wings and a fortified boss line.',
+  boardWidth: COOP_BOARD_WIDTH,
+  boardHeight: COOP_BOARD_HEIGHT,
+  tags: ['boss', 'ruin'],
+  terrain: [
+    ...terrain('highGround', [
+      { x: 3, y: 1 }, { x: 3, y: 7 }, { x: 11, y: 1 }, { x: 11, y: 7 },
+      { x: 5, y: 0 }, { x: 9, y: 8 },
+    ]),
+    ...terrain('mud', [
+      { x: 6, y: 3 }, { x: 7, y: 3 }, { x: 8, y: 3 },
+      { x: 6, y: 5 }, { x: 7, y: 5 }, { x: 8, y: 5 },
+    ]),
+    ...terrain('holyGround', [{ x: 5, y: 4 }, { x: 9, y: 4 }]),
+    ...terrain('stone', [{ x: 6, y: 4 }, { x: 7, y: 4 }, { x: 8, y: 4 }]),
+  ],
+  obstacles: [{ x: 7, y: 1 }, { x: 7, y: 7 }],
+  playerSpawns: [...COOP_HOST_SPAWNS, ...COOP_ALLY_SPAWNS],
+  enemySpawns: COOP_ENEMY_SPAWNS,
+};
 
 export const BATTLE_SPELLS: BattleSpell[] = [
   {
@@ -828,6 +883,15 @@ function getWorldBossCycle(now = Date.now()): { cycle: number; spawnedAt: number
     cycle,
     spawnedAt: cycle * WORLD_BOSS_CYCLE_MS,
     expiresAt: (cycle + 1) * WORLD_BOSS_CYCLE_MS,
+  };
+}
+
+export function getCoopBossCycle(now = Date.now()): { cycle: number; spawnedAt: number; expiresAt: number } {
+  const cycle = Math.floor(now / COOP_BOSS_CYCLE_MS);
+  return {
+    cycle,
+    spawnedAt: cycle * COOP_BOSS_CYCLE_MS,
+    expiresAt: (cycle + 1) * COOP_BOSS_CYCLE_MS,
   };
 }
 
@@ -1240,6 +1304,37 @@ export function getActiveWorldBoss(user: User | null, now = Date.now()): WorldEn
   return getHourlyWorldBoss(user, now, new Set<string>(), defeatedEnemyIds);
 }
 
+export function getActiveCoopBosses(user: User | null, now = Date.now()): WorldEnemy[] {
+  const { cycle, spawnedAt, expiresAt } = getCoopBossCycle(now);
+  const occupied = new Set<string>();
+  const playerLevel = user?.stats.level || 1;
+
+  return Array.from({ length: COOP_BOSSES_PER_CYCLE }, (_, index) => {
+    const profile = BOSS_PROFILES[(cycle * COOP_BOSSES_PER_CYCLE + index) % BOSS_PROFILES.length];
+    const region = ENEMY_SPAWN_REGIONS[Math.max(0, ENEMY_SPAWN_REGIONS.length - 1 - index)];
+    const seed = Math.abs(hashText(`coop-boss-${cycle}-${index}-${profile.id}`));
+    const home = findWorldEnemyHome(region, seed, occupied, 8);
+    const patrol = getWorldEnemyPatrolPosition(home, region, seed + 401, spawnedAt, occupied, 6);
+    const level = clamp(Math.max(12, playerLevel + 6, getRegionLevelFloor(region) + 5), 12, 30);
+    const baseBoss = makeWorldBossEnemy({ profile, level, home, patrol, seed, spawnedAt, expiresAt, cycle });
+    const raidMinions = Array.from({ length: 8 }, (_, minionIndex) => {
+      const templateId = profile.minionTemplates[minionIndex % profile.minionTemplates.length];
+      return makeMinionStack(templateId, `coop-boss-${cycle}-${index}-${minionIndex}`, true);
+    });
+
+    return {
+      ...baseBoss,
+      id: `coop-boss-${cycle}-${index}-${profile.id}`,
+      subtitle: `${profile.subtitle} - four-phase raid`,
+      minions: raidMinions,
+      spawnRegionId: `coop-raid-${index + 1}`,
+      spawnKind: 'coop-boss',
+      lootMultiplier: 4.8,
+      requiredPlayerLevel: 5,
+    };
+  });
+}
+
 function getNearbyEnemyRegion(user: User): EnemySpawnRegion {
   return {
     id: 'player-nearby',
@@ -1364,7 +1459,7 @@ function getBattleModifiers(stats: CharacterStats): BattleModifiers {
 }
 
 function isBossBattleEnemy(enemy: Pick<WorldEnemy, 'personality' | 'bossId' | 'spawnKind'>): boolean {
-  return enemy.personality === 'boss' || Boolean(enemy.bossId) || enemy.spawnKind === 'world-boss';
+  return enemy.personality === 'boss' || Boolean(enemy.bossId) || enemy.spawnKind === 'world-boss' || enemy.spawnKind === 'coop-boss';
 }
 
 function isSingleplayerRandomRunEnemy(enemy: Pick<WorldEnemy, 'id'>): boolean {
@@ -1875,6 +1970,7 @@ export function createNpcBattleState(user: User | BattleUserProfile, enemy: Worl
     log: openingLog,
     recruitOffer,
     bossPhase: bossBattle ? 1 : undefined,
+    bossPhaseCount: bossBattle ? 2 : undefined,
     bossSpecialRounds: bossBattle ? {} : undefined,
     bossSpecialUses: bossBattle ? {} : undefined,
     createdAt: Date.now(),
@@ -1992,8 +2088,174 @@ export function createPvpBattleState(
     )],
     recruitOffer: undefined,
     bossPhase: undefined,
+    bossPhaseCount: undefined,
     bossSpecialRounds: undefined,
     bossSpecialUses: undefined,
+    createdAt: now,
+  };
+
+  return grantCommanderMana(initialState, firstUnit);
+}
+
+export function createCoopBattleState(
+  host: BattleUserProfile,
+  ally: BattleUserProfile,
+  enemy: WorldEnemy,
+  options: CreateCoopBattleOptions = {},
+): BattleState {
+  const now = options.now ?? Date.now();
+  const battleId = options.battleId || `coop-${host.username}-${ally.username}-${enemy.id}-${now}`;
+  const hostStacks = (options.hostStacks || getPlayerBattleStacks(host)).slice(0, COOP_PLAYER_FIELD_MINIONS);
+  const allyStacks = (options.allyStacks || getPlayerBattleStacks(ally)).slice(0, COOP_PLAYER_FIELD_MINIONS);
+  const raidLevel = clamp(Math.max(enemy.level, host.stats.level + 4, ally.stats.level + 4), 1, 30);
+  const raidEnemy: WorldEnemy = {
+    ...enemy,
+    level: raidLevel,
+    personality: 'boss',
+    spawnKind: 'coop-boss',
+    lootMultiplier: Math.max(4.8, enemy.lootMultiplier || 0),
+  };
+  const baseEnemyStats = makeEnemyCommanderStats(raidLevel, raidEnemy);
+  const enemyStats: CharacterStats = {
+    ...baseEnemyStats,
+    armyPower: (baseEnemyStats.armyPower || 1) + 6,
+    defensivePower: (baseEnemyStats.defensivePower || 1) + 8,
+    morale: (baseEnemyStats.morale || 1) + 4,
+    spellPower: (baseEnemyStats.spellPower || 1) + 6,
+    health: Math.round(baseEnemyStats.maxHealth * 1.8),
+    maxHealth: Math.round(baseEnemyStats.maxHealth * 1.8),
+  };
+  const occupiedCells = new Set<string>();
+
+  const makeOwnedPlayerUnits = (
+    profile: BattleUserProfile,
+    stacks: MinionStack[],
+    spawns: BoardCell[],
+  ): BattleUnit[] => {
+    const modifiers = getBattleModifiers(profile.stats);
+    const commanderSpawn = claimSpawnCell(
+      spawns,
+      spawns[0],
+      occupiedCells,
+      COOP_BOSS_MAP,
+    );
+    const commander = {
+      ...makeCommanderUnit(
+        'player',
+        profile.username,
+        profile.selectedModel || 3,
+        profile.stats,
+        commanderSpawn.x,
+        commanderSpawn.y,
+      ),
+      id: `player-${profile.username}-commander`,
+      teamId: 'party',
+      ownerUsername: profile.username,
+    };
+    const minions = stacks
+      .map((stack, index): BattleUnit | null => {
+        const spawn = claimSpawnCell(
+          spawns.slice(1),
+          spawns[Math.min(index + 1, spawns.length - 1)],
+          occupiedCells,
+          COOP_BOSS_MAP,
+        );
+        const unit = makeMinionUnit(stack, 'player', spawn.x, spawn.y, modifiers);
+        return unit ? {
+          ...unit,
+          id: `player-${profile.username}-${stack.id}`,
+          teamId: 'party',
+          ownerUsername: profile.username,
+        } : null;
+      })
+      .filter((unit): unit is BattleUnit => Boolean(unit));
+
+    return [commander, ...minions];
+  };
+
+  const playerUnits = [
+    ...makeOwnedPlayerUnits(host, hostStacks, COOP_HOST_SPAWNS),
+    ...makeOwnedPlayerUnits(ally, allyStacks, COOP_ALLY_SPAWNS),
+  ];
+  const enemyCommanderSpawn = claimSpawnCell(
+    COOP_ENEMY_SPAWNS,
+    COOP_ENEMY_SPAWNS[0],
+    occupiedCells,
+    COOP_BOSS_MAP,
+  );
+  const enemyModifiers = getBattleModifiers(enemyStats);
+  const sourceEnemyStacks = raidEnemy.minions.length > 0
+    ? raidEnemy.minions
+    : [makeMinionStack('knight-squire', `coop-loaned-${battleId}`, true)];
+  const raidStacks = Array.from({ length: Math.min(12, Math.max(8, sourceEnemyStacks.length)) }, (_, index) => ({
+    ...sourceEnemyStacks[index % sourceEnemyStacks.length],
+    id: `coop-${battleId}-enemy-${index}`,
+  }));
+  const enemyUnits: BattleUnit[] = [
+    {
+      ...makeCommanderUnit(
+        'enemy',
+        raidEnemy.name,
+        raidEnemy.modelNumber,
+        enemyStats,
+        enemyCommanderSpawn.x,
+        enemyCommanderSpawn.y,
+        raidEnemy.artworkPath,
+      ),
+      id: `enemy-${raidEnemy.id}-commander`,
+      teamId: 'raid',
+    },
+    ...raidStacks
+      .map((stack, index): BattleUnit | null => {
+        const spawn = claimSpawnCell(
+          COOP_ENEMY_SPAWNS.slice(1),
+          COOP_ENEMY_SPAWNS[Math.min(index + 1, COOP_ENEMY_SPAWNS.length - 1)],
+          occupiedCells,
+          COOP_BOSS_MAP,
+        );
+        const unit = makeMinionUnit(stack, 'enemy', spawn.x, spawn.y, enemyModifiers);
+        return unit ? { ...unit, id: `enemy-${raidEnemy.id}-${index}`, teamId: 'raid' } : null;
+      })
+      .filter((unit): unit is BattleUnit => Boolean(unit)),
+  ];
+  const units = [...playerUnits, ...enemyUnits];
+  const openingTurnOrder = getTurnOrder(units);
+  const firstUnit = openingTurnOrder[0];
+  const initialState: BattleState = {
+    id: battleId,
+    mode: 'coop',
+    participants: [
+      { username: host.username, side: 'player', teamId: 'party', controller: 'human' },
+      { username: ally.username, side: 'player', teamId: 'party', controller: 'human' },
+      { username: raidEnemy.name, side: 'enemy', teamId: 'raid', controller: 'ai' },
+    ],
+    revision: 0,
+    processedActionIds: [],
+    enemy: raidEnemy,
+    mapTemplateId: COOP_BOSS_MAP.id,
+    mapName: COOP_BOSS_MAP.name,
+    boardWidth: COOP_BOSS_MAP.boardWidth,
+    boardHeight: COOP_BOSS_MAP.boardHeight,
+    terrain: COOP_BOSS_MAP.terrain,
+    obstacles: COOP_BOSS_MAP.obstacles,
+    units,
+    activeUnitId: firstUnit.id,
+    turnQueue: openingTurnOrder.slice(1).map(unit => unit.id),
+    round: 1,
+    status: 'active',
+    mana: { player: 0, enemy: 0 },
+    turnStartedAt: now,
+    turnTimeLimitMs: Math.max(15_000, options.turnTimeLimitMs || COOP_TURN_TIME_LIMIT_MS),
+    log: [createBattleLogEntry(
+      { round: 1 },
+      `${host.username} and ${ally.username} enter ${COOP_BOSS_MAP.name} against ${raidEnemy.name}.`,
+      { action: 'system' },
+    )],
+    recruitOffer: undefined,
+    bossPhase: 1,
+    bossPhaseCount: COOP_BOSS_PHASES,
+    bossSpecialRounds: {},
+    bossSpecialUses: {},
     createdAt: now,
   };
 
@@ -2935,11 +3197,12 @@ export function healBattleUnit(state: BattleState, healerId: string, targetId: s
 }
 
 function isBossCommanderLethalTrigger(unit: BattleUnit, state: BattleState): boolean {
+  const finalPhase = Math.max(2, state.bossPhaseCount || 2);
   return (
     unit.kind === 'commander' &&
     unit.side === 'enemy' &&
     isBossBattleEnemy(state.enemy) &&
-    state.bossPhase !== 2
+    (state.bossPhase || 1) < finalPhase
   );
 }
 
@@ -3040,16 +3303,19 @@ function resurrectBossMinions(
 }
 
 function applyBossLastStand(state: BattleState, commander: BattleUnit): BattleState {
-  const phase2Health = Math.max(1, Math.floor(commander.maxHealth * 0.5));
-  const bossDefenseBonus = 6;
+  const nextPhase = Math.min(state.bossPhaseCount || 2, (state.bossPhase || 1) + 1);
+  const phaseHealth = state.mode === 'coop'
+    ? commander.maxHealth
+    : Math.max(1, Math.floor(commander.maxHealth * 0.5));
+  const bossDefenseBonus = state.mode === 'coop' ? 2 : 6;
   const isFinalBoss = state.enemy.personality === 'boss';
   const resurrectCount = isFinalBoss ? 4 : 2;
   const { state: risenState, resurrectedIds } = resurrectBossMinions(state, commander, resurrectCount);
-  const resetPhaseTwoSpecials = isSingleplayerRandomRunEnemy(state.enemy);
-  const nextBossSpecialUses = resetPhaseTwoSpecials
+  const resetPhaseSpecials = state.mode === 'coop' || isSingleplayerRandomRunEnemy(state.enemy);
+  const nextBossSpecialUses = resetPhaseSpecials
     ? { ...(state.bossSpecialUses || {}), [commander.id]: 0 }
     : state.bossSpecialUses;
-  const nextBossSpecialRounds = resetPhaseTwoSpecials
+  const nextBossSpecialRounds = resetPhaseSpecials
     ? Object.fromEntries(Object.entries(state.bossSpecialRounds || {}).filter(([unitId]) => unitId !== commander.id))
     : state.bossSpecialRounds;
   const targetIds = [
@@ -3060,14 +3326,14 @@ function applyBossLastStand(state: BattleState, commander: BattleUnit): BattleSt
 
   const nextState = setSideMana({
     ...risenState,
-    bossPhase: 2,
+    bossPhase: nextPhase,
     bossSpecialUses: nextBossSpecialUses,
     bossSpecialRounds: nextBossSpecialRounds,
     units: risenState.units.map(unit => {
       if (unit.id === commander.id) {
         return {
           ...unit,
-          currentHealth: phase2Health,
+          currentHealth: phaseHealth,
           defense: unit.defense + bossDefenseBonus,
           attack: unit.attack + 2,
           magic: unit.magic + 2,
@@ -3086,6 +3352,9 @@ function applyBossLastStand(state: BattleState, commander: BattleUnit): BattleSt
 
   return withBattleLog(
     nextState,
+    state.mode === 'coop'
+      ? `${commander.name} enters phase ${nextPhase} of ${state.bossPhaseCount || COOP_BOSS_PHASES}, fully restored and stronger.${risenText}`
+      :
     `${commander.name} refuses death. A second oath ignites—healed to half strength, armored for the final stand.${risenText}`,
     {
       side: 'enemy',
@@ -3260,6 +3529,27 @@ export function pickFreshPresentationLogEntry(entries: BattleLogEntry[]): Battle
     ?? presentationEntries.find(entry => isPresentationBattleLogAction(entry.action));
 }
 
+export const BOSS_SPELL_DAMAGE_CAP_RATIO = 0.18;
+export const COOP_BOSS_SPELL_DAMAGE_CAP_RATIO = 0.1;
+
+export function getCappedBattleSpellDamage(
+  state: BattleState,
+  caster: BattleUnit,
+  target: BattleUnit,
+  rawDamage: number,
+): number {
+  const targetsProtectedBoss = (
+    caster.side === 'player'
+    && target.side === 'enemy'
+    && target.kind === 'commander'
+    && isBossBattleEnemy(state.enemy)
+  );
+  if (!targetsProtectedBoss) return Math.max(1, rawDamage);
+
+  const ratio = state.mode === 'coop' ? COOP_BOSS_SPELL_DAMAGE_CAP_RATIO : BOSS_SPELL_DAMAGE_CAP_RATIO;
+  return Math.min(Math.max(1, rawDamage), Math.max(1, Math.floor(target.maxHealth * ratio)));
+}
+
 export function castBattleSpell(state: BattleState, spellId: string, targetId?: string): BattleState {
   const spell = BATTLE_SPELLS.find(item => item.id === spellId);
   const caster = getActiveUnit(state);
@@ -3278,18 +3568,19 @@ export function castBattleSpell(state: BattleState, spellId: string, targetId?: 
   let spellTargetIds = target ? [target.id] : [];
   const damageDone = (unit: BattleUnit, amount: number) => Math.min(unit.currentHealth, Math.max(1, amount));
   const healingDone = (unit: BattleUnit, amount: number) => Math.max(0, Math.min(unit.maxHealth, unit.currentHealth + Math.max(1, amount)) - unit.currentHealth);
+  const cappedSpellDamage = (unit: BattleUnit, amount: number) => getCappedBattleSpellDamage(state, caster, unit, amount);
 
   switch (spell.id) {
     case 'ember-dart':
       if (target) {
-        const damage = 7 + spellPower * 2;
+        const damage = cappedSpellDamage(target, 7 + spellPower * 2);
         nextState = damageUnit(nextState, target.id, damage);
         logMessage = `${caster.name} casts ${spell.name} on ${target.name} for ${damageDone(target, damage)}.`;
       }
       break;
     case 'arcane-bolt':
       if (target) {
-        const damage = 12 + spellPower * 2;
+        const damage = cappedSpellDamage(target, 12 + spellPower * 2);
         nextState = damageUnit(nextState, target.id, damage);
         logMessage = `${caster.name} casts ${spell.name} on ${target.name} for ${damageDone(target, damage)}.`;
       }
@@ -3338,7 +3629,7 @@ export function castBattleSpell(state: BattleState, spellId: string, targetId?: 
       break;
     case 'withering-curse':
       if (target) {
-        const damage = 8 + spellPower;
+        const damage = cappedSpellDamage(target, 8 + spellPower);
         nextState = damageUnit(nextState, target.id, damage);
         nextState = {
           ...nextState,
@@ -3366,7 +3657,7 @@ export function castBattleSpell(state: BattleState, spellId: string, targetId?: 
         const enemyTargets = nextState.units.filter(unit => unit.side === enemySide && unit.currentHealth > 0);
         spellTargetIds = enemyTargets.map(unit => unit.id);
         nextState = enemyTargets.reduce(
-          (incoming, unit) => damageUnit(incoming, unit.id, damage),
+          (incoming, unit) => damageUnit(incoming, unit.id, cappedSpellDamage(unit, damage)),
           nextState,
         );
         logMessage = `${caster.name} casts ${spell.name}, striking every enemy for up to ${damage}.`;
@@ -3374,7 +3665,7 @@ export function castBattleSpell(state: BattleState, spellId: string, targetId?: 
       break;
     case 'gravity-snare':
       if (target) {
-        const damage = 7 + spellPower;
+        const damage = cappedSpellDamage(target, 7 + spellPower);
         nextState = damageUnit(nextState, target.id, damage);
         nextState = {
           ...nextState,
@@ -3387,14 +3678,14 @@ export function castBattleSpell(state: BattleState, spellId: string, targetId?: 
       break;
     case 'judgement':
       if (target) {
-        const damage = 18 + spellPower * 2;
+        const damage = cappedSpellDamage(target, 18 + spellPower * 2);
         nextState = damageUnit(nextState, target.id, damage);
         logMessage = `${caster.name} casts ${spell.name} on ${target.name} for ${damageDone(target, damage)}.`;
       }
       break;
     case 'blood-star':
       if (target) {
-        const damage = 10 + Math.floor(spellPower * 1.35);
+        const damage = cappedSpellDamage(target, 10 + Math.floor(spellPower * 1.35));
         const healing = 7 + Math.floor(spellPower * 0.65);
         nextState = damageUnit(nextState, target.id, damage);
         nextState = healUnit(nextState, caster.id, healing);
@@ -3415,7 +3706,7 @@ export function castBattleSpell(state: BattleState, spellId: string, targetId?: 
       break;
     case 'frost-lance':
       if (target) {
-        const damage = 10 + spellPower * 2;
+        const damage = cappedSpellDamage(target, 10 + spellPower * 2);
         nextState = damageUnit(nextState, target.id, damage);
         nextState = {
           ...nextState,
@@ -3447,7 +3738,7 @@ export function castBattleSpell(state: BattleState, spellId: string, targetId?: 
         const enemyTargets = nextState.units.filter(unit => unit.side === enemySide && unit.currentHealth > 0);
         spellTargetIds = enemyTargets.map(unit => unit.id);
         nextState = enemyTargets.reduce(
-          (incoming, unit) => damageUnit(incoming, unit.id, damage),
+          (incoming, unit) => damageUnit(incoming, unit.id, cappedSpellDamage(unit, damage)),
           nextState,
         );
         logMessage = `${caster.name} casts ${spell.name}, bursting across every enemy for up to ${damage}.`;
@@ -3555,7 +3846,7 @@ function getBossSummonTemplateId(state: BattleState, fallback: string, offset = 
 
 function summonBossMinions(state: BattleState, commander: BattleUnit, templateIds: string[]): { state: BattleState; summonedIds: string[] } {
   const liveEnemyMinions = state.units.filter(unit => unit.side === 'enemy' && unit.kind === 'minion' && unit.currentHealth > 0).length;
-  const summonLimit = ENEMY_FIELD_MINIONS + (state.bossPhase === 2 ? 2 : 0);
+  const summonLimit = ENEMY_FIELD_MINIONS + ((state.bossPhase || 1) >= 2 ? 2 : 0);
   let nextState = state;
   const summonedIds: string[] = [];
 
@@ -3612,11 +3903,12 @@ function finishBossSpecial(
 
 function runBossSpecialAbility(state: BattleState, commander: BattleUnit): BattleState | null {
   if (!isBossBattleEnemy(state.enemy)) return null;
-  const phaseTwoSingleplayerReset = state.bossPhase === 2 && isSingleplayerRandomRunEnemy(state.enemy);
-  if (state.bossPhase === 2 && !phaseTwoSingleplayerReset) return null;
+  const phaseSpecialReset = state.mode === 'coop'
+    || (state.bossPhase === 2 && isSingleplayerRandomRunEnemy(state.enemy));
+  if (state.bossPhase === 2 && !phaseSpecialReset) return null;
   if (getBossSpecialUses(state, commander.id) >= BOSS_SPECIAL_MAX_USES_BEFORE_PHASE_2) return null;
   if (state.bossSpecialRounds?.[commander.id] === state.round) return null;
-  if (Math.random() > (phaseTwoSingleplayerReset ? 0.78 : 0.58)) return null;
+  if (Math.random() > (phaseSpecialReset ? 0.78 : 0.58)) return null;
 
   const players = state.units.filter(unit => unit.side === 'player' && unit.currentHealth > 0);
   const enemies = state.units.filter(unit => unit.side === 'enemy' && unit.currentHealth > 0);

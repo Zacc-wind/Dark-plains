@@ -14,6 +14,7 @@ import ChatLiveFeed from './ChatLiveFeed';
 import GameSettingsPanel from './GameSettingsPanel';
 import MultiplayerFeatureLock from './MultiplayerFeatureLock';
 import MultiplayerProgressionModal, { type MultiplayerProgressionTab } from './MultiplayerProgressionModal';
+import CinematicScrollShell from './CinematicScrollShell';
 import {
   ActivityEntry,
   AllocatableStat,
@@ -143,8 +144,7 @@ const panelButtons: PanelButtonConfig[] = [
   { id: 'social', label: 'Social', icon: 'social' },
   { id: 'settings', label: 'Settings', icon: 'settings' },
 ];
-const primaryPanelButtons = panelButtons.slice(0, 5);
-const secondaryPanelButtons = panelButtons.slice(5);
+const primaryPanelButtons = panelButtons.filter(button => ['overview', 'jobs', 'spells', 'social', 'settings'].includes(button.id));
 
 function isPanelId(value: unknown): value is PanelId {
   return typeof value === 'string' && panelButtons.some(button => button.id === value);
@@ -514,7 +514,6 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
   const [selectedSpellSlot, setSelectedSpellSlot] = useState(0);
   const [expandedQuestId, setExpandedQuestId] = useState<string | null>(null);
   const [showDailyRun, setShowDailyRun] = useState(false);
-  const [isSecondaryNavOpen, setIsSecondaryNavOpen] = useState(true);
   const [friendSearch, setFriendSearch] = useState('');
   const [chatChannel, setChatChannel] = useState<SocialChatChannel>('global');
   const [chatDraft, setChatDraft] = useState('');
@@ -1058,7 +1057,6 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
       completeMultiplayerTutorialCallout(player.username, 'jobs-open');
     }
     setActivePanel(panelId);
-    if (secondaryPanelButtons.some(button => button.id === panelId)) setIsSecondaryNavOpen(true);
     setIsCommandOpen(true);
   };
 
@@ -1088,7 +1086,11 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
   return (
     <>
       <header className="game-hud fixed left-0 right-0 top-0 z-30 min-h-[5.35rem] text-zinc-100">
-        <div className="flex h-full items-center justify-between gap-3 px-4 py-2">
+        <CinematicScrollShell
+          variant="hud"
+          className="game-hud-scroll mx-auto h-full w-[min(92rem,calc(100vw-1rem))]"
+          contentClassName="flex h-full items-center justify-between gap-3 px-3 py-1"
+        >
           <button
             onClick={onOpenAvatar}
             className="hud-avatar-button hud-commander-chip flex min-w-0 items-center gap-3 px-1 py-1 transition"
@@ -1124,7 +1126,7 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
             </span>
           </button>
 
-          <div className="hidden md:flex flex-1 items-center justify-end gap-2 max-w-3xl ml-auto">
+          <div className="hud-metrics flex flex-1 items-center justify-end gap-2 max-w-3xl ml-auto">
             <HudMetric
               label="Health"
               value={`${player.stats.health}/${player.stats.maxHealth}`}
@@ -1135,7 +1137,7 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
             <HudMetric label="Gems" value={String(rareGemCount)} tone="violet" />
             <HudMetric label="Minions" value={`${fieldedMinions.length}/${MAX_FIELD_MINIONS}`} tone="teal" />
           </div>
-        </div>
+        </CinematicScrollShell>
       </header>
 
       {!isCommandOpen && (!showRandomRun || !showDailyRun) && !showMultiplayerHub && !showPveHub && renderMapActionRail()}
@@ -1149,7 +1151,11 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
       {renderActionChips()}
 
       {isCommandOpen && (
-      <aside className="command-panel command-center-shell vine-frame fixed bottom-4 left-4 right-4 top-20 z-50 overflow-hidden rounded border text-zinc-100">
+      <CinematicScrollShell
+        variant="surface"
+        className="command-center-shell fixed bottom-4 left-4 right-4 top-20 z-50 overflow-hidden text-zinc-100"
+        contentClassName="h-full"
+      >
         <div className="grid h-full min-h-0 grid-cols-[14rem_minmax(0,1fr)]">
           <nav className="command-center-nav border-r border-[rgba(232,217,184,0.14)] p-3">
             <div className="mb-4 px-2">
@@ -1165,15 +1171,6 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
             </div>
             <div className="command-center-nav-groups">
               <CommandNavGroup buttons={primaryPanelButtons} activePanel={activePanel} onOpen={openPanel} getSubtitle={getPanelSubtitle} />
-              <CommandNavGroup
-                buttons={secondaryPanelButtons}
-                activePanel={activePanel}
-                onOpen={openPanel}
-                getSubtitle={getPanelSubtitle}
-                secondary
-                isOpen={isSecondaryNavOpen}
-                onToggle={() => setIsSecondaryNavOpen(open => !open)}
-              />
             </div>
           </nav>
 
@@ -1199,7 +1196,7 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
           )}
 
           <div
-            className={`command-center-content no-scrollbar flex-1 px-6 ${
+            className={`command-center-content no-scrollbar min-h-0 flex-1 px-6 ${
               activePanel === 'spells' ? 'command-center-content-spells py-3' : 'overflow-y-auto py-6'
             }`}
           >
@@ -1223,7 +1220,7 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
           </div>
           </div>
         </div>
-      </aside>
+      </CinematicScrollShell>
       )}
 
 
@@ -1408,9 +1405,51 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
           </span>
           <span className="map-action-copy">
             <span className="map-action-label">Menu</span>
-            <span className="map-action-detail">Gear, army, quests</span>
+            <span className="map-action-detail">Jobs, spells, social</span>
           </span>
           <span className="map-action-badge">{gearUsed}/{inventorySlots}</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => openPanel('character')}
+          className="map-action-button"
+          title="Open commander"
+        >
+          <span className="map-action-icon"><PanelIcon icon="character" /></span>
+          <span className="map-action-copy">
+            <span className="map-action-label">Commander</span>
+            <span className="map-action-detail">Stats and level points</span>
+          </span>
+          <span className="map-action-badge">Lv {player.stats.level}</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => openPanel('inventory')}
+          className="map-action-button"
+          title="Open gear"
+        >
+          <span className="map-action-icon"><PanelIcon icon="inventory" /></span>
+          <span className="map-action-copy">
+            <span className="map-action-label">Gear</span>
+            <span className="map-action-detail">Equipment and storage</span>
+          </span>
+          <span className="map-action-badge">{gearUsed}/{inventorySlots}</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => openPanel('minions')}
+          className="map-action-button"
+          title="Open army"
+        >
+          <span className="map-action-icon"><PanelIcon icon="minions" /></span>
+          <span className="map-action-copy">
+            <span className="map-action-label">Army</span>
+            <span className="map-action-detail">Field and order units</span>
+          </span>
+          <span className="map-action-badge">{fieldedMinions.length}/{MAX_FIELD_MINIONS}</span>
         </button>
 
         <button

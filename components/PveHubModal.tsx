@@ -6,6 +6,7 @@ import { getCurrentUser } from '@/lib/auth';
 import { getWorldPveIntel, type PveIntelEntry, type PveRewardLine } from '@/lib/worldPveIntel';
 import { getMultiplayerUnlockStatus } from '@/lib/multiplayerUnlocks';
 import MultiplayerFeatureLock from '@/components/MultiplayerFeatureLock';
+import CinematicScrollShell from '@/components/CinematicScrollShell';
 
 interface PveHubModalProps {
   isOpen: boolean;
@@ -41,6 +42,7 @@ function PveRewardRow({ reward }: { reward: PveRewardLine }) {
 }
 
 function PveIntelCard({ entry }: { entry: PveIntelEntry }) {
+  const isCoopBoss = entry.kind === 'coop-boss';
   return (
     <article className="pve-hub-card ui-card overflow-hidden rounded border">
       <div className="pve-hub-card-hero">
@@ -59,8 +61,8 @@ function PveIntelCard({ entry }: { entry: PveIntelEntry }) {
 
         <div className="pve-hub-card-copy min-w-0 p-4">
           <div className="flex flex-wrap items-center gap-2">
-            <span className={`ui-pill rounded border px-2 py-0.5 text-[10px] font-black uppercase ${entry.kind === 'world-boss' ? 'text-amber-200' : entry.kind === 'regional-threat' ? 'text-fuchsia-200' : 'text-sky-200'}`}>
-              {entry.kind === 'world-boss' ? 'World Boss' : entry.kind === 'regional-threat' ? 'Regional Threat' : 'Dungeon'}
+            <span className={`ui-pill rounded border px-2 py-0.5 text-[10px] font-black uppercase ${entry.kind === 'world-boss' ? 'text-amber-200' : entry.kind === 'regional-threat' ? 'text-fuchsia-200' : isCoopBoss ? 'text-rose-200' : 'text-sky-200'}`}>
+              {entry.kind === 'world-boss' ? 'World Boss' : entry.kind === 'regional-threat' ? 'Regional Threat' : isCoopBoss ? 'Duo Raid' : 'Dungeon'}
             </span>
             <span className="ui-faint text-[10px] font-black uppercase">Lv {entry.level}</span>
             <span className="ui-faint text-[10px] font-black uppercase">{entry.expiresLabel} left</span>
@@ -82,9 +84,16 @@ function PveIntelCard({ entry }: { entry: PveIntelEntry }) {
           <div className="mt-3">
             <div className="text-sm font-black text-zinc-100">{entry.bossName}</div>
             <div className="ui-muted text-xs font-bold">{entry.bossSubtitle}</div>
+            {isCoopBoss && (
+              <div className="ui-accent mt-2 text-[11px] font-black uppercase">
+                {entry.requiredPlayers} commanders - {entry.phaseCount} phases - 15 sec turns
+              </div>
+            )}
             {entry.minUnitsRequired > 0 && (
               <div className="ui-faint mt-2 text-[11px] font-bold">
-                Requires {entry.minUnitsRequired} fielded units to enter once found.
+                {isCoopBoss
+                  ? `Each commander fields up to ${entry.minUnitsRequired} units.`
+                  : `Requires ${entry.minUnitsRequired} fielded units to enter once found.`}
               </div>
             )}
           </div>
@@ -105,8 +114,7 @@ function PveIntelCard({ entry }: { entry: PveIntelEntry }) {
 
 export default function PveHubModal({ isOpen, onClose }: PveHubModalProps) {
   const [now, setNow] = useState(() => Date.now());
-  const username = getCurrentUser()?.username ?? null;
-  const currentUser = username ? getCurrentUser() : null;
+  const [currentUser, setCurrentUser] = useState(() => getCurrentUser());
 
   const pveIntel = useMemo(
     () => (isOpen ? getWorldPveIntel(currentUser, now) : []),
@@ -115,8 +123,17 @@ export default function PveHubModal({ isOpen, onClose }: PveHubModalProps) {
 
   useEffect(() => {
     if (!isOpen) return undefined;
-    const clock = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(clock);
+
+    const refresh = () => {
+      setNow(Date.now());
+      setCurrentUser(getCurrentUser());
+    };
+    const openRefresh = window.setTimeout(refresh, 0);
+    const clock = window.setInterval(refresh, 1000);
+    return () => {
+      window.clearTimeout(openRefresh);
+      window.clearInterval(clock);
+    };
   }, [isOpen]);
 
   if (!isOpen) return null;
@@ -125,8 +142,9 @@ export default function PveHubModal({ isOpen, onClose }: PveHubModalProps) {
   if (!pveUnlock.unlocked) {
     return (
       <div className="pve-hub-overlay fixed inset-0 z-[70] flex items-center justify-center bg-black/72 p-4" onClick={onClose}>
-        <section
-          className="pve-hub-shell command-panel vine-frame w-[min(40rem,calc(100vw-2rem))] overflow-hidden rounded border text-zinc-100 shadow-2xl"
+        <CinematicScrollShell
+          variant="surface"
+          className="pve-hub-shell w-[min(40rem,calc(100vw-2rem))] overflow-hidden text-zinc-100"
           onClick={(event) => event.stopPropagation()}
         >
           <div className="panel-header flex items-center justify-between gap-4 border-b px-5 py-4">
@@ -137,18 +155,20 @@ export default function PveHubModal({ isOpen, onClose }: PveHubModalProps) {
             <button type="button" onClick={onClose} className="ui-button rounded px-3 py-2 text-xs font-black">Close</button>
           </div>
           <div className="p-5"><MultiplayerFeatureLock status={pveUnlock} /></div>
-        </section>
+        </CinematicScrollShell>
       </div>
     );
   }
 
   return (
     <div
-      className="pve-hub-overlay fixed inset-0 z-[70] flex items-center justify-center bg-black/72 p-4 backdrop-blur-sm"
+      className="pve-hub-overlay fixed inset-0 z-[70] flex items-center justify-center bg-black/72 p-4"
       onClick={onClose}
     >
-      <section
-        className="pve-hub-shell command-panel vine-frame flex max-h-[min(44rem,calc(100dvh-2rem))] w-[min(52rem,calc(100vw-2rem))] flex-col overflow-hidden rounded border text-zinc-100 shadow-2xl"
+      <CinematicScrollShell
+        variant="surface"
+        className="pve-hub-shell flex max-h-[min(48rem,calc(100dvh-1rem))] w-[min(58rem,calc(100vw-1rem))] flex-col overflow-hidden text-zinc-100"
+        contentClassName="flex min-h-0 flex-1 flex-col"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="panel-header flex shrink-0 items-start justify-between gap-4 border-b px-5 py-4">
@@ -170,7 +190,7 @@ export default function PveHubModal({ isOpen, onClose }: PveHubModalProps) {
 
         <div className="pve-hub-body no-scrollbar min-h-0 flex-1 overflow-y-auto p-5">
           <p className="ui-muted mb-4 text-sm font-bold">
-            Active spawns on the shared map. Rewards show lowest and highest likely payouts.
+            Active threats by region. Duo raids rotate every five hours; party entry arrives with server-backed sessions.
           </p>
 
           {pveIntel.length === 0 ? (
@@ -185,7 +205,7 @@ export default function PveHubModal({ isOpen, onClose }: PveHubModalProps) {
             </div>
           )}
         </div>
-      </section>
+      </CinematicScrollShell>
     </div>
   );
 }

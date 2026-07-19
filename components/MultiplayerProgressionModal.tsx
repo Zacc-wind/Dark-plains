@@ -21,6 +21,7 @@ import { getStoryDialogSequence } from '@/lib/storyDialogue';
 import MultiplayerOrdersPanel from './MultiplayerOrdersPanel';
 import MultiplayerChroniclePanel from './MultiplayerChroniclePanel';
 import StoryDialogOverlay from './StoryDialogOverlay';
+import CinematicScrollShell from './CinematicScrollShell';
 
 export type MultiplayerProgressionTab = 'orders' | 'campaign' | 'chronicle' | 'path';
 
@@ -158,9 +159,11 @@ export default function MultiplayerProgressionModal({
           if (event.target === event.currentTarget) onClose();
         }}
       >
-        <section
+        <CinematicScrollShell
           ref={shellRef}
-          className="multiplayer-progression-shell command-panel vine-frame flex max-h-[min(56rem,calc(100dvh-2rem))] w-[min(76rem,calc(100vw-2rem))] flex-col overflow-hidden rounded border shadow-2xl"
+          variant="surface"
+          className="multiplayer-progression-shell flex max-h-[min(58rem,calc(100dvh-1rem))] w-[min(80rem,calc(100vw-1rem))] flex-col overflow-hidden"
+          contentClassName="flex min-h-0 flex-1 flex-col"
           role="dialog"
           aria-modal="true"
           aria-label="Campaign and progression"
@@ -401,7 +404,7 @@ export default function MultiplayerProgressionModal({
               </div>
             )}
           </div>
-        </section>
+        </CinematicScrollShell>
       </div>
 
       {replayEntry && (

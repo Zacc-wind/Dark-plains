@@ -1,5 +1,5 @@
 import { getCurrentUser, type User } from './auth';
-import { getNpcEnemiesForUser } from './battle';
+import { COOP_BOSS_PHASES, getActiveCoopBosses, getNpcEnemiesForUser } from './battle';
 import { getMultiplayerRegionalThreat } from './multiplayerEngagement';
 import {
   formatDungeonTimeRemaining,
@@ -19,7 +19,7 @@ export interface PveRewardLine {
 
 export interface PveIntelEntry {
   id: string;
-  kind: 'dungeon' | 'world-boss' | 'regional-threat';
+  kind: 'dungeon' | 'world-boss' | 'regional-threat' | 'coop-boss';
   name: string;
   subtitle: string;
   description: string;
@@ -33,6 +33,8 @@ export interface PveIntelEntry {
   bossArtworkPath?: string;
   rewards: PveRewardLine[];
   minUnitsRequired: number;
+  requiredPlayers?: number;
+  phaseCount?: number;
 }
 
 function getDirectionHint(fromX: number, fromY: number, toX: number, toY: number): string {
@@ -172,6 +174,44 @@ function getWorldBossRewardLines(level: number): PveRewardLine[] {
   ];
 }
 
+function getCoopBossRewardLines(level: number): PveRewardLine[] {
+  const reward = estimateWorldBossFieldReward(level, 4.8);
+  return [
+    {
+      id: 'raid-gold',
+      label: 'Party Gold',
+      iconPath: '/assets/icons/gold.png',
+      minLabel: String(Math.round(reward.gold * 0.9)),
+      maxLabel: String(reward.gold),
+      detail: 'Validated completion payout for each commander',
+    },
+    {
+      id: 'raid-xp',
+      label: 'Commander XP',
+      iconPath: '/assets/icons/xp.png',
+      minLabel: String(Math.round(reward.exp * 0.9)),
+      maxLabel: String(reward.exp),
+      detail: 'Four-phase raid completion reward',
+    },
+    {
+      id: 'raid-gems',
+      label: 'Rare Gems',
+      iconPath: '/assets/icons/rare-gem.png',
+      minLabel: String(Math.max(2, reward.gemsMin + 1)),
+      maxLabel: String(Math.max(4, reward.gemsMax + 2)),
+      detail: 'Reserved for successful duo clears',
+    },
+    {
+      id: 'raid-chest',
+      label: 'Raid Chest',
+      iconPath: '/assets/icons/loot-chest.png',
+      minLabel: 'Epic',
+      maxLabel: 'Legendary',
+      detail: 'High set-piece chance with duplicate protection planned',
+    },
+  ];
+}
+
 function mapDungeonToIntel(
   dungeon: WorldDungeon,
   playerX: number,
@@ -248,7 +288,30 @@ export function getWorldPveIntel(user: User | null = getCurrentUser(), now = Dat
     };
   });
 
-  return [...bossEntries, ...dungeonEntries];
+  const coopEntries = getActiveCoopBosses(user, now).map<PveIntelEntry>(boss => {
+    const bossRegion = getRegionForTile(boss.x, boss.y);
+    return {
+      id: boss.id,
+      kind: 'coop-boss',
+      name: 'Co-op Incursion',
+      subtitle: boss.subtitle,
+      description: boss.story || 'A raid commander holds an expanded battlefield until the five-hour incursion closes.',
+      level: boss.level,
+      regionName: bossRegion.name,
+      regionLevels: bossRegion.levelRange,
+      directionHint: getDirectionHint(playerX, playerY, boss.x, boss.y),
+      expiresLabel: formatDungeonTimeRemaining(boss.expiresAt || now, now),
+      bossName: boss.name,
+      bossSubtitle: boss.subtitle,
+      bossArtworkPath: boss.artworkPath,
+      rewards: getCoopBossRewardLines(boss.level),
+      minUnitsRequired: 5,
+      requiredPlayers: 2,
+      phaseCount: COOP_BOSS_PHASES,
+    };
+  });
+
+  return [...coopEntries, ...bossEntries, ...dungeonEntries];
 }
 
 export function getActivePveSpawnCount(user: User | null = getCurrentUser(), now = Date.now()): number {

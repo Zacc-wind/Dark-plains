@@ -1,10 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import type { User } from './auth';
 import {
+  COOP_BOSS_CYCLE_MS,
+  COOP_BOSS_PHASES,
+  COOP_PLAYER_FIELD_MINIONS,
+  COOP_TURN_TIME_LIMIT_MS,
   applySynchronizedBattleAction,
   canUserControlBattleUnit,
+  castBattleSpell,
+  createCoopBattleState,
   createPvpBattleState,
+  getActiveCoopBosses,
   getActiveUnit,
+  getCappedBattleSpellDamage,
+  getTurnOrder,
   shouldRunBattleAi,
   type SynchronizedBattleAction,
 } from './battle';
@@ -149,5 +158,77 @@ describe('multiplayer combat ownership', () => {
     expect(expiredTimeout.success).toBe(true);
     expect(expiredTimeout.state.revision).toBe(1);
     expect(expiredTimeout.state.activeUnitId).not.toBe(activeUnit?.id);
+  });
+});
+
+describe('co-op boss combat foundation', () => {
+  it('creates a duo-owned 15x9 raid with five minion slots each and morale turn order', () => {
+    const host = makeUser('BlackBanner', 14, 1);
+    const ally = makeUser('MoonGuard', 8, 2);
+    const enemy = getActiveCoopBosses(host, 10 * COOP_BOSS_CYCLE_MS + 1)[0];
+    const stacks = Array.from({ length: 7 }, (_, index) => ({
+      id: `field-${index}`,
+      templateId: index % 2 === 0 ? 'knight-squire' : 'priest-acolyte',
+      quantity: 1,
+      acquiredAt: 1,
+    }));
+    const battle = createCoopBattleState(host, ally, enemy, {
+      battleId: 'coop-foundation',
+      hostStacks: stacks.map(stack => ({ ...stack, id: `host-${stack.id}` })),
+      allyStacks: stacks.map(stack => ({ ...stack, id: `ally-${stack.id}` })),
+      now: 1_000,
+    });
+
+    expect(battle.mode).toBe('coop');
+    expect(battle.boardWidth).toBe(15);
+    expect(battle.boardHeight).toBe(9);
+    expect(battle.turnTimeLimitMs).toBe(COOP_TURN_TIME_LIMIT_MS);
+    expect(battle.bossPhase).toBe(1);
+    expect(battle.bossPhaseCount).toBe(COOP_BOSS_PHASES);
+    expect(battle.participants?.filter(participant => participant.controller === 'human')).toHaveLength(2);
+    expect(battle.units.filter(unit => unit.ownerUsername === host.username && unit.kind === 'minion')).toHaveLength(COOP_PLAYER_FIELD_MINIONS);
+    expect(battle.units.filter(unit => unit.ownerUsername === ally.username && unit.kind === 'minion')).toHaveLength(COOP_PLAYER_FIELD_MINIONS);
+    expect(battle.units.filter(unit => unit.side === 'player').every(unit => unit.teamId === 'party' && Boolean(unit.ownerUsername))).toBe(true);
+    expect(battle.activeUnitId).toBe(getTurnOrder(battle.units)[0].id);
+  });
+
+  it('rotates exactly two raid bosses every five hours', () => {
+    const user = makeUser('BlackBanner', 10, 1);
+    const now = 4 * COOP_BOSS_CYCLE_MS + 12_345;
+    const bosses = getActiveCoopBosses(user, now);
+
+    expect(bosses).toHaveLength(2);
+    expect(new Set(bosses.map(boss => boss.id)).size).toBe(2);
+    expect(bosses.every(boss => boss.spawnKind === 'coop-boss' && boss.minions.length === 8)).toBe(true);
+    expect(bosses.every(boss => (boss.expiresAt || 0) - (boss.spawnedAt || 0) === COOP_BOSS_CYCLE_MS)).toBe(true);
+  });
+
+  it('caps player spell bursts and fully restores a raid boss through four phases', () => {
+    const host = makeUser('BlackBanner', 14, 1);
+    const ally = makeUser('MoonGuard', 8, 2);
+    const enemy = getActiveCoopBosses(host, COOP_BOSS_CYCLE_MS + 1)[0];
+    let battle = createCoopBattleState(host, ally, enemy, { battleId: 'coop-phases', now: 1_000 });
+    const caster = battle.units.find(unit => unit.ownerUsername === host.username && unit.kind === 'commander');
+    const boss = battle.units.find(unit => unit.side === 'enemy' && unit.kind === 'commander');
+
+    expect(caster).toBeDefined();
+    expect(boss).toBeDefined();
+    expect(getCappedBattleSpellDamage(battle, caster!, boss!, 99_999)).toBe(Math.floor(boss!.maxHealth * 0.1));
+
+    const startingAttack = boss!.attack;
+    for (let expectedPhase = 2; expectedPhase <= COOP_BOSS_PHASES; expectedPhase += 1) {
+      battle = {
+        ...battle,
+        activeUnitId: caster!.id,
+        mana: { ...battle.mana, player: 12 },
+        units: battle.units.map(unit => unit.id === boss!.id ? { ...unit, currentHealth: 1 } : unit),
+      };
+      battle = castBattleSpell(battle, 'arcane-bolt', boss!.id);
+      const phasedBoss = battle.units.find(unit => unit.id === boss!.id)!;
+      expect(battle.bossPhase).toBe(expectedPhase);
+      expect(phasedBoss.currentHealth).toBe(phasedBoss.maxHealth);
+    }
+
+    expect(battle.units.find(unit => unit.id === boss!.id)!.attack).toBe(startingAttack + 6);
   });
 });

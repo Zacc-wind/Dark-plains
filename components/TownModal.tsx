@@ -48,6 +48,7 @@ import { getGearSetById } from '@/lib/gearSets';
 import { formatEquipmentRarityLabel, RUN_EQUIPMENT_SLOT_LABELS } from '@/lib/runEquipment';
 import { getMultiplayerUnlockStatus, type MultiplayerUnlockStatus } from '@/lib/multiplayerUnlocks';
 import MultiplayerFeatureLock from '@/components/MultiplayerFeatureLock';
+import CinematicScrollShell from '@/components/CinematicScrollShell';
 
 interface TownModalProps {
   town: POI | null;
@@ -323,7 +324,11 @@ export default function TownModal({ town, onClose, onTravel }: TownModalProps) {
         <div className="town-modal-scrim absolute inset-0 bg-black/15" />
 
         <div className="town-modal-layer">
-          <div className="town-left-column">
+          <CinematicScrollShell
+            variant="surface"
+            className="town-left-column text-zinc-100"
+            contentClassName="town-scroll-content"
+          >
             <div className="town-modal-header command-panel vine-frame rounded border px-4 py-3 text-zinc-100">
               <div className="min-w-0">
                 <h1 className="fantasy-heading truncate text-2xl">{town.name}</h1>
@@ -463,7 +468,7 @@ export default function TownModal({ town, onClose, onTravel }: TownModalProps) {
             </div>
             )}
           </div>
-          </div>
+          </CinematicScrollShell>
         </div>
       </div>
     </div>

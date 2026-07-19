@@ -2,6 +2,7 @@
 
 import Image from 'next/image';
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { getCurrentUser, getJobRewardPreview, getJobTravelDurationMs, JOB_DURATION_LABELS, startJob } from '@/lib/auth';
 import { ASSET_PATHS } from '@/lib/assetLoader';
 import { emitFxEvent } from '@/lib/fxEvents';
@@ -50,7 +51,7 @@ export default function POIModal({ poi, onClose, onSelectJob, onTravel }: POIMod
     return () => document.body.classList.remove('poi-view-open');
   }, [poi]);
 
-  if (!poi) return null;
+  if (!poi || typeof document === 'undefined') return null;
 
   const jobDurations = JOB_DURATION_LABELS;
   const isCampfire = poi.type === POIType.CAMPFIRE;
@@ -93,7 +94,7 @@ export default function POIModal({ poi, onClose, onSelectJob, onTravel }: POIMod
     setError(result.error || 'Failed to start job.');
   };
 
-  return (
+  return createPortal(
     <div
       className={`poi-site-modal-root ${isCampfire ? 'poi-site-modal-root--campfire' : 'poi-site-modal-root--field'}`}
       onClick={onClose}
@@ -213,7 +214,8 @@ export default function POIModal({ poi, onClose, onSelectJob, onTravel }: POIMod
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
