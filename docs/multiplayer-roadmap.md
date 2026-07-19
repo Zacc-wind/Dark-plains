@@ -13,6 +13,7 @@ Turn the current shared world-map prototype into a real multiplayer layer withou
 - [x] Supabase-backed profiles, presence, and online PVP challenge transport exist.
 - [x] Main-story introductions can open as two-character RPG conversations on the world map.
 - [x] Challenge, trade, and party flows have in-game request popups and acceptance UX in the local multiplayer prototype. Server-backed synchronization remains deployment work.
+- [x] The Black Pike Ledger Chronicle pilot provides 20 permanent free-track ranks driven by capped, genuine multiplayer action receipts.
 - [ ] Player-vs-player combat still needs a real two-player battle session model.
 - [ ] Cooperative dungeon combat still needs multi-commander formation, turn order, and ownership rules.
 

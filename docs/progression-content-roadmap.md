@@ -18,6 +18,7 @@ This document is the execution plan for progression, retention, narrative conten
 - The level cap is 30.
 - The shared unlock registry already covers the level 1 core, level 2 contracts/forge/PVE, level 3 PVP, level 4 trading, level 5 parties/co-op, and level 6 veteran regions.
 - Daily contracts, a weekly oath, a seven-day return track, returning-player briefing, and engagement telemetry already exist.
+- The internal Black Pike Ledger pilot now provides a persistent 20-rank free Chronicle with capped genuine-action Renown, duplicate-safe claims, modest resources, lore, banners, a frame, and a title.
 - There are 32 main-story quest definitions across the two existing acts, grouped into six five-level campaign bands.
 - 17 story quests have authored dialogue ids, including the complete eight-step First Banner opening.
 - Levels 1-5 now form a playable opening chapter with a named scout target, Black Pike capstone, real return to Orren, and level 3/4/5 system briefings. Level 6 remains the next content gap before the level 7 Moonwell quest.
@@ -64,12 +65,12 @@ Dense progression screens keep the compact dark operational style. Gothic scroll
 
 ### Multiplayer Campaign And Progression
 
-Add one `Campaign` command to the map HUD. It opens a large responsive modal with five tabs:
+The map HUD `Campaign` command opens a large responsive modal. Four tabs are implemented and a fifth remains planned:
 
 1. `Orders`: active main objective, three daily contracts, weekly oath, regional threat, and returning briefing.
 2. `Campaign`: six chapter rows with guide, conflict, quest progress, midpoint, boss, rewards, and replayable conversations.
-3. `Level Path`: levels 1-30, claimed rewards, next three unlocks, and a direct link to the newly opened feature.
-4. `Chronicle`: featured Chronicle, archived Chronicles, rank track, challenge sources, and claim states.
+3. `Chronicle`: the featured 20-rank pilot, challenge sources, claim states, and permanent honor collection. Archives remain later work.
+4. `Level Path`: levels 1-30, claimed rewards, next three unlocks, and a direct link to the newly opened feature.
 5. `Deeds`: multiplayer achievements, boss trophies, titles, cosmetic collection, and account records.
 
 The first view always answers three questions without scrolling: what should I do now, what unlocks next, and what can I claim?
@@ -420,7 +421,7 @@ Do not make every achievement a power grant. Players need goals after the gamepl
 2. `MP-C1 Progression UI` - first slice complete: Campaign and Progression now unifies Orders, Campaign, and Level Path with six chapter bands and registry-backed unlock previews.
 3. `MP-C2 Levels 1-5` - complete: The First Banner is an eight-step playable chapter with a persistent named threat, level-five Black Pike capstone, genuine post-boss return, rank briefings, chapter presentation, and focused tests.
 4. `MP-C3 Social and return completion` - complete: shared request records, party/trade invitation overlays, a versioned local `TradeSession`, the first rotating regional threat, daily first-completion bonuses, and rested job catch-up all use genuine action receipts and duplicate-safe claims.
-5. `MP-C4 Chronicle pilot`: add the internal 20-rank Black Pike Ledger using only implemented, genuine actions.
+5. `MP-C4 Chronicle pilot` - complete: the internal 20-rank Black Pike Ledger uses an idempotent accumulated event ledger, capped genuine-action Renown, duplicate-safe claims, permanent honors, migration tests, and a responsive progression tab.
 6. `MP-C5 Multiplayer sessions`: refactor combat ownership, then ship real duel and first co-op dungeon sessions.
 7. `MP-C6 Levels 6-10`: ship The Drowned Moonwell, Moonbridge contracts, Mother Cindervein, first reputation track, and dungeon tier II.
 8. `MP-C7 Public Chronicle`: expand the validated pilot to 40 ranks, archive support, full reward presentation, and entitlement history.
@@ -465,7 +466,16 @@ The next code batch should be intentionally smaller than this roadmap:
 5. [x] Implement an ownership-validated local `TradeSession` before exposing the typed trade-request presentation.
 6. [x] Add moderate first-win and first-dungeon-clear bonuses with duplicate-claim protection.
 
-The next implementation batch is `MP-C4`: pilot the free 20-rank Black Pike Ledger Chronicle using only the genuine event vocabulary already implemented.
+## Fourth Implementation Batch - Complete 2026-07-19
+
+1. [x] Add a versioned Black Pike Ledger state that accumulates genuine engagement events exactly once instead of depending on the short event-retention window.
+2. [x] Define 20 free-track ranks at 50-Renown intervals with meaningful ranks 5, 10, 15, and 20.
+3. [x] Cap repeatable job, social, battle, dungeon, PVP, co-op, and trade sources by day or week while leaving authored and claimed objectives idempotent.
+4. [x] Persist rank claims, inventory-limited resource delivery, entitlement ownership, telemetry, and activity history.
+5. [x] Add the responsive Chronicle tab with rank states, reward presentation, exact source rules, and acquired lore/cosmetic honors.
+6. [x] Test thresholds, contribution caps, duplicate receipts, claims, entitlements, and reload normalization.
+
+The next implementation batch is `MP-C5`: move combat ownership into real session records, then use that foundation for complete duel and first co-op dungeon sessions.
 
 ## Definition Of Done For Every Progression Slice
 

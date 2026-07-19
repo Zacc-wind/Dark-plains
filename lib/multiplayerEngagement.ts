@@ -21,6 +21,9 @@ export type MultiplayerEngagementEventKind =
   | 'trade-completed'
   | 'pvp-completed'
   | 'coop-completed'
+  | 'daily-contract-claimed'
+  | 'weekly-oath-claimed'
+  | 'regional-threat-claimed'
   | 'social-action';
 export type LegacyMultiplayerEngagementEventKind = 'battle-win' | 'job-start' | 'dungeon-clear';
 export type MultiplayerEngagementEventInputKind = MultiplayerEngagementEventKind | LegacyMultiplayerEngagementEventKind;
@@ -164,6 +167,9 @@ const VALID_EVENT_KINDS = new Set<MultiplayerEngagementEventKind>([
   'trade-completed',
   'pvp-completed',
   'coop-completed',
+  'daily-contract-claimed',
+  'weekly-oath-claimed',
+  'regional-threat-claimed',
   'social-action',
 ]);
 const LEGACY_EVENT_KIND_MAP: Record<LegacyMultiplayerEngagementEventKind, MultiplayerEngagementEventKind> = {

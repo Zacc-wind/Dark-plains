@@ -85,6 +85,13 @@ import {
   type MultiplayerWeeklyOathView,
 } from './multiplayerEngagement';
 import type { RegionalThreatView } from './multiplayerRegionalThreat';
+import {
+  claimMultiplayerChronicleRank as claimMultiplayerChronicleRankState,
+  getMultiplayerChronicleView as getMultiplayerChronicleViewState,
+  syncMultiplayerChronicleEvents,
+  type MultiplayerChronicleState,
+  type MultiplayerChronicleView,
+} from './multiplayerChronicle';
 
 export { CITY_QUESTS, QUEST_NPCS, STORY_CHAPTERS, getAllStoryQuestsSorted, getCityQuestTemplate, getRotatingCityQuests };
 export { TRAVEL_EVENT_CONTENT_COUNTS };
@@ -477,6 +484,7 @@ export interface User {
   social?: SocialState;
   pvpRating?: PvpRatingState;
   multiplayerEngagement?: MultiplayerEngagementState;
+  multiplayerChronicle?: MultiplayerChronicleState;
 }
 
 export type { PvpRatingState };
@@ -1622,9 +1630,8 @@ export function claimCityQuestReward(questId: string): {
     minions: mergeMinionStacks(currentUser.minions || [], reward.minions),
     knownSpellIds: spellUnlock.knownSpellIds,
     cityQuests: updatedCityQuests,
-    multiplayerEngagement: recordMultiplayerEngagementEvent(
-      currentUser.multiplayerEngagement,
-      currentUser.username,
+    ...recordUserMultiplayerEvent(
+      currentUser,
       {
         id: `city-contract-completed:${quest.id}`,
         kind: 'city-contract-completed',
@@ -1817,9 +1824,8 @@ export function claimStoryQuestReward(questId: string): {
       ...storyQuests.filter(item => item.questId !== questId),
       { questId, claimed: true, completedAt, introSeen: true },
     ],
-    multiplayerEngagement: recordMultiplayerEngagementEvent(
-      currentUser.multiplayerEngagement,
-      currentUser.username,
+    ...recordUserMultiplayerEvent(
+      currentUser,
       {
         id: `story-quest-completed:${quest.id}`,
         kind: 'story-quest-completed',
@@ -3219,9 +3225,8 @@ export function confirmCurrentPlayerTrade(
         rewards,
         description: `Sent ${isInitiator ? initiatorSent : receiverSent}; received ${isInitiator ? receiverSent : initiatorSent}.`,
       }),
-      multiplayerEngagement: recordMultiplayerEngagementEvent(
-        user.multiplayerEngagement,
-        user.username,
+      ...recordUserMultiplayerEvent(
+        user,
         {
           id: `trade-completed:${completedSession.id}`,
           kind: 'trade-completed',
@@ -5077,6 +5082,30 @@ export function updateCurrentUser(updates: Partial<User>): void {
   }
 }
 
+function recordUserMultiplayerEvent(
+  user: User,
+  event: MultiplayerEngagementEventInput | MultiplayerEngagementEventInputKind,
+  now = Date.now(),
+  baseEngagement: Partial<MultiplayerEngagementState> | null | undefined = user.multiplayerEngagement,
+): {
+  multiplayerEngagement: MultiplayerEngagementState;
+  multiplayerChronicle: MultiplayerChronicleState;
+} {
+  const multiplayerEngagement = recordMultiplayerEngagementEvent(
+    baseEngagement,
+    user.username,
+    event,
+    now,
+  );
+  return {
+    multiplayerEngagement,
+    multiplayerChronicle: syncMultiplayerChronicleEvents(
+      user.multiplayerChronicle,
+      multiplayerEngagement.events,
+    ),
+  };
+}
+
 export interface MultiplayerEngagementView {
   state: MultiplayerEngagementState;
   dailyContracts: MultiplayerContractView[];
@@ -5108,6 +5137,79 @@ export function getMultiplayerEngagementView(
   };
 }
 
+export function getMultiplayerChronicleView(
+  user: User | null = getCurrentUser(),
+  now = Date.now(),
+): MultiplayerChronicleView | null {
+  if (!user) return null;
+  const engagement = normalizeMultiplayerEngagementState(user.multiplayerEngagement, user.username, now);
+  return getMultiplayerChronicleViewState(user.multiplayerChronicle, engagement.events);
+}
+
+export function claimCurrentMultiplayerChronicleRank(
+  rankNumber: number,
+  now = Date.now(),
+): { success: boolean; rewards?: RewardSummary; error?: string } {
+  const currentUser = getCurrentUser();
+  if (!currentUser) return { success: false, error: 'Not logged in.' };
+  const engagement = normalizeMultiplayerEngagementState(
+    currentUser.multiplayerEngagement,
+    currentUser.username,
+    now,
+  );
+  const result = claimMultiplayerChronicleRankState(
+    currentUser.multiplayerChronicle,
+    engagement.events,
+    rankNumber,
+  );
+  if (!result.success) return { success: false, error: result.error };
+
+  const gold = result.rank.rewards.reduce((total, reward) => total + (reward.gold || 0), 0);
+  const rareGems = result.rank.rewards.reduce((total, reward) => total + (reward.rareGems || 0), 0);
+  const rewardItems = result.rank.rewards.flatMap(reward => (
+    reward.itemId && reward.itemQuantity
+      ? [makeInventoryItem(reward.itemId, reward.itemQuantity)]
+      : []
+  ));
+  if (rareGems > 0) rewardItems.push(makeInventoryItem('rare-gem', rareGems));
+  const inventoryResult = addInventoryItemsWithLimit(
+    currentUser.inventory || [],
+    rewardItems,
+    getInventorySlotCapacity(currentUser),
+  );
+  const acceptedRareGems = inventoryResult.acceptedItems
+    .filter(item => item.id === 'rare-gem')
+    .reduce((total, item) => total + item.quantity, 0);
+  const acceptedItems = inventoryResult.acceptedItems.filter(item => item.id !== 'rare-gem');
+  const rewards: RewardSummary = {
+    gold: gold || undefined,
+    rareGems: acceptedRareGems || undefined,
+    items: acceptedItems.length > 0 ? acceptedItems : undefined,
+  };
+  const entitlementLabels = result.rank.rewards
+    .flatMap(reward => reward.entitlement ? [reward.entitlement.label] : []);
+  const rejectedQuantity = inventoryResult.rejectedItems.reduce((total, item) => total + item.quantity, 0);
+
+  updateCurrentUser({
+    multiplayerChronicle: result.state,
+    gold: currentUser.gold + gold,
+    inventory: inventoryResult.inventory,
+    activityLog: pushActivityEntry(currentUser.activityLog, {
+      id: `activity-chronicle-rank-${result.rank.rank}-${now}`,
+      type: 'quest',
+      title: `Chronicle Rank ${result.rank.rank}: ${result.rank.title}`,
+      source: 'The Black Pike Ledger',
+      completedAt: now,
+      rewards,
+      description: [
+        entitlementLabels.length > 0 ? `Unlocked ${entitlementLabels.join(', ')}.` : '',
+        rejectedQuantity > 0 ? `${rejectedQuantity} item reward could not fit in inventory.` : '',
+      ].filter(Boolean).join(' ') || 'Chronicle rank reward claimed.',
+    }),
+  });
+  return { success: true, rewards };
+}
+
 export function touchCurrentMultiplayerEngagement(now = Date.now()): MultiplayerEngagementState | null {
   const currentUser = getCurrentUser();
   if (!currentUser) return null;
@@ -5128,14 +5230,9 @@ export function recordCurrentMultiplayerEngagementEvent(
 ): MultiplayerEngagementState | null {
   const currentUser = getCurrentUser();
   if (!currentUser) return null;
-  const state = recordMultiplayerEngagementEvent(
-    currentUser.multiplayerEngagement,
-    currentUser.username,
-    event,
-    now,
-  );
-  updateCurrentUser({ multiplayerEngagement: state });
-  return state;
+  const progress = recordUserMultiplayerEvent(currentUser, event, now);
+  updateCurrentUser(progress);
+  return progress.multiplayerEngagement;
 }
 
 export function rerollCurrentMultiplayerDailyContract(
@@ -5172,8 +5269,20 @@ export function claimCurrentMultiplayerDailyContract(
     gold: result.contract.rewardGold,
     exp: result.contract.rewardExp,
   };
+  const engagementUpdates = recordUserMultiplayerEvent(
+    currentUser,
+    {
+      id: `daily-contract-claimed:${result.contract.id}`,
+      kind: 'daily-contract-claimed',
+      occurredAt: now,
+      contextId: 'daily-orders',
+      targetId: result.contract.id,
+    },
+    now,
+    result.state,
+  );
   updateCurrentUser({
-    multiplayerEngagement: result.state,
+    ...engagementUpdates,
     gold: currentUser.gold + result.contract.rewardGold,
     exp: currentUser.exp + result.contract.rewardExp,
     activityLog: pushActivityEntry(currentUser.activityLog, {
@@ -5243,8 +5352,20 @@ export function claimCurrentMultiplayerWeeklyOath(
     gold: result.oath.rewardGold,
     exp: result.oath.rewardExp,
   };
+  const engagementUpdates = recordUserMultiplayerEvent(
+    currentUser,
+    {
+      id: `weekly-oath-claimed:${result.oath.id}`,
+      kind: 'weekly-oath-claimed',
+      occurredAt: now,
+      contextId: 'weekly-oath',
+      targetId: result.oath.id,
+    },
+    now,
+    result.state,
+  );
   updateCurrentUser({
-    multiplayerEngagement: result.state,
+    ...engagementUpdates,
     gold: currentUser.gold + result.oath.rewardGold,
     exp: currentUser.exp + result.oath.rewardExp,
     activityLog: pushActivityEntry(currentUser.activityLog, {
@@ -5287,8 +5408,20 @@ export function claimCurrentMultiplayerRegionalThreat(
     exp: result.threat.rewardExp,
     rareGems: acceptedRareGems || undefined,
   };
+  const engagementUpdates = recordUserMultiplayerEvent(
+    currentUser,
+    {
+      id: `regional-threat-claimed:${result.threat.instanceId}`,
+      kind: 'regional-threat-claimed',
+      occurredAt: now,
+      contextId: result.threat.regionId,
+      targetId: result.threat.instanceId,
+    },
+    now,
+    result.state,
+  );
   updateCurrentUser({
-    multiplayerEngagement: result.state,
+    ...engagementUpdates,
     gold: currentUser.gold + result.threat.rewardGold,
     exp: currentUser.exp + result.threat.rewardExp,
     inventory: gemResult.inventory,
@@ -5528,9 +5661,8 @@ export function checkTravelComplete(): boolean {
       y: currentUser.traveling.targetY,
       traveling: null,
       activityLog: arrivalActivityLog,
-      multiplayerEngagement: recordMultiplayerEngagementEvent(
-        currentUser.multiplayerEngagement,
-        currentUser.username,
+      ...recordUserMultiplayerEvent(
+        currentUser,
         {
           id: `travel-completed:${currentUser.traveling.eventSeed || currentUser.traveling.startTime}`,
           kind: 'travel-completed',
@@ -5830,9 +5962,8 @@ export function startJob(poiId: string, poiName: string, jobName: string, jobInd
   const updatedQueue = [...currentUser.jobQueue, newJob];
   updateCurrentUser({
     jobQueue: updatedQueue,
-    multiplayerEngagement: recordMultiplayerEngagementEvent(
-      currentUser.multiplayerEngagement,
-      currentUser.username,
+    ...recordUserMultiplayerEvent(
+      currentUser,
       {
         id: `job-started:${newJob.id}`,
         kind: 'job-started',
@@ -6049,6 +6180,24 @@ export function checkJobsComplete(): void {
         })
       : currentUser.activityLog || [];
     
+    const engagementUpdates = firstJob
+      ? recordUserMultiplayerEvent(
+          currentUser,
+          {
+            id: `job-completed:${firstJob.id}`,
+            kind: 'job-completed',
+            occurredAt: now,
+            contextId: firstJob.poiId,
+            targetId: firstJob.id,
+          },
+          now,
+          nextMultiplayerEngagement,
+        )
+      : {
+          multiplayerEngagement: currentUser.multiplayerEngagement,
+          multiplayerChronicle: currentUser.multiplayerChronicle,
+        };
+
     updateCurrentUser({
       jobQueue: updatedQueue,
       gold: currentUser.gold + goldEarned,
@@ -6059,20 +6208,7 @@ export function checkJobsComplete(): void {
       minions: updatedMinions,
       cityQuests: updatedCityQuests,
       activityLog: updatedActivityLog,
-      multiplayerEngagement: firstJob
-        ? recordMultiplayerEngagementEvent(
-            nextMultiplayerEngagement,
-            currentUser.username,
-            {
-              id: `job-completed:${firstJob.id}`,
-              kind: 'job-completed',
-              occurredAt: now,
-              contextId: firstJob.poiId,
-              targetId: firstJob.id,
-            },
-            now,
-          )
-        : currentUser.multiplayerEngagement,
+      ...engagementUpdates,
     });
   }
 }

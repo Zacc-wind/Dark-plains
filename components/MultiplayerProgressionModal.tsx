@@ -19,9 +19,10 @@ import {
 import { getMultiplayerUnlockLevelGroups, getNextMultiplayerUnlocks } from '@/lib/multiplayerUnlocks';
 import { getStoryDialogSequence } from '@/lib/storyDialogue';
 import MultiplayerOrdersPanel from './MultiplayerOrdersPanel';
+import MultiplayerChroniclePanel from './MultiplayerChroniclePanel';
 import StoryDialogOverlay from './StoryDialogOverlay';
 
-export type MultiplayerProgressionTab = 'orders' | 'campaign' | 'path';
+export type MultiplayerProgressionTab = 'orders' | 'campaign' | 'chronicle' | 'path';
 
 interface MultiplayerProgressionModalProps {
   isOpen: boolean;
@@ -37,6 +38,7 @@ interface MultiplayerProgressionModalProps {
 const TABS: Array<{ id: MultiplayerProgressionTab; label: string }> = [
   { id: 'orders', label: 'Orders' },
   { id: 'campaign', label: 'Campaign' },
+  { id: 'chronicle', label: 'Chronicle' },
   { id: 'path', label: 'Level Path' },
 ];
 
@@ -337,6 +339,12 @@ export default function MultiplayerProgressionModal({
                     )}
                   </section>
                 )}
+              </div>
+            )}
+
+            {activeTab === 'chronicle' && (
+              <div id="multiplayer-progression-chronicle" role="tabpanel">
+                <MultiplayerChroniclePanel now={now} player={player} onPlayerRefresh={onPlayerRefresh} />
               </div>
             )}
 
