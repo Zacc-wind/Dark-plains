@@ -17,9 +17,46 @@ describe('multiplayer campaign presentation', () => {
 
     const views = getMultiplayerChapterViews({ stats: { level: 1 }, storyQuests: [] });
     expect(views).toHaveLength(6);
-    expect(views.reduce((total, chapter) => total + chapter.questCount, 0)).toBe(30);
-    expect(views[0]).toMatchObject({ unlocked: true, active: true, questCount: 6 });
+    expect(views.reduce((total, chapter) => total + chapter.questCount, 0)).toBe(32);
+    expect(views[0]).toMatchObject({ unlocked: true, active: true, questCount: 8 });
     expect(views[1].unlocked).toBe(false);
+  });
+
+  it('ends the First Banner with a named scout objective and level-five capstone', () => {
+    const chapter = getMultiplayerChapterViews({ stats: { level: 5 }, storyQuests: [] })[0];
+
+    expect(chapter.quests.map(quest => quest.id)).toEqual([
+      'story-01-first-banner',
+      'story-02-candle-road',
+      'story-03-lost-apprentice',
+      'story-04-river-law',
+      'story-05-violet-satchel',
+      'story-06-black-pike',
+      'story-07-broken-toll',
+      'story-08-banner-recognized',
+    ]);
+    expect(chapter.quests[5]).toMatchObject({
+      requiredLevel: 3,
+      requirement: {
+        type: 'inspect_enemy',
+        enemyId: 'story-boss-black-pike-lieutenant',
+      },
+    });
+    expect(chapter.quests[6]).toMatchObject({
+      requiredLevel: 5,
+      requirement: {
+        type: 'defeat_boss',
+        bossId: 'black-pike-lieutenant',
+      },
+    });
+    expect(chapter.quests[7]).toMatchObject({
+      requiredLevel: 5,
+      requirement: {
+        type: 'visit_quest_npc',
+        questNpcId: 'quest-npc-marshal-orren',
+        afterQuestId: 'story-07-broken-toll',
+      },
+    });
   });
 
   it('moves the active marker after every quest in a chapter is claimed', () => {

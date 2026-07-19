@@ -7,6 +7,7 @@ vi.mock('@/lib/supabase/config', () => ({
 import { applyRemoteAccountTutorials, readAccountTutorials } from '@/lib/accountTutorial';
 import {
   clearMultiplayerTutorialDialogue,
+  completeMultiplayerUnlockDialogue,
   completeMultiplayerTutorialCallout,
   getMultiplayerTutorialDialogueLine,
   getNextMultiplayerTutorialCallout,
@@ -17,6 +18,7 @@ import {
   saveMultiplayerTutorialDialogueLine,
   skipMultiplayerTutorial,
 } from '@/lib/multiplayerTutorial';
+import { getNextMultiplayerUnlockDialogue } from '@/lib/multiplayerUnlockDialogue';
 
 class MemoryLocalStorage {
   private readonly values = new Map<string, string>();
@@ -120,6 +122,38 @@ describe('multiplayer tutorial progress', () => {
     expect(progress.completedCalloutIds).toEqual(MULTIPLAYER_TUTORIAL_CALLOUT_IDS);
     expect(progress.skipped).toBe(true);
     expect(getNextMultiplayerTutorialCallout('SkipBanner', 'story-04-river-law')).toBeNull();
+  });
+
+  it('queues and persists the level three, four, and five unlock briefings in order', () => {
+    expect(getNextMultiplayerUnlockDialogue(2, [])).toBeNull();
+    expect(getNextMultiplayerUnlockDialogue(3, [])?.id).toBe('unlock-level-3-pvp');
+
+    completeMultiplayerUnlockDialogue('RankBanner', 'unlock-level-3-pvp');
+    let progress = readMultiplayerTutorialProgress('RankBanner');
+    expect(getNextMultiplayerUnlockDialogue(4, progress.completedUnlockDialogueIds || [])?.id)
+      .toBe('unlock-level-4-trading');
+
+    completeMultiplayerUnlockDialogue('RankBanner', 'unlock-level-4-trading');
+    progress = readMultiplayerTutorialProgress('RankBanner');
+    expect(getNextMultiplayerUnlockDialogue(5, progress.completedUnlockDialogueIds || [])?.id)
+      .toBe('unlock-level-5-company');
+
+    completeMultiplayerUnlockDialogue('RankBanner', 'unlock-level-5-company');
+    progress = readMultiplayerTutorialProgress('RankBanner');
+    expect(progress.completedUnlockDialogueIds).toEqual([
+      'unlock-level-3-pvp',
+      'unlock-level-4-trading',
+      'unlock-level-5-company',
+    ]);
+    expect(getNextMultiplayerUnlockDialogue(30, progress.completedUnlockDialogueIds || [])).toBeNull();
+  });
+
+  it('preserves completed unlock briefings when callouts are skipped', () => {
+    completeMultiplayerUnlockDialogue('SkipRankBanner', 'unlock-level-3-pvp');
+
+    const progress = skipMultiplayerTutorial('SkipRankBanner');
+
+    expect(progress.completedUnlockDialogueIds).toEqual(['unlock-level-3-pvp']);
   });
 
   it('recovers partial callout and dialogue progress after module reload', async () => {

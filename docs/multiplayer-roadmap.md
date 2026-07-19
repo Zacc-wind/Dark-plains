@@ -96,9 +96,9 @@ Turn the current shared world-map prototype into a real multiplayer layer withou
 - [x] Define one shared unlock registry consumed by HUD buttons, modal guards, API routes, and tutorial copy.
 - [x] Level 1: jobs, towns, story quests, NPC encounters, inventory, and basic army management.
 - [x] Level 2: city contracts, gear upgrades, and the first dungeon preview.
-- [ ] Level 3: PVP hub and duel challenges unlock with a short rules conversation. The shared gate and API enforcement are complete; the authored conversation remains.
+- [x] Level 3: PVP hub and duel challenges unlock with a short rules conversation backed by the shared gate and API enforcement.
 - [x] Level 4: trading unlocks after inventory and value are explained.
-- [ ] Level 5: party creation and cooperative dungeon entry unlock. Party creation is gated; the cooperative dungeon session is not implemented yet.
+- [ ] Level 5: party creation and cooperative dungeon readiness unlock with an authored briefing. Party creation is gated; the cooperative dungeon session is not implemented yet.
 - [ ] Later levels unlock harder regions, additional city services, dungeon tiers, boss rotations, and advanced social objectives.
 - [ ] Enforce every gate on the server as well as the client; a hidden button is not an authorization rule.
 - [x] Show locked features in a compact preview with level requirement and one-sentence value, rather than silently hiding the feature.
@@ -117,7 +117,7 @@ Turn the current shared world-map prototype into a real multiplayer layer withou
 - [ ] Give every main-story chapter a named guide, a regional conflict, a midpoint fight, and a boss resolution.
 - [ ] Keep each quest objective explicit about the target, location, action, and reward source.
 - [ ] Use quest contacts for authored dialogue; use compact objective cards for routine contracts.
-- [ ] Add visible chapter progress to the quest journal without covering the world map.
+- [x] Add visible chapter progress, guides, capstones, and replayable conversations to the Campaign view without covering the world map.
 - [ ] Add faction reputation only after at least two factions have distinct rewards and repeatable activities.
 - [ ] Let completed chapters change small world details, NPC lines, or available contracts without deleting required contacts.
 - [ ] Build level-band content in batches: 1-5 onboarding, 6-10 regional mastery, 11-15 veteran systems, then expand the cap only with enough enemies and bosses.
@@ -138,7 +138,7 @@ Turn the current shared world-map prototype into a real multiplayer layer withou
 
 ## Recommended Implementation Order
 1. [x] Add the shared genuine-action event foundation and Campaign/Progression shell described in `docs/progression-content-roadmap.md`.
-2. [ ] Finish the level 1-5 First Banner chapter, Black Pike capstone, and level 3/4/5 unlock conversations.
+2. [x] Finish the level 1-5 First Banner chapter, Black Pike capstone, and level 3/4/5 unlock conversations.
 3. Complete the shared social-request overlay for trade and party invites, then add the first regional threat and rested catch-up rules.
 4. Pilot the free Black Pike Ledger Chronicle using only implemented and validated activities.
 5. Refactor battle ownership and synchronization before implementing real player-versus-player and cooperative sessions.

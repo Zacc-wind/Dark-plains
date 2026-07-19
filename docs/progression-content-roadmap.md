@@ -18,9 +18,9 @@ This document is the execution plan for progression, retention, narrative conten
 - The level cap is 30.
 - The shared unlock registry already covers the level 1 core, level 2 contracts/forge/PVE, level 3 PVP, level 4 trading, level 5 parties/co-op, and level 6 veteran regions.
 - Daily contracts, a weekly oath, a seven-day return track, returning-player briefing, and engagement telemetry already exist.
-- There are 30 main-story quest definitions across two 15-level chapters.
-- Only 15 of the 30 story quests have authored dialogue ids.
-- The first six onboarding objectives are concentrated in levels 1-3. There is no story step at levels 4-6 before the level 7 Moonwell quest.
+- There are 32 main-story quest definitions across the two existing acts, grouped into six five-level campaign bands.
+- 17 story quests have authored dialogue ids, including the complete eight-step First Banner opening.
+- Levels 1-5 now form a playable opening chapter with a named scout target, Black Pike capstone, real return to Orren, and level 3/4/5 system briefings. Level 6 remains the next content gap before the level 7 Moonwell quest.
 - There are 36 city contracts. Harborview and Riverside own 15 each, Blackwater Gate and Eclipse Hold own 3 each, and Moonbridge and Ashford own none.
 - There are 8 boss profiles, 24 unit templates, and 20 commander spells.
 - The world has useful fiction and assets, but the player-facing structure does not yet expose a clear chapter, next unlock, named target, or long-term collection goal.
@@ -161,24 +161,24 @@ Full 1-30 production target:
 
 The existing definitions count toward these totals. This is a rewrite-and-fill plan, not a demand for 132 entirely new quests.
 
-### First Shippable Chapter: Levels 1-5
+### First Shippable Chapter: Levels 1-5 - Complete 2026-07-19
 
 Preserve the six onboarding ids because tutorial state depends on them, then complete the chapter around those interactions:
 
-1. `First Banner`: start and complete a real road job.
-2. `The Candle Road`: travel to Harborview.
-3. `Marshal's Muster`: meet Marshal Orren.
-4. `Trial by Steel`: inspect a real enemy, confirm formation, win, and claim the report.
-5. `River Law`: travel to Riverside and hear why the Black Pike matters.
-6. `Black Pike Warning`: inspect the named threat and learn the risk rules.
-7. `The Broken Toll`: defeat the Black Pike lieutenant, not two unrelated battles.
-8. `Banner Recognized`: return to Orren, claim the chapter reward, and preview the level 6 Moonwell conflict.
+1. [x] `First Banner`: start and complete a real road job.
+2. [x] `The Candle Road`: travel to Harborview.
+3. [x] `Marshal's Muster`: meet Marshal Orren.
+4. [x] `Trial by Steel`: inspect a real enemy, confirm formation, win, and claim the report.
+5. [x] `River Law`: travel to Riverside and hear why the Black Pike matters.
+6. [x] `Black Pike Warning`: inspect the named threat and learn the risk rules.
+7. [x] `The Broken Toll`: defeat the Black Pike lieutenant, not two unrelated battles.
+8. [x] `Banner Recognized`: return to Orren, claim the chapter reward, and preview the level 6 Moonwell conflict.
 
 Add three short system conversations at their real unlock moments:
 
-- Level 3: duel charter, loss policy, and rating protection.
-- Level 4: merchant seal, item value, confirmation, and trade safety.
-- Level 5: company banner, party ownership, and co-op readiness.
+- [x] Level 3: duel charter, loss policy, and rating protection.
+- [x] Level 4: merchant seal, item value, confirmation, and trade safety.
+- [x] Level 5: company banner, party ownership, and co-op readiness.
 
 These conversations explain a real available feature. If the feature is not implemented, show it as a preview and do not create a dead call to action.
 
@@ -418,7 +418,7 @@ Do not make every achievement a power grant. Players need goals after the gamepl
 
 1. `MP-C0 Event foundation` - complete: semantic genuine-action events, idempotent receipts, legacy normalization, definition versioning, and tests.
 2. `MP-C1 Progression UI` - first slice complete: Campaign and Progression now unifies Orders, Campaign, and Level Path with six chapter bands and registry-backed unlock previews.
-3. `MP-C2 Levels 1-5`: complete The First Banner chapter, add the Black Pike capstone, level 3/4/5 unlock conversations, chapter progress, and balanced early rewards.
+3. `MP-C2 Levels 1-5` - complete: The First Banner is an eight-step playable chapter with a persistent named threat, level-five Black Pike capstone, genuine post-boss return, rank briefings, chapter presentation, and focused tests.
 4. `MP-C3 Social and return completion`: finish trade/party request overlays, regional threat, first-win/dungeon bonuses, and rested catch-up.
 5. `MP-C4 Chronicle pilot`: add the internal 20-rank Black Pike Ledger using only implemented, genuine actions.
 6. `MP-C5 Multiplayer sessions`: refactor combat ownership, then ship real duel and first co-op dungeon sessions.
@@ -447,7 +447,16 @@ The next code batch should be intentionally smaller than this roadmap:
 5. [x] Add a next-unlock panel backed only by `MULTIPLAYER_UNLOCK_REGISTRY`.
 6. [x] Verify reload, genuine-action progress, keyboard/mobile layout, and old tutorial saves before writing new chapter rewards.
 
-The next implementation batch is `MP-C2`: finish the level 1-5 First Banner chapter as a complete playable band before adding the Chronicle pilot.
+## Second Implementation Batch - Complete 2026-07-19
+
+1. [x] Replace the generic Black Pike objective with a named, persistent level-five story boss and scout-report interaction.
+2. [x] Add a boss-specific combat rite, exact defeat receipt, balanced capstone rewards, and an authored resolution at Marshal Orren.
+3. [x] Prevent the earlier muster visit from satisfying the post-capstone return objective.
+4. [x] Add persistent level 3/4/5 unlock briefings with line resume, ordered completion, and archive replay.
+5. [x] Expose chapter guides and capstones in the Campaign view.
+6. [x] Test spawn rules, exact genuine-action quest completion, legacy tutorial state, briefing order, and chapter ordering.
+
+The next implementation batch is `MP-C3`: complete trade and party request overlays, then add the first regional threat and rested catch-up rules before starting the Chronicle pilot.
 
 ## Definition Of Done For Every Progression Slice
 

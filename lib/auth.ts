@@ -1055,15 +1055,21 @@ function isPreviousStoryQuestClaimed(user: User, quest: StoryQuestTemplate): boo
   return Boolean(user.storyQuests?.some(item => item.questId === previous.id && item.claimed));
 }
 
-function hasVisitedQuestNpc(user: User, questNpcId?: string): boolean {
+function hasVisitedQuestNpc(user: User, questNpcId?: string, afterQuestId?: string): boolean {
   if (!questNpcId) return false;
   const npc = getQuestNpcById(questNpcId);
   if (!npc) return false;
+  const afterTimestamp = afterQuestId
+    ? user.storyQuests?.find(progress => progress.questId === afterQuestId && progress.claimed)?.completedAt
+    : undefined;
+  if (afterQuestId && !afterTimestamp) return false;
 
-  if (Math.abs(user.x - npc.x) + Math.abs(user.y - npc.y) <= 1) return true;
+  if (!afterQuestId && Math.abs(user.x - npc.x) + Math.abs(user.y - npc.y) <= 1) return true;
 
   return (user.activityLog || []).some(activity => (
-    activity.type === 'quest' && activity.questNpcId === questNpcId
+    activity.type === 'quest'
+    && activity.questNpcId === questNpcId
+    && (!afterTimestamp || activity.completedAt > afterTimestamp)
   ));
 }
 
@@ -1137,6 +1143,12 @@ function getBossDefeatCount(user: User, bossId?: string): number {
   }).length;
 }
 
+function getEnemyInspectionCount(user: User, enemyId?: string): number {
+  return (user.multiplayerEngagement?.events || []).filter(event => (
+    event.kind === 'enemy-inspected' && (!enemyId || event.targetId === enemyId)
+  )).length;
+}
+
 function getStoryQuestTemplate(questId: string): StoryQuestTemplate | undefined {
   return STORY_CHAPTERS.flatMap(chapter => chapter.quests).find(quest => quest.id === questId);
 }
@@ -1172,9 +1184,11 @@ function getQuestRequirementProgressValue(
     case 'complete_jobs_at_poi':
       return getJobsAtPoiCount(user, requirement);
     case 'visit_quest_npc':
-      return hasVisitedQuestNpc(user, requirement.questNpcId) ? 1 : acceptedProgress;
+      return hasVisitedQuestNpc(user, requirement.questNpcId, requirement.afterQuestId) ? 1 : acceptedProgress;
     case 'visit_poi':
       return hasVisitedQuestPoi(user, requirement) ? 1 : acceptedProgress;
+    case 'inspect_enemy':
+      return getEnemyInspectionCount(user, requirement.enemyId);
     case 'defeat_boss':
       return getBossDefeatCount(user, requirement.bossId);
     default:
@@ -1207,7 +1221,7 @@ function getCityQuestProgressValue(user: User, quest: CityQuestTemplate, progres
     case 'clear_dungeons':
       return getDungeonClearCount(user, quest.requirement.minDungeonLevel || 1);
     case 'visit_quest_npc':
-      return hasVisitedQuestNpc(user, quest.requirement.questNpcId) ? 1 : progress?.progress || 0;
+      return hasVisitedQuestNpc(user, quest.requirement.questNpcId, quest.requirement.afterQuestId) ? 1 : progress?.progress || 0;
     case 'visit_poi':
       return hasVisitedQuestPoi(user, quest.requirement) ? 1 : progress?.progress || 0;
     default:
@@ -1356,6 +1370,7 @@ export function getPendingStoryDialogQuest(user: User | null | undefined): Story
     if (!story.dialogId) return false;
     const status = getStoryQuestStatus(user, story.id);
     if (!status.unlocked || status.claimed) return false;
+    if (story.requirement.type === 'visit_quest_npc' && story.requirement.afterQuestId) return false;
     const state = user.storyQuests?.find(item => item.questId === story.id);
     return !state?.introSeen;
   });
@@ -1368,9 +1383,8 @@ export function recordQuestNpcVisit(npcId: string): void {
   const npc = getQuestNpcById(npcId);
   if (!npc) return;
 
-  if ((currentUser.activityLog || []).some(entry => entry.type === 'quest' && entry.questNpcId === npcId)) {
-    return;
-  }
+  const latestVisit = (currentUser.activityLog || []).find(entry => entry.type === 'quest' && entry.questNpcId === npcId);
+  if (latestVisit && Date.now() - latestVisit.completedAt < 3000) return;
 
   updateCurrentUser({
     activityLog: pushActivityEntry(currentUser.activityLog, {

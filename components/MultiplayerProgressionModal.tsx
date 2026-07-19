@@ -10,6 +10,12 @@ import {
 } from '@/lib/auth';
 import { getPlayerModelPath } from '@/lib/assetLoader';
 import { getMultiplayerChapterViews } from '@/lib/multiplayerProgression';
+import { readMultiplayerTutorialProgress } from '@/lib/multiplayerTutorial';
+import {
+  MULTIPLAYER_UNLOCK_DIALOGUES,
+  getMultiplayerUnlockDialogue,
+  type MultiplayerUnlockDialogueId,
+} from '@/lib/multiplayerUnlockDialogue';
 import { getMultiplayerUnlockLevelGroups, getNextMultiplayerUnlocks } from '@/lib/multiplayerUnlocks';
 import { getStoryDialogSequence } from '@/lib/storyDialogue';
 import MultiplayerOrdersPanel from './MultiplayerOrdersPanel';
@@ -52,6 +58,7 @@ export default function MultiplayerProgressionModal({
 }: MultiplayerProgressionModalProps) {
   const [activeTab, setActiveTab] = useState<MultiplayerProgressionTab>(initialTab);
   const [replayQuestId, setReplayQuestId] = useState<string | null>(null);
+  const [replayUnlockDialogueId, setReplayUnlockDialogueId] = useState<MultiplayerUnlockDialogueId | null>(null);
   const [confirmSkip, setConfirmSkip] = useState(false);
   const [notice, setNotice] = useState('');
   const shellRef = useRef<HTMLElement>(null);
@@ -73,10 +80,11 @@ export default function MultiplayerProgressionModal({
       if (event.key === 'Escape') {
         event.preventDefault();
         if (replayQuestId) setReplayQuestId(null);
+        else if (replayUnlockDialogueId) setReplayUnlockDialogueId(null);
         else onCloseRef.current();
         return;
       }
-      if (event.key !== 'Tab' || replayQuestId) return;
+      if (event.key !== 'Tab' || replayQuestId || replayUnlockDialogueId) return;
       const focusable = Array.from(shellRef.current?.querySelectorAll<HTMLElement>(focusableSelector) || []);
       if (focusable.length === 0) return;
       const first = focusable[0];
@@ -98,7 +106,7 @@ export default function MultiplayerProgressionModal({
       document.body.classList.remove('multiplayer-progression-open');
       previousFocus?.focus();
     };
-  }, [isOpen, replayQuestId]);
+  }, [isOpen, replayQuestId, replayUnlockDialogueId]);
 
   const chapterViews = useMemo(() => getMultiplayerChapterViews(player), [player]);
   const unlockGroups = useMemo(() => getMultiplayerUnlockLevelGroups(player), [player]);
@@ -109,12 +117,18 @@ export default function MultiplayerProgressionModal({
     if (!sequence || !progress?.introSeen) return null;
     return { story, sequence, status: getStoryQuestStatus(player, story.id) };
   }).filter((entry): entry is NonNullable<typeof entry> => Boolean(entry)), [player]);
+  const completedUnlockDialogues = useMemo(() => {
+    const progress = readMultiplayerTutorialProgress(player.username);
+    const completed = new Set(progress.completedUnlockDialogueIds || []);
+    return MULTIPLAYER_UNLOCK_DIALOGUES.filter(dialogue => completed.has(dialogue.id));
+  }, [player]);
   const activeStory = useMemo(() => getAllStoryQuestsSorted().find(story => {
     const status = getStoryQuestStatus(player, story.id);
     return status.unlocked && !status.claimed;
   }) || null, [player]);
   const activeStoryStatus = activeStory ? getStoryQuestStatus(player, activeStory.id) : null;
   const replayEntry = storyEntries.find(entry => entry.story.id === replayQuestId);
+  const replayUnlockDialogue = getMultiplayerUnlockDialogue(replayUnlockDialogueId);
   const onboardingRemaining = MULTIPLAYER_ONBOARDING_STORY_QUEST_IDS.filter(questId => (
     !player.storyQuests?.some(progress => progress.questId === questId && progress.introSeen)
   )).length;
@@ -226,6 +240,10 @@ export default function MultiplayerProgressionModal({
                               <span className="ui-faint text-[10px] font-black uppercase">Levels {chapter.minLevel}-{chapter.maxLevel}</span>
                             </div>
                             <p className="ui-muted mt-1 text-xs font-bold">{chapter.conflict}</p>
+                            <div className="ui-faint mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[10px] font-black uppercase">
+                              <span>Guide: {chapter.guideName}</span>
+                              <span>Capstone: {chapter.capstone}</span>
+                            </div>
                             <div className="ui-progress-track mt-3 h-1.5 overflow-hidden rounded border">
                               <div className="ui-progress-fill h-full" style={{ width: `${percent}%` }} />
                             </div>
@@ -245,7 +263,7 @@ export default function MultiplayerProgressionModal({
                     <p className="arcane-label">Campaign Archive</p>
                     <h3 className="fantasy-heading text-xl">Recorded Conversations</h3>
                   </div>
-                  {storyEntries.length === 0 ? (
+                  {storyEntries.length === 0 && completedUnlockDialogues.length === 0 ? (
                     <div className="ui-empty mt-4 rounded border border-dashed px-5 py-10 text-center">
                       <div className="fantasy-heading text-base">No conversations recorded</div>
                       <p className="ui-muted mt-2 text-xs font-bold">Viewed story scenes appear here.</p>
@@ -269,6 +287,30 @@ export default function MultiplayerProgressionModal({
                             <span className="fantasy-heading mt-1 block text-sm">{story.name}</span>
                           </span>
                           <span className="ui-pill rounded border px-2 py-1 text-[10px] font-black">{status.claimed ? 'Claimed' : 'Recorded'}</span>
+                        </button>
+                      ))}
+                      {completedUnlockDialogues.map(dialogue => (
+                        <button
+                          key={dialogue.id}
+                          type="button"
+                          onClick={() => setReplayUnlockDialogueId(dialogue.id)}
+                          className="multiplayer-story-record"
+                        >
+                          <span className="relative h-16 w-14 shrink-0 overflow-hidden">
+                            <Image
+                              src={dialogue.sequence.npcAssetPath || getPlayerModelPath(dialogue.sequence.npcModelNumber || 4)}
+                              alt=""
+                              fill
+                              sizes="56px"
+                              className="object-contain"
+                              unoptimized
+                            />
+                          </span>
+                          <span className="min-w-0 flex-1 text-left">
+                            <span className="arcane-label block">Rank {dialogue.minLevel} Briefing</span>
+                            <span className="fantasy-heading mt-1 block text-sm">{dialogue.title}</span>
+                          </span>
+                          <span className="ui-pill rounded border px-2 py-1 text-[10px] font-black">Recorded</span>
                         </button>
                       ))}
                     </div>
@@ -358,6 +400,14 @@ export default function MultiplayerProgressionModal({
           sequence={replayEntry.sequence}
           playerModelNumber={player.selectedModel || 3}
           onComplete={() => setReplayQuestId(null)}
+        />
+      )}
+      {replayUnlockDialogue && (
+        <StoryDialogOverlay
+          key={`progression-unlock-${replayUnlockDialogue.id}`}
+          sequence={replayUnlockDialogue.sequence}
+          playerModelNumber={player.selectedModel || 3}
+          onComplete={() => setReplayUnlockDialogueId(null)}
         />
       )}
     </>

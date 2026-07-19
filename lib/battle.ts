@@ -15,9 +15,15 @@ import {
 import { getMinionAssetPath, getPlayerModelPath } from './assetLoader';
 import { readGameJson, removeGameStorageItem, writeGameJson } from './gameStore';
 import { MAP_CONFIG, POIType, TileType, getStaticMap, getStaticPOIs } from './mapData';
-import { BOSS_PROFILES, type BossProfile } from './bosses';
+import { BOSS_PROFILES, getBossProfileById, type BossProfile } from './bosses';
 import { COMMANDER_FORMATION_KEY } from './formation';
 import { requireMultiplayerUnlock } from './multiplayerUnlocks';
+import {
+  FIRST_BANNER_BOSS_ENEMY_ID,
+  FIRST_BANNER_BOSS_ID,
+  FIRST_BANNER_BOSS_LEVEL,
+  shouldSpawnFirstBannerBoss,
+} from './multiplayerFirstBanner';
 
 export type BattleSide = 'player' | 'enemy';
 export type BattleStatus = 'active' | 'victory' | 'defeat' | 'recruited';
@@ -97,8 +103,9 @@ export interface WorldEnemy {
   spawnedAt?: number;
   expiresAt?: number;
   spawnRegionId?: string;
-  spawnKind?: 'regional' | 'nearby' | 'world-boss';
+  spawnKind?: 'regional' | 'nearby' | 'world-boss' | 'story-boss';
   lootMultiplier?: number;
+  requiredPlayerLevel?: number;
 }
 
 export interface BattleRatingPreview {
@@ -1017,6 +1024,57 @@ function makeWorldBossEnemy({
   };
 }
 
+function getFirstBannerStoryBoss(
+  user: User | null,
+  now: number,
+  occupied: Set<string>,
+  defeatedEnemyIds: Set<string>,
+): WorldEnemy | null {
+  if (!user || !shouldSpawnFirstBannerBoss(user) || defeatedEnemyIds.has(FIRST_BANNER_BOSS_ENEMY_ID)) return null;
+  const profile = getBossProfileById(FIRST_BANNER_BOSS_ID);
+  if (!profile) return null;
+
+  const riverside = getStaticPOIs().find(poi => poi.name === 'Riverside');
+  const centerX = riverside ? riverside.x + 12 : 16;
+  const centerY = riverside ? riverside.y + 2 : 34;
+  const region: EnemySpawnRegion = {
+    id: 'black-pike-toll',
+    minX: clamp(centerX - 5, 1, MAP_CONFIG.width - 2),
+    minY: clamp(centerY - 5, 1, MAP_CONFIG.height - 2),
+    maxX: clamp(centerX + 5, 1, MAP_CONFIG.width - 2),
+    maxY: clamp(centerY + 5, 1, MAP_CONFIG.height - 2),
+    levels: [FIRST_BANNER_BOSS_LEVEL],
+  };
+  const seed = Math.abs(hashText(`${FIRST_BANNER_BOSS_ENEMY_ID}-${user.username}`));
+  const home = findWorldEnemyHome(region, seed, occupied, 3);
+  const minions = profile.minionTemplates.map((templateId, index) => (
+    makeMinionStack(templateId, `${FIRST_BANNER_BOSS_ENEMY_ID}-${index}`, true)
+  ));
+
+  return {
+    id: FIRST_BANNER_BOSS_ENEMY_ID,
+    bossId: profile.id,
+    name: profile.name,
+    subtitle: profile.subtitle,
+    story: profile.story,
+    intro: profile.intro,
+    artworkPath: profile.assetPath,
+    x: home.x,
+    y: home.y,
+    homeX: home.x,
+    homeY: home.y,
+    level: FIRST_BANNER_BOSS_LEVEL,
+    modelNumber: profile.modelNumber,
+    personality: 'boss',
+    minions,
+    spawnedAt: now,
+    spawnRegionId: region.id,
+    spawnKind: 'story-boss',
+    lootMultiplier: 1.7,
+    requiredPlayerLevel: FIRST_BANNER_BOSS_LEVEL,
+  };
+}
+
 function getHourlyWorldBoss(user: User | null, now: number, occupied: Set<string>, defeatedEnemyIds: Set<string>): WorldEnemy | null {
   const { cycle, spawnedAt, expiresAt } = getWorldBossCycle(now);
   const profile = BOSS_PROFILES[cycle % BOSS_PROFILES.length];
@@ -1243,7 +1301,8 @@ export function getNpcEnemiesForUser(user: User | null, now = Date.now()): World
   if (savedEnemies) {
     const occupied = new Set(savedEnemies.map(enemy => `${enemy.x}:${enemy.y}`));
     const activeBoss = getHourlyWorldBoss(user, now, occupied, defeatedEnemyIds);
-    return activeBoss ? [activeBoss, ...savedEnemies] : savedEnemies;
+    const storyBoss = getFirstBannerStoryBoss(user, now, occupied, defeatedEnemyIds);
+    return [...(storyBoss ? [storyBoss] : []), ...(activeBoss ? [activeBoss] : []), ...savedEnemies];
   }
 
   const homeOccupied = new Set<string>();
@@ -1311,7 +1370,8 @@ export function getNpcEnemiesForUser(user: User | null, now = Date.now()): World
   const generatedEnemies = enemies.slice(0, WORLD_ENEMY_CAP);
   writeWorldEnemySnapshot(cycle, snapshotUsername, generatedEnemies);
   const activeBoss = getHourlyWorldBoss(user, now, patrolOccupied, defeatedEnemyIds);
-  return activeBoss ? [activeBoss, ...generatedEnemies] : generatedEnemies;
+  const storyBoss = getFirstBannerStoryBoss(user, now, patrolOccupied, defeatedEnemyIds);
+  return [...(storyBoss ? [storyBoss] : []), ...(activeBoss ? [activeBoss] : []), ...generatedEnemies];
 }
 
 function makeCommanderUnit(side: BattleSide, name: string, modelNumber: number, stats: CharacterStats, x: number, y: number, assetPath?: string): BattleUnit {
@@ -3409,6 +3469,24 @@ function runBossSpecialAbility(state: BattleState, commander: BattleUnit): Battl
         [...players.map(unit => unit.id), ...summonedIds],
         'eclipse-nova',
         summonedIds,
+      );
+    }
+    case 'black-pike-lieutenant': {
+      const target = playerCommander || players.sort((left, right) => left.defense - right.defense)[0];
+      const pressuredState = target
+        ? damageUnit(state, target.id, 8 + Math.floor(spellPower * 0.55))
+        : state;
+      const nextState = mutateUnits(pressuredState, 'enemy', unit => ({
+        ...unit,
+        attack: unit.attack + 1,
+        defense: unit.defense + 1,
+      }));
+      return finishBossSpecial(
+        nextState,
+        commander,
+        `${commander.name} sounds the toll bell. Black pikes close around your command while the camp locks formation.`,
+        target ? [target.id, ...enemies.map(unit => unit.id)] : enemies.map(unit => unit.id),
+        'gravity-snare',
       );
     }
     default: {

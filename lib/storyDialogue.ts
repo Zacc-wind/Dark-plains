@@ -116,13 +116,47 @@ export const STORY_DIALOG_SEQUENCES: Record<string, StoryDialogSequence> = {
     npcModelNumber: 1,
     objective: {
       label: 'Threat Order',
-      title: 'Win a second battle',
-      description: 'Defeat another enemy warband. Black Pike scouts grow stronger farther from the western towns.',
+      title: 'Inspect the Black Pike lieutenant',
+      description: 'Open the named threat from the quest tracker and read its scout rating before deciding when to fight.',
     },
     lines: [
-      { speaker: 'npc', text: 'Black Pike raiders tax the mid-road in blood. Break one warband and the rest will learn your name.' },
-      { speaker: 'player', text: 'One victory is enough to start.' },
-      { speaker: 'npc', text: 'One is enough to survive the week. That is more than most commanders manage.' },
+      { speaker: 'npc', text: 'The Black Pike lieutenant has stopped counting coins. Now he records banners, formations, and the commanders who refuse his toll.' },
+      { speaker: 'player', text: 'Then I will read his strength before he reads mine.' },
+      { speaker: 'npc', text: 'Good. Open the named threat and inspect the scout report. He will remain on the road until your banner is strong enough to break the toll.' },
+    ],
+  },
+  'story-07-broken-toll': {
+    id: 'story-07-broken-toll',
+    kicker: 'Chapter I - The Broken Toll',
+    npcName: 'Marshal Orren',
+    npcTitle: 'Harborview Field Marshal',
+    npcModelNumber: 1,
+    objective: {
+      label: 'Capstone Order',
+      title: 'Defeat the Black Pike lieutenant',
+      description: 'Reach level 5, return to the named threat, prepare your formation, and break the toll camp.',
+    },
+    lines: [
+      { speaker: 'npc', text: 'You know the lieutenant\'s measure now. He expects fear, a rushed march, and a commander exposed in the front rank.' },
+      { speaker: 'player', text: 'He will get a prepared formation instead.' },
+      { speaker: 'npc', text: 'Reach full field authority, then take the toll camp. Bring back his pike and the western road will recognize your banner.' },
+    ],
+  },
+  'story-08-banner-recognized': {
+    id: 'story-08-banner-recognized',
+    kicker: 'Chapter I - Banner Recognized',
+    npcName: 'Marshal Orren',
+    npcTitle: 'Harborview Field Marshal',
+    npcModelNumber: 1,
+    objective: {
+      label: 'Chapter Complete',
+      title: 'The western road recognizes your banner',
+      description: 'Claim Orren\'s chapter reward. The next campaign band begins at level 6 with the drowned Moonwell road.',
+    },
+    lines: [
+      { speaker: 'npc', text: 'Lieutenant Veyr\'s pike is broken, his ledger is ash, and the toll bell has stopped. Harborview records the road under your protection.' },
+      { speaker: 'player', text: 'Then my banner has earned its place.' },
+      { speaker: 'npc', text: 'On the western road, yes. Beyond Riverside the Moonwell is filling with voices again. Reach veteran authority before you answer them.' },
     ],
   },
   'story-15-broken-crown': {

@@ -50,11 +50,18 @@ import { DungeonRunModal, EncounterRunModal, getEncounterRunBattleCount } from '
 import CinematicScrollShell from './CinematicScrollShell';
 import {
   clearMultiplayerTutorialDialogue,
+  completeMultiplayerUnlockDialogue,
   completeMultiplayerTutorialCallout,
   getMultiplayerTutorialDialogueLine,
   MULTIPLAYER_FIND_WORK_EVENT,
+  readMultiplayerTutorialProgress,
   saveMultiplayerTutorialDialogueLine,
 } from '@/lib/multiplayerTutorial';
+import {
+  getMultiplayerUnlockDialogue,
+  getNextMultiplayerUnlockDialogue,
+  type MultiplayerUnlockDialogueId,
+} from '@/lib/multiplayerUnlockDialogue';
 
 // POI image mapping
 const POI_IMAGE_PATHS: Record<POIType, string> = {
@@ -443,6 +450,7 @@ function isEnemyRevealedOnScreen(
   playerRevealPoint: { x: number; y: number } | null,
   zoom: number
 ): boolean {
+  if (enemy.spawnKind === 'story-boss') return true;
   return isScreenPointRevealed(getEnemyScreenCenter(enemy, cameraX, cameraY, tileSize), cursor, playerRevealPoint, zoom);
 }
 
@@ -1033,6 +1041,7 @@ export default function MapRenderer({
     return window.localStorage.getItem(MAIN_QUEST_TRACKER_HIDDEN_KEY) === 'true';
   });
   const [storyDialogQuestId, setStoryDialogQuestId] = useState<string | null>(null);
+  const [unlockDialogId, setUnlockDialogId] = useState<MultiplayerUnlockDialogueId | null>(null);
   const cameraInitialized = useRef(false);
   const dragOriginRef = useRef({ x: 0, y: 0 });
   const hasDraggedRef = useRef(false);
@@ -1079,7 +1088,7 @@ export default function MapRenderer({
 
   useEffect(() => {
     const pending = getPendingStoryDialogQuest(currentUser);
-    if (!pending || storyDialogQuestId) return;
+    if (!pending || storyDialogQuestId || unlockDialogId) return;
 
     if (!getStoryDialogSequence(pending.dialogId)) {
       markStoryQuestIntroSeen(pending.id);
@@ -1089,7 +1098,22 @@ export default function MapRenderer({
 
     const openFrame = window.requestAnimationFrame(() => setStoryDialogQuestId(pending.id));
     return () => window.cancelAnimationFrame(openFrame);
-  }, [currentUser, storyDialogQuestId]);
+  }, [currentUser, storyDialogQuestId, unlockDialogId]);
+
+  useEffect(() => {
+    if (!currentUser || storyDialogQuestId || unlockDialogId) return;
+    if (getPendingStoryDialogQuest(currentUser)) return;
+
+    const tutorialProgress = readMultiplayerTutorialProgress(currentUser.username);
+    const pending = getNextMultiplayerUnlockDialogue(
+      currentUser.stats.level,
+      tutorialProgress.completedUnlockDialogueIds || [],
+    );
+    if (!pending) return;
+
+    const openFrame = window.requestAnimationFrame(() => setUnlockDialogId(pending.id));
+    return () => window.cancelAnimationFrame(openFrame);
+  }, [currentUser, storyDialogQuestId, unlockDialogId]);
 
   useEffect(() => {
     const frameId = window.requestAnimationFrame(() => setIsMounted(true));
@@ -1695,7 +1719,9 @@ export default function MapRenderer({
       const enemyScreenX = enemy.x * tileSize - cameraX;
       const enemyScreenY = enemy.y * tileSize - cameraY;
       const isWorldBoss = enemy.spawnKind === 'world-boss';
-      const enemySize = getCharacterSpriteSize(tileSize, effectiveZoom, isWorldBoss ? 1.22 : 0.88, isWorldBoss ? 36 : 25);
+      const isStoryBoss = enemy.spawnKind === 'story-boss';
+      const isBossThreat = isWorldBoss || isStoryBoss;
+      const enemySize = getCharacterSpriteSize(tileSize, effectiveZoom, isBossThreat ? 1.22 : 0.88, isBossThreat ? 36 : 25);
       const enemyImage = AssetLoader.getImage(enemy.artworkPath || getPlayerModelAsset(enemy.modelNumber));
       const enemyRevealed = isEnemyRevealedOnScreen(
         enemy,
@@ -1720,9 +1746,9 @@ export default function MapRenderer({
           y: enemyScreenY + (tileSize - enemySize) / 2 - tileSize * 0.08,
           size: enemySize,
           fallbackColor: '#7f1d1d',
-          topText: isWorldBoss ? 'Boss' : `Lv ${enemy.level}`,
-          topTextColor: isWorldBoss ? '#fca5a5' : '#fecaca',
-          label: isWorldBoss || hoveredEnemy?.id === enemy.id ? enemy.name : undefined,
+          topText: isWorldBoss ? 'Boss' : isStoryBoss ? 'Story' : `Lv ${enemy.level}`,
+          topTextColor: isBossThreat ? '#fca5a5' : '#fecaca',
+          label: isBossThreat || hoveredEnemy?.id === enemy.id ? enemy.name : undefined,
           labelColor: '#fecaca',
           hovered: hoveredEnemy?.id === enemy.id,
         });
@@ -2073,7 +2099,15 @@ export default function MapRenderer({
         <MainQuestTracker
           currentUser={currentUser}
           poisData={poisData}
+          worldEnemies={worldEnemies}
           onTravel={requestTravelIntent}
+          onInspectEnemy={(enemy) => {
+            setSelectedEnemy(enemy);
+            setSelectedPOI(null);
+            setSelectedTown(null);
+            setSelectedDungeon(null);
+            setSelectedQuestNpc(null);
+          }}
           onClaim={claimMainStoryReward}
           onHide={() => setMainQuestTrackerVisibility(true)}
         />
@@ -2153,6 +2187,7 @@ export default function MapRenderer({
           canStart={Boolean(currentUser && currentUser.x === selectedEnemy.x && currentUser.y === selectedEnemy.y)}
           onStart={() => {
             if (!currentUser || currentUser.x !== selectedEnemy.x || currentUser.y !== selectedEnemy.y) return;
+            if (selectedEnemy.requiredPlayerLevel && currentUser.stats.level < selectedEnemy.requiredPlayerLevel) return;
             setActiveBattleEnemy(selectedEnemy);
             setSelectedEnemy(null);
           }}
@@ -2233,6 +2268,28 @@ export default function MapRenderer({
         />
       );
     })()}
+    {unlockDialogId && currentUser && !storyDialogQuestId && (() => {
+      const definition = getMultiplayerUnlockDialogue(unlockDialogId);
+      if (!definition) return null;
+      const sequence = definition.sequence;
+      return (
+        <StoryDialogOverlay
+          key={sequence.id}
+          sequence={sequence}
+          playerModelNumber={currentUser.selectedModel || 3}
+          initialLineIndex={getMultiplayerTutorialDialogueLine(currentUser.username, sequence.id)}
+          onLineChange={(lineIndex) => {
+            saveMultiplayerTutorialDialogueLine(currentUser.username, sequence.id, lineIndex);
+          }}
+          onComplete={() => {
+            completeMultiplayerUnlockDialogue(currentUser.username, unlockDialogId);
+            clearMultiplayerTutorialDialogue(currentUser.username, sequence.id);
+            setUnlockDialogId(null);
+            setCurrentUser(getCurrentUser());
+          }}
+        />
+      );
+    })()}
     </>
   );
 }
@@ -2268,6 +2325,8 @@ function formatQuestRequirementText(requirement: QuestNpc['requirement']): strin
       return `Bring ${requirement.count} required quest item${requirement.count === 1 ? '' : 's'}.`;
     case 'player_level':
       return `Reach commander level ${requirement.count}.`;
+    case 'inspect_enemy':
+      return 'Inspect the named threat and read its scout rating.';
     case 'defeat_boss':
       return 'Defeat the named boss.';
     default:
@@ -2315,6 +2374,8 @@ function getStoryRequirementLabel(story: StoryQuestForTracker): string {
       return `Reach ${requirement.poiName || 'the marked place'}`;
     case 'visit_quest_npc':
       return 'Find the quest contact on the map';
+    case 'inspect_enemy':
+      return 'Inspect the named threat scout report';
     case 'complete_jobs_at_poi':
       return `Work ${requirement.count} job${requirement.count === 1 ? '' : 's'} at ${requirement.poiName || 'the marked site'}`;
     case 'defeat_enemies_level':
@@ -2336,13 +2397,17 @@ function openCommandPanel(panel: 'overview' | 'jobs' | 'quests') {
 function MainQuestTracker({
   currentUser,
   poisData,
+  worldEnemies,
   onTravel,
+  onInspectEnemy,
   onClaim,
   onHide,
 }: {
   currentUser: ReturnType<typeof getCurrentUser>;
   poisData: POI[];
+  worldEnemies: WorldEnemy[];
   onTravel: (targetX: number, targetY: number, label: string, kind: TravelIntentKind) => void;
+  onInspectEnemy: (enemy: WorldEnemy) => void;
   onClaim: (questId: string) => { success: boolean; error?: string };
   onHide: () => void;
 }) {
@@ -2362,15 +2427,25 @@ function MainQuestTracker({
   const targetPoi = requirement.type === 'visit_poi' && requirement.poiName
     ? poisData.find(poi => poi.name.toLowerCase() === requirement.poiName?.toLowerCase())
     : undefined;
+  const targetQuestNpc = requirement.type === 'visit_quest_npc'
+    ? QUEST_NPCS.find(npc => npc.id === requirement.questNpcId)
+    : undefined;
+  const targetEnemy = requirement.type === 'inspect_enemy'
+    ? worldEnemies.find(enemy => enemy.id === requirement.enemyId)
+    : requirement.type === 'defeat_boss'
+      ? worldEnemies.find(enemy => enemy.bossId === requirement.bossId)
+      : undefined;
   const progress = status.required > 0 ? Math.min(100, (status.progress / status.required) * 100) : 0;
   const actionPanel = requirement.type === 'complete_jobs' || requirement.type === 'complete_timed_jobs' ? 'jobs' : 'quests';
   const actionLabel = !status.unlocked
     ? `Level ${activeStory.requiredLevel}`
     : status.complete
       ? 'Claim'
-      : targetPoi
+      : targetPoi || targetQuestNpc
         ? currentUser.traveling ? 'Walking' : 'Travel'
-        : actionPanel === 'jobs' ? 'Jobs' : 'Quests';
+        : targetEnemy
+          ? 'Scout'
+          : actionPanel === 'jobs' ? 'Jobs' : 'Quests';
   const targetKind: TravelIntentKind = targetPoi?.type === POIType.TOWN ? 'town' : 'poi';
   const objectiveLabel = status.complete
     ? 'Story reward ready to claim.'
@@ -2397,7 +2472,7 @@ function MainQuestTracker({
       </div>
       <button
         type="button"
-        disabled={!status.unlocked || Boolean(currentUser.traveling && targetPoi)}
+        disabled={!status.unlocked || Boolean(currentUser.traveling && (targetPoi || targetQuestNpc))}
         onClick={() => {
           setClaimError('');
           if (!status.unlocked) return;
@@ -2414,6 +2489,16 @@ function MainQuestTracker({
             return;
           }
 
+          if (targetQuestNpc) {
+            onTravel(targetQuestNpc.x, targetQuestNpc.y, targetQuestNpc.name, 'quest');
+            return;
+          }
+
+          if (targetEnemy) {
+            onInspectEnemy(targetEnemy);
+            return;
+          }
+
           openCommandPanel(actionPanel);
         }}
         className="main-quest-action first-step-row mt-3 block w-full rounded px-3 py-2.5 text-left text-xs font-bold disabled:opacity-45"
@@ -2426,7 +2511,7 @@ function MainQuestTracker({
       </div>
       <div className="ui-faint mt-2 flex items-center justify-between text-[10px] font-black uppercase">
         <span>{status.unlocked ? `${status.progress}/${status.required}` : 'Locked'}</span>
-        <span>{targetPoi ? targetPoi.name : status.complete ? 'Ready' : actionPanel}</span>
+        <span>{targetPoi ? targetPoi.name : targetQuestNpc ? targetQuestNpc.name : targetEnemy ? targetEnemy.name : status.complete ? 'Ready' : actionPanel}</span>
       </div>
       {claimError && <div className="mt-2 text-xs font-black text-red-100">{claimError}</div>}
     </aside>
@@ -2534,7 +2619,15 @@ function QuestNpcModal({ npc, onTravel, onClose }: { npc: QuestNpc; onTravel: ()
   const claimed = counselStatus.claimed;
   const atNpc = Boolean(user && isTileInsideFootprint(user.x, user.y, npc.x, npc.y, 2, 2));
   const [showConversation, setShowConversation] = useState(atNpc);
-  const conversation: StoryDialogSequence = useMemo(() => ({
+  const returnStory = getAllStoryQuestsSorted().find(story => (
+    story.requirement.type === 'visit_quest_npc'
+    && story.requirement.afterQuestId
+    && story.requirement.questNpcId === npc.id
+    && getStoryQuestStatus(user, story.id).unlocked
+    && !getStoryQuestStatus(user, story.id).claimed
+  ));
+  const authoredReturnConversation = getStoryDialogSequence(returnStory?.dialogId);
+  const conversation: StoryDialogSequence = useMemo(() => authoredReturnConversation || ({
     id: `quest-npc-conversation-${npc.id}`,
     kicker: `${npc.town} - ${npc.faction}`,
     npcName: npc.name,
@@ -2550,7 +2643,7 @@ function QuestNpcModal({ npc, onTravel, onClose }: { npc: QuestNpc; onTravel: ()
       { speaker: 'player', text: 'What do you ask of my banner?' },
       { speaker: 'npc', text: `${npc.questHook} Prove your command, then return for counsel.` },
     ],
-  }), [npc]);
+  }), [authoredReturnConversation, npc]);
 
   const handleClaimCounsel = () => {
     if (!atNpc) {
@@ -2584,6 +2677,7 @@ function QuestNpcModal({ npc, onTravel, onClose }: { npc: QuestNpc; onTravel: ()
         playerModelNumber={user.selectedModel || 3}
         onComplete={() => {
           recordQuestNpcVisit(npc.id);
+          if (returnStory) markStoryQuestIntroSeen(returnStory.id);
           setUser(getCurrentUser());
           setShowConversation(false);
         }}
@@ -2703,6 +2797,8 @@ function EnemyScoutModal({
     .map(minion => getMinionTemplate(minion.templateId)?.name || minion.templateId)
     .slice(0, 5);
   const routeBattles = getEncounterRunBattleCount(enemy.level);
+  const requiredPlayerLevel = enemy.requiredPlayerLevel || 1;
+  const battleLevelLocked = Boolean(currentUser && currentUser.stats.level < requiredPlayerLevel);
 
   return (
     <div className="world-popup-layer pointer-events-none fixed inset-0 flex items-center justify-center px-4">
@@ -2736,6 +2832,11 @@ function EnemyScoutModal({
               {enemy.spawnKind === 'world-boss' && (
                 <div className="ui-rarity-legendary mt-1 inline-flex rounded border px-2 py-1 text-[10px] font-black uppercase">
                   Hourly Boss
+                </div>
+              )}
+              {enemy.spawnKind === 'story-boss' && (
+                <div className="ui-rarity-legendary mt-1 inline-flex rounded border px-2 py-1 text-[10px] font-black uppercase">
+                  First Banner Capstone
                 </div>
               )}
               <p className="ui-muted mt-1 text-sm font-bold">
@@ -2799,11 +2900,17 @@ function EnemyScoutModal({
           </div>
 
           <button
-            onClick={canStart ? onStart : onTravel}
-            disabled={!currentUser || Boolean(currentUser.traveling && !canStart)}
+            onClick={battleLevelLocked ? undefined : canStart ? onStart : onTravel}
+            disabled={!currentUser || battleLevelLocked || Boolean(currentUser.traveling && !canStart)}
             className="ui-button-primary w-full rounded px-4 py-3 text-sm font-black disabled:opacity-40"
           >
-            {canStart ? 'Start Road' : currentUser?.traveling ? 'Walking to Enemy' : 'Walk Here'}
+            {battleLevelLocked
+              ? `Battle unlocks at level ${requiredPlayerLevel}`
+              : canStart
+                ? 'Start Road'
+                : currentUser?.traveling
+                  ? 'Walking to Enemy'
+                  : 'Walk Here'}
           </button>
         </div>
       </div>

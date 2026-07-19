@@ -43,8 +43,9 @@ Singleplayer and multiplayer keep separate onboarding because their economies an
 - [ ] Highlight Marshal Orren's quest marker and explain why story contacts can return after earlier quests.
 - [x] Highlight enemy level, risk label, formation entry, and commander-loss rule before the first world battle.
 - [x] Add a compact post-battle explanation of reports, wounded/dead persistent units, and reward claims.
-- [ ] Add the level-3 PVP unlock conversation before the PVP hub becomes interactive.
-- [ ] Add first-use conversations for gear upgrades, trade, party creation, and cooperative dungeon readiness.
+- [x] Add the level-3 PVP rules conversation when the PVP gate opens.
+- [x] Add first-use unlock conversations for trade, party creation, and cooperative dungeon readiness.
+- [ ] Add a first-use conversation for gear upgrades.
 - [x] Add a journal replay list and a single Skip Multiplayer Onboarding action that never grants progress or rewards.
 - [x] Persist active dialogue line and tutorial callout state through Supabase account state.
 - [x] Add automated opening-chain state tests for a fresh account and a returning partially completed account.

@@ -103,8 +103,22 @@ export const BOSS_PROFILES: BossProfile[] = [
   },
 ];
 
+export const STORY_BOSS_PROFILES: BossProfile[] = [
+  {
+    id: 'black-pike-lieutenant',
+    name: 'Lieutenant Veyr',
+    subtitle: 'Black Pike tollmaster',
+    story: 'Veyr weighs every passing banner against the price on its commander. The toll camp is his ledger, and each hanging pike records a company that paid too late.',
+    intro: 'The toll bell sounds once. Black pikes lower across the road.',
+    assetPath: '/assets/bosses/boss2.png',
+    modelNumber: 2,
+    personality: 'aggressive',
+    minionTemplates: ['crossbow', 'bell', 'darkpriest'],
+  },
+];
+
 export function getBossProfileById(id?: string): BossProfile | undefined {
-  return BOSS_PROFILES.find(profile => profile.id === id);
+  return [...BOSS_PROFILES, ...STORY_BOSS_PROFILES].find(profile => profile.id === id);
 }
 
 export function getBossProfileByIndex(index: number): BossProfile {

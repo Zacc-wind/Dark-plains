@@ -15,6 +15,7 @@ export type QuestRequirementType =
   | 'clear_dungeons'
   | 'visit_poi'
   | 'visit_quest_npc'
+  | 'inspect_enemy'
   | 'defeat_boss';
 
 export interface QuestRequirementSpec {
@@ -25,7 +26,9 @@ export interface QuestRequirementSpec {
   poiName?: string;
   itemId?: string;
   bossId?: string;
+  enemyId?: string;
   questNpcId?: string;
+  afterQuestId?: string;
   minEnemyLevel?: number;
   maxEnemyLevel?: number;
   minDungeonLevel?: number;
@@ -485,15 +488,42 @@ export const STORY_CHAPTERS: StoryChapter[] = [
         order: 6,
         requiredLevel: 3,
         name: 'Black Pike Warning',
-        lore: 'The Black Pike Raider taxes the mid-road in blood and calls it discipline.',
+        lore: 'A Black Pike lieutenant has raised a toll camp beyond Riverside. Read the scout report before committing your banner.',
         dialogId: 'story-06-black-pike',
-        requirement: { type: 'win_battles', count: 2 },
+        requirement: { type: 'inspect_enemy', count: 1, enemyId: 'story-boss-black-pike-lieutenant' },
         rewards: { gold: 260, exp: 160, minionTier: 'tier2', spellIds: ['chain-spark'] },
+      },
+      {
+        id: 'story-07-broken-toll',
+        chapter: 'chapter-1',
+        order: 7,
+        requiredLevel: 5,
+        name: 'The Broken Toll',
+        lore: 'The lieutenant has measured your army and kept the road closed. Break the Black Pike toll and carry Orren\'s law through the camp.',
+        dialogId: 'story-07-broken-toll',
+        requirement: { type: 'defeat_boss', count: 1, bossId: 'black-pike-lieutenant' },
+        rewards: { gold: 420, exp: 320, rareGems: 2, equipmentRarity: 'rare', spellIds: ['withering-curse'] },
+      },
+      {
+        id: 'story-08-banner-recognized',
+        chapter: 'chapter-1',
+        order: 8,
+        requiredLevel: 5,
+        name: 'Banner Recognized',
+        lore: 'Carry Lieutenant Veyr\'s broken pike back to Marshal Orren and receive Harborview\'s recognition before the Moonwell road opens.',
+        dialogId: 'story-08-banner-recognized',
+        requirement: {
+          type: 'visit_quest_npc',
+          count: 1,
+          questNpcId: 'quest-npc-marshal-orren',
+          afterQuestId: 'story-07-broken-toll',
+        },
+        rewards: { gold: 500, exp: 380, rareGems: 3, minionTier: 'tier2', spellIds: ['royal-command'] },
       },
       {
         id: 'story-07-moonwell',
         chapter: 'chapter-1',
-        order: 7,
+        order: 9,
         requiredLevel: 7,
         name: 'Moonwell Descent',
         lore: 'A temporary breach opens where the moon is reflected in dead water. Something below is recruiting.',
@@ -503,7 +533,7 @@ export const STORY_CHAPTERS: StoryChapter[] = [
       {
         id: 'story-08-templar-seal',
         chapter: 'chapter-1',
-        order: 8,
+        order: 10,
         requiredLevel: 8,
         name: 'Templar Seal',
         lore: 'A relic shield bears a seal from an order that swore never to serve another wizard.',
@@ -513,7 +543,7 @@ export const STORY_CHAPTERS: StoryChapter[] = [
       {
         id: 'story-09-gravebound-script',
         chapter: 'chapter-1',
-        order: 9,
+        order: 11,
         requiredLevel: 9,
         name: 'Gravebound Script',
         lore: 'The Gravebound Magus writes orders in ash. Each command is a spell, each spell a debt.',
@@ -523,7 +553,7 @@ export const STORY_CHAPTERS: StoryChapter[] = [
       {
         id: 'story-10-field-council',
         chapter: 'chapter-1',
-        order: 10,
+        order: 12,
         requiredLevel: 10,
         name: 'Field Council',
         lore: 'Harborview and Riverside agree on one thing: your army is either useful or dangerous.',
@@ -533,7 +563,7 @@ export const STORY_CHAPTERS: StoryChapter[] = [
       {
         id: 'story-11-eastward-march',
         chapter: 'chapter-1',
-        order: 11,
+        order: 13,
         requiredLevel: 11,
         name: 'Eastward March',
         lore: 'The road bends toward Blackwater and the old map begins to show places nobody painted.',
@@ -543,7 +573,7 @@ export const STORY_CHAPTERS: StoryChapter[] = [
       {
         id: 'story-12-choir-of-iron',
         chapter: 'chapter-1',
-        order: 12,
+        order: 14,
         requiredLevel: 12,
         name: 'Choir of Iron',
         lore: 'The enemy forges armor by singing names into steel. Silence the choir or wear its hymn.',
@@ -553,7 +583,7 @@ export const STORY_CHAPTERS: StoryChapter[] = [
       {
         id: 'story-13-paragon-vow',
         chapter: 'chapter-1',
-        order: 13,
+        order: 15,
         requiredLevel: 13,
         name: 'Paragon Vow',
         lore: 'One elite knight will kneel if your army proves it can survive the eclipse marches.',
@@ -563,7 +593,7 @@ export const STORY_CHAPTERS: StoryChapter[] = [
       {
         id: 'story-14-eclipse-field',
         chapter: 'chapter-1',
-        order: 14,
+        order: 16,
         requiredLevel: 14,
         name: 'Eclipse Field',
         lore: 'The battlefield where the first king-mage fell is no longer empty. It has learned to wait.',
@@ -573,7 +603,7 @@ export const STORY_CHAPTERS: StoryChapter[] = [
       {
         id: 'story-15-broken-crown',
         chapter: 'chapter-1',
-        order: 15,
+        order: 17,
         requiredLevel: 15,
         name: 'The Broken Crown',
         lore: 'Emperor Grave-Aurel keeps a broken crown for anyone who still believes commanders rule alone.',

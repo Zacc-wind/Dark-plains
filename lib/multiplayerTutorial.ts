@@ -1,4 +1,8 @@
 import { readAccountTutorials, writeAccountTutorials } from '@/lib/accountTutorial';
+import {
+  MULTIPLAYER_UNLOCK_DIALOGUE_IDS,
+  type MultiplayerUnlockDialogueId,
+} from '@/lib/multiplayerUnlockDialogue';
 
 export type MultiplayerTutorialCalloutId =
   | 'jobs-open'
@@ -16,6 +20,7 @@ export interface MultiplayerTutorialDialogueProgress {
 
 export interface MultiplayerTutorialProgress {
   completedCalloutIds: MultiplayerTutorialCalloutId[];
+  completedUnlockDialogueIds?: MultiplayerUnlockDialogueId[];
   activeDialogue?: MultiplayerTutorialDialogueProgress;
   skipped?: boolean;
   updatedAt?: number;
@@ -54,6 +59,12 @@ export function normalizeMultiplayerTutorialProgress(
       validCallouts.has(calloutId as MultiplayerTutorialCalloutId)
     )),
   ));
+  const validUnlockDialogues = new Set(MULTIPLAYER_UNLOCK_DIALOGUE_IDS);
+  const completedUnlockDialogueIds = Array.from(new Set(
+    (progress?.completedUnlockDialogueIds || []).filter((dialogueId): dialogueId is MultiplayerUnlockDialogueId => (
+      validUnlockDialogues.has(dialogueId as MultiplayerUnlockDialogueId)
+    )),
+  ));
   const activeDialogue = progress?.activeDialogue?.sequenceId
     ? {
         sequenceId: progress.activeDialogue.sequenceId,
@@ -63,6 +74,7 @@ export function normalizeMultiplayerTutorialProgress(
 
   return {
     completedCalloutIds,
+    completedUnlockDialogueIds,
     activeDialogue,
     skipped: Boolean(progress?.skipped),
     updatedAt: progress?.updatedAt,
@@ -99,6 +111,20 @@ export function completeMultiplayerTutorialCallout(
   return writeMultiplayerTutorialProgress(username, {
     ...current,
     completedCalloutIds: [...current.completedCalloutIds, calloutId],
+    updatedAt: Date.now(),
+  });
+}
+
+export function completeMultiplayerUnlockDialogue(
+  username: string | null | undefined,
+  dialogueId: MultiplayerUnlockDialogueId,
+): MultiplayerTutorialProgress {
+  if (!username) return normalizeMultiplayerTutorialProgress(null);
+  const current = readMultiplayerTutorialProgress(username);
+  if (current.completedUnlockDialogueIds?.includes(dialogueId)) return current;
+  return writeMultiplayerTutorialProgress(username, {
+    ...current,
+    completedUnlockDialogueIds: [...(current.completedUnlockDialogueIds || []), dialogueId],
     updatedAt: Date.now(),
   });
 }
@@ -159,7 +185,9 @@ export function clearMultiplayerTutorialDialogue(
 
 export function skipMultiplayerTutorial(username: string | null | undefined): MultiplayerTutorialProgress {
   if (!username) return normalizeMultiplayerTutorialProgress(null);
+  const current = readMultiplayerTutorialProgress(username);
   return writeMultiplayerTutorialProgress(username, {
+    ...current,
     completedCalloutIds: MULTIPLAYER_TUTORIAL_CALLOUT_IDS,
     activeDialogue: undefined,
     skipped: true,
