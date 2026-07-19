@@ -77,9 +77,12 @@ describe('multiplayer engagement loops', () => {
 
     const oath = getMultiplayerWeeklyOath(state, 'WeeklyBanner', NOW + 20);
     expect(oath.complete).toBe(true);
+    expect(oath.rewardMinionTier).toBe('tier1');
     expect(oath.contributions).toEqual({ combat: 4, world: 2, social: 2 });
-    const claimed = claimMultiplayerWeeklyOath(state, 'WeeklyBanner', NOW + 20);
+    expect(getMultiplayerWeeklyOath(state, 'WeeklyBanner', NOW + 20, 5).rewardMinionTier).toBe('tier2');
+    const claimed = claimMultiplayerWeeklyOath(state, 'WeeklyBanner', NOW + 20, 5);
     expect(claimed.success).toBe(true);
+    expect(claimed.oath.rewardMinionTier).toBe('tier2');
     expect(claimMultiplayerWeeklyOath(claimed.state, 'WeeklyBanner', NOW + 21).success).toBe(false);
   });
 

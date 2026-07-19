@@ -249,6 +249,7 @@ export type SynchronizedBattleActionType =
   | 'support'
   | 'focus-mana'
   | 'cast-spell'
+  | 'ai-turn'
   | 'timeout-pass';
 
 export interface SynchronizedBattleAction {
@@ -314,6 +315,8 @@ export interface CreateCoopBattleOptions {
   battleId?: string;
   hostStacks?: MinionStack[];
   allyStacks?: MinionStack[];
+  hostFormation?: Record<string, BoardCell>;
+  allyFormation?: Record<string, BoardCell>;
   turnTimeLimitMs?: number;
   now?: number;
 }
@@ -2131,10 +2134,28 @@ export function createCoopBattleState(
     profile: BattleUserProfile,
     stacks: MinionStack[],
     spawns: BoardCell[],
+    formation: Record<string, BoardCell> | undefined,
+    wingStartY: number,
   ): BattleUnit[] => {
     const modifiers = getBattleModifiers(profile.stats);
+    const mapFormationCell = (cell?: BoardCell): BoardCell | undefined => {
+      if (
+        !cell
+        || !Number.isInteger(cell.x)
+        || !Number.isInteger(cell.y)
+        || cell.x < 0
+        || cell.x > 1
+        || cell.y < 0
+        || cell.y > 6
+      ) return undefined;
+      return {
+        x: cell.x,
+        y: wingStartY + Math.round((cell.y / 6) * 3),
+      };
+    };
+    const commanderFormationCell = mapFormationCell(formation?.[COMMANDER_FORMATION_KEY]);
     const commanderSpawn = claimSpawnCell(
-      spawns,
+      commanderFormationCell ? [commanderFormationCell, ...spawns] : spawns,
       spawns[0],
       occupiedCells,
       COOP_BOSS_MAP,
@@ -2154,8 +2175,9 @@ export function createCoopBattleState(
     };
     const minions = stacks
       .map((stack, index): BattleUnit | null => {
+        const formationCell = mapFormationCell(formation?.[stack.id]);
         const spawn = claimSpawnCell(
-          spawns.slice(1),
+          formationCell ? [formationCell, ...spawns.slice(1)] : spawns.slice(1),
           spawns[Math.min(index + 1, spawns.length - 1)],
           occupiedCells,
           COOP_BOSS_MAP,
@@ -2174,8 +2196,8 @@ export function createCoopBattleState(
   };
 
   const playerUnits = [
-    ...makeOwnedPlayerUnits(host, hostStacks, COOP_HOST_SPAWNS),
-    ...makeOwnedPlayerUnits(ally, allyStacks, COOP_ALLY_SPAWNS),
+    ...makeOwnedPlayerUnits(host, hostStacks, COOP_HOST_SPAWNS, options.hostFormation, 0),
+    ...makeOwnedPlayerUnits(ally, allyStacks, COOP_ALLY_SPAWNS, options.allyFormation, 5),
   ];
   const enemyCommanderSpawn = claimSpawnCell(
     COOP_ENEMY_SPAWNS,
@@ -4404,6 +4426,22 @@ export function applySynchronizedBattleAction(
     return {
       success: true,
       state: finishSynchronizedBattleAction(state, timeoutState, actionId),
+    };
+  }
+
+  if (action.type === 'ai-turn') {
+    if (participant?.controller !== 'human') {
+      return { success: false, state, error: 'Only a human battle participant can advance the raid AI.' };
+    }
+    if (!shouldRunBattleAi(state)) {
+      return { success: false, state, error: 'The active unit is not controlled by battle AI.' };
+    }
+    if (action.unitId && action.unitId !== activeUnit.id) {
+      return { success: false, state, error: 'Only the active unit can act.' };
+    }
+    return {
+      success: true,
+      state: finishSynchronizedBattleAction(state, runEnemyBattleTurn(state), actionId),
     };
   }
 

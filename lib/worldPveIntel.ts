@@ -207,7 +207,7 @@ function getCoopBossRewardLines(level: number): PveRewardLine[] {
       iconPath: '/assets/icons/loot-chest.png',
       minLabel: 'Epic',
       maxLabel: 'Legendary',
-      detail: 'High set-piece chance with duplicate protection planned',
+      detail: 'One duplicate-safe chest claim for each commander',
     },
   ];
 }

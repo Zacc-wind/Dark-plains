@@ -8,6 +8,7 @@ export type MultiplayerTutorialCalloutId =
   | 'jobs-open'
   | 'job-start'
   | 'harborview-travel'
+  | 'marshal-orren-contact'
   | 'enemy-risk'
   | 'formation-confirm'
   | 'commander-loss-warning'
@@ -30,6 +31,7 @@ export const MULTIPLAYER_TUTORIAL_CALLOUT_IDS: MultiplayerTutorialCalloutId[] = 
   'jobs-open',
   'job-start',
   'harborview-travel',
+  'marshal-orren-contact',
   'enemy-risk',
   'formation-confirm',
   'commander-loss-warning',
@@ -42,6 +44,7 @@ export const MULTIPLAYER_FIND_WORK_EVENT = 'wizardy:multiplayer-find-work';
 export const MULTIPLAYER_TUTORIAL_CALLOUTS_BY_STORY: Record<string, MultiplayerTutorialCalloutId[]> = {
   'story-01-first-banner': ['jobs-open', 'job-start'],
   'story-02-candle-road': ['harborview-travel'],
+  'story-03-lost-apprentice': ['marshal-orren-contact'],
   'story-04-river-law': [
     'enemy-risk',
     'formation-confirm',

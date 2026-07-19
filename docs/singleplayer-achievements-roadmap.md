@@ -21,7 +21,7 @@ Build a dedicated singleplayer progression layer on top of random runs, separate
 
 ## Phase 2 — Achievement Data Model
 - [x] Store claimed milestone ids on `User.dailyRun`.
-- [ ] Track unlock timestamps, tier, and display metadata per achievement id.
+- [x] Track unlock timestamps, tier, and display metadata per achievement id.
 - [x] Persist boss kills, route notes, shop buys, omens, spell unlocks, unit classes, unit templates, and tier III recruits in run history.
 - [x] Migration helper in `lib/auth.ts` `normalizeDailyRunState()` for older saves.
 
@@ -33,10 +33,10 @@ Build a dedicated singleplayer progression layer on top of random runs, separate
   - **Economy**: spend 500 run gold in one run, buy 3 shop items, claim 5 omens.
   - **Meta**: reach run level 5/10/15, 10 lifetime clears, 5-win streak.
 - [x] Wire unlock checks into run completion history for boss, road, army, economy, meta, and spell milestones.
-- [ ] Add no-shop clear, flawless boss, speed threshold, and spend-500-gold milestones once the run report exposes those exact counters.
+- [x] Add exact run-report counters and milestones for no-shop clears, flawless boss wins, 90-second boss wins, and spending 500 run gold.
 
 ## Phase 4 — Run Overview UI
-- [ ] Replace placeholder card with category tabs: Milestones, Bosses, Unlocks, Recent.
+- [x] Replace placeholder card with category tabs: Milestones, Bosses, Unlocks, Recent.
 - [x] Show compact category summaries and partial progress labels for tracked milestone counters.
 - [x] Move achievements entry into the Trophies & Unlocks header and keep the hub summary compact.
 - [x] Pin 3 featured achievements on the hub overview.
@@ -46,7 +46,7 @@ Build a dedicated singleplayer progression layer on top of random runs, separate
 ## Phase 5 — Reward Hooks
 - [ ] Optional cosmetic titles for commander in run lobby.
 - [ ] Optional run-start blessings unlocked by achievements (small meta bonuses only).
-- [ ] Export achievement summary to run completion report screen.
+- [x] Export achievement summary to run completion report screen, including newly completed deeds and total claimable run XP.
 
 ## Phase 5B - Achievement-Driven Discovery
 - [ ] Split singleplayer spell ownership from multiplayer `User.knownSpellIds` without relocking existing players.

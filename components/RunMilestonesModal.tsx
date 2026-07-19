@@ -1,7 +1,7 @@
 'use client';
 
 import Image from 'next/image';
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import {
   claimRunMilestoneReward,
   getCurrentUser,
@@ -19,7 +19,26 @@ import {
   type RunMilestoneView,
 } from '@/lib/runMilestones';
 
-const CATEGORY_ORDER: RunMilestoneCategory[] = ['boss', 'road', 'army', 'spell', 'meta', 'economy'];
+type MilestoneTab = 'milestones' | 'bosses' | 'unlocks' | 'recent';
+
+const MILESTONE_TABS: Array<{ id: MilestoneTab; label: string }> = [
+  { id: 'milestones', label: 'Milestones' },
+  { id: 'bosses', label: 'Bosses' },
+  { id: 'unlocks', label: 'Unlocks' },
+  { id: 'recent', label: 'Recent' },
+];
+
+const TAB_CATEGORIES: Record<Exclude<MilestoneTab, 'recent'>, RunMilestoneCategory[]> = {
+  milestones: ['road', 'meta', 'economy'],
+  bosses: ['boss'],
+  unlocks: ['army', 'spell'],
+};
+
+function formatMilestoneUnlockTime(unlockedAt: number | undefined): string | null {
+  if (!unlockedAt) return null;
+  if (unlockedAt <= 1) return 'Legacy unlock';
+  return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(new Date(unlockedAt));
+}
 
 interface RunMilestonesModalProps {
   isOpen: boolean;
@@ -66,12 +85,12 @@ export function MilestoneIconTile({
 }
 
 export default function RunMilestonesModal({ isOpen, runState, onClose, onClaim }: RunMilestonesModalProps) {
-  const [refreshKey, setRefreshKey] = useState(0);
+  const [, setRefreshKey] = useState(0);
   const [claimNotice, setClaimNotice] = useState<string | null>(null);
-  const player = getCurrentUser();
-  const currentRunState = useMemo(() => getDailyRunState(player), [player, refreshKey, runState]);
-  const views = useMemo(() => getRunMilestoneViews(currentRunState), [currentRunState]);
-  const counts = useMemo(() => getRunMilestoneUnlockCounts(currentRunState), [currentRunState]);
+  const [activeTab, setActiveTab] = useState<MilestoneTab>('milestones');
+  const currentRunState = getDailyRunState(getCurrentUser() || { dailyRun: runState });
+  const views = getRunMilestoneViews(currentRunState);
+  const counts = getRunMilestoneUnlockCounts(currentRunState);
 
   if (!isOpen) return null;
 
@@ -109,9 +128,23 @@ export default function RunMilestonesModal({ isOpen, runState, onClose, onClaim 
     setRefreshKey(value => value + 1);
   };
 
+  const sections = activeTab === 'recent'
+    ? [{
+        id: 'recent',
+        label: 'Latest Unlocks',
+        milestones: views
+          .filter(view => view.unlocked && view.unlockedAt)
+          .sort((left, right) => (right.unlockedAt || 0) - (left.unlockedAt || 0)),
+      }]
+    : TAB_CATEGORIES[activeTab].map(category => ({
+        id: category,
+        label: RUN_MILESTONE_CATEGORY_LABELS[category],
+        milestones: views.filter(view => view.category === category),
+      }));
+
   return (
     <div
-      className="sp-milestones-layer fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4 backdrop-blur-[2px]"
+      className="sp-milestones-layer fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4"
       onClick={onClose}
       role="presentation"
     >
@@ -127,7 +160,7 @@ export default function RunMilestonesModal({ isOpen, runState, onClose, onClaim 
             <p className="arcane-label">Singleplayer Campaign</p>
             <h2 id="sp-milestones-title" className="fantasy-heading text-2xl">Run Milestones</h2>
             <p className="ui-muted mt-1 text-sm font-bold">
-              {counts.unlocked} of {counts.total} unlocked — click completed milestones to claim run XP.
+              {counts.unlocked} of {counts.total} unlocked - select a completed milestone to claim run XP.
             </p>
             {claimNotice ? <p className="ui-value mt-1 text-xs font-bold">{claimNotice}</p> : null}
           </div>
@@ -136,16 +169,36 @@ export default function RunMilestonesModal({ isOpen, runState, onClose, onClaim 
           </button>
         </div>
 
-        <div className="sp-milestones-scroll max-h-[calc(100vh-8rem)] overflow-y-auto p-5">
-          {CATEGORY_ORDER.map(category => {
-            const inCategory = views.filter(view => view.category === category);
-            if (inCategory.length === 0) return null;
+        <nav className="sp-milestones-tabs" aria-label="Milestone categories">
+          {MILESTONE_TABS.map(tab => (
+            <button
+              key={tab.id}
+              type="button"
+              className={`sp-milestones-tab${activeTab === tab.id ? ' sp-milestones-tab-active' : ''}`}
+              aria-current={activeTab === tab.id ? 'page' : undefined}
+              onClick={() => setActiveTab(tab.id)}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </nav>
+
+        <div className="sp-milestones-scroll max-h-[calc(100vh-11rem)] overflow-y-auto p-5">
+          {sections.map(section => {
+            const inCategory = section.milestones;
+            if (inCategory.length === 0) {
+              return (
+                <div key={section.id} className="sp-milestones-empty ui-muted">
+                  Complete a run milestone to add it here.
+                </div>
+              );
+            }
             const unlocked = inCategory.filter(view => view.unlocked).length;
 
             return (
-              <section key={category} className="sp-milestones-section">
+              <section key={section.id} className="sp-milestones-section">
                 <div className="sp-milestones-section-head">
-                  <h3 className="fantasy-heading text-lg">{RUN_MILESTONE_CATEGORY_LABELS[category]}</h3>
+                  <h3 className="fantasy-heading text-lg">{section.label}</h3>
                   <span className="ui-pill rounded border px-2 py-1 text-[10px] font-black uppercase">
                     {unlocked}/{inCategory.length}
                   </span>
@@ -185,6 +238,11 @@ export default function RunMilestonesModal({ isOpen, runState, onClose, onClaim 
                           ) : null}
                           {milestone.progressLabel ? (
                             <p className="sp-milestone-card-progress ui-value">{milestone.progressLabel}</p>
+                          ) : null}
+                          {milestone.unlocked ? (
+                            <p className={`sp-milestone-record sp-milestone-tier-${milestone.tier}`}>
+                              {milestone.tier} - {formatMilestoneUnlockTime(milestone.unlockedAt) || 'Recorded this run'}
+                            </p>
                           ) : null}
                           {milestone.unlocked ? (
                             <p className="sp-milestone-card-reward ui-faint">

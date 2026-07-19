@@ -46,6 +46,23 @@ Avoid trusting client-only rewards. The server should validate daily lockouts, r
 
 ### Phase 3: Supabase Schema
 
+Checked-in migration status:
+
+- `001`-`006` create the profile/player-state foundation, world presence, PVP challenge policies, content registry, multiplayer daily records, and enemy-only unit flags.
+- `007_multiplayer_sessions.sql` adds trade, human-duel, and duo-raid sessions with optimistic versions; co-op action receipts and duplicate-proof reward claims; participant-scoped RLS; and the missing friendship, party, and chat policies.
+- Session tables are readable only by their participants. Trade, duel, co-op action, and co-op claim mutations remain server-only until the route handlers validate inventory ownership, expected revisions, legal combat actions, expiration, and rewards.
+- These files are local source of truth but have not yet been applied to or validated against the hosted project.
+
+Staging deployment steps once the Supabase CLI and project access are available:
+
+```powershell
+supabase login
+supabase link --project-ref <project-ref>
+supabase db push
+```
+
+After deployment, use two authenticated staging accounts to verify that participants can read their shared session, a third account cannot, client-side mutations fail, and trusted handlers reject stale versions and duplicate claims.
+
 First tables:
 
 ```sql
@@ -152,6 +169,45 @@ create table party_members (
   primary key (party_id, user_id)
 );
 
+create table coop_raid_sessions (
+  id text primary key,
+  party_id uuid not null references parties(id) on delete cascade,
+  host_id uuid not null references profiles(id) on delete cascade,
+  ally_id uuid not null references profiles(id) on delete cascade,
+  boss_id text not null,
+  phase text not null check (phase in ('formation', 'active', 'completed', 'abandoned', 'expired')),
+  version bigint not null default 1,
+  boss_snapshot jsonb not null,
+  host_snapshot jsonb not null,
+  ally_snapshot jsonb not null,
+  host_formation jsonb not null,
+  ally_formation jsonb not null,
+  combat_snapshot jsonb,
+  result jsonb,
+  expires_at timestamptz not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table coop_raid_actions (
+  session_id text not null references coop_raid_sessions(id) on delete cascade,
+  action_id text not null,
+  actor_id uuid not null references profiles(id) on delete cascade,
+  expected_revision bigint not null,
+  payload jsonb not null,
+  created_at timestamptz not null default now(),
+  primary key (session_id, action_id)
+);
+
+create table coop_raid_claims (
+  session_id text not null references coop_raid_sessions(id) on delete cascade,
+  user_id uuid not null references profiles(id) on delete cascade,
+  reward jsonb not null,
+  equipment_id text,
+  claimed_at timestamptz not null default now(),
+  primary key (session_id, user_id)
+);
+
 create table chat_messages (
   id uuid primary key default gen_random_uuid(),
   channel text not null,
@@ -229,5 +285,8 @@ Today these boards read local browser users. After Phase 2, the UI can call `/ap
 - Current passwords are local prototype data only and must not be used in production.
 - Production auth should use Supabase Auth or another managed auth provider.
 - Server endpoints must validate rewards and daily lockouts.
+- Co-op actions must atomically compare the session version and combat revision before writing the next snapshot.
+- Co-op reward claims must use the `(session_id, user_id)` primary key as the final duplicate barrier.
 - Row Level Security should allow users to read public leaderboard/profile fields, but only update their own player state.
+- Co-op session RLS should allow reads only to the host and ally; all combat and reward mutations should go through validated server handlers.
 - Admin-editable content should be protected by an admin role, not client-side checks.

@@ -1163,7 +1163,6 @@ textarea {
   overflow: visible;
   gap: 0.9rem;
   justify-content: space-between;
-  visibility: hidden;
 }
 
 .sp-hub-milestone-grid {
@@ -1649,6 +1648,49 @@ button.sp-hub-bonus-tile-spendable:focus-visible {
   animation: random-run-lobby-in 280ms cubic-bezier(0.18, 0.9, 0.22, 1) both;
 }
 
+.sp-milestones-tabs {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.35rem;
+  border-bottom: 1px solid rgba(232, 217, 184, 0.1);
+  padding: 0.55rem 1.25rem;
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.sp-milestones-tab {
+  min-height: 2.15rem;
+  border: 1px solid rgba(232, 217, 184, 0.12);
+  border-radius: 0.3rem;
+  background: rgba(0, 0, 0, 0.22);
+  color: rgba(232, 217, 184, 0.72);
+  font-size: 0.7rem;
+  font-weight: 900;
+  text-transform: uppercase;
+  transition: border-color 150ms ease, background 150ms ease, color 150ms ease;
+}
+
+.sp-milestones-tab:hover,
+.sp-milestones-tab:focus-visible {
+  border-color: rgba(244, 221, 176, 0.36);
+  color: #f4ddb0;
+}
+
+.sp-milestones-tab-active {
+  border-color: rgba(244, 221, 176, 0.4);
+  background: rgba(244, 221, 176, 0.09);
+  color: #f4ddb0;
+}
+
+.sp-milestones-empty {
+  display: grid;
+  min-height: 11rem;
+  place-items: center;
+  border: 1px dashed rgba(232, 217, 184, 0.14);
+  border-radius: 0.38rem;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
 .sp-milestones-section + .sp-milestones-section {
   margin-top: 1.25rem;
   padding-top: 1.1rem;
@@ -1714,12 +1756,23 @@ button.sp-hub-bonus-tile-spendable:focus-visible {
 
 .sp-milestone-card-desc,
 .sp-milestone-card-reward,
-.sp-milestone-card-progress {
+.sp-milestone-card-progress,
+.sp-milestone-record {
   margin-top: 0.15rem;
   font-size: 0.68rem;
   font-weight: 700;
   line-height: 1.35;
 }
+
+.sp-milestone-record {
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.sp-milestone-tier-bronze { color: #d7a978; }
+.sp-milestone-tier-silver { color: #d6dde5; }
+.sp-milestone-tier-gold { color: #f1cf69; }
+.sp-milestone-tier-legendary { color: #e6a6ff; }
 
 .sp-milestone-status-unlocked {
   border-color: rgba(110, 231, 183, 0.34);
@@ -1958,7 +2011,7 @@ button.vine-frame::before,
 
 .game-hud-scroll > .cinematic-scroll-content {
   background:
-    linear-gradient(90deg, rgba(8, 8, 9, 0.9), rgba(17, 13, 12, 0.76) 50%, rgba(8, 8, 9, 0.9));
+    linear-gradient(90deg, rgba(8, 8, 9, 0), rgba(17, 13, 12, 0.76) 50%, rgba(8, 8, 9, 0.9));
   box-shadow: inset 0 0 28px rgba(0, 0, 0, 0.34);
 }
 
@@ -6032,7 +6085,7 @@ button.vine-frame::before,
   min-height: 0;
   flex-direction: column;
   gap: 0.65rem;
-  width: min(75vw, 65.6rem);
+  width: min(76vw, 112rem);
   height: calc(100dvh - 2rem);
   max-height: calc(100dvh - 2rem);
   pointer-events: auto;
@@ -6145,6 +6198,21 @@ button.vine-frame::before,
   overflow: hidden;
 }
 
+.town-section-header-meta,
+.town-subsection-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.town-section-status {
+  color: var(--ui-muted);
+  font-size: 0.65rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
 .town-service-body {
   flex: 1 1 auto;
   min-height: 0;
@@ -6222,6 +6290,9 @@ button.vine-frame::before,
 .town-item-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(6.5rem, 1fr));
+  grid-auto-rows: max-content;
+  align-content: start;
+  align-items: start;
   gap: 0.65rem;
   overflow: visible;
 }
@@ -6245,7 +6316,7 @@ button.vine-frame::before,
 .town-grid-cell {
   display: flex;
   width: 100%;
-  min-height: 7.5rem;
+  min-height: 8.25rem;
   flex-direction: column;
   align-items: center;
   justify-content: center;
@@ -6258,13 +6329,15 @@ button.vine-frame::before,
   transition: border-color 160ms ease, transform 160ms ease, box-shadow 160ms ease;
 }
 
-.town-grid-cell:hover:not(:disabled) {
+.town-grid-cell:hover:not(.town-grid-cell-locked),
+.town-grid-cell:focus-visible {
   border-color: rgba(244, 221, 176, 0.42);
   box-shadow: inset 0 0 0 1px rgba(244, 221, 176, 0.12), 0 8px 20px rgba(0, 0, 0, 0.28);
+  outline: none;
 }
 
 .town-grid-cell-disabled:not(.town-grid-cell-locked) {
-  opacity: 0.45;
+  opacity: 0.68;
 }
 
 .town-grid-cell-locked {
@@ -6287,6 +6360,20 @@ button.vine-frame::before,
   font-size: 0.62rem;
   font-weight: 800;
   color: var(--ui-gold, #d4b06a);
+}
+
+.town-grid-cell-action {
+  min-width: 3.5rem;
+  border-top: 1px solid rgba(232, 217, 184, 0.14);
+  padding-top: 0.28rem;
+  color: #fff8e7;
+  font-size: 0.58rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.town-grid-cell-disabled .town-grid-cell-action {
+  color: var(--ui-muted);
 }
 
 .town-grid-cell-lock {
@@ -6390,6 +6477,29 @@ button.vine-frame::before,
   background: rgba(0, 0, 0, 0.22);
 }
 
+.town-forge-primary-action,
+.town-forge-bonus-main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.town-forge-price,
+.town-forge-upgrade-terms {
+  display: flex;
+  flex-direction: column;
+  gap: 0.12rem;
+}
+
+.town-value-label {
+  display: block;
+  color: var(--ui-faint);
+  font-size: 0.55rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
 @media (min-width: 900px) {
   .town-forge-layout {
     grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
@@ -6402,6 +6512,42 @@ button.vine-frame::before,
 .town-player-row {
   background: linear-gradient(180deg, rgba(9, 13, 14, 0.72), rgba(3, 5, 6, 0.62));
   box-shadow: inset 0 0 0 1px rgba(232, 217, 184, 0.07);
+}
+
+.town-exchange-row {
+  display: grid;
+  grid-template-columns: 2.5rem minmax(8rem, 1fr) minmax(12rem, 1.25fr) 6rem;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.town-exchange-values {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 0.45rem;
+  color: var(--ui-gold, #d4b06a);
+  font-size: 0.65rem;
+}
+
+.town-exchange-values strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.town-exchange-arrow {
+  color: rgba(244, 240, 230, 0.54);
+  font-weight: 900;
+}
+
+.town-exchange-action {
+  width: 100%;
+}
+
+.town-action-unavailable {
+  opacity: 0.55;
 }
 
 .town-sell-row:hover,
@@ -6753,9 +6899,11 @@ button.vine-frame::before,
 
   .town-service-layout {
     grid-template-columns: 1fr;
+    grid-template-rows: max-content minmax(0, 1fr);
     width: auto;
-    min-height: min(70dvh, 36rem);
-    overflow: visible;
+    min-height: 0;
+    flex: 1 1 auto;
+    overflow: hidden;
   }
 
   .town-service-menu {
@@ -6769,10 +6917,48 @@ button.vine-frame::before,
     min-height: 3.5rem;
   }
 
-  .town-service-menu,
+  .town-section-header {
+    align-items: flex-start;
+    padding-inline: 0.9rem;
+  }
+
+  .town-section-header-meta {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  .town-service-body {
+    padding: 0.85rem;
+  }
+
+  .town-exchange-row {
+    grid-template-columns: 2.5rem minmax(0, 1fr);
+  }
+
+  .town-exchange-values,
+  .town-exchange-action {
+    grid-column: 1 / -1;
+  }
+
+  .town-forge-primary-action,
+  .town-forge-bonus-main {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .town-forge-primary-action .ui-button-primary,
+  .town-forge-bonus-main .ui-button-primary {
+    width: 100%;
+  }
+
+  .town-service-menu {
+    height: auto;
+    min-height: 0;
+  }
+
   .town-service-panel {
     height: auto;
-    min-height: min(58dvh, 32rem);
+    min-height: 0;
   }
 
   .main-quest-tracker {
@@ -21486,6 +21672,21 @@ button.vine-frame::before,
 .pve-hub-reward-icon {
   background: rgba(0, 0, 0, 0.28);
   border-color: rgba(232, 217, 184, 0.16);
+}
+
+.coop-raid-ready-row {
+  border-color: rgba(232, 217, 184, 0.16);
+  background: rgba(5, 7, 8, 0.56);
+}
+
+.coop-raid-ready-row-confirmed {
+  border-color: rgba(52, 211, 153, 0.42);
+  background: rgba(6, 78, 59, 0.18);
+}
+
+.coop-raid-reward-grid .ui-card {
+  border-color: rgba(226, 190, 103, 0.22);
+  background: rgba(3, 5, 6, 0.48);
 }
 
 @media (max-width: 720px) {

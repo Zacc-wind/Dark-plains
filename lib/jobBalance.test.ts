@@ -38,6 +38,18 @@ describe('multiplayer job balance', () => {
     expect(getJobRewardPreview(3, 'mountain')).toMatchObject({ gold: 29, exp: 7 });
   });
 
+  it('keeps later-level work relevant without changing the early economy', () => {
+    const earlyReward = getJobRewardPreview(3, 'mountain', 5);
+    const veteranReward = getJobRewardPreview(3, 'mountain', 20);
+    const commandReward = getJobRewardPreview(3, 'mountain', 30);
+
+    expect(earlyReward).toMatchObject({ gold: 29, exp: 7 });
+    expect(veteranReward.gold).toBeGreaterThan(earlyReward.gold);
+    expect(veteranReward.exp).toBeGreaterThan(earlyReward.exp);
+    expect(commandReward.gold).toBeGreaterThan(veteranReward.gold);
+    expect(commandReward.exp).toBeGreaterThan(veteranReward.exp);
+  });
+
   it('keeps rare gems exclusive to the one-hour tier', () => {
     for (const poiType of POI_TYPES) {
       expect(getJobRewardPreview(0, poiType).rareGems).toBeUndefined();

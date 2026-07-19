@@ -101,6 +101,7 @@ import { emitFxEvent, type FxEventType } from '@/lib/fxEvents';
 import { readGameJson } from '@/lib/gameStore';
 import { playGameSound, preloadGameSounds, type GameSoundId } from '@/lib/sound';
 import { getSpellIconPath } from '@/lib/spellAssets';
+import { scaleMultiplayerRewards } from '@/lib/multiplayerRewards';
 import CombatThreeFxLayer from './CombatThreeFxLayer';
 import SingleplayerTutorialOverlay from './SingleplayerTutorialOverlay';
 import {
@@ -373,6 +374,7 @@ export default function BattleModal({
   availableSpellIds,
   persistentResults = true,
   onBattleEnd,
+  contextLabel,
   tutorialStep,
   onTutorialContinue,
   onTutorialSkip,
@@ -891,31 +893,34 @@ export default function BattleModal({
         detail: '',
         tone: 'enemy',
       });
-      setBattle(current => {
-        if (!current) return current;
+      const next = resolveBattleAction(
+        { type: 'ai-turn', unitId: activeUnit.id },
+        () => runEnemyBattleTurn(battle),
+      );
+      if (!next) {
+        setIsResolvingAction(false);
+        return;
+      }
 
-        const next = runEnemyBattleTurn(current);
-        const presentationEntry = getRecentPresentationLogEntry(next, Date.now());
-        const isCinematicOverlay = presentationEntry?.style === 'boss-phase' || presentationEntry?.style === 'boss-special';
-        const holdMs = getEnemyActionHoldMs(presentationEntry, next, enemyHoldMs);
+      const presentationEntry = getRecentPresentationLogEntry(next, Date.now());
+      const isCinematicOverlay = presentationEntry?.style === 'boss-phase' || presentationEntry?.style === 'boss-special';
+      const holdMs = getEnemyActionHoldMs(presentationEntry, next, enemyHoldMs);
+      setBattle(next);
 
-        if (!isCinematicOverlay) {
-          if (enemyActionHoldTimer.current) window.clearTimeout(enemyActionHoldTimer.current);
-          enemyActionHoldTimer.current = window.setTimeout(() => {
-            enemyActionHoldTimer.current = null;
-            setIsResolvingAction(false);
-            setBattleCue(null);
-          }, holdMs);
-        }
-
-        return next;
-      });
+      if (!isCinematicOverlay) {
+        if (enemyActionHoldTimer.current) window.clearTimeout(enemyActionHoldTimer.current);
+        enemyActionHoldTimer.current = window.setTimeout(() => {
+          enemyActionHoldTimer.current = null;
+          setIsResolvingAction(false);
+          setBattleCue(null);
+        }, holdMs);
+      }
     }, enemyDelayMs);
 
     return () => {
       if (enemyTimer.current) window.clearTimeout(enemyTimer.current);
     };
-  }, [battle, isResolvingAction, roundIntroActive, bossLastStandCue, bossSpecialCue]);
+  }, [battle, isResolvingAction, roundIntroActive, bossLastStandCue, bossSpecialCue, resolveBattleAction]);
 
   useEffect(() => {
     if (!battle || battle.status !== 'active') return;
@@ -1887,6 +1892,7 @@ export default function BattleModal({
                   isPlayerTurn={isPlayerTurn}
                   isResolvingAction={isResolvingAction}
                   selectedSpell={selectedSpell}
+                  contextLabel={contextLabel}
                   onRetreat={handleRetreat}
                   onLeaveField={handleLeaveField}
                 />
@@ -2985,6 +2991,7 @@ function BattleCommandRail({
   isPlayerTurn,
   isResolvingAction,
   selectedSpell,
+  contextLabel,
   onRetreat,
   onLeaveField,
 }: {
@@ -2993,6 +3000,7 @@ function BattleCommandRail({
   isPlayerTurn: boolean;
   isResolvingAction: boolean;
   selectedSpell?: BattleSpell;
+  contextLabel?: string;
   onRetreat: () => void;
   onLeaveField: () => void;
 }) {
@@ -3009,6 +3017,7 @@ function BattleCommandRail({
     poisonTurns > 0 ? `Poison ${poisonTurns}` : '',
     supportAbility ? supportAbility.shortLabel : '',
   ].filter(Boolean);
+  const activeOwner = getBattleActiveOwnerUsername(battle);
   const commandTitle = !active
     ? 'Aftermath'
     : isResolvingAction
@@ -3017,7 +3026,9 @@ function BattleCommandRail({
         ? 'Target Spell'
         : isPlayerTurn
           ? 'Your Command'
-          : 'Enemy Command';
+          : activeOwner
+            ? `${shortBattleUnitName(activeOwner, 14)}'s Command`
+            : 'Enemy Command';
   const commandCopy = !active
     ? 'The field is decided.'
     : selectedSpell
@@ -3029,7 +3040,7 @@ function BattleCommandRail({
   return (
     <div className={`battle-command-rail-panel rounded border ${active ? '' : 'battle-command-rail-panel-after'}`}>
       <div className="battle-command-section battle-command-state">
-        <span className="battle-command-kicker">Field Command</span>
+        <span className="battle-command-kicker">{contextLabel || 'Field Command'}</span>
         <h3 className="battle-command-title fantasy-heading">{commandTitle}</h3>
         <p className="battle-command-copy">{commandCopy}</p>
       </div>
@@ -4705,16 +4716,23 @@ function getMinionStackName(minion: MinionStack): string {
   return getMinionTemplate(minion.templateId)?.name || minion.templateId;
 }
 
-function getVictoryReward(enemy: WorldEnemy): { gold: number; exp: number; rareGems?: number; equipmentRarity?: EquipmentRarity } {
+function getVictoryReward(
+  enemy: WorldEnemy,
+  playerLevel = getCurrentUser()?.stats.level || 1,
+): { gold: number; exp: number; rareGems?: number; equipmentRarity?: EquipmentRarity } {
   const dungeonReward = enemy.id.startsWith('dungeon-');
   const nearbyReward = enemy.spawnKind === 'nearby';
   const lootMultiplier = enemy.lootMultiplier || 1;
   const baseGold = (dungeonReward ? 45 : nearbyReward ? 34 : 20) + enemy.level * (dungeonReward ? 8 : nearbyReward ? 6 : 4);
   const baseExp = (dungeonReward ? 10 : nearbyReward ? 8 : 5) + enemy.level * (dungeonReward ? 2.5 : nearbyReward ? 2 : 1.5);
-
-  return {
+  const scaledReward = scaleMultiplayerRewards({
     gold: Math.round(baseGold * lootMultiplier),
     exp: Math.round(baseExp * lootMultiplier),
+  }, playerLevel, getPvpOpponentUsername(enemy) ? 'pvp' : 'pve');
+
+  return {
+    gold: scaledReward.gold,
+    exp: scaledReward.exp,
     rareGems: dungeonReward
       ? Math.max(1, Math.floor(enemy.level / 5))
       : nearbyReward && enemy.level >= 3
@@ -4784,7 +4802,7 @@ function applyVictoryReward(enemy: WorldEnemy): VictoryRewardReport | null {
   if (!user) return null;
 
   const questProgressBefore = getBattleQuestSnapshots(user);
-  const reward = getVictoryReward(enemy);
+  const reward = getVictoryReward(enemy, user.stats.level);
   const completedAt = Date.now();
   const rewardEquipment = reward.equipmentRarity
     ? [generateEquipment(0, reward.equipmentRarity)].filter(Boolean) as Equipment[]

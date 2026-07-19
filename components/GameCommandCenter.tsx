@@ -3120,7 +3120,7 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
                       <p className="ui-muted text-xs font-bold">{story.lore}</p>
                       <div className="ui-muted mt-2 flex flex-wrap gap-2 text-[10px] font-black uppercase">
                         <span>{status.progress}/{status.required}</span>
-                        {story.rewards.exp ? <span>{getBalancedQuestExp(story.rewards.exp)} XP</span> : null}
+                        {story.rewards.exp ? <span>{getBalancedQuestExp(story.rewards.exp, player.stats.level, 'campaign')} XP</span> : null}
                         {spellRewards.length > 0 ? <span>{spellRewards.join(', ')}</span> : null}
                       </div>
                     </div>
@@ -3187,7 +3187,7 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
                     </div>
                     <div className="ui-muted mt-2 flex items-center justify-between text-xs font-bold">
                       <span>{status.progress} / {status.required}</span>
-                        <span>{template.rewards.exp ? `${getBalancedQuestExp(template.rewards.exp)} XP` : template.rewards.equipmentRarity ? `${template.rewards.equipmentRarity} gear` : template.rewards.minionTier ? 'Recruit reward' : 'Gold reward'}</span>
+                        <span>{template.rewards.exp ? `${getBalancedQuestExp(template.rewards.exp, player.stats.level, 'contract')} XP` : template.rewards.equipmentRarity ? `${template.rewards.equipmentRarity} gear` : template.rewards.minionTier ? 'Recruit reward' : 'Gold reward'}</span>
                       </div>
                     {renderQuestGuidePanel(
                       questKey,

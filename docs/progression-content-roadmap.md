@@ -424,7 +424,7 @@ Do not make every achievement a power grant. Players need goals after the gamepl
 3. `MP-C2 Levels 1-5` - complete: The First Banner is an eight-step playable chapter with a persistent named threat, level-five Black Pike capstone, genuine post-boss return, rank briefings, chapter presentation, and focused tests.
 4. `MP-C3 Social and return completion` - complete: shared request records, party/trade invitation overlays, a versioned local `TradeSession`, the first rotating regional threat, daily first-completion bonuses, and rested job catch-up all use genuine action receipts and duplicate-safe claims.
 5. `MP-C4 Chronicle pilot` - complete: the internal 20-rank Black Pike Ledger uses an idempotent accumulated event ledger, capped genuine-action Renown, duplicate-safe claims, permanent honors, migration tests, and a responsive progression tab.
-6. `MP-C5 Multiplayer sessions` - in progress: combat ownership, synchronized action receipts, complete local duel sessions, and the tested duo raid battle foundation are implemented. Party readiness, collaborative formation, raid settlement, and database transport remain.
+6. `MP-C5 Multiplayer sessions` - local slice complete: duels and duo raids have independent formation, readiness, synchronized ownership-checked combat, recovery, abandon/forfeit outcomes, and duplicate-safe settlement. Database transport remains.
 7. `MP-C6 Levels 6-10`: ship The Drowned Moonwell, Moonbridge contracts, Mother Cindervein, first reputation track, and dungeon tier II.
 8. `MP-C7 Public Chronicle`: expand the validated pilot to 40 ranks, archive support, full reward presentation, and entitlement history.
 9. `MP-C8 Levels 11-30`: produce one complete five-level chapter at a time. Do not implement all remaining quest text in one untested batch.
@@ -486,7 +486,7 @@ The next code batch should be intentionally smaller than this roadmap:
 5. [x] Add controlled/read-only BattleModal support, visible commander owner names, no campaign loot or health penalties, and a claimable duel result.
 6. [x] Make rating settlement and `pvp-completed` engagement receipts idempotent by duel id, including reload normalization tests.
 
-## Sixth Implementation Batch - UI, Economy, And Duo Raid Foundation - In Progress 2026-07-19
+## Sixth Implementation Batch - UI, Economy, And Duo Raid Foundation - Complete 2026-07-19
 
 1. [x] Remove world-popup blur and switch scroll shells to a transparent-edge gothic asset.
 2. [x] Move Commander, Gear, and Army to the map rail; simplify Menu and expand the quest tracker with active orders.
@@ -494,10 +494,20 @@ The next code batch should be intentionally smaller than this roadmap:
 4. [x] Add multiplayer-only roster sorting and a confirmed retreat action to run maps.
 5. [x] Rebalance jobs to 1/10/30/60 minutes, 30 percent baseline gold/XP, gems only at 60 minutes, and later gear/drop thresholds.
 6. [x] Add the duo raid battle foundation: 15x9 board, two owners, five minions each, morale order, 15-second turns, four full-health phases, two bosses per five-hour cycle, and boss spell caps.
-7. [ ] Add duo readiness, collaborative formation, result settlement, reconnect recovery, and server-backed session transport.
-8. [ ] Complete the concise town-service content pass and viewport QA.
+7. [x] Add local duo readiness, collaborative formation, result settlement, reload recovery, and abandon handling.
+8. [x] Complete the concise town-service content pass and viewport QA.
 
-The remaining `MP-C5` work is the first complete cooperative raid session: party readiness, two independent five-unit formations, owner-only turns, shared result state, per-player claims, recovery, and database transport. Four-player route dungeons are a later scale step, not a requirement for the first reliable co-op release.
+## Seventh Implementation Batch - Local Duo Raid Session - Complete 2026-07-19
+
+1. [x] Add a versioned `CoopRaidSession` with immutable player/boss snapshots, expiry, readiness, result, and claim receipts.
+2. [x] Launch or resume rotating incursions from PVE intel with level, party-size, and leader guards.
+3. [x] Give each commander an independent five-unit formation and equipped-spell confirmation.
+4. [x] Synchronize human and AI actions through battle revisions and duplicate action receipts.
+5. [x] Settle deterministic gold, XP, gems, and Epic/Legendary gear once per player and feed genuine engagement events.
+6. [x] Cover stale writes, ownership, AI turns, final-phase victory, abandon, expiry, and duplicate claims with deterministic tests.
+7. [ ] Replace local storage/event transport with Supabase session rows, realtime updates, RLS, and server action validation.
+
+The remaining `MP-C5` work is database transport and authority. Four-player route dungeons are a later scale step, not a requirement for the first reliable co-op release.
 
 ## Definition Of Done For Every Progression Slice
 

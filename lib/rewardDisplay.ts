@@ -153,16 +153,17 @@ export function buildJobRewardChips(
 
 export function buildQuestRewardChips(
   reward: QuestRewardSpec,
-  options?: { formatExp?: (value: number) => number }
+  options?: { formatExp?: (value: number) => number; formatGold?: (value: number) => number }
 ): RewardChip[] {
   const chips: RewardChip[] = [];
   const formatExp = options?.formatExp || ((value: number) => value);
+  const formatGold = options?.formatGold || ((value: number) => value);
 
   if (reward.gold) {
     chips.push({
       id: 'gold',
       iconPath: ASSET_PATHS.icons.gold,
-      quantity: reward.gold,
+      quantity: formatGold(reward.gold),
       title: 'Gold',
       meta: 'Quest payout',
       description: 'Gold awarded when you claim this contract.',

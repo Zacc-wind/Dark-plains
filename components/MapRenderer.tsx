@@ -3,7 +3,7 @@
 import { type WheelEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import Image from 'next/image';
-import { getStaticPOIs, MAP_CONFIG, POI, POIType } from '@/lib/mapData';
+import { findPoiAtTile, getPoiFootprint, getStaticPOIs, MAP_CONFIG, POI, POIType } from '@/lib/mapData';
 import { AssetLoader, ASSET_PATHS, getPlayerModelPath, preloadAllAssets } from '@/lib/assetLoader';
 import {
   areFriends as areSocialFriends,
@@ -353,12 +353,6 @@ function findEnemyAtScreenPoint(
     .sort((a, b) => a.distance - b.distance);
 
   return hits[0]?.enemy || null;
-}
-
-function getPoiFootprint(poi: POI): { width: number; height: number } {
-  if (poi.type === POIType.TOWN) return { width: 8, height: 8 };
-  if (poi.type === POIType.CAMPFIRE) return { width: 2, height: 2 };
-  return { width: 4, height: 4 };
 }
 
 function isTileInsideFootprint(
@@ -1836,12 +1830,7 @@ export default function MapRenderer({
     }
 
     // Check if hovering over a POI (2x2 for campfire, 4x4 tiles or 8x8 for towns)
-    const hoveredPOI = poisData.find(
-      poi => {
-        const { width, height } = getPoiFootprint(poi);
-        return isTileInsideFootprint(tileX, tileY, poi.x, poi.y, width, height);
-      }
-    );
+    const hoveredPOI = findPoiAtTile(poisData, tileX, tileY);
     if (!hoveredEnemy && !hoveredDungeon && !hoveredQuestNpc) setHoveredPOI(hoveredPOI || null);
 
     // Update cursor
@@ -1981,6 +1970,12 @@ export default function MapRenderer({
       tileY < npc.y + 2
     ));
     if (clickedQuestNpc) {
+      if (clickedQuestNpc.id === 'quest-npc-marshal-orren' && currentUser) {
+        const marshalStory = getStoryQuestStatus(currentUser, 'story-03-lost-apprentice');
+        if (marshalStory.unlocked && !marshalStory.complete) {
+          completeMultiplayerTutorialCallout(currentUser.username, 'marshal-orren-contact');
+        }
+      }
       setSelectedQuestNpc(clickedQuestNpc);
       setPendingTravel(null);
       setSelectedDungeon(null);
@@ -1991,12 +1986,7 @@ export default function MapRenderer({
     }
 
     // Check if clicking on a POI (2x2 for campfire, 4x4 tiles or 8x8 for towns)
-    const clickedPOI = poisData.find(
-      poi => {
-        const { width, height } = getPoiFootprint(poi);
-        return isTileInsideFootprint(tileX, tileY, poi.x, poi.y, width, height);
-      }
-    );
+    const clickedPOI = findPoiAtTile(poisData, tileX, tileY);
 
     if (clickedPOI) {
       const { width, height } = getPoiFootprint(clickedPOI);
@@ -2131,6 +2121,26 @@ export default function MapRenderer({
         onWheel={handleWheel}
         onClick={handleClick}
       />
+
+      {visibleQuestNpcs
+        .filter(npc => npc.id === 'quest-npc-marshal-orren')
+        .map(npc => {
+          const markerSize = getCharacterSpriteSize(scaledTileSize, effectiveZoom, 0.9, 26);
+          return (
+            <span
+              key={`tutorial-anchor-${npc.id}`}
+              data-multiplayer-tutorial-anchor="marshal-orren-contact"
+              className="pointer-events-none absolute"
+              style={{
+                left: npc.x * scaledTileSize - cameraX + (scaledTileSize - markerSize) / 2,
+                top: npc.y * scaledTileSize - cameraY + (scaledTileSize - markerSize) / 2 - scaledTileSize * 0.08,
+                width: markerSize,
+                height: markerSize,
+              }}
+              aria-hidden="true"
+            />
+          );
+        })}
 
       <TravelConfirmModal
         pendingTravel={pendingTravel}

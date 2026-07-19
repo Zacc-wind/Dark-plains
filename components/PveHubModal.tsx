@@ -2,7 +2,12 @@
 
 import Image from 'next/image';
 import { useEffect, useMemo, useState } from 'react';
-import { getCurrentUser } from '@/lib/auth';
+import { getCurrentUser, getPartyMembers, getSocialState } from '@/lib/auth';
+import {
+  ensureCurrentCoopRaidSession,
+  getCoopRaidSessions,
+  getCurrentCoopRaidSession,
+} from '@/lib/coopRaidClient';
 import { getWorldPveIntel, type PveIntelEntry, type PveRewardLine } from '@/lib/worldPveIntel';
 import { getMultiplayerUnlockStatus } from '@/lib/multiplayerUnlocks';
 import MultiplayerFeatureLock from '@/components/MultiplayerFeatureLock';
@@ -11,6 +16,13 @@ import CinematicScrollShell from '@/components/CinematicScrollShell';
 interface PveHubModalProps {
   isOpen: boolean;
   onClose: () => void;
+}
+
+interface PveRaidAction {
+  label: string;
+  detail: string;
+  disabled: boolean;
+  onClick: () => void;
 }
 
 function PveRewardRow({ reward }: { reward: PveRewardLine }) {
@@ -41,7 +53,7 @@ function PveRewardRow({ reward }: { reward: PveRewardLine }) {
   );
 }
 
-function PveIntelCard({ entry }: { entry: PveIntelEntry }) {
+function PveIntelCard({ entry, raidAction }: { entry: PveIntelEntry; raidAction?: PveRaidAction }) {
   const isCoopBoss = entry.kind === 'coop-boss';
   return (
     <article className="pve-hub-card ui-card overflow-hidden rounded border">
@@ -107,6 +119,19 @@ function PveIntelCard({ entry }: { entry: PveIntelEntry }) {
             <PveRewardRow key={`${entry.id}-${reward.id}`} reward={reward} />
           ))}
         </div>
+        {raidAction && (
+          <div className="mt-4 flex flex-col gap-2 border-t border-[rgba(232,217,184,0.1)] pt-4 sm:flex-row sm:items-center sm:justify-between">
+            <p className="ui-muted min-w-0 text-xs font-bold">{raidAction.detail}</p>
+            <button
+              type="button"
+              disabled={raidAction.disabled}
+              onClick={raidAction.onClick}
+              className="ui-button-primary shrink-0 rounded px-4 py-2.5 text-xs font-black disabled:cursor-not-allowed disabled:opacity-45"
+            >
+              {raidAction.label}
+            </button>
+          </div>
+        )}
       </div>
     </article>
   );
@@ -115,11 +140,24 @@ function PveIntelCard({ entry }: { entry: PveIntelEntry }) {
 export default function PveHubModal({ isOpen, onClose }: PveHubModalProps) {
   const [now, setNow] = useState(() => Date.now());
   const [currentUser, setCurrentUser] = useState(() => getCurrentUser());
+  const [notice, setNotice] = useState<string | null>(null);
 
   const pveIntel = useMemo(
     () => (isOpen ? getWorldPveIntel(currentUser, now) : []),
     [currentUser, isOpen, now],
   );
+  const currentRaid = useMemo(
+    () => (currentUser ? getCurrentCoopRaidSession(currentUser.username, now) : undefined),
+    [currentUser, now],
+  );
+  const participantRaids = useMemo(() => {
+    if (!currentUser) return [];
+    const username = currentUser.username.toLowerCase();
+    return getCoopRaidSessions(now).filter(session => (
+      session.hostUsername.toLowerCase() === username
+      || session.allyUsername.toLowerCase() === username
+    ));
+  }, [currentUser, now]);
 
   useEffect(() => {
     if (!isOpen) return undefined;
@@ -160,6 +198,87 @@ export default function PveHubModal({ isOpen, onClose }: PveHubModalProps) {
     );
   }
 
+  const coopUnlock = getMultiplayerUnlockStatus('coop-dungeons', currentUser);
+  const party = getSocialState(currentUser).party;
+  const partyMembers = getPartyMembers(currentUser);
+  const isPartyLeader = Boolean(
+    currentUser
+    && party
+    && party.leaderUsername.toLowerCase() === currentUser.username.toLowerCase()
+  );
+
+  const getRaidAction = (entry: PveIntelEntry): PveRaidAction | undefined => {
+    if (entry.kind !== 'coop-boss') return undefined;
+
+    const raidForBoss = participantRaids.find(session => session.bossId === entry.id);
+    const currentUsername = currentUser?.username.toLowerCase() || '';
+    const currentClaimed = Boolean(raidForBoss?.result?.claimReceipts.some(receipt => (
+      receipt.username.toLowerCase() === currentUsername
+    )));
+    const allReportsClosed = Boolean(raidForBoss?.result && raidForBoss.result.claimReceipts.length >= 2);
+    let label = 'Prepare Raid';
+    let detail = 'Two level 5 commanders, each with a fielded unit.';
+    let disabled = false;
+
+    if (raidForBoss?.result?.outcome === 'victory' && currentClaimed) {
+      label = 'Raid Cleared';
+      detail = 'Your loot from this incursion has already been claimed.';
+      disabled = true;
+    } else if (
+      raidForBoss?.phase === 'completed'
+      && raidForBoss.result?.outcome !== 'victory'
+      && currentClaimed
+      && !allReportsClosed
+    ) {
+      label = 'Awaiting Party';
+      detail = 'Your ally must close the shared raid report before the duo can retry.';
+      disabled = true;
+    } else if (currentRaid?.bossId === entry.id) {
+      label = currentRaid.phase === 'completed' ? 'View Raid Report' : 'Resume Raid';
+      detail = currentRaid.phase === 'formation'
+        ? 'Return to formation and readiness.'
+        : currentRaid.phase === 'active'
+          ? 'Return to the synchronized battle.'
+          : 'Review and claim your raid result.';
+    } else if (currentRaid) {
+      label = 'Raid In Progress';
+      detail = `Finish ${currentRaid.bossSnapshot.name} before preparing another incursion.`;
+      disabled = true;
+    } else if (!coopUnlock.unlocked) {
+      label = `Unlocks Lv ${coopUnlock.minLevel}`;
+      detail = coopUnlock.description;
+      disabled = true;
+    } else if (!party) {
+      label = 'Party Required';
+      detail = 'Create a party and invite one commander from Chat.';
+      disabled = true;
+    } else if (partyMembers.length !== 2) {
+      label = 'Duo Required';
+      detail = 'This raid requires exactly two accepted party members.';
+      disabled = true;
+    } else if (!isPartyLeader) {
+      label = 'Leader Prepares';
+      detail = `${party.leaderUsername} must open the raid session.`;
+      disabled = true;
+    }
+
+    return {
+      label,
+      detail,
+      disabled,
+      onClick: () => {
+        if (disabled) return;
+        const result = ensureCurrentCoopRaidSession(entry.id);
+        if (!result.success) {
+          setNotice(result.error || 'Could not prepare this raid.');
+          return;
+        }
+        setNotice(null);
+        onClose();
+      },
+    };
+  };
+
   return (
     <div
       className="pve-hub-overlay fixed inset-0 z-[70] flex items-center justify-center bg-black/72 p-4"
@@ -190,8 +309,14 @@ export default function PveHubModal({ isOpen, onClose }: PveHubModalProps) {
 
         <div className="pve-hub-body no-scrollbar min-h-0 flex-1 overflow-y-auto p-5">
           <p className="ui-muted mb-4 text-sm font-bold">
-            Active threats by region. Duo raids rotate every five hours; party entry arrives with server-backed sessions.
+            Active threats by region. Duo raids rotate every five hours and require two prepared commanders.
           </p>
+
+          {notice && (
+            <div className="mb-4 rounded border border-red-400/35 bg-red-950/35 px-4 py-3 text-sm font-bold text-red-100">
+              {notice}
+            </div>
+          )}
 
           {pveIntel.length === 0 ? (
             <div className="ui-empty rounded border border-dashed px-4 py-8 text-center text-sm font-bold">
@@ -200,7 +325,7 @@ export default function PveHubModal({ isOpen, onClose }: PveHubModalProps) {
           ) : (
             <div className="pve-hub-list space-y-4">
               {pveIntel.map(entry => (
-                <PveIntelCard key={entry.id} entry={entry} />
+                <PveIntelCard key={entry.id} entry={entry} raidAction={getRaidAction(entry)} />
               ))}
             </div>
           )}

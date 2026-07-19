@@ -105,6 +105,7 @@ export interface MultiplayerWeeklyOathView {
   claimed: boolean;
   rewardGold: number;
   rewardExp: number;
+  rewardMinionTier: 'tier1' | 'tier2';
   contributions: Record<MultiplayerContractCategory, number>;
 }
 
@@ -559,6 +560,7 @@ export function getMultiplayerWeeklyOath(
   state: Partial<MultiplayerEngagementState> | null | undefined,
   username: string,
   now = Date.now(),
+  playerLevel = 1,
 ): MultiplayerWeeklyOathView {
   const normalized = normalizeMultiplayerEngagementState(state, username, now);
   const weekStart = dateKeyToStart(normalized.weekKey);
@@ -581,6 +583,7 @@ export function getMultiplayerWeeklyOath(
     claimed: normalized.weeklyClaimed,
     rewardGold: 180,
     rewardExp: 75,
+    rewardMinionTier: playerLevel >= 5 ? 'tier2' : 'tier1',
     contributions,
   };
 }
@@ -589,9 +592,10 @@ export function claimMultiplayerWeeklyOath(
   state: Partial<MultiplayerEngagementState> | null | undefined,
   username: string,
   now = Date.now(),
+  playerLevel = 1,
 ): { success: boolean; state: MultiplayerEngagementState; oath: MultiplayerWeeklyOathView; error?: string } {
   const normalized = normalizeMultiplayerEngagementState(state, username, now);
-  const oath = getMultiplayerWeeklyOath(normalized, username, now);
+  const oath = getMultiplayerWeeklyOath(normalized, username, now, playerLevel);
   if (oath.claimed) return { success: false, state: normalized, oath, error: 'Weekly oath already claimed.' };
   if (!oath.complete) return { success: false, state: normalized, oath, error: 'Weekly oath is not complete.' };
 

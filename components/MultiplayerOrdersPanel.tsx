@@ -334,7 +334,9 @@ export default function MultiplayerOrdersPanel({ now, onPlayerRefresh, onOpenPve
           </div>
           <div className="multiplayer-oath-progress">
             <strong>{view.weeklyOath.progress}/{view.weeklyOath.target}</strong>
-            <span>{view.weeklyOath.rewardGold} gold + {view.weeklyOath.rewardExp} XP</span>
+            <span>
+              {view.weeklyOath.rewardGold} gold + {view.weeklyOath.rewardExp} XP + {view.weeklyOath.rewardMinionTier === 'tier2' ? 'Tier II' : 'Tier I'} recruit
+            </span>
           </div>
         </div>
         <div className="multiplayer-oath-paths mt-4">

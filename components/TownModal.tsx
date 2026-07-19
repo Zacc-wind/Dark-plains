@@ -22,12 +22,14 @@ import {
   getCityQuestStatus,
   getCurrentUser,
   getBalancedQuestExp,
+  getBalancedQuestGold,
   getEquipmentSocketAddQuote,
   getEquipmentSocketBonusValue,
   getEquipmentSocketLimit,
   getEquipmentSocketUpgradeQuote,
   getRotatingCityQuests,
   getTownShopOffers,
+  getTownRecruitmentOffers,
   InventoryItem,
   MinionStack,
   RewardSummary,
@@ -35,6 +37,7 @@ import {
   type TradeExchangeOffer,
   type User,
   performTradeExchange,
+  recruitTownWeeklyOffer,
   sellEquipmentItem,
   sellInventoryItem,
   sellMinion,
@@ -82,11 +85,11 @@ function getCityQuestRequirementText(quest: { id?: string; town?: string; requir
   switch (requirement.type) {
     case 'complete_jobs':
       if (quest.id === 'hv-pilgrim-scrip') {
-        return `Finish ${requirement.count} Harborview road jobs; each completed job counts as one signed scrip from workers.`;
+        return `Complete ${requirement.count} Harborview road job${requirement.count === 1 ? '' : 's'}.`;
       }
-      return `Finish ${requirement.count} ${quest.town || 'local'} job${requirement.count === 1 ? '' : 's'} from the town board or nearby work sites.`;
+      return `Complete ${requirement.count} ${quest.town || 'local'} job${requirement.count === 1 ? '' : 's'}.`;
     case 'complete_timed_jobs':
-      return `Finish ${requirement.count} longer ${quest.town || 'local'} job${requirement.count === 1 ? '' : 's'} lasting at least ${Math.round((requirement.minDuration || 0) / 60000)} minutes.`;
+      return `Complete ${requirement.count} ${quest.town || 'local'} job${requirement.count === 1 ? '' : 's'} lasting ${Math.round((requirement.minDuration || 0) / 60000)}+ minutes.`;
     case 'player_level':
       return `Reach level ${requirement.count}.`;
     case 'own_rare_gems':
@@ -125,6 +128,15 @@ export default function TownModal({ town, onClose, onTravel }: TownModalProps) {
     return () => document.body.classList.remove('town-view-open');
   }, [town]);
 
+  useEffect(() => {
+    if (!town) return undefined;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose, town]);
+
   if (!town) return null;
 
   const harborStyleTowns = new Set(['Harborview', 'Blackwater Gate', 'Eclipse Hold']);
@@ -132,6 +144,7 @@ export default function TownModal({ town, onClose, onTravel }: TownModalProps) {
     ? ASSET_PATHS.towns.harborviewBackground
     : ASSET_PATHS.towns.riversideBackground;
   const offers = getTownShopOffers(town.name);
+  const recruitmentOffers = getTownRecruitmentOffers(town.name, user);
   const cityQuests = getRotatingCityQuests(town.name);
   const forgeEquipment = user?.equipment || [];
   const selectedForgeItem = forgeEquipment.find(item => item.id === selectedForgeItemId) || forgeEquipment[0] || null;
@@ -163,7 +176,7 @@ export default function TownModal({ town, onClose, onTravel }: TownModalProps) {
   const tradingUnlock = getMultiplayerUnlockStatus('trading', user);
   const townServices: Array<{ key: TownServiceKey; label: string; detail: string; unlock?: MultiplayerUnlockStatus }> = [
     { key: 'quests', label: 'Board', detail: cityContractsUnlock.unlocked ? `${cityQuests.length} contracts` : `Lv ${cityContractsUnlock.minLevel}`, unlock: cityContractsUnlock },
-    { key: 'shop', label: 'Shop', detail: `${offers.length} offers` },
+    { key: 'shop', label: 'Shop', detail: `${offers.length + recruitmentOffers.length} offers` },
     { key: 'blacksmith', label: 'Forge', detail: forgeUnlock.unlocked ? `${forgeEquipment.length} gear` : `Lv ${forgeUnlock.minLevel}`, unlock: forgeUnlock },
     { key: 'players', label: 'Players', detail: `${townPlayers.length} here` },
   ];
@@ -177,6 +190,21 @@ export default function TownModal({ town, onClose, onTravel }: TownModalProps) {
     const result = buyShopOffer(offerId, town.name);
     setNotice(result.success ? 'Bought.' : result.error || 'Purchase failed.');
     if (result.success) emitFxEvent({ type: 'city', tone: 'gold', intensity: 0.46 });
+    setUser(getCurrentUser());
+    window.setTimeout(() => setNotice(''), 2500);
+  };
+
+  const handleRecruit = (offerId: string) => {
+    if (!atTown) {
+      setNotice('Walk into town before signing a recruit.');
+      return;
+    }
+
+    const result = recruitTownWeeklyOffer(offerId, town.name);
+    setNotice(result.success
+      ? `${result.minion ? getMinionTemplate(result.minion.templateId)?.name || 'Unit' : 'Unit'} recruited.`
+      : result.error || 'Recruitment failed.');
+    if (result.success) emitFxEvent({ type: 'city', tone: 'gold', intensity: 0.5 });
     setUser(getCurrentUser());
     window.setTimeout(() => setNotice(''), 2500);
   };
@@ -370,6 +398,7 @@ export default function TownModal({ town, onClose, onTravel }: TownModalProps) {
                   key={service.key}
                   type="button"
                   onClick={() => setActiveService(service.key)}
+                  aria-pressed={activeService === service.key}
                   className={`town-service-tab rounded px-3 py-2 ${activeService === service.key ? 'town-service-tab-active' : ''} ${service.unlock && !service.unlock.unlocked ? 'town-service-tab-locked' : ''}`}
                 >
                   <span className="block text-sm font-black text-zinc-100">{service.label}</span>
@@ -380,7 +409,11 @@ export default function TownModal({ town, onClose, onTravel }: TownModalProps) {
 
             {activeService === 'quests' && (
             <div className="command-panel vine-frame town-service-panel rounded border text-zinc-100">
-              <TownSectionHeader title="Quest Board" meta={`${cityQuests.length} contracts`} />
+              <TownSectionHeader
+                title="Quest Board"
+                meta={`${cityQuests.length} contracts`}
+                status={atTown ? 'Open' : 'Travel required'}
+              />
               <div className="town-service-body no-scrollbar">
                 {cityContractsUnlock.unlocked ? (
                   <CityQuestBoardPanel
@@ -397,15 +430,21 @@ export default function TownModal({ town, onClose, onTravel }: TownModalProps) {
 
             {activeService === 'shop' && (
             <div className="command-panel vine-frame town-service-panel rounded border text-zinc-100">
-              <TownSectionHeader title="Shop" meta={`${user?.gold || 0} gold`} />
+              <TownSectionHeader
+                title="Shop"
+                meta={`${user?.gold || 0} gold`}
+                status={atTown ? 'Open' : 'Travel required'}
+              />
               <div className="town-service-body no-scrollbar space-y-3">
                 <TownShopTabs active={activeShopSection} onChange={setActiveShopSection} tradingUnlock={tradingUnlock} />
                 {activeShopSection === 'buy' && (
                   <TownBuyGrid
                     offers={offers}
+                    recruitmentOffers={recruitmentOffers}
                     gold={user?.gold || 0}
                     atTown={atTown}
                     onBuy={handleBuy}
+                    onRecruit={handleRecruit}
                   />
                 )}
                 {activeShopSection === 'exchange' && tradingUnlock.unlocked && (
@@ -444,6 +483,7 @@ export default function TownModal({ town, onClose, onTravel }: TownModalProps) {
               <TownSectionHeader
                 title="Forge"
                 meta={`${user?.inventory?.find(item => item.id === 'rare-gem')?.quantity || 0} gems`}
+                status={atTown ? 'Open' : 'Travel required'}
               />
               <div className="town-service-body no-scrollbar">
                 {forgeUnlock.unlocked ? (
@@ -463,7 +503,7 @@ export default function TownModal({ town, onClose, onTravel }: TownModalProps) {
 
             {activeService === 'players' && (
             <div className="command-panel vine-frame town-service-panel rounded border text-zinc-100">
-              <TownSectionHeader title="Players Here" meta={`${townPlayers.length} visible`} />
+              <TownSectionHeader title="Travelers" meta={`${townPlayers.length} visible`} status={town.name} />
               <TownPlayersPanel players={townPlayers} currentUsername={user?.username} />
             </div>
             )}
@@ -497,6 +537,7 @@ function TownShopTabs({
           key={tab.id}
           type="button"
           onClick={() => onChange(tab.id)}
+          aria-pressed={active === tab.id}
           className={`town-shop-tab rounded ${active === tab.id ? 'town-shop-tab-active' : ''} ${tab.id === 'exchange' && !tradingUnlock.unlocked ? 'town-shop-tab-locked' : ''}`}
         >
           {tab.id === 'exchange' && !tradingUnlock.unlocked ? `${tab.label} Lv ${tradingUnlock.minLevel}` : tab.label}
@@ -509,23 +550,29 @@ function TownShopTabs({
 function TownSectionHeader({
   title,
   meta,
+  status,
 }: {
   title: string;
   meta?: string;
+  status?: string;
 }) {
   return (
-    <div className="panel-header flex items-center justify-between gap-3 border-b px-5 py-3">
+    <div className="panel-header town-section-header flex items-center justify-between gap-3 border-b px-5 py-3">
       <h2 className="fantasy-heading text-xl">{title}</h2>
-      {meta ? (
-        <span className="ui-pill shrink-0 rounded border px-3 py-1 text-[10px] font-black uppercase">
-          {meta}
-        </span>
-      ) : null}
+      <div className="town-section-header-meta">
+        {status ? <span className="town-section-status">{status}</span> : null}
+        {meta ? (
+          <span className="ui-pill shrink-0 rounded border px-3 py-1 text-[10px] font-black uppercase">
+            {meta}
+          </span>
+        ) : null}
+      </div>
     </div>
   );
 }
 
 function TownPlayersPanel({ players, currentUsername }: { players: User[]; currentUsername?: string }) {
+  const currentPlayer = players.find(player => player.username === currentUsername);
   const otherPlayers = players.filter(player => player.username !== currentUsername);
 
   return (
@@ -536,11 +583,11 @@ function TownPlayersPanel({ players, currentUsername }: { players: User[]; curre
         </div>
       ) : (
         <>
-          {currentUsername && (
+          {currentPlayer && (
             <div className="town-player-row flex items-center gap-3 rounded px-3 py-2">
               <span className="ui-icon-frame relative block h-10 w-10 shrink-0 overflow-hidden rounded border">
                 <Image
-                  src={getPlayerModelPath(players.find(player => player.username === currentUsername)?.selectedModel || 3)}
+                  src={getPlayerModelPath(currentPlayer.selectedModel || 3)}
                   alt=""
                   fill
                   sizes="40px"
@@ -549,16 +596,13 @@ function TownPlayersPanel({ players, currentUsername }: { players: User[]; curre
                 />
               </span>
               <span className="min-w-0 flex-1">
-                <span className="block truncate text-xs font-black text-zinc-100">{currentUsername}</span>
+                <span className="block truncate text-xs font-black text-zinc-100">{currentPlayer.username}</span>
                 <span className="ui-faint block text-[10px] font-bold">Your commander</span>
               </span>
             </div>
           )}
 
-          {otherPlayers.length === 0 ? (
-            <div className="ui-muted rounded bg-black/20 p-3 text-xs font-bold">No other players visible in town.</div>
-          ) : (
-            otherPlayers.map(player => (
+          {otherPlayers.map(player => (
               <div key={player.username} className="town-player-row flex items-center gap-3 rounded px-3 py-2">
                 <span className="ui-icon-frame relative block h-10 w-10 shrink-0 overflow-hidden rounded border">
                   <Image
@@ -575,8 +619,7 @@ function TownPlayersPanel({ players, currentUsername }: { players: User[]; curre
                   <span className="ui-faint block text-[10px] font-bold">Lv {player.stats?.level || 1} - {player.minions?.length || 0} units</span>
                 </span>
               </div>
-            ))
-          )}
+            ))}
         </>
       )}
     </div>
@@ -678,6 +721,8 @@ function TownGridCell({
   icon,
   label,
   meta,
+  actionLabel,
+  ariaLabel,
   locked,
   lockLabel = 'Locked',
   disabled,
@@ -687,6 +732,8 @@ function TownGridCell({
   icon: ReactNode;
   label: string;
   meta?: string;
+  actionLabel?: string;
+  ariaLabel?: string;
   locked?: boolean;
   lockLabel?: string;
   disabled?: boolean;
@@ -703,13 +750,17 @@ function TownGridCell({
     >
       <button
         type="button"
-        onClick={onClick}
-        disabled={disabled || locked}
+        onClick={locked ? undefined : onClick}
+        onFocus={() => setHovered(true)}
+        onBlur={() => setHovered(false)}
+        aria-label={ariaLabel}
+        aria-disabled={locked || undefined}
         className={`town-grid-cell ${locked ? 'town-grid-cell-locked' : ''} ${disabled ? 'town-grid-cell-disabled' : ''}`}
       >
         <span className="town-grid-cell-icon">{icon}</span>
         <span className="town-grid-cell-label">{label}</span>
         {meta && <span className="town-grid-cell-meta">{meta}</span>}
+        {!locked && actionLabel && <span className="town-grid-cell-action">{actionLabel}</span>}
         {locked && <span className="town-grid-cell-lock">{lockLabel}</span>}
       </button>
       {hovered && popover}
@@ -765,7 +816,10 @@ function CityQuestBoardPanel({
 
             <div className="mt-3 flex flex-wrap items-end justify-between gap-3">
               <RewardIconStrip
-                chips={buildQuestRewardChips(quest.rewards, { formatExp: getBalancedQuestExp })}
+                chips={buildQuestRewardChips(quest.rewards, {
+                  formatExp: value => getBalancedQuestExp(value, user?.stats.level || 1, 'contract'),
+                  formatGold: value => getBalancedQuestGold(value, user?.stats.level || 1, 'contract'),
+                })}
               />
               {!status.accepted && (
                 <button
@@ -802,54 +856,118 @@ function CityQuestBoardPanel({
 
 function TownBuyGrid({
   offers,
+  recruitmentOffers,
   gold,
   atTown,
   onBuy,
+  onRecruit,
 }: {
   offers: ReturnType<typeof getTownShopOffers>;
+  recruitmentOffers: ReturnType<typeof getTownRecruitmentOffers>;
   gold: number;
   atTown: boolean;
   onBuy: (offerId: string) => void;
+  onRecruit: (offerId: string) => void;
 }) {
-  if (offers.length === 0) {
+  if (offers.length === 0 && recruitmentOffers.length === 0) {
     return <div className="ui-muted rounded bg-black/20 p-3 text-xs font-bold">No offers today.</div>;
   }
 
   return (
-    <div className="town-item-grid">
-      {offers.map(offer => {
-        const canBuy = atTown && gold >= offer.price;
-        return (
-          <TownGridCell
-            key={offer.id}
-            label={offer.name}
-            meta={`${offer.price}g`}
-            disabled={!canBuy}
-            onClick={() => onBuy(offer.id)}
-            icon={(
-              <span className="ui-icon-frame relative block h-12 w-12 shrink-0 overflow-hidden rounded border">
-                <Image
-                  src={offer.imagePath}
-                  alt={offer.name}
-                  fill
-                  className="object-contain p-1"
-                  style={{ imageRendering: 'pixelated' }}
+    <div className="space-y-4">
+      {recruitmentOffers.length > 0 && (
+        <section className="town-weekly-muster">
+          <div className="town-subsection-heading mb-2">
+            <div>
+              <h3 className="fantasy-heading text-base">Weekly Muster</h3>
+              <p className="ui-faint text-[10px] font-black uppercase">One contract per slot</p>
+            </div>
+            <span className="ui-pill rounded border px-2 py-1 text-[10px] font-black uppercase">
+              {formatRecruitmentReset(recruitmentOffers[0]?.resetsAt)}
+            </span>
+          </div>
+          <div className="town-item-grid">
+            {recruitmentOffers.map(offer => {
+              const canBuy = atTown && offer.unlocked && !offer.claimed && gold >= offer.price;
+              const lockLabel = offer.claimed ? 'Signed' : `Lv ${offer.minLevel}`;
+              return (
+                <TownGridCell
+                  key={offer.offerId}
+                  label={offer.name}
+                  meta={`${offer.tier === 'tier2' ? 'Tier II' : 'Tier I'} - ${offer.price}g`}
+                  actionLabel={!atTown ? 'Travel here' : gold >= offer.price ? 'Recruit' : `Need ${offer.price - gold}g`}
+                  ariaLabel={`${offer.name}, weekly ${offer.tier} recruit for ${offer.price} gold`}
+                  locked={offer.claimed || !offer.unlocked}
+                  lockLabel={lockLabel}
+                  disabled={!canBuy}
+                  onClick={() => onRecruit(offer.offerId)}
+                  icon={(
+                    <span className="ui-icon-frame relative block h-12 w-12 shrink-0 overflow-hidden rounded border">
+                      <Image src={offer.imagePath} alt={offer.name} fill className="object-contain p-1" style={{ imageRendering: 'pixelated' }} />
+                    </span>
+                  )}
+                  popover={(
+                    <TownHoverPopover
+                      title={offer.name}
+                      subtitle={`${offer.tier === 'tier2' ? 'Tier II specialist' : 'Tier I reserve'} - weekly`}
+                      lines={[offer.description, offer.claimed ? 'Already signed this week' : offer.unlocked ? 'Available until the weekly reset' : `Unlocks at level ${offer.minLevel}`]}
+                      footer={`${offer.price} gold`}
+                    />
+                  )}
                 />
-              </span>
-            )}
-            popover={(
-              <TownHoverPopover
-                title={offer.name}
-                subtitle="Shop offer"
-                lines={[offer.description, gold < offer.price ? `Need ${offer.price - gold} more gold` : 'Click to purchase']}
-                footer={`${offer.price} gold`}
-              />
-            )}
-          />
-        );
-      })}
+              );
+            })}
+          </div>
+        </section>
+      )}
+
+      {offers.length > 0 && (
+        <section>
+          <div className="town-subsection-heading mb-2">
+            <h3 className="fantasy-heading text-base">Market Stock</h3>
+            <span className="ui-faint text-[10px] font-black uppercase">Rotates every 2 hours</span>
+          </div>
+          <div className="town-item-grid">
+            {offers.map(offer => {
+              const canBuy = atTown && gold >= offer.price;
+              return (
+                <TownGridCell
+                  key={offer.id}
+                  label={offer.name}
+                  meta={`${offer.price}g`}
+                  actionLabel={!atTown ? 'Travel here' : gold >= offer.price ? 'Buy' : `Need ${offer.price - gold}g`}
+                  ariaLabel={`${offer.name}, ${offer.price} gold. ${!atTown ? 'Travel to town to buy' : gold >= offer.price ? 'Buy' : `Need ${offer.price - gold} more gold`}`}
+                  disabled={!canBuy}
+                  onClick={() => onBuy(offer.id)}
+                  icon={(
+                    <span className="ui-icon-frame relative block h-12 w-12 shrink-0 overflow-hidden rounded border">
+                      <Image src={offer.imagePath} alt={offer.name} fill className="object-contain p-1" style={{ imageRendering: 'pixelated' }} />
+                    </span>
+                  )}
+                  popover={(
+                    <TownHoverPopover
+                      title={offer.name}
+                      subtitle="Shop offer"
+                      lines={[offer.description, gold < offer.price ? `Need ${offer.price - gold} more gold` : 'Click to purchase']}
+                      footer={`${offer.price} gold`}
+                    />
+                  )}
+                />
+              );
+            })}
+          </div>
+        </section>
+      )}
     </div>
   );
+}
+
+function formatRecruitmentReset(resetsAt: number | undefined): string {
+  if (!resetsAt) return 'Weekly';
+  const remainingHours = Math.max(1, Math.ceil((resetsAt - Date.now()) / (60 * 60 * 1000)));
+  const days = Math.floor(remainingHours / 24);
+  const hours = remainingHours % 24;
+  return days > 0 ? `${days}d ${hours}h` : `${hours}h`;
 }
 
 function getOfferCostText(offer: TradeExchangeOffer): string {
@@ -891,9 +1009,9 @@ function TownExchangePanel({
 }) {
   return (
     <section className="town-exchange-panel border-t border-[rgba(232,217,184,0.14)] pt-4">
-      <div className="mb-3">
+      <div className="town-subsection-heading mb-3">
         <h3 className="fantasy-heading text-base">Reliquary Exchange</h3>
-        <p className="arcane-label">Trade goods into useful caches</p>
+        <span className="arcane-label">{offers.length} trades</span>
       </div>
       <div className="grid gap-2">
         {offers.map(offer => {
@@ -901,22 +1019,33 @@ function TownExchangePanel({
           const rewardIcon = getInventoryItemDefinition(offer.rewardItems[0]?.itemId || '')?.imagePath || '/assets/icons/loot-chest.png';
 
           return (
-            <button
-              key={offer.id}
-              onClick={() => onExchange(offer.id)}
-              disabled={!atTown || !affordable}
-              className="town-exchange-row flex items-center gap-3 rounded px-3 py-2 text-left disabled:opacity-40"
-            >
+            <article key={offer.id} className="town-exchange-row rounded px-3 py-2">
               <span className="ui-icon-frame relative block h-10 w-10 shrink-0 overflow-hidden rounded">
                 <Image src={rewardIcon} alt="" fill className="object-contain p-1" style={{ imageRendering: 'pixelated' }} />
               </span>
-              <span className="min-w-0 flex-1">
+              <div className="min-w-0">
                 <span className="block truncate text-xs font-black text-zinc-100">{offer.name}</span>
-                <span className="ui-muted block text-[10px] font-bold">{offer.description}</span>
-                <span className="ui-faint block text-[10px] font-black">Cost: {getOfferCostText(offer)}</span>
-              </span>
-              <span className="ui-value max-w-28 text-right text-[10px] font-black">{getOfferRewardText(offer)}</span>
-            </button>
+                <span className="ui-muted block truncate text-[10px] font-bold">{offer.description}</span>
+              </div>
+              <div className="town-exchange-values" aria-label={`Costs ${getOfferCostText(offer)} and rewards ${getOfferRewardText(offer)}`}>
+                <span>
+                  <span className="town-value-label">Cost</span>
+                  <strong>{getOfferCostText(offer)}</strong>
+                </span>
+                <span className="town-exchange-arrow" aria-hidden="true">-&gt;</span>
+                <span>
+                  <span className="town-value-label">Receive</span>
+                  <strong>{getOfferRewardText(offer)}</strong>
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => onExchange(offer.id)}
+                className={`town-exchange-action ui-button-primary rounded px-3 py-2 text-[10px] font-black ${!atTown || !affordable ? 'town-action-unavailable' : ''}`}
+              >
+                {!atTown ? 'Travel here' : affordable ? 'Exchange' : 'Need goods'}
+              </button>
+            </article>
           );
         })}
       </div>
@@ -960,11 +1089,9 @@ function TownSellPanel({
 
   return (
     <section className="town-sell-panel border-t border-[rgba(232,217,184,0.14)] pt-4">
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h3 className="fantasy-heading text-base">Sell Goods</h3>
-          <p className="arcane-label">Hover a tile for details. Equipped gear and active roster units cannot be sold.</p>
-        </div>
+      <div className="town-subsection-heading mb-3">
+        <h3 className="fantasy-heading text-base">Sell Goods</h3>
+        <span className="arcane-label">Spare stock only</span>
       </div>
 
       <div className="town-shop-tabs mb-3 rounded">
@@ -973,6 +1100,7 @@ function TownSellPanel({
             key={category.id}
             type="button"
             onClick={() => onCategoryChange(category.id)}
+            aria-pressed={activeCategory === category.id}
             className={`town-shop-tab rounded ${activeCategory === category.id ? 'town-shop-tab-active' : ''}`}
           >
             {category.label} ({category.count})
@@ -990,6 +1118,8 @@ function TownSellPanel({
                 key={`sell-item-${item.id}-${item.quantity}`}
                 label={item.name}
                 meta={`${getInventoryItemSellValue(item)}g`}
+                actionLabel={atTown ? 'Sell' : 'Travel here'}
+                ariaLabel={`${item.name}, sell for ${getInventoryItemSellValue(item)} gold`}
                 disabled={!atTown}
                 onClick={() => onSellItem(item.id)}
                 icon={(
@@ -1025,6 +1155,8 @@ function TownSellPanel({
                   key={`sell-gear-${item.id}`}
                   label={item.name}
                   meta={`${getEquipmentSellValue(item)}g`}
+                  actionLabel={atTown ? 'Sell' : 'Travel here'}
+                  ariaLabel={`${item.name}, sell for ${getEquipmentSellValue(item)} gold`}
                   disabled={!atTown}
                   onClick={() => onSellGear(item.id)}
                   icon={(
@@ -1086,6 +1218,8 @@ function TownSellPanel({
                     key={`sell-unit-${minion.id}`}
                     label={template?.name || 'Unit'}
                     meta={`${getMinionSellValue(minion)}g`}
+                    actionLabel={atTown ? 'Sell' : 'Travel here'}
+                    ariaLabel={`${template?.name || 'Unit'}, sell for ${getMinionSellValue(minion)} gold`}
                     disabled={!atTown}
                     onClick={() => onSellUnit(minion.id)}
                     icon={(
@@ -1203,7 +1337,7 @@ function BlacksmithPanel({
           </div>
         </div>
 
-        <div className="mt-4 flex flex-wrap gap-2">
+        <div className="town-forge-primary-action mt-4">
           <button
             type="button"
             onClick={onAddBonus}
@@ -1213,7 +1347,8 @@ function BlacksmithPanel({
             Add Forge Bonus
           </button>
           {!socketQuote.maxed && selectedItem && (
-            <span className="ui-muted self-center text-[11px] font-bold">
+            <span className="town-forge-price ui-muted text-[11px] font-bold">
+              <span className="town-value-label">Cost</span>
               {socketQuote.goldCost} gold · {socketQuote.gemCost} rare gem
             </span>
           )}
@@ -1223,14 +1358,14 @@ function BlacksmithPanel({
           <div className="arcane-label text-[10px]">Installed bonuses</div>
           {socketBonuses.length === 0 ? (
             <div className="ui-muted rounded border border-white/10 bg-black/20 p-3 text-xs font-bold">
-              No forge bonuses yet. Add one with gold and a rare gem.
+              No forge bonuses installed.
             </div>
           ) : (
             socketBonuses.map(bonus => {
               const quote = getEquipmentSocketUpgradeQuote(bonus);
               return (
                 <div key={bonus.id} className="town-forge-bonus-row rounded border px-3 py-2">
-                  <div className="flex items-center justify-between gap-2">
+                  <div className="town-forge-bonus-main">
                     <div>
                       <div className="text-xs font-black text-zinc-100">{formatSocketBonus(bonus)}</div>
                       <div className="ui-faint text-[10px] font-bold">Upgrade level +{bonus.upgradeLevel}</div>
@@ -1245,7 +1380,8 @@ function BlacksmithPanel({
                     </button>
                   </div>
                   {!quote.maxed && (
-                    <div className="ui-muted mt-1 text-[10px] font-bold">
+                    <div className="town-forge-upgrade-terms ui-muted mt-2 text-[10px] font-bold">
+                      <span className="town-value-label">Cost / chance</span>
                       {quote.goldCost} gold · {quote.successChance}% success
                     </div>
                   )}
@@ -1266,6 +1402,8 @@ function BlacksmithPanel({
                 key={item.id}
                 label={item.name}
                 meta={`${(item.socketBonuses || []).length}/${getEquipmentSocketLimit(item)}`}
+                actionLabel={selected ? 'Selected' : 'Select'}
+                ariaLabel={`${item.name}, ${(item.socketBonuses || []).length} of ${getEquipmentSocketLimit(item)} forge slots${selected ? ', selected' : ''}`}
                 onClick={() => onSelect(item.id)}
                 icon={(
                   <span className={`ui-icon-frame relative block h-12 w-12 shrink-0 overflow-hidden rounded border ${selected ? 'ring-2 ring-amber-200/50' : ''}`}>

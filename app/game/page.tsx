@@ -16,6 +16,7 @@ import SocialRequestOverlay from '@/components/SocialRequestOverlay';
 import TradeSessionOverlay from '@/components/TradeSessionOverlay';
 import MultiplayerTutorialSpotlight from '@/components/MultiplayerTutorialSpotlight';
 import PvpDuelSessionOverlay from '@/components/PvpDuelSessionOverlay';
+import CoopRaidSessionOverlay from '@/components/CoopRaidSessionOverlay';
 import { writeGameMode } from '@/lib/gameMode';
 
 export default function GamePage() {
@@ -71,6 +72,7 @@ export default function GamePage() {
       <SocialRequestOverlay />
       <TradeSessionOverlay />
       <PvpDuelSessionOverlay />
+      <CoopRaidSessionOverlay />
       <MultiplayerTutorialSpotlight />
     </div>
   );

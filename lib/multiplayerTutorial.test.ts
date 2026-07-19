@@ -68,9 +68,17 @@ describe('multiplayer tutorial progress', () => {
 
   it('scopes callouts to the active story instead of blocking on older unfinished steps', () => {
     expect(getNextMultiplayerTutorialCallout('ReturningBanner', 'story-02-candle-road')).toBe('harborview-travel');
-    expect(getNextMultiplayerTutorialCallout('ReturningBanner', 'story-03-lost-apprentice')).toBeNull();
+    expect(getNextMultiplayerTutorialCallout('ReturningBanner', 'story-03-lost-apprentice')).toBe('marshal-orren-contact');
     expect(getNextMultiplayerTutorialCallout('ReturningBanner', 'story-04-river-law')).toBe('enemy-risk');
     expect(getNextMultiplayerTutorialCallout('ReturningBanner', null)).toBeNull();
+  });
+
+  it('completes the Marshal Orren contact lesson only from its recorded interaction', () => {
+    expect(getNextMultiplayerTutorialCallout('MusterBanner', 'story-03-lost-apprentice')).toBe('marshal-orren-contact');
+
+    completeMultiplayerTutorialCallout('MusterBanner', 'marshal-orren-contact');
+
+    expect(getNextMultiplayerTutorialCallout('MusterBanner', 'story-03-lost-apprentice')).toBeNull();
   });
 
   it('advances every Trial by Steel interaction in order', () => {
@@ -124,12 +132,17 @@ describe('multiplayer tutorial progress', () => {
     expect(getNextMultiplayerTutorialCallout('SkipBanner', 'story-04-river-law')).toBeNull();
   });
 
-  it('queues and persists the level three, four, and five unlock briefings in order', () => {
-    expect(getNextMultiplayerUnlockDialogue(2, [])).toBeNull();
-    expect(getNextMultiplayerUnlockDialogue(3, [])?.id).toBe('unlock-level-3-pvp');
+  it('queues and persists the level two through five unlock briefings in order', () => {
+    expect(getNextMultiplayerUnlockDialogue(1, [])).toBeNull();
+    expect(getNextMultiplayerUnlockDialogue(2, [])?.id).toBe('unlock-level-2-forge');
+
+    completeMultiplayerUnlockDialogue('RankBanner', 'unlock-level-2-forge');
+    let progress = readMultiplayerTutorialProgress('RankBanner');
+    expect(getNextMultiplayerUnlockDialogue(3, progress.completedUnlockDialogueIds || [])?.id)
+      .toBe('unlock-level-3-pvp');
 
     completeMultiplayerUnlockDialogue('RankBanner', 'unlock-level-3-pvp');
-    let progress = readMultiplayerTutorialProgress('RankBanner');
+    progress = readMultiplayerTutorialProgress('RankBanner');
     expect(getNextMultiplayerUnlockDialogue(4, progress.completedUnlockDialogueIds || [])?.id)
       .toBe('unlock-level-4-trading');
 
@@ -141,6 +154,7 @@ describe('multiplayer tutorial progress', () => {
     completeMultiplayerUnlockDialogue('RankBanner', 'unlock-level-5-company');
     progress = readMultiplayerTutorialProgress('RankBanner');
     expect(progress.completedUnlockDialogueIds).toEqual([
+      'unlock-level-2-forge',
       'unlock-level-3-pvp',
       'unlock-level-4-trading',
       'unlock-level-5-company',

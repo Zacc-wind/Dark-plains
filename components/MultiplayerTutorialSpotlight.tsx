@@ -29,6 +29,11 @@ const CALLOUT_COPY: Record<MultiplayerTutorialCalloutId, { kicker: string; title
     title: 'Confirm Harborview',
     body: 'Review the road time, then begin the actual journey to Harborview.',
   },
+  'marshal-orren-contact': {
+    kicker: "Marshal's Muster",
+    title: 'Find Marshal Orren',
+    body: 'Open Orren\'s marked contact on the map. Story contacts can return when a later chapter needs their counsel or reward.',
+  },
   'enemy-risk': {
     kicker: 'Scout Discipline',
     title: 'Inspect the risk',

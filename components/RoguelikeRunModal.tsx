@@ -43,6 +43,7 @@ import {
   ActivityEntry,
   CharacterStats,
   type DailyRunChallenge,
+  type DailyRunHistoryEntry,
   Equipment,
   EquipmentRarity,
   EquipmentSlot,
@@ -104,6 +105,7 @@ import {
   getRunMilestoneRewardExp,
   getRunMilestoneViews,
   getRunProgressionUnlocks,
+  type RunMilestoneView,
 } from '@/lib/runMilestones';
 import {
   createSingleplayerRunTutorialStep,
@@ -336,6 +338,7 @@ interface RunBattleReport {
   enemyLevel: number;
   enemyPersonality: EnemyAiPersonality;
   status: BattleEndResult['status'];
+  bossFight?: boolean;
   round: number;
   durationMs: number;
   damageDealt: number;
@@ -428,6 +431,7 @@ interface RunSession {
   startedAt?: number;
   bossHistory?: string[];
   shopBuyHistory?: string[];
+  shopGoldSpent?: number;
   omenHistory?: string[];
   permanentSpellUnlocks?: string[];
   runGearRarityCap?: EquipmentRarity;
@@ -1684,9 +1688,10 @@ function RunController({
       if (!current || current.activeEnemy?.id !== result.battle.enemy.id) return current;
 
       const withBattleHealth = persistRunBattleHealth(current, result.battle);
+      const bossFight = current.nodes[current.currentNodeIndex]?.type === 'boss';
       const withLosses = appendRunBattleReport(
         applyBattleLossesToRun(withBattleHealth, result.battle),
-        createRunBattleReport(result.battle, result.status)
+        createRunBattleReport(result.battle, result.status, bossFight)
       );
       if (result.status !== 'victory') {
         return {
@@ -3644,6 +3649,7 @@ function CompletionPanel({
   const abandoned = session.outcome === 'abandoned';
   const tone = victory ? 'victory' : abandoned ? 'abandoned' : 'defeat';
   const [statsOpen, setStatsOpen] = useState(false);
+  const [achievementPreview] = useState(() => getRunAchievementPreview(session));
   const victoryBossArtwork = victory ? getRunVictoryBossArtwork(session) : null;
   const [showVictoryBoss, setShowVictoryBoss] = useState(Boolean(victoryBossArtwork));
   const headline = victory ? 'Run Cleared' : abandoned ? 'Run Retreated' : 'Run Failed';
@@ -3724,6 +3730,31 @@ function CompletionPanel({
             })}
         </div>
 
+          {achievementPreview && (
+            <div className="mt-3 flex items-center gap-3 border-t border-[rgba(232,217,184,0.12)] pt-3" aria-label="Achievement summary">
+              <span className="ui-icon-frame relative block h-10 w-10 shrink-0 overflow-hidden rounded border">
+                <Image
+                  src={achievementPreview.newlyUnlocked[0]?.iconPath || '/assets/icons/loot-chest.png'}
+                  alt=""
+                  fill
+                  sizes="40px"
+                  className="object-contain p-1.5"
+                  unoptimized
+                />
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="fantasy-heading truncate text-sm">
+                  {achievementPreview.newlyUnlocked.length > 0
+                    ? `${achievementPreview.newlyUnlocked.length} new achievement${achievementPreview.newlyUnlocked.length === 1 ? '' : 's'}`
+                    : 'No new achievements'}
+                </div>
+                <div className="ui-faint truncate text-[10px] font-black uppercase">
+                  {achievementPreview.claimableCount} claimable - +{achievementPreview.claimableExp} run XP
+                </div>
+              </div>
+            </div>
+          )}
+
           <div className="run-completion-action-row mt-3">
             <button
               type="button"
@@ -3757,7 +3788,11 @@ function CompletionPanel({
           </div>
 
       {statsOpen && (
-        <RunCompletionStatsModal session={session} onClose={() => setStatsOpen(false)} />
+        <RunCompletionStatsModal
+          session={session}
+          achievementPreview={achievementPreview}
+          onClose={() => setStatsOpen(false)}
+        />
       )}
     </>
   );
@@ -3787,7 +3822,15 @@ function RunCompletionStatTile({
   );
 }
 
-function RunCompletionStatsModal({ session, onClose }: { session: RunSession; onClose: () => void }) {
+function RunCompletionStatsModal({
+  session,
+  achievementPreview,
+  onClose,
+}: {
+  session: RunSession;
+  achievementPreview: RunAchievementPreview | null;
+  onClose: () => void;
+}) {
   const aliveCount = getAliveRunRoster(session).length;
   const totalDamageDealt = session.battleReports.reduce((total, report) => total + report.damageDealt, 0);
   const totalDamageTaken = session.battleReports.reduce((total, report) => total + report.damageTaken, 0);
@@ -3840,6 +3883,40 @@ function RunCompletionStatsModal({ session, onClose }: { session: RunSession; on
             <div className="arcane-label mb-2">Road Progress</div>
             <RunProgressPips total={session.targetBattles} completed={session.wins} />
           </div>
+
+          {achievementPreview && (
+            <section className="mt-4 border-t border-[rgba(232,217,184,0.12)] pt-4" aria-label="Run achievement report">
+              <div className="mb-2 flex flex-wrap items-end justify-between gap-2">
+                <div>
+                  <div className="arcane-label">Achievement Report</div>
+                  <h4 className="fantasy-heading text-lg">New This Run</h4>
+                </div>
+                <span className="ui-pill rounded border px-2 py-1 text-[10px] font-black uppercase">
+                  {achievementPreview.claimableCount} claimable - +{achievementPreview.claimableExp} XP
+                </span>
+              </div>
+              {achievementPreview.newlyUnlocked.length > 0 ? (
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {achievementPreview.newlyUnlocked.map(milestone => (
+                    <article key={milestone.id} className="run-battle-report flex min-w-0 items-center gap-3 rounded border p-3">
+                      <span className="ui-icon-frame relative block h-10 w-10 shrink-0 overflow-hidden rounded border">
+                        <Image src={milestone.iconPath} alt="" fill sizes="40px" className="object-contain p-1.5" unoptimized />
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <div className="fantasy-heading truncate text-sm">{milestone.title}</div>
+                        <p className="ui-faint line-clamp-2 text-[10px] font-bold leading-relaxed">{milestone.description}</p>
+                      </div>
+                      <span className="ui-value shrink-0 text-xs font-black">+{getRunMilestoneRewardExp(milestone.id)}</span>
+                    </article>
+                  ))}
+                </div>
+              ) : (
+                <p className="ui-muted rounded border border-[rgba(232,217,184,0.12)] bg-black/20 px-3 py-2 text-xs font-bold">
+                  No new achievements completed on this road.
+                </p>
+              )}
+            </section>
+          )}
 
           <div className="mt-4 grid grid-cols-2 gap-2 lg:grid-cols-4">
             <RunCompletionStatTile icon={RUN_COMPLETION_STAT_ICONS.time} label="Time Fought" value={formatRunDuration(totalDurationMs)} />
@@ -4661,6 +4738,7 @@ function hydrateRunSession(
     startedAt: storedSession.startedAt || Date.now(),
     bossHistory: storedSession.bossHistory || [],
     shopBuyHistory: storedSession.shopBuyHistory || [],
+    shopGoldSpent: Math.max(0, storedSession.shopGoldSpent || 0),
     omenHistory: storedSession.omenHistory || [],
     permanentSpellUnlocks: storedSession.permanentSpellUnlocks || [],
     runGearRarityCap: storedSession.runGearRarityCap || progressionUnlocks.maxGearRarity,
@@ -4939,6 +5017,7 @@ function createDailySession(user: User, dailyChallenge = createRandomRunChalleng
     startedAt: Date.now(),
     bossHistory: [],
     shopBuyHistory: [],
+    shopGoldSpent: 0,
     omenHistory: [],
     permanentSpellUnlocks: [],
     runGearRarityCap: progressionUnlocks.maxGearRarity,
@@ -6515,7 +6594,11 @@ function appendRunBattleReport(session: RunSession, report: RunBattleReport): Ru
   };
 }
 
-function createRunBattleReport(battle: BattleState, status: BattleEndResult['status']): RunBattleReport {
+function createRunBattleReport(
+  battle: BattleState,
+  status: BattleEndResult['status'],
+  bossFight = false,
+): RunBattleReport {
   const unitReports = battle.units
     .filter(unit => unit.side === 'player')
     .map(unit => {
@@ -6548,6 +6631,7 @@ function createRunBattleReport(battle: BattleState, status: BattleEndResult['sta
     enemyLevel: battle.enemy.level,
     enemyPersonality: battle.enemy.personality,
     status,
+    bossFight,
     round: battle.round,
     durationMs: Math.max(0, Date.now() - battle.createdAt),
     damageDealt: unitReports.reduce((total, unit) => total + unit.damageDealt, 0),
@@ -6975,6 +7059,7 @@ function buyShopReward(session: RunSession, offerIndex: number, choice: RunRewar
       [key]: offers.map((item, index) => index === offerIndex ? { ...item, purchased: true } : item),
     },
     shopBuyHistory: [...(applied.shopBuyHistory || session.shopBuyHistory || []), `${choice.name} (${cost}g)`],
+    shopGoldSpent: (applied.shopGoldSpent || session.shopGoldSpent || 0) + cost,
     notice: `${choice.name} purchased for ${cost} run gold.`,
   };
 }
@@ -7859,10 +7944,35 @@ function grantCompletionReward(session: RunSession): string {
     : `Claimed ${gold} gold, ${exp} XP, ${acceptedGems} gem, bonus items, and ${rarity} gear.`;
 }
 
-function grantRandomRunCompletionReward(session: RunSession, user: User, completedAt: number): string {
+interface RandomRunCompletionSummary {
+  report: Omit<DailyRunHistoryEntry, 'id' | 'date' | 'streakAfter'>;
+  aliveCount: number;
+  bossesDefeated: string[];
+  score: number;
+  runExp: number;
+}
+
+interface RunAchievementPreview {
+  newlyUnlocked: RunMilestoneView[];
+  claimableCount: number;
+  claimableExp: number;
+}
+
+function buildRandomRunCompletionSummary(session: RunSession, completedAt: number): RandomRunCompletionSummary {
   const aliveCount = getAliveRunRoster(session).length;
   const durationMs = session.battleReports.reduce((total, report) => total + report.durationMs, 0);
   const bossesDefeated = session.bossHistory || [];
+  const victoriousBossReports = session.battleReports.filter(report => report.bossFight && report.status === 'victory');
+  const flawlessBossNames = Array.from(new Set(
+    victoriousBossReports
+      .filter(report => report.unitReports.length > 0 && report.unitReports.every(unit => unit.alive))
+      .map(report => report.enemyName)
+  ));
+  const fastBossNames = Array.from(new Set(
+    victoriousBossReports
+      .filter(report => report.durationMs <= 90_000)
+      .map(report => report.enemyName)
+  ));
   const routeSummary = session.nodes
     .filter(node => node.completed || (node.type === 'boss' && bossesDefeated.includes(node.label)))
     .map(node => node.type === 'boss' ? `Boss: ${node.label}` : node.label);
@@ -7885,7 +7995,6 @@ function grantRandomRunCompletionReward(session: RunSession, user: User, complet
     + (fullClear ? 120 + expectedBosses * 15 : Math.round(clearRatio * 40))
     + getRandomRunEffectiveLevel(session.stats.level || 1) * 5
   ) * runExpMultiplier));
-  const previousRunState = getDailyRunState(user);
   const runTemplates = session.minions
     .map(unit => getMinionTemplate(unit.stack.templateId))
     .filter((template): template is MinionTemplate => Boolean(template));
@@ -7896,29 +8005,78 @@ function grantRandomRunCompletionReward(session: RunSession, user: User, complet
       .filter(template => template.tier === 'tier3')
       .map(template => template.name)
   ));
-  const dailyRun = recordDailyRunCompletionState(user, {
+
+  return {
+    aliveCount,
+    bossesDefeated,
+    score,
+    runExp,
+    report: {
       completedAt,
       wins: session.wins,
       targetBattles: session.targetBattles,
-    unitsStanding: aliveCount,
-    gold: session.runGold,
-    exp: runExp,
-    rareGems: undefined,
-    itemNames: [],
-    equipmentNames: [],
-    challengeName: session.title,
-    weeklyRewardName: 'Run',
-    score,
-    durationMs,
-    bossesDefeated,
-    routeSummary,
-    shopBuys: session.shopBuyHistory || [],
-    omens: session.omenHistory || [],
-    unlockedSpellNames: session.permanentSpellUnlocks || [],
-    unitTemplateIds,
-    unitClassIds,
-    tierThreeUnitNames,
-  });
+      unitsStanding: aliveCount,
+      gold: session.runGold,
+      exp: runExp,
+      rareGems: undefined,
+      itemNames: [],
+      equipmentNames: [],
+      challengeName: session.title,
+      weeklyRewardName: 'Run',
+      score,
+      durationMs,
+      bossesDefeated,
+      flawlessBossNames,
+      fastBossNames,
+      routeSummary,
+      shopBuys: session.shopBuyHistory || [],
+      shopGoldSpent: session.shopGoldSpent || 0,
+      omens: session.omenHistory || [],
+      unlockedSpellNames: session.permanentSpellUnlocks || [],
+      unitTemplateIds,
+      unitClassIds,
+      tierThreeUnitNames,
+    },
+  };
+}
+
+function getRunAchievementPreview(session: RunSession): RunAchievementPreview | null {
+  if (session.mode !== 'daily' || session.outcome !== 'victory') return null;
+  const user = getCurrentUser();
+  if (!user) return null;
+
+  const completedAt = Date.now();
+  const previousState = getDailyRunState(user);
+  const nextState = recordDailyRunCompletionState(
+    user,
+    buildRandomRunCompletionSummary(session, completedAt).report
+  );
+  const previouslyUnlockedIds = new Set(
+    getRunMilestoneViews(previousState)
+      .filter(milestone => milestone.unlocked)
+      .map(milestone => milestone.id)
+  );
+  const nextViews = getRunMilestoneViews(nextState);
+  const newlyUnlocked = nextViews.filter(
+    milestone => milestone.unlocked && !previouslyUnlockedIds.has(milestone.id)
+  );
+  const claimedIds = new Set(nextState.claimedMilestoneIds || []);
+  const claimable = nextViews.filter(milestone => milestone.unlocked && !claimedIds.has(milestone.id));
+
+  return {
+    newlyUnlocked,
+    claimableCount: claimable.length,
+    claimableExp: claimable.reduce(
+      (total, milestone) => total + getRunMilestoneRewardExp(milestone.id),
+      0
+    ),
+  };
+}
+
+function grantRandomRunCompletionReward(session: RunSession, user: User, completedAt: number): string {
+  const previousRunState = getDailyRunState(user);
+  const { report, score, runExp, bossesDefeated } = buildRandomRunCompletionSummary(session, completedAt);
+  const dailyRun = recordDailyRunCompletionState(user, report);
   const levelUps = Math.max(0, dailyRun.runLevel - previousRunState.runLevel);
   const activity: ActivityEntry = {
     id: `activity-random-run-${session.id}-${completedAt}`,

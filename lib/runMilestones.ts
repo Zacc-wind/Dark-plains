@@ -1,5 +1,11 @@
 import { BOSS_PROFILES } from '@/lib/bosses';
-import type { DailyRunState, EquipmentRarity, MinionClass } from '@/lib/auth';
+import type {
+  DailyRunState,
+  EquipmentRarity,
+  MinionClass,
+  RunMilestoneTier,
+  RunMilestoneUnlockRecord,
+} from '@/lib/auth';
 
 export type RunMilestoneCategory = 'boss' | 'road' | 'army' | 'spell' | 'meta' | 'economy';
 export const RUN_MILESTONE_CATEGORY_LABELS: Record<RunMilestoneCategory, string> = {
@@ -17,12 +23,14 @@ export interface RunMilestoneDefinition {
   title: string;
   description: string;
   iconPath: string;
+  tier: RunMilestoneTier;
   rewardHint?: string;
   claimReward?: string;
 }
 
 export interface RunMilestoneView extends RunMilestoneDefinition {
   unlocked: boolean;
+  unlockedAt?: number;
   progressLabel?: string;
 }
 
@@ -78,6 +86,24 @@ function maxShopBuysInRun(state: DailyRunState): number {
   return Math.max(0, ...state.history.map(entry => entry.shopBuys?.length || 0));
 }
 
+function maxShopGoldSpentInRun(state: DailyRunState): number {
+  return Math.max(0, ...state.history.map(entry => entry.shopGoldSpent || 0));
+}
+
+function hasFullClearWithoutShop(state: DailyRunState): boolean {
+  return state.history.some(entry =>
+    entry.wins >= entry.targetBattles && (entry.shopBuys?.length || 0) === 0
+  );
+}
+
+function hasFlawlessBossClear(state: DailyRunState): boolean {
+  return state.history.some(entry => (entry.flawlessBossNames?.length || 0) > 0);
+}
+
+function hasFastBossClear(state: DailyRunState): boolean {
+  return state.history.some(entry => (entry.fastBossNames?.length || 0) > 0);
+}
+
 function maxOmensInRun(state: DailyRunState): number {
   return Math.max(0, ...state.history.map(entry => entry.omens?.length || 0));
 }
@@ -96,9 +122,10 @@ const BOSS_MILESTONES: RunMilestoneDefinition[] = BOSS_PROFILES.map(boss => ({
   title: `${boss.name} Trophy`,
   description: `Defeat ${boss.name} on a run.`,
   iconPath: boss.assetPath,
+  tier: 'gold',
 }));
 
-const STATIC_MILESTONES: RunMilestoneDefinition[] = [
+const STATIC_MILESTONE_BASE: Array<Omit<RunMilestoneDefinition, 'tier'>> = [
   {
     id: 'road-first-clear',
     category: 'road',
@@ -133,6 +160,27 @@ const STATIC_MILESTONES: RunMilestoneDefinition[] = [
     title: 'No Empty Graves',
     description: 'Clear a run with seven units still standing.',
     iconPath: '/assets/icons/defense.png',
+  },
+  {
+    id: 'road-no-shop-clear',
+    category: 'road',
+    title: 'Empty Purse March',
+    description: 'Clear a full run without buying from a shop.',
+    iconPath: '/assets/icons/gold.png',
+  },
+  {
+    id: 'boss-flawless-clear',
+    category: 'boss',
+    title: 'Untouched Vanguard',
+    description: 'Defeat a run boss with every deployed unit still standing.',
+    iconPath: '/assets/icons/defense.png',
+  },
+  {
+    id: 'boss-speed-clear',
+    category: 'boss',
+    title: 'Ninety-Second Sentence',
+    description: 'Defeat a run boss in 90 seconds or less.',
+    iconPath: '/assets/icons/speed.png',
   },
   {
     id: 'army-priest-recruit',
@@ -263,6 +311,13 @@ const STATIC_MILESTONES: RunMilestoneDefinition[] = [
     claimReward: 'Future singleplayer runs begin with one extra shop reroll.',
   },
   {
+    id: 'economy-spend-500',
+    category: 'economy',
+    title: 'Heavy Purse',
+    description: 'Spend at least 500 run gold in one run.',
+    iconPath: '/assets/icons/gold.png',
+  },
+  {
     id: 'economy-omen',
     category: 'economy',
     title: 'Omen Touched',
@@ -279,10 +334,43 @@ const STATIC_MILESTONES: RunMilestoneDefinition[] = [
   },
 ];
 
+function getStaticMilestoneTier(milestone: Omit<RunMilestoneDefinition, 'tier'>): RunMilestoneTier {
+  if (milestone.id === 'meta-run-level-15') return 'legendary';
+  if (
+    milestone.id === 'meta-run-level-10'
+    || milestone.id === 'meta-ten-clears'
+    || milestone.id === 'road-double-boss'
+    || milestone.id === 'boss-flawless-clear'
+    || milestone.id === 'boss-speed-clear'
+    || milestone.id === 'economy-spend-500'
+  ) return 'gold';
+  if (
+    milestone.category === 'army'
+    || milestone.category === 'spell'
+    || milestone.id === 'meta-run-level-5'
+    || milestone.id === 'meta-streak-5'
+    || milestone.id === 'economy-three-shop-buys'
+    || milestone.id === 'economy-five-omens'
+  ) return 'silver';
+  return 'bronze';
+}
+
+const STATIC_MILESTONES: RunMilestoneDefinition[] = STATIC_MILESTONE_BASE.map(milestone => ({
+  ...milestone,
+  tier: getStaticMilestoneTier(milestone),
+}));
+
 export const RUN_MILESTONE_CATALOG: RunMilestoneDefinition[] = [
   ...BOSS_MILESTONES,
   ...STATIC_MILESTONES,
 ];
+
+function getStoredMilestoneRecord(
+  state: DailyRunState,
+  milestoneId: string,
+): RunMilestoneUnlockRecord | undefined {
+  return state.milestoneUnlocks?.find(record => record.id === milestoneId);
+}
 
 function isMilestoneUnlocked(state: DailyRunState, milestone: RunMilestoneDefinition): boolean {
   const defeatedBosses = getDefeatedBossNames(state);
@@ -299,6 +387,12 @@ function isMilestoneUnlocked(state: DailyRunState, milestone: RunMilestoneDefini
       return state.history.some(entry => (entry.bossesDefeated?.length || 0) >= 2);
     case 'road-full-warband':
       return state.history.some(entry => entry.wins >= entry.targetBattles && entry.unitsStanding >= 7);
+    case 'road-no-shop-clear':
+      return hasFullClearWithoutShop(state);
+    case 'boss-flawless-clear':
+      return hasFlawlessBossClear(state);
+    case 'boss-speed-clear':
+      return hasFastBossClear(state);
     case 'army-priest-recruit':
       return historyHasUnitClass(state, 'priest');
     case 'army-knight-recruit':
@@ -333,6 +427,8 @@ function isMilestoneUnlocked(state: DailyRunState, milestone: RunMilestoneDefini
       return historyHasShopBuy(state);
     case 'economy-three-shop-buys':
       return maxShopBuysInRun(state) >= 3;
+    case 'economy-spend-500':
+      return maxShopGoldSpentInRun(state) >= 500;
     case 'economy-omen':
       return historyHasOmen(state);
     case 'economy-five-omens':
@@ -355,6 +451,7 @@ function getRunMilestoneProgressLabel(state: DailyRunState, milestoneId: string)
   if (milestoneId === 'meta-ten-clears') return `${state.completions}/10`;
   if (milestoneId === 'meta-streak-5') return `${state.streak}/5 streak`;
   if (milestoneId === 'economy-three-shop-buys') return `${maxShopBuysInRun(state)}/3 buys`;
+  if (milestoneId === 'economy-spend-500') return `${maxShopGoldSpentInRun(state)}/500 gold`;
   if (milestoneId === 'economy-five-omens') return `${maxOmensInRun(state)}/5 omens`;
   if (milestoneId === 'road-double-boss') {
     const maxBosses = Math.max(0, ...state.history.map(entry => entry.bossesDefeated?.length || 0));
@@ -364,15 +461,47 @@ function getRunMilestoneProgressLabel(state: DailyRunState, milestoneId: string)
     const maxStanding = Math.max(0, ...state.history.map(entry => entry.unitsStanding || 0));
     return `${maxStanding}/7 standing`;
   }
+  if (milestoneId === 'road-no-shop-clear') return hasFullClearWithoutShop(state) ? 'Cleared' : 'Not cleared';
+  if (milestoneId === 'boss-flawless-clear') return hasFlawlessBossClear(state) ? 'Cleared' : 'No flawless boss';
+  if (milestoneId === 'boss-speed-clear') return hasFastBossClear(state) ? 'Cleared' : 'No speed clear';
   return undefined;
 }
 
 export function getRunMilestoneViews(state: DailyRunState): RunMilestoneView[] {
-  return RUN_MILESTONE_CATALOG.map(milestone => ({
-    ...milestone,
-    unlocked: isMilestoneUnlocked(state, milestone),
-    progressLabel: getRunMilestoneProgressLabel(state, milestone.id),
-  }));
+  return RUN_MILESTONE_CATALOG.map(milestone => {
+    const record = getStoredMilestoneRecord(state, milestone.id);
+    return {
+      ...milestone,
+      unlocked: Boolean(record) || isMilestoneUnlocked(state, milestone),
+      unlockedAt: record?.unlockedAt,
+      progressLabel: getRunMilestoneProgressLabel(state, milestone.id),
+    };
+  });
+}
+
+export function syncRunMilestoneUnlockRecords(
+  state: DailyRunState,
+  unlockedAt = Date.now(),
+): DailyRunState {
+  const safeUnlockedAt = Math.max(1, Math.floor(Number.isFinite(unlockedAt) ? unlockedAt : 1));
+  const existingById = new Map((state.milestoneUnlocks || []).map(record => [record.id, record]));
+  const milestoneUnlocks = RUN_MILESTONE_CATALOG.flatMap(milestone => {
+    const existing = existingById.get(milestone.id);
+    if (!existing && !isMilestoneUnlocked(state, milestone)) return [];
+
+    return [{
+      id: milestone.id,
+      unlockedAt: existing?.unlockedAt && Number.isFinite(existing.unlockedAt)
+        ? Math.max(1, Math.floor(existing.unlockedAt))
+        : safeUnlockedAt,
+      tier: milestone.tier,
+      title: milestone.title,
+      category: milestone.category,
+      iconPath: milestone.iconPath,
+    } satisfies RunMilestoneUnlockRecord];
+  }).sort((left, right) => right.unlockedAt - left.unlockedAt || left.id.localeCompare(right.id));
+
+  return { ...state, milestoneUnlocks };
 }
 
 export function getMilestonesByCategory(state: DailyRunState, category: RunMilestoneCategory): RunMilestoneView[] {

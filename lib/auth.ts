@@ -36,6 +36,19 @@ import {
 } from './pvpRating';
 import { requireMultiplayerUnlock } from './multiplayerUnlocks';
 import {
+  capCampaignRewardExp,
+  scaleMultiplayerRewards,
+  type MultiplayerRewardSource,
+} from './multiplayerRewards';
+import { syncRunMilestoneUnlockRecords } from './runMilestones';
+import {
+  TOWN_RECRUITMENT_TOWNS,
+  getTownRecruitmentSlots,
+  normalizeTownRecruitmentClaims,
+  type TownRecruitmentClaim,
+  type TownRecruitmentTown,
+} from './townRecruitment';
+import {
   createSocialRequest,
   getIncomingSocialRequests as getIncomingSocialRequestRecords,
   normalizeSocialRequests,
@@ -271,6 +284,7 @@ export interface DailyQuest {
     };
     legendaryChance: number; // 0.01 for 1%
     randomSupply?: boolean;
+    guaranteedMinionTier?: MinionTier;
     minionChance?: {
       tier: MinionTier;
       chance: number;
@@ -310,8 +324,11 @@ export interface DailyRunHistoryEntry {
   score?: number;
   durationMs?: number;
   bossesDefeated?: string[];
+  flawlessBossNames?: string[];
+  fastBossNames?: string[];
   routeSummary?: string[];
   shopBuys?: string[];
+  shopGoldSpent?: number;
   omens?: string[];
   unlockedSpellNames?: string[];
   unitTemplateIds?: string[];
@@ -331,6 +348,17 @@ export interface RandomRunPermanentStats {
   unitWard: number;
 }
 
+export type RunMilestoneTier = 'bronze' | 'silver' | 'gold' | 'legendary';
+
+export interface RunMilestoneUnlockRecord {
+  id: string;
+  unlockedAt: number;
+  tier: RunMilestoneTier;
+  title: string;
+  category: string;
+  iconPath: string;
+}
+
 export interface DailyRunState {
   lastCompletedDate?: string;
   streak: number;
@@ -342,6 +370,7 @@ export interface DailyRunState {
   runUpgradePoints: number;
   permanentStats: RandomRunPermanentStats;
   claimedMilestoneIds?: string[];
+  milestoneUnlocks?: RunMilestoneUnlockRecord[];
 }
 
 export interface DailyRunStatus {
@@ -485,6 +514,7 @@ export interface User {
   pvpRating?: PvpRatingState;
   multiplayerEngagement?: MultiplayerEngagementState;
   multiplayerChronicle?: MultiplayerChronicleState;
+  townRecruitmentClaims?: TownRecruitmentClaim[];
 }
 
 export type { PvpRatingState };
@@ -802,6 +832,22 @@ export interface ShopOffer {
   minionTemplateId?: string;
 }
 
+export interface TownRecruitmentOffer {
+  offerId: string;
+  weekKey: string;
+  townName: TownRecruitmentTown;
+  templateId: string;
+  name: string;
+  description: string;
+  imagePath: string;
+  tier: Extract<MinionTier, 'tier1' | 'tier2'>;
+  price: number;
+  minLevel: number;
+  unlocked: boolean;
+  claimed: boolean;
+  resetsAt: number;
+}
+
 export const MINION_CLASS_LABELS: Record<MinionClass, string> = {
   wizard: 'Wizard',
   knight: 'Knight',
@@ -1059,7 +1105,9 @@ export const SHOP_OFFERS: ShopOffer[] = [
 ];
 
 export function getTownShopOffers(townName: string, now = Date.now(), limit = 5): ShopOffer[] {
-  const availableOffers = SHOP_OFFERS.filter(offer => offer.town === 'all' || offer.town === townName);
+  const availableOffers = SHOP_OFFERS.filter(offer => (
+    offer.kind !== 'minion' && (offer.town === 'all' || offer.town === townName)
+  ));
   const fixedOffers = availableOffers
     .filter(offer => offer.id === 'harbor-draught' || offer.id === 'harbor-gem')
     .slice(0, 2);
@@ -1072,6 +1120,35 @@ export function getTownShopOffers(townName: string, now = Date.now(), limit = 5)
   const rotatedOffers = rotatingOffers.map((_, index) => rotatingOffers[(startIndex + index) % rotatingOffers.length]);
 
   return [...fixedOffers, ...rotatedOffers].slice(0, limit);
+}
+
+function isTownRecruitmentTown(townName: string): townName is TownRecruitmentTown {
+  return (TOWN_RECRUITMENT_TOWNS as readonly string[]).includes(townName);
+}
+
+export function getTownRecruitmentOffers(
+  townName: string,
+  user: User | null = getCurrentUser(),
+  now = Date.now(),
+): TownRecruitmentOffer[] {
+  if (!isTownRecruitmentTown(townName)) return [];
+  return getTownRecruitmentSlots(
+    townName,
+    user?.stats.level || 1,
+    user?.townRecruitmentClaims,
+    now,
+  ).flatMap(slot => {
+    const template = getMinionTemplate(slot.templateId);
+    if (!template) return [];
+    return [{
+      ...slot,
+      name: template.name,
+      description: slot.tier === 'tier2'
+        ? `Weekly specialist contract for one ${template.name}.`
+        : `Weekly reserve contract for one ${template.name}.`,
+      imagePath: `/assets/minions/${template.assetName}`,
+    }];
+  });
 }
 
 function getBattleWinCount(user: User): number {
@@ -1473,10 +1550,35 @@ function updateCityQuestProgressForJob(
   });
 }
 
-export function getBalancedQuestExp(exp = 0): number {
+function getBaseBalancedQuestExp(exp = 0): number {
   if (exp <= 40) return exp;
   if (exp <= 120) return 40;
   return Math.round(40 + (exp - 120) * 0.35);
+}
+
+export type MultiplayerQuestRewardSource = Extract<MultiplayerRewardSource, 'contract' | 'campaign'>;
+
+export function getBalancedQuestExp(
+  exp = 0,
+  playerLevel = 1,
+  source: MultiplayerQuestRewardSource = 'contract',
+): number {
+  const scaled = scaleMultiplayerRewards(
+    { gold: 0, exp: getBaseBalancedQuestExp(exp) },
+    playerLevel,
+    source,
+  ).exp;
+  return source === 'campaign'
+    ? capCampaignRewardExp(scaled, getExpNeeded(playerLevel))
+    : scaled;
+}
+
+export function getBalancedQuestGold(
+  gold = 0,
+  playerLevel = 1,
+  source: MultiplayerQuestRewardSource = 'contract',
+): number {
+  return scaleMultiplayerRewards({ gold, exp: 0 }, playerLevel, source).gold;
 }
 
 export function getCityQuestStatus(
@@ -1529,7 +1631,11 @@ export function acceptCityQuest(questId: string, townName: string): { success: b
   return { success: true };
 }
 
-function buildQuestRewardSummary(rewards: QuestRewardSpec): {
+function buildQuestRewardSummary(
+  rewards: QuestRewardSpec,
+  playerLevel = 1,
+  source: MultiplayerQuestRewardSource = 'contract',
+): {
   gold: number;
   exp: number;
   healthRestore: number;
@@ -1551,8 +1657,8 @@ function buildQuestRewardSummary(rewards: QuestRewardSpec): {
     : [];
 
   return {
-    gold: rewards.gold || 0,
-    exp: getBalancedQuestExp(rewards.exp || 0),
+    gold: getBalancedQuestGold(rewards.gold || 0, playerLevel, source),
+    exp: getBalancedQuestExp(rewards.exp || 0, playerLevel, source),
     healthRestore: rewards.healthRestore || 0,
     items,
     equipment,
@@ -1580,7 +1686,7 @@ export function claimCityQuestReward(questId: string): {
   const progress = getCityQuestProgressValue(currentUser, quest, progressState);
   if (progress < quest.requirement.count) return { success: false, error: 'Contract is not complete yet.' };
 
-  const reward = buildQuestRewardSummary(quest.rewards);
+  const reward = buildQuestRewardSummary(quest.rewards, currentUser.stats.level, 'contract');
   const spellUnlock = applySpellUnlocks(currentUser, reward.spellIds);
   if (reward.equipment.length > 0 && !canAcceptGearReward(currentUser, reward.equipment.length)) {
     return { success: false, error: 'Gear storage is full. Sell or equip gear before claiming this reward.' };
@@ -1692,7 +1798,7 @@ export function claimQuestNpcReward(npcId: string): {
     return { success: false, error: `Complete the counsel task first (${status.progress}/${status.required}).` };
   }
 
-  const reward = buildQuestRewardSummary(npc.rewards);
+  const reward = buildQuestRewardSummary(npc.rewards, currentUser.stats.level, 'contract');
   const spellUnlock = applySpellUnlocks(currentUser, reward.spellIds);
   if (reward.equipment.length > 0 && !canAcceptGearReward(currentUser, reward.equipment.length)) {
     return { success: false, error: 'Gear storage is full. Sell or equip gear before claiming this counsel.' };
@@ -1777,7 +1883,7 @@ export function claimStoryQuestReward(questId: string): {
   }
   if (!status.complete) return { success: false, error: 'Story objective is not complete yet.' };
 
-  const reward = buildQuestRewardSummary(quest.rewards);
+  const reward = buildQuestRewardSummary(quest.rewards, currentUser.stats.level, 'campaign');
   const spellUnlock = applySpellUnlocks(currentUser, reward.spellIds);
   if (reward.equipment.length > 0 && !canAcceptGearReward(currentUser, reward.equipment.length)) {
     return { success: false, error: 'Gear storage is full. Sell or equip gear before claiming this reward.' };
@@ -4780,6 +4886,56 @@ export function buyShopOffer(offerId: string, townName: string): { success: bool
   return { success: true };
 }
 
+export function recruitTownWeeklyOffer(
+  offerId: string,
+  townName: string,
+  now = Date.now(),
+): { success: boolean; minion?: MinionStack; error?: string } {
+  const currentUser = getCurrentUser();
+  if (!currentUser) return { success: false, error: 'Not logged in.' };
+
+  const offer = getTownRecruitmentOffers(townName, currentUser, now)
+    .find(candidate => candidate.offerId === offerId);
+  if (!offer) return { success: false, error: 'That weekly recruit is not available here.' };
+  if (offer.claimed) return { success: false, error: 'This weekly recruit was already signed.' };
+  if (!offer.unlocked) return { success: false, error: `Requires level ${offer.minLevel}.` };
+  if (currentUser.gold < offer.price) return { success: false, error: 'Not enough gold.' };
+
+  const template = getMinionTemplate(offer.templateId);
+  if (!template || !isPlayerRecruitableMinionTemplate(template.templateId)) {
+    return { success: false, error: 'Recruit template is unavailable.' };
+  }
+
+  const minion = createMinionStack(template, 1);
+  const claimedAt = now;
+  const claim: TownRecruitmentClaim = {
+    offerId: offer.offerId,
+    weekKey: offer.weekKey,
+    townName: offer.townName,
+    templateId: offer.templateId,
+    claimedAt,
+  };
+  updateCurrentUser({
+    gold: currentUser.gold - offer.price,
+    minions: mergeMinionStacks(currentUser.minions || [], [minion]),
+    townRecruitmentClaims: normalizeTownRecruitmentClaims([
+      claim,
+      ...(currentUser.townRecruitmentClaims || []),
+    ]),
+    activityLog: pushActivityEntry(currentUser.activityLog, {
+      id: `activity-weekly-recruit-${offer.offerId}-${claimedAt}`,
+      type: 'shop',
+      title: `Recruited ${template.name}`,
+      source: `${townName} Weekly Muster`,
+      completedAt: claimedAt,
+      rewards: { minions: [minion] },
+      description: `${MINION_TIER_LABELS[template.tier]} weekly recruitment contract claimed.`,
+    }),
+  });
+
+  return { success: true, minion };
+}
+
 export function register(username: string, password: string): { success: boolean; error?: string } {
   if (!username || !password) {
     return { success: false, error: 'Username and password are required' };
@@ -4833,6 +4989,7 @@ export function register(username: string, password: string): { success: boolean
     mpDailyDungeon: normalizeMpDailyDungeonState(),
     pvpRating: createDefaultPvpRatingState(),
     multiplayerEngagement: normalizeMultiplayerEngagementState(null, username),
+    townRecruitmentClaims: [],
     knownSpellIds: DEFAULT_KNOWN_SPELL_IDS,
     equippedSpellIds: DEFAULT_EQUIPPED_SPELL_IDS,
     spellUnlockVersion: 1,
@@ -5043,6 +5200,7 @@ export function getCurrentUser(): User | null {
     parsedUser.multiplayerEngagement,
     parsedUser.username,
   );
+  parsedUser.townRecruitmentClaims = normalizeTownRecruitmentClaims(parsedUser.townRecruitmentClaims);
 
   parsedUser.dailyQuests = normalizeDailyQuests(parsedUser.dailyQuests);
   
@@ -5116,18 +5274,42 @@ export interface MultiplayerEngagementView {
   claimableCount: number;
 }
 
+function scaleEngagementReward<T extends { rewardGold: number; rewardExp: number }>(
+  reward: T,
+  playerLevel: number,
+  source: MultiplayerRewardSource,
+): T {
+  const scaled = scaleMultiplayerRewards(
+    { gold: reward.rewardGold, exp: reward.rewardExp },
+    playerLevel,
+    source,
+  );
+  return { ...reward, rewardGold: scaled.gold, rewardExp: scaled.exp };
+}
+
 export function getMultiplayerEngagementView(
   user: User | null = getCurrentUser(),
   now = Date.now(),
 ): MultiplayerEngagementView | null {
   if (!user) return null;
   const state = normalizeMultiplayerEngagementState(user.multiplayerEngagement, user.username, now);
-  const regionalThreat = getMultiplayerRegionalThreat(state, user.username, user.stats.level, now);
-  const firstCompletionBonuses = getMultiplayerFirstCompletionBonuses(state, user.username, user.stats.level, now);
+  const playerLevel = user.stats.level;
+  const regionalThreat = scaleEngagementReward(
+    getMultiplayerRegionalThreat(state, user.username, playerLevel, now),
+    playerLevel,
+    'pve',
+  );
+  const firstCompletionBonuses = getMultiplayerFirstCompletionBonuses(state, user.username, playerLevel, now)
+    .map(bonus => scaleEngagementReward(bonus, playerLevel, 'pve'));
   return {
     state,
-    dailyContracts: getMultiplayerDailyContracts(state, user.username, now),
-    weeklyOath: getMultiplayerWeeklyOath(state, user.username, now),
+    dailyContracts: getMultiplayerDailyContracts(state, user.username, now)
+      .map(contract => scaleEngagementReward(contract, playerLevel, 'contract')),
+    weeklyOath: scaleEngagementReward(
+      getMultiplayerWeeklyOath(state, user.username, now, playerLevel),
+      playerLevel,
+      'contract',
+    ),
     returnTrack: getMultiplayerReturnTrack(state, user.username, now),
     regionalThreat,
     firstCompletionBonuses,
@@ -5265,9 +5447,14 @@ export function claimCurrentMultiplayerDailyContract(
   );
   if (!result.success || !result.contract) return { success: false, error: result.error };
 
+  const scaledReward = scaleMultiplayerRewards(
+    { gold: result.contract.rewardGold, exp: result.contract.rewardExp },
+    currentUser.stats.level,
+    'contract',
+  );
   const rewards: RewardSummary = {
-    gold: result.contract.rewardGold,
-    exp: result.contract.rewardExp,
+    gold: scaledReward.gold,
+    exp: scaledReward.exp,
   };
   const engagementUpdates = recordUserMultiplayerEvent(
     currentUser,
@@ -5283,8 +5470,8 @@ export function claimCurrentMultiplayerDailyContract(
   );
   updateCurrentUser({
     ...engagementUpdates,
-    gold: currentUser.gold + result.contract.rewardGold,
-    exp: currentUser.exp + result.contract.rewardExp,
+    gold: currentUser.gold + scaledReward.gold,
+    exp: currentUser.exp + scaledReward.exp,
     activityLog: pushActivityEntry(currentUser.activityLog, {
       id: `activity-daily-contract-${result.contract.id}-${now}`,
       type: 'quest',
@@ -5314,14 +5501,19 @@ export function claimCurrentMultiplayerFirstCompletionBonus(
   );
   if (!result.success) return { success: false, error: result.error };
 
+  const scaledReward = scaleMultiplayerRewards(
+    { gold: result.bonus.rewardGold, exp: result.bonus.rewardExp },
+    currentUser.stats.level,
+    'pve',
+  );
   const rewards: RewardSummary = {
-    gold: result.bonus.rewardGold,
-    exp: result.bonus.rewardExp,
+    gold: scaledReward.gold,
+    exp: scaledReward.exp,
   };
   updateCurrentUser({
     multiplayerEngagement: result.state,
-    gold: currentUser.gold + result.bonus.rewardGold,
-    exp: currentUser.exp + result.bonus.rewardExp,
+    gold: currentUser.gold + scaledReward.gold,
+    exp: currentUser.exp + scaledReward.exp,
     activityLog: pushActivityEntry(currentUser.activityLog, {
       id: `activity-first-completion-${result.bonus.id}-${now}`,
       type: 'quest',
@@ -5345,12 +5537,26 @@ export function claimCurrentMultiplayerWeeklyOath(
     currentUser.multiplayerEngagement,
     currentUser.username,
     now,
+    currentUser.stats.level,
   );
   if (!result.success) return { success: false, error: result.error };
 
+  const scaledReward = scaleMultiplayerRewards(
+    { gold: result.oath.rewardGold, exp: result.oath.rewardExp },
+    currentUser.stats.level,
+    'contract',
+  );
+  const weeklyRecruit = generateMinionDrop(
+    0,
+    result.oath.rewardMinionTier,
+    1,
+    currentUser.stats.level || 1,
+  );
+  const recruitRewards = weeklyRecruit ? [weeklyRecruit] : [];
   const rewards: RewardSummary = {
-    gold: result.oath.rewardGold,
-    exp: result.oath.rewardExp,
+    gold: scaledReward.gold,
+    exp: scaledReward.exp,
+    minions: recruitRewards.length > 0 ? recruitRewards : undefined,
   };
   const engagementUpdates = recordUserMultiplayerEvent(
     currentUser,
@@ -5366,8 +5572,9 @@ export function claimCurrentMultiplayerWeeklyOath(
   );
   updateCurrentUser({
     ...engagementUpdates,
-    gold: currentUser.gold + result.oath.rewardGold,
-    exp: currentUser.exp + result.oath.rewardExp,
+    gold: currentUser.gold + scaledReward.gold,
+    exp: currentUser.exp + scaledReward.exp,
+    minions: mergeMinionStacks(currentUser.minions || [], recruitRewards),
     activityLog: pushActivityEntry(currentUser.activityLog, {
       id: `activity-weekly-oath-${result.oath.id}-${now}`,
       type: 'quest',
@@ -5395,6 +5602,12 @@ export function claimCurrentMultiplayerRegionalThreat(
   );
   if (!result.success) return { success: false, error: result.error };
 
+  const scaledReward = scaleMultiplayerRewards(
+    { gold: result.threat.rewardGold, exp: result.threat.rewardExp },
+    currentUser.stats.level,
+    'pve',
+  );
+
   const gemResult = addInventoryItemsWithLimit(
     currentUser.inventory || [],
     result.threat.rewardRareGems > 0 ? [makeInventoryItem('rare-gem', result.threat.rewardRareGems)] : [],
@@ -5404,8 +5617,8 @@ export function claimCurrentMultiplayerRegionalThreat(
     .filter(item => item.id === 'rare-gem')
     .reduce((total, item) => total + item.quantity, 0);
   const rewards: RewardSummary = {
-    gold: result.threat.rewardGold,
-    exp: result.threat.rewardExp,
+    gold: scaledReward.gold,
+    exp: scaledReward.exp,
     rareGems: acceptedRareGems || undefined,
   };
   const engagementUpdates = recordUserMultiplayerEvent(
@@ -5422,8 +5635,8 @@ export function claimCurrentMultiplayerRegionalThreat(
   );
   updateCurrentUser({
     ...engagementUpdates,
-    gold: currentUser.gold + result.threat.rewardGold,
-    exp: currentUser.exp + result.threat.rewardExp,
+    gold: currentUser.gold + scaledReward.gold,
+    exp: currentUser.exp + scaledReward.exp,
     inventory: gemResult.inventory,
     activityLog: pushActivityEntry(currentUser.activityLog, {
       id: `activity-regional-threat-${result.threat.instanceId}-${now}`,
@@ -5860,7 +6073,7 @@ function getJobRewardProfile(poiType?: string): JobRewardProfile {
   return JOB_REWARD_PROFILES[poiType || ''] || DEFAULT_JOB_REWARD_PROFILE;
 }
 
-export function getJobRewardPreview(jobIndex: number, poiType?: string): JobRewardPreview {
+export function getJobRewardPreview(jobIndex: number, poiType?: string, playerLevel = 1): JobRewardPreview {
   const safeIndex = Math.max(0, Math.min(JOB_DURATIONS.length - 1, jobIndex));
   const profile = getJobRewardProfile(poiType);
   const itemId = profile.itemIds?.[safeIndex] || null;
@@ -5869,9 +6082,14 @@ export function getJobRewardPreview(jobIndex: number, poiType?: string): JobRewa
   const rareGems = safeIndex === JOB_DURATIONS.length - 1 ? profile.rareGems?.[safeIndex] || 0 : 0;
   const healthRestore = profile.healthRestore?.[safeIndex] || 0;
 
-  return {
+  const scaledReward = scaleMultiplayerRewards({
     gold: profile.gold[safeIndex] > 0 ? Math.max(1, Math.round(profile.gold[safeIndex] * JOB_REWARD_MULTIPLIER)) : 0,
     exp: profile.exp[safeIndex] > 0 ? Math.max(1, Math.round(profile.exp[safeIndex] * JOB_REWARD_MULTIPLIER)) : 0,
+  }, playerLevel, 'job');
+
+  return {
+    gold: scaledReward.gold,
+    exp: scaledReward.exp,
     rareGems: rareGems > 0 ? rareGems : undefined,
     healthRestore: healthRestore > 0 ? healthRestore : undefined,
     items: itemId ? [makeInventoryItem(itemId)] : undefined,
@@ -5891,7 +6109,7 @@ export function startJob(poiId: string, poiName: string, jobName: string, jobInd
   }
 
   const workDuration = JOB_DURATIONS[jobIndex] || JOB_DURATIONS[0];
-  const rewardPreview = getJobRewardPreview(jobIndex, poiType);
+  const rewardPreview = getJobRewardPreview(jobIndex, poiType, currentUser.stats.level);
   const levelRequirement = rewardPreview.levelRequirement || 1;
   if ((currentUser.stats.level || 1) < levelRequirement) {
     return { success: false, error: `Requires level ${levelRequirement}.` };
@@ -6958,38 +7176,48 @@ function applyAutomaticRandomRunUpgrade(stats: RandomRunPermanentStats, newLevel
 function normalizeDailyRunState(state?: Partial<DailyRunState> | null): DailyRunState {
   const runLevel = getRandomRunEffectiveLevel(toFiniteNumber(state?.runLevel, 1));
   const runExp = Math.max(0, Math.floor(toFiniteNumber(state?.runExp, 0)));
+  const history = (state?.history || []).slice(0, 12).map(entry => ({
+    ...entry,
+    wins: Math.max(0, Math.floor(toFiniteNumber(entry.wins, 0))),
+    targetBattles: Math.max(1, Math.floor(toFiniteNumber(entry.targetBattles, 1))),
+    unitsStanding: Math.max(0, Math.floor(toFiniteNumber(entry.unitsStanding, 0))),
+    gold: Math.max(0, Math.floor(toFiniteNumber(entry.gold, 0))),
+    exp: Math.max(0, Math.floor(toFiniteNumber(entry.exp, 0))),
+    score: Math.max(0, Math.floor(toFiniteNumber(entry.score, 0))),
+    durationMs: Math.max(0, Math.floor(toFiniteNumber(entry.durationMs, 0))),
+    bossesDefeated: (entry.bossesDefeated || []).slice(0, 6),
+    flawlessBossNames: (entry.flawlessBossNames || []).filter(Boolean).slice(0, 6),
+    fastBossNames: (entry.fastBossNames || []).filter(Boolean).slice(0, 6),
+    routeSummary: (entry.routeSummary || []).slice(0, 24),
+    shopBuys: (entry.shopBuys || []).slice(0, 24),
+    shopGoldSpent: Math.max(0, Math.floor(toFiniteNumber(entry.shopGoldSpent, 0))),
+    omens: (entry.omens || []).slice(0, 24),
+    unlockedSpellNames: (entry.unlockedSpellNames || []).slice(0, 12),
+    unitTemplateIds: (entry.unitTemplateIds || []).filter(Boolean).slice(0, 24),
+    unitClassIds: (entry.unitClassIds || []).filter(Boolean).slice(0, 8) as MinionClass[],
+    tierThreeUnitNames: (entry.tierThreeUnitNames || []).filter(Boolean).slice(0, 12),
+    runLevelAfter: Math.max(1, Math.floor(toFiniteNumber(entry.runLevelAfter, runLevel))),
+    streakAfter: Math.max(0, Math.floor(toFiniteNumber(entry.streakAfter, 0))),
+  }));
 
-  return {
+  const normalized: DailyRunState = {
     lastCompletedDate: state?.lastCompletedDate,
     streak: Math.max(0, Math.floor(toFiniteNumber(state?.streak, 0))),
     bestWins: Math.max(0, Math.floor(toFiniteNumber(state?.bestWins, 0))),
     completions: Math.max(0, Math.floor(toFiniteNumber(state?.completions, 0))),
-    history: (state?.history || []).slice(0, 12).map(entry => ({
-      ...entry,
-      wins: Math.max(0, Math.floor(toFiniteNumber(entry.wins, 0))),
-      targetBattles: Math.max(1, Math.floor(toFiniteNumber(entry.targetBattles, 1))),
-      unitsStanding: Math.max(0, Math.floor(toFiniteNumber(entry.unitsStanding, 0))),
-      gold: Math.max(0, Math.floor(toFiniteNumber(entry.gold, 0))),
-      exp: Math.max(0, Math.floor(toFiniteNumber(entry.exp, 0))),
-      score: Math.max(0, Math.floor(toFiniteNumber(entry.score, 0))),
-      durationMs: Math.max(0, Math.floor(toFiniteNumber(entry.durationMs, 0))),
-      bossesDefeated: (entry.bossesDefeated || []).slice(0, 6),
-      routeSummary: (entry.routeSummary || []).slice(0, 24),
-      shopBuys: (entry.shopBuys || []).slice(0, 24),
-      omens: (entry.omens || []).slice(0, 24),
-      unlockedSpellNames: (entry.unlockedSpellNames || []).slice(0, 12),
-      unitTemplateIds: (entry.unitTemplateIds || []).filter(Boolean).slice(0, 24),
-      unitClassIds: (entry.unitClassIds || []).filter(Boolean).slice(0, 8) as MinionClass[],
-      tierThreeUnitNames: (entry.tierThreeUnitNames || []).filter(Boolean).slice(0, 12),
-      runLevelAfter: Math.max(1, Math.floor(toFiniteNumber(entry.runLevelAfter, runLevel))),
-      streakAfter: Math.max(0, Math.floor(toFiniteNumber(entry.streakAfter, 0))),
-    })),
+    history,
     runLevel,
     runExp,
     runUpgradePoints: Math.max(0, Math.floor(toFiniteNumber(state?.runUpgradePoints, 0))),
     permanentStats: capRandomRunPermanentStats(normalizeRandomRunPermanentStats(state?.permanentStats)),
     claimedMilestoneIds: Array.from(new Set((state?.claimedMilestoneIds || []).filter(Boolean))).slice(0, 64),
+    milestoneUnlocks: (state?.milestoneUnlocks || []).filter(record => (
+      Boolean(record?.id) && Number.isFinite(record?.unlockedAt)
+    )),
   };
+
+  const migrationTimestamp = history[history.length - 1]?.completedAt || 1;
+  return syncRunMilestoneUnlockRecords(normalized, migrationTimestamp);
 }
 
 export function getDailyRunState(user: Pick<User, 'dailyRun'> | null | undefined = getCurrentUser()): DailyRunState {
@@ -7154,6 +7382,161 @@ export function recordPvpDuelOutcome(
   }
 
   return { success: true, delta };
+}
+
+export interface CoopRaidRewardGrant {
+  gold: number;
+  exp: number;
+  rareGems: number;
+  equipmentRarity: EquipmentRarity;
+}
+
+export interface CoopRaidRewardResult {
+  success: boolean;
+  duplicate?: boolean;
+  equipmentName?: string;
+  equipmentStored?: boolean;
+  error?: string;
+}
+
+function applyCommanderExperienceReward(user: User, gainedExp: number): Pick<User, 'exp' | 'stats'> {
+  const stats = { ...user.stats };
+  let exp = Math.max(0, user.exp + Math.max(0, Math.floor(gainedExp)));
+
+  while (stats.level < MAX_PLAYER_LEVEL) {
+    const needed = getExpNeeded(stats.level);
+    if (exp < needed) break;
+    exp -= needed;
+    stats.level += 1;
+    stats.unallocatedPoints += 4;
+  }
+
+  return { exp, stats };
+}
+
+export function recordCoopRaidOutcome(
+  username: string,
+  raidId: string,
+  bossName: string,
+  reward: CoopRaidRewardGrant,
+  now = Date.now(),
+): CoopRaidRewardResult {
+  const usernameKey = normalizeUsername(username);
+  const normalizedRaidId = raidId.trim().slice(0, 180);
+  if (!usernameKey || !normalizedRaidId) return { success: false, error: 'Raid reward identity is invalid.' };
+
+  const users = getUsers();
+  const userIndex = users.findIndex(user => normalizeUsername(user.username) === usernameKey);
+  if (userIndex === -1) return { success: false, error: 'Raid participant profile was not found.' };
+  const user = users[userIndex];
+  const receiptId = `coop-completed:${normalizedRaidId}:${usernameKey}`;
+  const engagement = normalizeMultiplayerEngagementState(
+    user.multiplayerEngagement,
+    user.username,
+    now,
+  );
+  if (engagement.events.some(event => event.id === receiptId)) {
+    return { success: true, duplicate: true };
+  }
+
+  const equipment = generateEquipment(60 * 60 * 1000, reward.equipmentRarity);
+  if (equipment) equipment.id = `raid-gear-${normalizedRaidId}-${usernameKey}`;
+  const equipmentResult = addEquipmentWithLimit(
+    user.equipment || [],
+    user.equippedSlots || {},
+    equipment ? [equipment] : [],
+    getInventorySlotCapacity(user),
+  );
+  const gemResult = addInventoryItemsWithLimit(
+    user.inventory || [],
+    [makeInventoryItem('rare-gem', Math.max(0, Math.floor(reward.rareGems)))],
+    getInventorySlotCapacity(user),
+  );
+  const experience = applyCommanderExperienceReward(user, reward.exp);
+
+  let engagementUser = user;
+  const engagementEvents: MultiplayerEngagementEventInput[] = [
+    {
+      id: receiptId,
+      kind: 'coop-completed',
+      occurredAt: now,
+      contextId: normalizedRaidId,
+      targetId: bossName,
+    },
+    {
+      id: `dungeon-cleared:${normalizedRaidId}:${usernameKey}`,
+      kind: 'dungeon-cleared',
+      occurredAt: now,
+      contextId: normalizedRaidId,
+      targetId: bossName,
+    },
+    {
+      id: `battle-result-claimed:${normalizedRaidId}:${usernameKey}`,
+      kind: 'battle-result-claimed',
+      occurredAt: now,
+      contextId: 'coop-raid',
+      targetId: bossName,
+    },
+  ];
+  engagementEvents.forEach(event => {
+    const updates = recordUserMultiplayerEvent(
+      engagementUser,
+      event,
+      now,
+      engagementUser.multiplayerEngagement,
+    );
+    engagementUser = { ...engagementUser, ...updates };
+  });
+
+  const acceptedEquipment = equipmentResult.acceptedEquipment;
+  const nextUser: User = {
+    ...user,
+    ...experience,
+    gold: user.gold + Math.max(0, Math.floor(reward.gold)),
+    inventory: gemResult.inventory,
+    equipment: equipmentResult.equipment,
+    multiplayerEngagement: engagementUser.multiplayerEngagement,
+    multiplayerChronicle: engagementUser.multiplayerChronicle,
+    activityLog: pushActivityEntry(user.activityLog, {
+      id: `activity-coop-raid-${normalizedRaidId}-${usernameKey}`,
+      type: 'battle',
+      title: `Raid Victory: ${bossName}`,
+      source: 'Co-op Incursion',
+      completedAt: now,
+      battleLevel: Math.max(1, user.stats.level),
+      description: equipmentResult.rejectedEquipment.length > 0
+        ? 'Raid cleared. Gear storage was full, so the chest item was not stored.'
+        : 'Raid cleared with a second commander.',
+      rewards: {
+        gold: Math.max(0, Math.floor(reward.gold)),
+        exp: Math.max(0, Math.floor(reward.exp)),
+        rareGems: Math.max(0, Math.floor(reward.rareGems)),
+        equipment: acceptedEquipment.length > 0 ? acceptedEquipment : undefined,
+      },
+    }),
+  };
+  users[userIndex] = nextUser;
+  saveUsers(users);
+
+  const current = readGameJson<User | null>(CURRENT_USER_KEY, null);
+  if (current && normalizeUsername(current.username) === usernameKey) {
+    updateCurrentUser({
+      exp: nextUser.exp,
+      stats: nextUser.stats,
+      gold: nextUser.gold,
+      inventory: nextUser.inventory,
+      equipment: nextUser.equipment,
+      activityLog: nextUser.activityLog,
+      multiplayerEngagement: nextUser.multiplayerEngagement,
+      multiplayerChronicle: nextUser.multiplayerChronicle,
+    });
+  }
+
+  return {
+    success: true,
+    equipmentName: acceptedEquipment[0]?.name,
+    equipmentStored: acceptedEquipment.length > 0,
+  };
 }
 
 function getFieldedMinionPowerScore(user: User): number {
@@ -7335,7 +7718,7 @@ export function recordDailyRunCompletionState(
     streakAfter: nextStreak,
   };
 
-  return {
+  return syncRunMilestoneUnlockRecords({
     lastCompletedDate: completedDate,
     streak: nextStreak,
     bestWins: Math.max(state.bestWins, report.wins),
@@ -7346,7 +7729,8 @@ export function recordDailyRunCompletionState(
     runUpgradePoints: Math.max(0, state.runUpgradePoints + levelUps),
     permanentStats,
     claimedMilestoneIds: state.claimedMilestoneIds || [],
-  };
+    milestoneUnlocks: state.milestoneUnlocks || [],
+  }, report.completedAt);
 }
 
 export type RandomRunUpgradeStat = keyof RandomRunPermanentStats;
@@ -7437,10 +7821,10 @@ export function claimRunMilestoneReward(
     return { ok: false, message: 'Milestone reward already claimed.', dailyRun: state };
   }
 
-  const dailyRun = applyRandomRunExperienceGain({
+  const dailyRun = syncRunMilestoneUnlockRecords(applyRandomRunExperienceGain({
     ...state,
     claimedMilestoneIds: [...claimed, milestoneId],
-  }, rewardExp);
+  }, rewardExp), Date.now());
 
   return {
     ok: true,
@@ -7467,20 +7851,16 @@ function initializeDailyQuests(now = Date.now()): DailyQuestState {
         rewards: {
           guaranteedItem: 'decent',
           legendaryChance: 0.01,
-          minionChance: {
-            tier: 'tier1',
-            chance: 0.03,
-          }
         }
       },
       {
         id: 'daily-2',
         name: 'Vows of the Road',
-        description: 'Complete 5 longer jobs while serving the old roads.',
+        description: 'Complete 2 jobs lasting at least 10 minutes.',
         requirement: {
           type: 'complete_timed_jobs',
-          count: 5,
-          minDuration: 5 * 60 * 1000 // 5 minute work tier
+          count: 2,
+          minDuration: 10 * 60 * 1000,
         },
         progress: 0,
         claimed: false,
@@ -7491,30 +7871,23 @@ function initializeDailyQuests(now = Date.now()): DailyQuestState {
             chance: 0.10
           },
           legendaryChance: 0.01,
-          minionChance: {
-            tier: 'tier2',
-            chance: 0.05,
-          }
         }
       },
       {
         id: 'daily-3',
         name: 'Oath of the War Commander',
-        description: 'Complete 10 longer jobs to prove your command.',
+        description: 'Complete 2 jobs lasting at least 30 minutes to earn a Tier I recruit.',
         requirement: {
           type: 'complete_timed_jobs',
-          count: 10,
-          minDuration: 5 * 60 * 1000 // 5 minute work tier
+          count: 2,
+          minDuration: 30 * 60 * 1000,
         },
         progress: 0,
         claimed: false,
         rewards: {
           guaranteedItem: 'epic',
           legendaryChance: 0.01,
-          minionChance: {
-            tier: 'tier3',
-            chance: 0.08,
-          }
+          guaranteedMinionTier: 'tier1',
         }
       },
       {
@@ -7686,11 +8059,21 @@ export function claimQuestReward(questId: string): { success: boolean; rewards?:
       }
     }
 
-    if (quest.rewards.minionChance && Math.random() < quest.rewards.minionChance.chance) {
+    if (quest.rewards.guaranteedMinionTier) {
+      const minion = generateMinionDrop(
+        0,
+        quest.rewards.guaranteedMinionTier,
+        1,
+        currentUser.stats.level || 1,
+      );
+
+      if (minion) rewardMinions.push(minion);
+    } else if (quest.rewards.minionChance && Math.random() < quest.rewards.minionChance.chance) {
       const minion = generateMinionDrop(
         0,
         quest.rewards.minionChance.tier,
-        quest.rewards.minionChance.quantity || 1
+        quest.rewards.minionChance.quantity || 1,
+        currentUser.stats.level || 1,
       );
 
       if (minion) {

@@ -41,6 +41,39 @@ export interface POI {
   jobs: string[];
 }
 
+export function getPoiFootprint(poi: Pick<POI, 'type'>): { width: number; height: number } {
+  if (poi.type === POIType.TOWN) return { width: 8, height: 8 };
+  if (poi.type === POIType.CAMPFIRE) return { width: 2, height: 2 };
+  return { width: 4, height: 4 };
+}
+
+export function findPoiAtTile<T extends Pick<POI, 'id' | 'x' | 'y' | 'type'>>(
+  pois: readonly T[],
+  tileX: number,
+  tileY: number
+): T | undefined {
+  return pois
+    .map(poi => {
+      const { width, height } = getPoiFootprint(poi);
+      const inside = tileX >= poi.x && tileX < poi.x + width && tileY >= poi.y && tileY < poi.y + height;
+      const centerX = poi.x + width / 2;
+      const centerY = poi.y + height / 2;
+
+      return {
+        poi,
+        inside,
+        distance: Math.hypot(tileX + 0.5 - centerX, tileY + 0.5 - centerY),
+        area: width * height,
+      };
+    })
+    .filter(candidate => candidate.inside)
+    .sort((left, right) => (
+      left.distance - right.distance
+      || left.area - right.area
+      || left.poi.id.localeCompare(right.poi.id)
+    ))[0]?.poi;
+}
+
 // Map configuration
 export const MAP_CONFIG = {
   width: 84,

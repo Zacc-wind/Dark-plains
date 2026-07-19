@@ -1,6 +1,7 @@
 import type { StoryDialogSequence } from './storyDialogue';
 
 export type MultiplayerUnlockDialogueId =
+  | 'unlock-level-2-forge'
   | 'unlock-level-3-pvp'
   | 'unlock-level-4-trading'
   | 'unlock-level-5-company';
@@ -14,6 +15,24 @@ export interface MultiplayerUnlockDialogueDefinition {
 }
 
 export const MULTIPLAYER_UNLOCK_DIALOGUES: MultiplayerUnlockDialogueDefinition[] = [
+  {
+    id: 'unlock-level-2-forge',
+    minLevel: 2,
+    title: 'The Tempered Seal',
+    featureIds: ['gear-upgrades'],
+    sequence: {
+      id: 'unlock-level-2-forge',
+      kicker: 'Command Rank II - Forge License',
+      npcName: 'Master Ilyra',
+      npcTitle: 'Harborview Forgekeeper',
+      npcModelNumber: 3,
+      lines: [
+        { speaker: 'npc', text: 'Your rank now permits a forgekeeper to cut sockets into commander gear. Each socket adds a permanent combat bonus to that item.' },
+        { speaker: 'player', text: 'What does the work cost?' },
+        { speaker: 'npc', text: 'New sockets consume gold and rare gems. Reinforcing a socket costs gold, shows its success chance before you commit, and a failed attempt can lower its current level.' },
+      ],
+    },
+  },
   {
     id: 'unlock-level-3-pvp',
     minLevel: 3,

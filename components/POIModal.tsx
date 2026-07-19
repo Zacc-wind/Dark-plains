@@ -164,7 +164,7 @@ export default function POIModal({ poi, onClose, onSelectJob, onTravel }: POIMod
           <div className="poi-site-body-shade" aria-hidden="true" />
           <div className="poi-site-job-grid">
           {poi.jobs.map((job, index) => {
-            const reward = getJobRewardPreview(index, poi.type);
+            const reward = getJobRewardPreview(index, poi.type, user?.stats.level || 1);
             const levelLocked = Boolean(user && (user.stats.level || 1) < (reward.levelRequirement || 1));
             const rewardChips = buildJobRewardChips(reward);
 

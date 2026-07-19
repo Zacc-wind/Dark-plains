@@ -242,7 +242,7 @@
 - [x] Add boss-specific route modifiers so each boss changes one or two road rules before the fight.
 - [x] Add more late-run enemy formations before increasing run length or level cap.
 - [x] Remove run-level per-stat caps from permanent run upgrades so players can specialize freely.
-- [ ] Generate a unique `public/assets/spells/thorn-ward.png` or keep the current Warding Prayer fallback intentionally.
+- [x] Keep the current Warding Prayer icon fallback for Thorn Ward intentionally until unique spell art is produced.
 - [ ] Raise the random-run cap beyond 15 once there are enough bosses, enemies, run rewards, and late-run events to support it.
 
 ## Phase 10: PVP And Social Map
@@ -265,10 +265,10 @@
 - [x] Add cinematic incoming trade popup with requester identity, accept/decline, timeout, sound, and handoff into the validated local trade session.
 - [x] Add compact party HUD map strip with member status, pending invites, and party chat shortcut.
 - [x] Add a party details popover from the map strip with promote, leave, invite, kick, and party-chat actions.
-- [ ] Implement real player-vs-player duel sessions with both sides controlled by humans and opponent commander names shown in combat.
+- [x] Implement real player-vs-player duel sessions with both sides controlled by humans and opponent commander names shown in combat.
 - [ ] Implement cooperative dungeon sessions for parties: up to 4 commanders, shared 8-unit field cap, owner-based turns, longer routes, hard roads, and multiple bosses.
-- [ ] Add `ownerUsername` / team ownership metadata to combat units so players can only control their own commander and units.
-- [ ] Extend database plan for challenges, trades, duel sessions, co-op dungeon sessions, party membership, chat, and action validation.
+- [x] Add `ownerUsername` / team ownership metadata to combat units so players can only control their own commander and units.
+- [x] Extend the database plan and migration chain for challenges, trades, duel sessions, co-op dungeon sessions, party membership, chat, and action receipts.
 
 ## Phase 11: Browser Game Systems To Compare Later
 - [x] Compare against The West:
@@ -296,10 +296,10 @@
 - [x] Draft the live database and deployment plan.
 - [x] Add a storage adapter boundary so gameplay systems stop calling `localStorage` directly.
 - [x] Add first Next.js API route contracts for player state, leaderboards, reports, daily runs, and PVP challenges.
-- [ ] Extend database schema plan for spell loadouts, gear socket bonuses, friends, parties, and chat.
+- [x] Extend the database schema plan for spell loadouts, gear socket bonuses, friends, parties, and chat.
 - [ ] Wire API routes to managed auth and database-backed state.
 - [ ] Move accounts from prototype local passwords to managed auth.
-- [ ] Create Supabase Postgres tables, migrations, Row Level Security, and leaderboard views.
+- [ ] Apply the checked-in Supabase Postgres migrations, RLS policies, and leaderboard views to staging and validate them with two authenticated accounts.
 - [ ] Move editable content tables into the database after mechanics stabilize.
 
 ## Phase 12: Dark Gothic UI Polish

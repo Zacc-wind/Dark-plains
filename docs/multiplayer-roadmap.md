@@ -15,7 +15,7 @@ Turn the current shared world-map prototype into a real multiplayer layer withou
 - [x] Challenge, trade, and party flows have in-game request popups and acceptance UX in the local multiplayer prototype. Server-backed synchronization remains deployment work.
 - [x] The Black Pike Ledger Chronicle pilot provides 20 permanent free-track ranks driven by capped, genuine multiplayer action receipts.
 - [x] Player-vs-player combat has a versioned local two-player duel session with captured rosters, formation readiness, ownership-checked actions, timeout passing, and idempotent rating settlement. Database transport remains deployment work.
-- [x] Cooperative combat now has a tested duo battle snapshot: two human owners, five minions each, a 15x9 raid arena, morale turn order, 15-second turns, four full-health boss phases, and protected boss spell damage. Party readiness, formation UI, settlement, and database transport remain.
+- [x] Cooperative raids now have a complete local-authoritative session: PVE launch/resume, two independent formations, readiness, synchronized combat and AI actions, four boss phases, abandon handling, recovery, and duplicate-safe per-player settlement. Database transport remains deployment work.
 - [x] PVE intel exposes two deterministic co-op boss incursions per five-hour cycle without routing them through the solo encounter flow.
 
 ## Phase 1: First-Login Mode Tutorial
@@ -49,7 +49,7 @@ Turn the current shared world-map prototype into a real multiplayer layer withou
 - [x] Add a compact party strip to the main map HUD showing leader, members, pending invites, health/level, and location status.
 - [x] Add a party details popover with promote leader, leave party, invite player, kick member, and party chat shortcut.
 - [ ] Show party members on the world map with a distinct but subtle frame/glow that does not collide with quest/enemy markers.
-- [ ] In dungeons, show party readiness and who has confirmed entry.
+- [x] In duo raids, show party readiness and who has confirmed entry.
 - [x] Add party state validation: max 4 players, one leader, no duplicate invites, no player in two parties.
 
 ## Phase 4: Player Duels
@@ -74,17 +74,18 @@ Turn the current shared world-map prototype into a real multiplayer layer withou
 - [x] Add a dedicated 15x9 raid arena with separate deployment wings and five non-commander field slots per player.
 - [x] Add a four-phase boss contract: full health on every phase transition, escalating attack/defense/magic, refreshed boss abilities, and high raid loot metadata.
 - [x] Add two deterministic raid bosses per five-hour rotation and show them in PVE intel.
-- [ ] Add `CoopRaidSession` state: party id, two members, readiness, formations, shared combat revision, result, and claim receipts.
-- [ ] Build collaborative duo formation; each player places only their own five field units and confirms independently.
-- [ ] Add idempotent raid settlement, per-player loot, disconnect recovery, forfeit/abandon rules, and database transport.
+- [x] Add `CoopRaidSession` state: party id, two members, readiness, formations, shared combat revision, result, and claim receipts.
+- [x] Build collaborative duo formation; each player places only their own five field units and confirms independently.
+- [x] Add local idempotent raid settlement, per-player loot, reload recovery, and forfeit/abandon rules.
+- [ ] Replace local co-op session transport with database subscriptions and server-authoritative action validation.
 - [ ] Add map interaction only after party readiness can prevent the old solo encounter path from opening a raid.
 - [ ] Add the longer `CoopDungeonSession`: party id, members, dungeon level, route nodes, bosses, shared seed, and current chamber.
 - [ ] Dungeon levels scale from 1 to 15, with longer routes as level rises.
 - [ ] Level 1 dungeons should be about 4-10 fights; high-level dungeons can reach around 30 fights with multiple bosses.
 - [ ] Consider four-player veteran dungeons only after the duo raid is reliable; do not make the first session solve both scales.
 - [x] Each player controls only their commander and owned units during combat.
-- [x] Turn order interleaves commanders and units by morale/speed; the combat UI still needs a stronger active-owner banner for co-op.
-- [ ] Show player nickname above each commander on the combat grid.
+- [x] Turn order interleaves commanders and units by morale/speed, with the active command owner named in the turn banner and command rail.
+- [x] Show player nickname above each commander on the combat grid.
 - [ ] Co-op dungeons should have more hard roads, stronger enemy formations, and boss mechanics tuned for multiple commanders.
 
 ## Phase 6B: Multiplayer UI Simplification
@@ -96,17 +97,18 @@ Turn the current shared world-map prototype into a real multiplayer layer withou
 - [x] Show active city and daily orders under the main quest tracker with one direct route to Orders.
 - [x] Sort multiplayer formation and run rosters by tier, class, or name while leaving singleplayer roster behavior unchanged.
 - [x] Add a bottom-right retreat action and confirmation to both singleplayer and multiplayer run maps.
-- [ ] Recompose each town service into a concise service header, primary action, price/reward row, and inventory/result list; remove repeated explanatory paragraphs.
-- [ ] Finish visual QA at 1920x1080, 2560x1440, 3840x2160, and 390x844 after all shell conversions settle.
+- [x] Recompose each town service into a concise service header, primary action, price/reward row, and inventory/result list; remove repeated explanatory paragraphs.
+- [x] Finish visual QA at 1920x1080, 2560x1440, 3840x2160, and 390x844 after all shell conversions settle.
 
 ## Phase 6C: Economy And Recruitment Balance
 - [x] Replace 20-second/1-minute/5-minute/15-minute jobs with 1-minute/10-minute/30-minute/1-hour jobs.
 - [x] Reduce baseline job gold and XP to 30 percent of the previous values; rare gems are available only on the one-hour tier.
 - [x] Move random gear thresholds to 10/30/60 minutes and keep the best rarity rolls on the longest job.
-- [ ] Tune campaign rewards so a normal chapter step grants no more than about 80 percent of the intended level requirement.
-- [ ] Add level-band reward curves for jobs, contracts, PVE, PVP, and co-op so later levels remain useful without trivializing early progression.
-- [ ] Restrict town recruitment to one deterministic weekly Tier I offer in most towns and one or two weekly Tier II specialist markets.
-- [ ] Make daily/weekly objectives and authored achievements the primary reliable unit sources; keep job-board recruitment uncommon.
+- [x] Tune campaign rewards so a normal chapter step grants no more than about 80 percent of the intended level requirement.
+- [x] Add level-band reward curves for jobs, contracts, PVE, PVP, and co-op so later levels remain useful without trivializing early progression.
+- [x] Restrict town recruitment to one deterministic weekly Tier I offer in every town, with weekly Tier II specialist slots in Harborview and Riverside from level 5.
+- [x] Make daily and weekly objectives reliable unit sources and remove rotating unit contracts from the two-hour town stock.
+- [ ] Add authored multiplayer achievement unit rewards; keep random job recruitment uncommon.
 - [x] Cap direct player spell damage against boss commanders at 18 percent of max health, and at 10 percent in four-phase co-op raids.
 
 ## Phase 7: Multiplayer Combat Engine Refactor
@@ -117,9 +119,9 @@ Turn the current shared world-map prototype into a real multiplayer layer withou
 - [x] Add revisioned action synchronization hooks with action receipts so database-backed play can replace local prototype storage later.
 
 ## Phase 8: Database Readiness
-- [ ] Mirror friends, parties, chat, challenges, trades, duel sessions, and co-op dungeon sessions in the database plan.
-- [ ] Add optimistic-lock version fields to trade, duel, and dungeon session tables.
-- [ ] Add RLS rules so players can read only sessions they participate in.
+- [x] Mirror friends, parties, chat, challenges, trades, duel sessions, and co-op dungeon sessions in the database plan and migration `007_multiplayer_sessions.sql`.
+- [x] Add optimistic-lock version fields to trade, duel, and dungeon session tables.
+- [x] Add participant-only RLS reads and reserve multiplayer session writes for trusted server handlers.
 - [ ] Add server-side validation for trade completion and combat actions before deployment.
 
 ## Phase 9: Progression Gates And Unlock Communication
@@ -128,7 +130,7 @@ Turn the current shared world-map prototype into a real multiplayer layer withou
 - [x] Level 2: city contracts, gear upgrades, and the first dungeon preview.
 - [x] Level 3: PVP hub and duel challenges unlock with a short rules conversation backed by the shared gate and API enforcement.
 - [x] Level 4: trading unlocks after inventory and value are explained.
-- [ ] Level 5: party creation and cooperative dungeon readiness unlock with an authored briefing. Party creation is gated; the cooperative dungeon session is not implemented yet.
+- [x] Level 5: party creation and cooperative dungeon readiness unlock with an authored briefing and a guarded two-player raid entry.
 - [ ] Later levels unlock harder regions, additional city services, dungeon tiers, boss rotations, and advanced social objectives.
 - [ ] Enforce every gate on the server as well as the client; a hidden button is not an authorization rule.
 - [x] Show locked features in a compact preview with level requirement and one-sentence value, rather than silently hiding the feature.
@@ -172,6 +174,7 @@ Turn the current shared world-map prototype into a real multiplayer layer withou
 3. [x] Complete the shared request lifecycle and party invite overlay, then add the first regional threat and rested catch-up rules.
 4. [x] Implement the validated local `TradeSession`, request popup, and first-win/first-dungeon-clear bonuses.
 5. [x] Pilot the free Black Pike Ledger Chronicle using only implemented and validated activities.
-6. [ ] Complete multiplayer sessions: local duel ownership/synchronization and the co-op battle foundation are implemented; duo readiness, formation, settlement, and database transport remain.
-7. [ ] Finish the concise town-service pass and verify the new scroll-shell composition at all target viewports.
-8. Produce levels 6-30 as complete five-level content bands, one chapter at a time.
+6. [x] Complete local multiplayer sessions: duel ownership/synchronization and duo raid readiness, formation, combat, recovery, abandon, and settlement are implemented.
+7. [x] Finish the concise town-service pass and verify the new scroll-shell composition at all target viewports.
+8. [ ] Move duel, trade, and co-op session transport and validation to Supabase.
+9. Produce levels 6-30 as complete five-level content bands, one chapter at a time.
