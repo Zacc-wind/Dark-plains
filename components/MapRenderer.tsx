@@ -450,7 +450,7 @@ function isEnemyRevealedOnScreen(
   playerRevealPoint: { x: number; y: number } | null,
   zoom: number
 ): boolean {
-  if (enemy.spawnKind === 'story-boss') return true;
+  if (enemy.spawnKind === 'story-boss' || enemy.spawnKind === 'regional-threat') return true;
   return isScreenPointRevealed(getEnemyScreenCenter(enemy, cameraX, cameraY, tileSize), cursor, playerRevealPoint, zoom);
 }
 
@@ -1720,7 +1720,8 @@ export default function MapRenderer({
       const enemyScreenY = enemy.y * tileSize - cameraY;
       const isWorldBoss = enemy.spawnKind === 'world-boss';
       const isStoryBoss = enemy.spawnKind === 'story-boss';
-      const isBossThreat = isWorldBoss || isStoryBoss;
+      const isRegionalThreat = enemy.spawnKind === 'regional-threat';
+      const isBossThreat = isWorldBoss || isStoryBoss || isRegionalThreat;
       const enemySize = getCharacterSpriteSize(tileSize, effectiveZoom, isBossThreat ? 1.22 : 0.88, isBossThreat ? 36 : 25);
       const enemyImage = AssetLoader.getImage(enemy.artworkPath || getPlayerModelAsset(enemy.modelNumber));
       const enemyRevealed = isEnemyRevealedOnScreen(
@@ -1746,7 +1747,7 @@ export default function MapRenderer({
           y: enemyScreenY + (tileSize - enemySize) / 2 - tileSize * 0.08,
           size: enemySize,
           fallbackColor: '#7f1d1d',
-          topText: isWorldBoss ? 'Boss' : isStoryBoss ? 'Story' : `Lv ${enemy.level}`,
+          topText: isWorldBoss ? 'Boss' : isStoryBoss ? 'Story' : isRegionalThreat ? 'Threat' : `Lv ${enemy.level}`,
           topTextColor: isBossThreat ? '#fca5a5' : '#fecaca',
           label: isBossThreat || hoveredEnemy?.id === enemy.id ? enemy.name : undefined,
           labelColor: '#fecaca',
@@ -2837,6 +2838,11 @@ function EnemyScoutModal({
               {enemy.spawnKind === 'story-boss' && (
                 <div className="ui-rarity-legendary mt-1 inline-flex rounded border px-2 py-1 text-[10px] font-black uppercase">
                   First Banner Capstone
+                </div>
+              )}
+              {enemy.spawnKind === 'regional-threat' && (
+                <div className="ui-rarity-epic mt-1 inline-flex rounded border px-2 py-1 text-[10px] font-black uppercase">
+                  Regional Threat Boss
                 </div>
               )}
               <p className="ui-muted mt-1 text-sm font-bold">

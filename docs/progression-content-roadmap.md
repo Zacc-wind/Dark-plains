@@ -419,7 +419,7 @@ Do not make every achievement a power grant. Players need goals after the gamepl
 1. `MP-C0 Event foundation` - complete: semantic genuine-action events, idempotent receipts, legacy normalization, definition versioning, and tests.
 2. `MP-C1 Progression UI` - first slice complete: Campaign and Progression now unifies Orders, Campaign, and Level Path with six chapter bands and registry-backed unlock previews.
 3. `MP-C2 Levels 1-5` - complete: The First Banner is an eight-step playable chapter with a persistent named threat, level-five Black Pike capstone, genuine post-boss return, rank briefings, chapter presentation, and focused tests.
-4. `MP-C3 Social and return completion`: finish trade/party request overlays, regional threat, first-win/dungeon bonuses, and rested catch-up.
+4. `MP-C3 Social and return completion` - in progress: the shared request record, party invite overlay, first rotating regional threat, and rested job catch-up are complete. A real `TradeSession`, its request acceptance path, and first-win/dungeon bonuses remain.
 5. `MP-C4 Chronicle pilot`: add the internal 20-rank Black Pike Ledger using only implemented, genuine actions.
 6. `MP-C5 Multiplayer sessions`: refactor combat ownership, then ship real duel and first co-op dungeon sessions.
 7. `MP-C6 Levels 6-10`: ship The Drowned Moonwell, Moonbridge contracts, Mother Cindervein, first reputation track, and dungeon tier II.
@@ -456,7 +456,16 @@ The next code batch should be intentionally smaller than this roadmap:
 5. [x] Expose chapter guides and capstones in the Campaign view.
 6. [x] Test spawn rules, exact genuine-action quest completion, legacy tutorial state, briefing order, and chapter ordering.
 
-The next implementation batch is `MP-C3`: complete trade and party request overlays, then add the first regional threat and rested catch-up rules before starting the Chronicle pilot.
+## Third Implementation Batch - In Progress 2026-07-19
+
+1. [x] Add typed social request records with ids, participants, payload, expiry, status, retention, and duplicate-response protection.
+2. [x] Route real party invitations through a page-level cinematic request overlay and preserve state for both local account copies.
+3. [x] Add the first deterministic weekly regional threat with region-specific patrol composition, a named map boss, genuine battle receipts, exact claim rules, and PVE intel.
+4. [x] Add finite returning-player catch-up: at most three +25% job-XP charges, capped at 50 XP per completed job.
+5. [ ] Implement an ownership-validated `TradeSession` before exposing the existing typed trade-request presentation.
+6. [ ] Add moderate first-win and first-dungeon-clear bonuses with duplicate-claim protection.
+
+The next implementation batch is the `MP-C3` continuation: finish the real trade session and the two remaining first-completion bonuses, then start the Chronicle pilot.
 
 ## Definition Of Done For Every Progression Slice
 

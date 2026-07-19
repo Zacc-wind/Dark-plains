@@ -24,6 +24,8 @@ import {
   FIRST_BANNER_BOSS_LEVEL,
   shouldSpawnFirstBannerBoss,
 } from './multiplayerFirstBanner';
+import { getMultiplayerRegionalThreat } from './multiplayerEngagement';
+import { getRegionalThreatBossEnemyId } from './multiplayerRegionalThreat';
 
 export type BattleSide = 'player' | 'enemy';
 export type BattleStatus = 'active' | 'victory' | 'defeat' | 'recruited';
@@ -103,7 +105,7 @@ export interface WorldEnemy {
   spawnedAt?: number;
   expiresAt?: number;
   spawnRegionId?: string;
-  spawnKind?: 'regional' | 'nearby' | 'world-boss' | 'story-boss';
+  spawnKind?: 'regional' | 'nearby' | 'world-boss' | 'story-boss' | 'regional-threat';
   lootMultiplier?: number;
   requiredPlayerLevel?: number;
 }
@@ -1075,6 +1077,80 @@ function getFirstBannerStoryBoss(
   };
 }
 
+function getRegionalThreatBoss(
+  user: User | null,
+  now: number,
+  occupied: Set<string>,
+  defeatedEnemyIds: Set<string>,
+): WorldEnemy | null {
+  if (!user) return null;
+  const threat = getMultiplayerRegionalThreat(
+    user.multiplayerEngagement,
+    user.username,
+    user.stats.level,
+    now,
+  );
+  if (!threat.unlocked || threat.bossDefeated) return null;
+  const enemyId = getRegionalThreatBossEnemyId(threat.weekKey);
+  if (defeatedEnemyIds.has(enemyId)) return null;
+  const profile = getBossProfileById(threat.bossId);
+  const region = ENEMY_SPAWN_REGIONS.find(candidate => candidate.id === threat.regionId);
+  if (!profile || !region) return null;
+
+  const seed = Math.abs(hashText(enemyId));
+  const home = findWorldEnemyHome(region, seed, occupied, 3);
+  const templateIds = Array.from(new Set([
+    ...threat.featuredMinionTemplateIds,
+    ...profile.minionTemplates,
+  ])).slice(0, 4);
+  return {
+    id: enemyId,
+    bossId: profile.id,
+    name: profile.name,
+    subtitle: `${threat.title} commander`,
+    story: `${threat.description} ${profile.story}`,
+    intro: profile.intro,
+    artworkPath: profile.assetPath,
+    x: home.x,
+    y: home.y,
+    homeX: home.x,
+    homeY: home.y,
+    level: clamp(Math.max(threat.minLevel, user.stats.level + 1), threat.minLevel, 15),
+    modelNumber: profile.modelNumber,
+    personality: 'boss',
+    minions: templateIds.map((templateId, index) => makeMinionStack(templateId, `${enemyId}-${index}`, true)),
+    spawnedAt: now,
+    expiresAt: threat.expiresAt,
+    spawnRegionId: threat.regionId,
+    spawnKind: 'regional-threat',
+    lootMultiplier: 1.6,
+    requiredPlayerLevel: threat.minLevel,
+  };
+}
+
+function applyRegionalThreatComposition(user: User | null, enemies: WorldEnemy[], now: number): WorldEnemy[] {
+  if (!user) return enemies;
+  const threat = getMultiplayerRegionalThreat(
+    user.multiplayerEngagement,
+    user.username,
+    user.stats.level,
+    now,
+  );
+  if (!threat.unlocked) return enemies;
+
+  return enemies.map(enemy => {
+    if (enemy.spawnRegionId !== threat.regionId || enemy.bossId || enemy.minions.length === 0) return enemy;
+    const featuredIndex = Math.abs(hashText(`${threat.instanceId}-${enemy.id}`)) % threat.featuredMinionTemplateIds.length;
+    const templateId = threat.featuredMinionTemplateIds[featuredIndex];
+    return {
+      ...enemy,
+      subtitle: `${enemy.subtitle} - Threat patrol`,
+      minions: [makeMinionStack(templateId, `${enemy.id}-threat`, true), ...enemy.minions.slice(1)],
+      lootMultiplier: Math.max(enemy.lootMultiplier || 1, 1.25),
+    };
+  });
+}
+
 function getHourlyWorldBoss(user: User | null, now: number, occupied: Set<string>, defeatedEnemyIds: Set<string>): WorldEnemy | null {
   const { cycle, spawnedAt, expiresAt } = getWorldBossCycle(now);
   const profile = BOSS_PROFILES[cycle % BOSS_PROFILES.length];
@@ -1299,10 +1375,17 @@ export function getNpcEnemiesForUser(user: User | null, now = Date.now()): World
   const snapshotUsername = getWorldEnemySnapshotUsername(user);
   const savedEnemies = readWorldEnemySnapshot(cycle, snapshotUsername, defeatedEnemyIds);
   if (savedEnemies) {
-    const occupied = new Set(savedEnemies.map(enemy => `${enemy.x}:${enemy.y}`));
+    const threatEnemies = applyRegionalThreatComposition(user, savedEnemies, now);
+    const occupied = new Set(threatEnemies.map(enemy => `${enemy.x}:${enemy.y}`));
     const activeBoss = getHourlyWorldBoss(user, now, occupied, defeatedEnemyIds);
     const storyBoss = getFirstBannerStoryBoss(user, now, occupied, defeatedEnemyIds);
-    return [...(storyBoss ? [storyBoss] : []), ...(activeBoss ? [activeBoss] : []), ...savedEnemies];
+    const regionalThreatBoss = getRegionalThreatBoss(user, now, occupied, defeatedEnemyIds);
+    return [
+      ...(storyBoss ? [storyBoss] : []),
+      ...(regionalThreatBoss ? [regionalThreatBoss] : []),
+      ...(activeBoss ? [activeBoss] : []),
+      ...threatEnemies,
+    ];
   }
 
   const homeOccupied = new Set<string>();
@@ -1371,7 +1454,14 @@ export function getNpcEnemiesForUser(user: User | null, now = Date.now()): World
   writeWorldEnemySnapshot(cycle, snapshotUsername, generatedEnemies);
   const activeBoss = getHourlyWorldBoss(user, now, patrolOccupied, defeatedEnemyIds);
   const storyBoss = getFirstBannerStoryBoss(user, now, patrolOccupied, defeatedEnemyIds);
-  return [...(storyBoss ? [storyBoss] : []), ...(activeBoss ? [activeBoss] : []), ...generatedEnemies];
+  const regionalThreatBoss = getRegionalThreatBoss(user, now, patrolOccupied, defeatedEnemyIds);
+  const threatEnemies = applyRegionalThreatComposition(user, generatedEnemies, now);
+  return [
+    ...(storyBoss ? [storyBoss] : []),
+    ...(regionalThreatBoss ? [regionalThreatBoss] : []),
+    ...(activeBoss ? [activeBoss] : []),
+    ...threatEnemies,
+  ];
 }
 
 function makeCommanderUnit(side: BattleSide, name: string, modelNumber: number, stats: CharacterStats, x: number, y: number, assetPath?: string): BattleUnit {

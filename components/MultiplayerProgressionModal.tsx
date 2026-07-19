@@ -31,6 +31,7 @@ interface MultiplayerProgressionModalProps {
   onClose: () => void;
   onPlayerRefresh: () => void;
   onSkipOnboarding: () => { success: boolean; message?: string; error?: string };
+  onOpenPve?: () => void;
 }
 
 const TABS: Array<{ id: MultiplayerProgressionTab; label: string }> = [
@@ -55,6 +56,7 @@ export default function MultiplayerProgressionModal({
   onClose,
   onPlayerRefresh,
   onSkipOnboarding,
+  onOpenPve,
 }: MultiplayerProgressionModalProps) {
   const [activeTab, setActiveTab] = useState<MultiplayerProgressionTab>(initialTab);
   const [replayQuestId, setReplayQuestId] = useState<string | null>(null);
@@ -198,7 +200,7 @@ export default function MultiplayerProgressionModal({
           <div className="no-scrollbar min-h-0 flex-1 overflow-y-auto">
             {activeTab === 'orders' && (
               <div id="multiplayer-progression-orders" role="tabpanel">
-                <MultiplayerOrdersPanel now={now} onPlayerRefresh={onPlayerRefresh} />
+                <MultiplayerOrdersPanel now={now} onPlayerRefresh={onPlayerRefresh} onOpenPve={onOpenPve} />
               </div>
             )}
 

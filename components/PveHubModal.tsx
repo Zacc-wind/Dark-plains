@@ -59,8 +59,8 @@ function PveIntelCard({ entry }: { entry: PveIntelEntry }) {
 
         <div className="pve-hub-card-copy min-w-0 p-4">
           <div className="flex flex-wrap items-center gap-2">
-            <span className={`ui-pill rounded border px-2 py-0.5 text-[10px] font-black uppercase ${entry.kind === 'world-boss' ? 'text-amber-200' : 'text-sky-200'}`}>
-              {entry.kind === 'world-boss' ? 'World Boss' : 'Dungeon'}
+            <span className={`ui-pill rounded border px-2 py-0.5 text-[10px] font-black uppercase ${entry.kind === 'world-boss' ? 'text-amber-200' : entry.kind === 'regional-threat' ? 'text-fuchsia-200' : 'text-sky-200'}`}>
+              {entry.kind === 'world-boss' ? 'World Boss' : entry.kind === 'regional-threat' ? 'Regional Threat' : 'Dungeon'}
             </span>
             <span className="ui-faint text-[10px] font-black uppercase">Lv {entry.level}</span>
             <span className="ui-faint text-[10px] font-black uppercase">{entry.expiresLabel} left</span>

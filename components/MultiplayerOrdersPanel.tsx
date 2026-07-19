@@ -4,6 +4,7 @@ import Image from 'next/image';
 import { useState } from 'react';
 import {
   claimCurrentMultiplayerDailyContract,
+  claimCurrentMultiplayerRegionalThreat,
   claimCurrentMultiplayerWeeklyOath,
   dismissCurrentMultiplayerReturningBriefing,
   getAllStoryQuestsSorted,
@@ -20,6 +21,7 @@ import { getActivePveSpawnCount } from '@/lib/worldPveIntel';
 interface MultiplayerOrdersPanelProps {
   now: number;
   onPlayerRefresh: () => void;
+  onOpenPve?: () => void;
 }
 
 function rewardLines(rewards?: RewardSummary): CompletionRewardLine[] {
@@ -27,6 +29,7 @@ function rewardLines(rewards?: RewardSummary): CompletionRewardLine[] {
   const lines: CompletionRewardLine[] = [];
   if (rewards.gold) lines.push({ label: 'Gold', value: `+${rewards.gold}`, tone: 'gold' });
   if (rewards.exp) lines.push({ label: 'XP', value: `+${rewards.exp}`, tone: 'blue' });
+  if (rewards.rareGems) lines.push({ label: 'Rare Gems', value: `+${rewards.rareGems}`, tone: 'violet' });
   return lines;
 }
 
@@ -35,7 +38,13 @@ function formatTrackDay(dateKey: string): string {
   return `${month}/${day}`;
 }
 
-export default function MultiplayerOrdersPanel({ now, onPlayerRefresh }: MultiplayerOrdersPanelProps) {
+function formatThreatTime(expiresAt: number, now: number): string {
+  const totalHours = Math.max(0, Math.ceil((expiresAt - now) / (60 * 60 * 1000)));
+  if (totalHours >= 48) return `${Math.ceil(totalHours / 24)} days left`;
+  return `${totalHours}h left`;
+}
+
+export default function MultiplayerOrdersPanel({ now, onPlayerRefresh, onOpenPve }: MultiplayerOrdersPanelProps) {
   const [, forceRender] = useState(0);
   const [notice, setNotice] = useState('');
   const user = getCurrentUser();
@@ -90,6 +99,22 @@ export default function MultiplayerOrdersPanel({ now, onPlayerRefresh }: Multipl
     refresh();
   };
 
+  const handleThreatClaim = () => {
+    const result = claimCurrentMultiplayerRegionalThreat(now);
+    setNotice(result.success ? 'Regional threat reward claimed.' : result.error || 'Could not claim regional threat.');
+    if (result.success) {
+      emitCompletionNotice({
+        id: `regional-threat-${view.regionalThreat.instanceId}-${now}`,
+        kind: 'quest',
+        kicker: 'Regional Threat',
+        title: view.regionalThreat.title,
+        description: `${view.regionalThreat.regionName} is secure for this rotation.`,
+        rewards: rewardLines(result.rewards),
+      });
+    }
+    refresh();
+  };
+
   const handleDismissBriefing = () => {
     dismissCurrentMultiplayerReturningBriefing();
     refresh();
@@ -117,6 +142,19 @@ export default function MultiplayerOrdersPanel({ now, onPlayerRefresh }: Multipl
             <div><span>Regional threats</span><strong>{getActivePveSpawnCount(user)} active</strong></div>
             <div><span>Party status</span><strong>{party ? `${party.memberUsernames.length} members` : 'Traveling solo'}</strong></div>
             <div><span>Catch-up order</span><strong>{view.dailyContracts[1]?.title || 'Open the daily board'}</strong></div>
+            <div><span>Rested command</span><strong>{view.state.restedJobCharges} job bonus{view.state.restedJobCharges === 1 ? '' : 'es'}</strong></div>
+          </div>
+        </section>
+      )}
+
+      {view.state.restedJobCharges > 0 && (
+        <section className="border-b px-5 py-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="arcane-label">Rested Command</p>
+              <p className="ui-muted mt-1 text-xs font-bold">Your next {view.state.restedJobCharges} completed job{view.state.restedJobCharges === 1 ? '' : 's'} grant 25% bonus XP, capped at 50 XP each.</p>
+            </div>
+            <span className="ui-pill rounded border px-3 py-2 text-xs font-black">{view.state.restedJobCharges} remaining</span>
           </div>
         </section>
       )}
@@ -176,6 +214,58 @@ export default function MultiplayerOrdersPanel({ now, onPlayerRefresh }: Multipl
               </article>
             );
           })}
+        </div>
+      </section>
+
+      <section className="border-t px-5 py-5">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="max-w-2xl">
+            <p className="arcane-label">Regional Threat - {view.regionalThreat.faction}</p>
+            <h3 className="fantasy-heading text-xl">{view.regionalThreat.title}</h3>
+            <p className="ui-muted mt-1 text-sm font-bold">{view.regionalThreat.description}</p>
+          </div>
+          <span className="ui-pill rounded border px-3 py-2 text-[10px] font-black uppercase">
+            {view.regionalThreat.unlocked
+              ? `${view.regionalThreat.regionName} - ${formatThreatTime(view.regionalThreat.expiresAt, now)}`
+              : `Unlocks Lv ${view.regionalThreat.minLevel}`}
+          </span>
+        </div>
+        <div className="mt-4 grid gap-2 sm:grid-cols-3">
+          <div className="ui-card rounded border p-3">
+            <span className="arcane-label">Threat Patrols</span>
+            <strong className="mt-1 block text-lg">{view.regionalThreat.patrolProgress}/{view.regionalThreat.targetPatrolWins}</strong>
+          </div>
+          <div className="ui-card rounded border p-3">
+            <span className="arcane-label">Named Commander</span>
+            <strong className="mt-1 block text-sm">{view.regionalThreat.bossName}</strong>
+            <span className="ui-faint mt-1 block text-[10px] font-black uppercase">{view.regionalThreat.bossDefeated ? 'Defeated' : 'Still active'}</span>
+          </div>
+          <div className="ui-card rounded border p-3">
+            <span className="arcane-label">Threat Reward</span>
+            <strong className="mt-1 block text-sm">{view.regionalThreat.rewardGold} gold / {view.regionalThreat.rewardExp} XP / {view.regionalThreat.rewardRareGems} gem</strong>
+          </div>
+        </div>
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+          <p className="ui-faint text-xs font-bold">Win patrols in {view.regionalThreat.regionName}, then defeat the marked threat boss.</p>
+          {view.regionalThreat.complete ? (
+            <button
+              type="button"
+              onClick={handleThreatClaim}
+              disabled={view.regionalThreat.claimed}
+              className="ui-button-primary rounded px-4 py-2 text-xs font-black disabled:opacity-35"
+            >
+              {view.regionalThreat.claimed ? 'Threat Claimed' : 'Claim Threat'}
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={onOpenPve}
+              disabled={!view.regionalThreat.unlocked || !onOpenPve}
+              className="ui-button rounded px-4 py-2 text-xs font-black disabled:opacity-35"
+            >
+              {view.regionalThreat.unlocked ? 'Open PVE Intel' : `Reach Level ${view.regionalThreat.minLevel}`}
+            </button>
+          )}
         </div>
       </section>
 

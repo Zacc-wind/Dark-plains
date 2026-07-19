@@ -1224,6 +1224,10 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
               player={player}
               onClose={() => setShowMultiplayerProgression(false)}
               onPlayerRefresh={() => setUser(getCurrentUser())}
+              onOpenPve={() => {
+                setShowMultiplayerProgression(false);
+                setShowPveHub(true);
+              }}
               onSkipOnboarding={() => {
                 const result = skipMultiplayerOnboarding();
                 if (result.success) skipMultiplayerTutorial(player.username);

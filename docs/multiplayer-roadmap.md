@@ -36,12 +36,12 @@ Turn the current shared world-map prototype into a real multiplayer layer withou
 - [ ] Add authored player response choices to selected story scenes; choices may change tone or faction reputation but must not silently block core progression.
 
 ## Phase 2: Social Request Popups
-- [ ] Add a shared `SocialRequestOverlay` component for incoming requests.
+- [x] Add a shared `SocialRequestOverlay` component for incoming requests. Party invitations use it now; the typed contract already reserves trade requests for the validated trade session.
 - [x] Challenge request popup: sword icon burst, challenger sprite/name, accept/decline buttons, timeout state.
-- [ ] Trade request popup: gold icon burst, requester sprite/name, accept/decline buttons, timeout state.
-- [ ] Party invite popup: banner/group icon burst, leader name, party member preview, accept/decline buttons.
-- [ ] Add request sounds: challenge received, trade received, party invite received, accept, decline.
-- [ ] Store request state with ids, sender, receiver, createdAt, expiresAt, status, and payload.
+- [ ] Trade request popup: gold icon burst, requester sprite/name, accept/decline buttons, timeout state. Do not expose acceptance until it opens a real `TradeSession`.
+- [x] Party invite popup: banner/group presentation, leader name, party size, accept/decline buttons, outside/Escape dismissal, and timeout cleanup.
+- [x] Add request sounds: challenge received, trade received, party invite received, accept, decline.
+- [x] Store request state with ids, sender, receiver, createdAt, expiresAt, status, and payload.
 
 ## Phase 3: Party UI
 - [x] Add a compact party strip to the main map HUD showing leader, members, pending invites, health/level, and location status.
@@ -105,12 +105,12 @@ Turn the current shared world-map prototype into a real multiplayer layer withou
 
 ## Phase 10: Daily And Weekly Reasons To Return
 - [x] Add a three-slot daily contract board: one combat task, one world/job task, and one social or co-op task. Allow one reroll per day.
-- [ ] Add a rotating regional threat that changes enemy composition and culminates in a shared boss target.
+- [x] Add a rotating regional threat that changes enemy composition and culminates in a deterministic weekly named boss target.
 - [x] Add a weekly faction oath with several contribution paths so combat, jobs, trade, and co-op players can all progress it.
 - [ ] Add first-win and first-dungeon-clear bonuses with moderate rewards; avoid mandatory multi-hour streak pressure.
 - [x] Add a seven-day return track with a missed-day buffer and no exclusive combat power.
 - [x] Add a returning-player briefing after several inactive days: current threats, unfinished story objective, party activity, and one catch-up contract.
-- [ ] Add capped rested job XP or contract progress so returning players can catch up without making daily players irrelevant.
+- [x] Add capped rested job XP or contract progress so returning players can catch up without making daily players irrelevant. Returning players receive at most three +25% job-XP charges, each capped at 50 XP.
 - [x] Record completion telemetry for each loop before increasing reward volume or adding more currencies.
 
 ## Phase 11: Story Chapters And World Direction
@@ -139,7 +139,8 @@ Turn the current shared world-map prototype into a real multiplayer layer withou
 ## Recommended Implementation Order
 1. [x] Add the shared genuine-action event foundation and Campaign/Progression shell described in `docs/progression-content-roadmap.md`.
 2. [x] Finish the level 1-5 First Banner chapter, Black Pike capstone, and level 3/4/5 unlock conversations.
-3. Complete the shared social-request overlay for trade and party invites, then add the first regional threat and rested catch-up rules.
-4. Pilot the free Black Pike Ledger Chronicle using only implemented and validated activities.
-5. Refactor battle ownership and synchronization before implementing real player-versus-player and cooperative sessions.
-6. Produce levels 6-30 as complete five-level content bands, one chapter at a time.
+3. [x] Complete the shared request lifecycle and party invite overlay, then add the first regional threat and rested catch-up rules.
+4. Implement the validated `TradeSession` and its request popup, then add first-win and first-dungeon-clear bonuses.
+5. Pilot the free Black Pike Ledger Chronicle using only implemented and validated activities.
+6. Refactor battle ownership and synchronization before implementing real player-versus-player and cooperative sessions.
+7. Produce levels 6-30 as complete five-level content bands, one chapter at a time.

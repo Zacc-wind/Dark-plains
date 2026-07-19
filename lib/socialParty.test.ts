@@ -1,0 +1,113 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import {
+  acceptPartyInvite,
+  expireCurrentSocialRequests,
+  getCurrentUser,
+  getIncomingSocialRequests,
+  getSocialState,
+  getUsers,
+  invitePlayerToParty,
+  login,
+  register,
+  updateCurrentUser,
+} from './auth';
+
+class MemoryLocalStorage {
+  private readonly values = new Map<string, string>();
+
+  clear() {
+    this.values.clear();
+  }
+
+  getItem(key: string) {
+    return this.values.get(key) ?? null;
+  }
+
+  removeItem(key: string) {
+    this.values.delete(key);
+  }
+
+  setItem(key: string, value: string) {
+    this.values.set(key, value);
+  }
+}
+
+const storage = new MemoryLocalStorage();
+
+function setCurrentPlayerLevel(level: number): void {
+  const user = getCurrentUser();
+  if (!user) throw new Error('Expected a logged-in player.');
+  updateCurrentUser({ stats: { ...user.stats, level } });
+}
+
+beforeEach(() => {
+  storage.clear();
+  vi.stubGlobal('window', { localStorage: storage });
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date('2026-07-19T12:00:00Z'));
+});
+
+describe('party social request persistence', () => {
+  it('persists a real invite for both players, accepts once, and joins the party', () => {
+    expect(register('LeaderMage', 'test-password').success).toBe(true);
+    expect(register('InviteeMage', 'test-password').success).toBe(true);
+
+    expect(login('LeaderMage', 'test-password').success).toBe(true);
+    setCurrentPlayerLevel(5);
+    expect(login('InviteeMage', 'test-password').success).toBe(true);
+    setCurrentPlayerLevel(5);
+
+    expect(login('LeaderMage', 'test-password').success).toBe(true);
+    expect(invitePlayerToParty('InviteeMage')).toMatchObject({ success: true });
+
+    const usersAfterInvite = getUsers();
+    const leaderAfterInvite = usersAfterInvite.find(user => user.username === 'LeaderMage');
+    const inviteeAfterInvite = usersAfterInvite.find(user => user.username === 'InviteeMage');
+    const leaderRequest = getSocialState(leaderAfterInvite).requests?.[0];
+    const inviteeRequest = getSocialState(inviteeAfterInvite).requests?.[0];
+
+    expect(leaderRequest).toMatchObject({ kind: 'party', status: 'pending' });
+    expect(inviteeRequest).toEqual(leaderRequest);
+
+    expect(login('InviteeMage', 'test-password').success).toBe(true);
+    const incoming = getIncomingSocialRequests();
+    expect(incoming).toHaveLength(1);
+    expect(acceptPartyInvite(incoming[0].id)).toMatchObject({ success: true });
+
+    const acceptedParty = getSocialState(getCurrentUser()).party;
+    expect(acceptedParty?.leaderUsername).toBe('LeaderMage');
+    expect(acceptedParty?.memberUsernames).toEqual(['LeaderMage', 'InviteeMage']);
+    expect(getIncomingSocialRequests()).toEqual([]);
+    expect(acceptPartyInvite(incoming[0].id)).toMatchObject({ success: false });
+
+    const usersAfterAccept = getUsers();
+    usersAfterAccept.forEach(user => {
+      const request = getSocialState(user).requests?.find(candidate => candidate.id === incoming[0].id);
+      expect(request?.status).toBe('accepted');
+    });
+  });
+
+  it('keeps a newer invite alive after an older request from the same leader expires', () => {
+    expect(register('RepeatLeader', 'test-password').success).toBe(true);
+    expect(register('RepeatInvitee', 'test-password').success).toBe(true);
+
+    expect(login('RepeatLeader', 'test-password').success).toBe(true);
+    setCurrentPlayerLevel(5);
+    expect(login('RepeatInvitee', 'test-password').success).toBe(true);
+    setCurrentPlayerLevel(5);
+
+    expect(login('RepeatLeader', 'test-password').success).toBe(true);
+    expect(invitePlayerToParty('RepeatInvitee')).toMatchObject({ success: true });
+
+    vi.advanceTimersByTime(2 * 60 * 1000 + 1);
+    expireCurrentSocialRequests();
+    expect(invitePlayerToParty('RepeatInvitee')).toMatchObject({ success: true });
+
+    expect(login('RepeatInvitee', 'test-password').success).toBe(true);
+    expireCurrentSocialRequests();
+    const incoming = getIncomingSocialRequests();
+    expect(incoming).toHaveLength(1);
+    expect(acceptPartyInvite(incoming[0].id)).toMatchObject({ success: true });
+  });
+});

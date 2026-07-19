@@ -1,5 +1,6 @@
 import { getCurrentUser, type User } from './auth';
-import { getActiveWorldBoss } from './battle';
+import { getNpcEnemiesForUser } from './battle';
+import { getMultiplayerRegionalThreat } from './multiplayerEngagement';
 import {
   formatDungeonTimeRemaining,
   getActiveDungeons,
@@ -18,7 +19,7 @@ export interface PveRewardLine {
 
 export interface PveIntelEntry {
   id: string;
-  kind: 'dungeon' | 'world-boss';
+  kind: 'dungeon' | 'world-boss' | 'regional-threat';
   name: string;
   subtitle: string;
   description: string;
@@ -207,31 +208,47 @@ export function getWorldPveIntel(user: User | null = getCurrentUser(), now = Dat
     mapDungeonToIntel(dungeon, playerX, playerY, now),
   );
 
-  const worldBoss = getActiveWorldBoss(user, now);
-  if (!worldBoss) {
-    return dungeonEntries;
-  }
+  const worldEnemies = getNpcEnemiesForUser(user, now);
+  const activeBosses = worldEnemies.filter(enemy => (
+    enemy.spawnKind === 'world-boss' || enemy.spawnKind === 'regional-threat'
+  ));
+  const threat = user
+    ? getMultiplayerRegionalThreat(user.multiplayerEngagement, user.username, user.stats.level, now)
+    : null;
+  const bossEntries = activeBosses.map<PveIntelEntry>(boss => {
+    const bossRegion = getRegionForTile(boss.x, boss.y);
+    const isRegionalThreat = boss.spawnKind === 'regional-threat';
+    const rewards = getWorldBossRewardLines(boss.level);
+    if (isRegionalThreat && threat) {
+      rewards.unshift({
+        id: 'threat-board',
+        label: 'Threat Board',
+        iconPath: '/assets/icons/rare-gem.png',
+        minLabel: `${threat.rewardGold} gold`,
+        maxLabel: `${threat.rewardExp} XP + ${threat.rewardRareGems} gem`,
+        detail: 'Claimed after the regional patrol and named boss objectives are both complete',
+      });
+    }
+    return {
+      id: boss.id,
+      kind: isRegionalThreat ? 'regional-threat' : 'world-boss',
+      name: isRegionalThreat && threat ? threat.title : 'Hourly World Boss',
+      subtitle: boss.subtitle,
+      description: boss.story || boss.intro || 'A roaming boss patrols the map until defeated.',
+      level: boss.level,
+      regionName: bossRegion.name,
+      regionLevels: bossRegion.levelRange,
+      directionHint: getDirectionHint(playerX, playerY, boss.x, boss.y),
+      expiresLabel: formatDungeonTimeRemaining(boss.expiresAt || now, now),
+      bossName: boss.name,
+      bossSubtitle: boss.subtitle,
+      bossArtworkPath: boss.artworkPath,
+      rewards,
+      minUnitsRequired: 0,
+    };
+  });
 
-  const bossRegion = getRegionForTile(worldBoss.x, worldBoss.y);
-  const bossEntry: PveIntelEntry = {
-    id: worldBoss.id,
-    kind: 'world-boss',
-    name: 'Hourly World Boss',
-    subtitle: worldBoss.subtitle,
-    description: worldBoss.story || worldBoss.intro || 'A roaming boss patrols the map until defeated.',
-    level: worldBoss.level,
-    regionName: bossRegion.name,
-    regionLevels: bossRegion.levelRange,
-    directionHint: getDirectionHint(playerX, playerY, worldBoss.x, worldBoss.y),
-    expiresLabel: formatDungeonTimeRemaining(worldBoss.expiresAt || now, now),
-    bossName: worldBoss.name,
-    bossSubtitle: worldBoss.subtitle,
-    bossArtworkPath: worldBoss.artworkPath,
-    rewards: getWorldBossRewardLines(worldBoss.level),
-    minUnitsRequired: 0,
-  };
-
-  return [bossEntry, ...dungeonEntries];
+  return [...bossEntries, ...dungeonEntries];
 }
 
 export function getActivePveSpawnCount(user: User | null = getCurrentUser(), now = Date.now()): number {

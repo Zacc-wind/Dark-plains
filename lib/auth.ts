@@ -36,12 +36,23 @@ import {
 } from './pvpRating';
 import { requireMultiplayerUnlock } from './multiplayerUnlocks';
 import {
+  createSocialRequest,
+  getIncomingSocialRequests as getIncomingSocialRequestRecords,
+  normalizeSocialRequests,
+  respondToSocialRequest,
+  type SocialRequestRecord,
+  type SocialRequestStatus,
+} from './socialRequests';
+import {
   claimMultiplayerDailyContract as claimMultiplayerDailyContractState,
+  claimMultiplayerRegionalThreat as claimMultiplayerRegionalThreatState,
   claimMultiplayerWeeklyOath as claimMultiplayerWeeklyOathState,
+  consumeMultiplayerRestedJobBonus,
   dismissMultiplayerReturningBriefing as dismissMultiplayerReturningBriefingState,
   getMultiplayerDailyContracts,
   getMultiplayerEngagementClaimableCount,
   getMultiplayerReturnTrack,
+  getMultiplayerRegionalThreat,
   getMultiplayerWeeklyOath,
   normalizeMultiplayerEngagementState,
   recordMultiplayerEngagementEvent,
@@ -54,6 +65,7 @@ import {
   type MultiplayerReturnTrackView,
   type MultiplayerWeeklyOathView,
 } from './multiplayerEngagement';
+import type { RegionalThreatView } from './multiplayerRegionalThreat';
 
 export { CITY_QUESTS, QUEST_NPCS, STORY_CHAPTERS, getAllStoryQuestsSorted, getCityQuestTemplate, getRotatingCityQuests };
 export { TRAVEL_EVENT_CONTENT_COUNTS };
@@ -397,6 +409,7 @@ export interface PartyState {
 export interface SocialState {
   friends: FriendRecord[];
   party?: PartyState;
+  requests?: SocialRequestRecord[];
 }
 
 export interface SocialChatMessage {
@@ -2273,9 +2286,11 @@ function normalizeSocialStateForUser(user: Pick<User, 'username' | 'social'> | n
   });
 
   const party = normalizePartyState(user?.social?.party, ownUsername);
+  const requests = normalizeSocialRequests(user?.social?.requests);
   return {
     friends: Array.from(friendMap.values()),
     ...(party ? { party } : {}),
+    ...(requests.length > 0 ? { requests } : {}),
   };
 }
 
@@ -2357,6 +2372,95 @@ function setPartyForUsers(users: User[], party: PartyState | null, affectedUsern
   });
 }
 
+function upsertSocialRequestForUsers(users: User[], request: SocialRequestRecord): User[] {
+  const participants = new Set([
+    normalizeUsername(request.senderUsername),
+    normalizeUsername(request.receiverUsername),
+  ]);
+  return users.map(user => {
+    if (!participants.has(normalizeUsername(user.username))) return user;
+    const social = getSocialState(user);
+    return setUserSocial(user, {
+      ...social,
+      requests: normalizeSocialRequests([
+        request,
+        ...(social.requests || []).filter(existing => existing.id !== request.id),
+      ]),
+    });
+  });
+}
+
+function respondToSocialRequestForUsers(
+  users: User[],
+  request: SocialRequestRecord,
+  status: 'accepted' | 'declined',
+  now = Date.now(),
+): User[] {
+  return users.map(user => {
+    const social = getSocialState(user);
+    if (!(social.requests || []).some(existing => existing.id === request.id)) return user;
+    const result = respondToSocialRequest(social.requests, request.id, request.receiverUsername, status, now);
+    return result.success ? setUserSocial(user, { ...social, requests: result.records }) : user;
+  });
+}
+
+function setSocialRequestStatusForUsers(
+  users: User[],
+  requestId: string,
+  status: SocialRequestStatus,
+  now = Date.now(),
+): User[] {
+  return users.map(user => {
+    const social = getSocialState(user);
+    if (!(social.requests || []).some(request => request.id === requestId)) return user;
+    const requests = (social.requests || []).map(request => (
+      request.id === requestId ? { ...request, status, respondedAt: now } : request
+    ));
+    return setUserSocial(user, { ...social, requests });
+  });
+}
+
+function reconcileExpiredSocialRequests(users: User[], now = Date.now()): User[] {
+  let nextUsers = users.map(user => {
+    const social = getSocialState(user);
+    const requests = normalizeSocialRequests(social.requests, now);
+    return setUserSocial(user, { ...social, requests });
+  });
+  const expiredPartyRequests = new Map<string, SocialRequestRecord>();
+
+  nextUsers.forEach(user => {
+    getSocialState(user).requests?.forEach(request => {
+      if (request.kind === 'party' && request.status === 'expired') {
+        expiredPartyRequests.set(request.id, request);
+      }
+    });
+  });
+
+  expiredPartyRequests.forEach(request => {
+    const receiver = nextUsers.find(user => normalizeUsername(user.username) === normalizeUsername(request.receiverUsername));
+    const party = normalizePartyState(getSocialState(receiver).party, receiver?.username);
+    if (!party?.invitedUsernames.some(username => normalizeUsername(username) === normalizeUsername(request.receiverUsername))) return;
+    const requestLeader = request.payload?.partyLeaderUsername || request.senderUsername;
+    if (normalizeUsername(party.leaderUsername) !== normalizeUsername(requestLeader)) return;
+    const hasPendingReplacement = getSocialState(receiver).requests?.some(candidate => (
+      candidate.id !== request.id
+      && candidate.kind === 'party'
+      && candidate.status === 'pending'
+      && normalizeUsername(candidate.receiverUsername) === normalizeUsername(request.receiverUsername)
+      && normalizeUsername(candidate.payload?.partyLeaderUsername || candidate.senderUsername) === normalizeUsername(party.leaderUsername)
+    ));
+    if (hasPendingReplacement) return;
+    const nextParty: PartyState = {
+      ...party,
+      invitedUsernames: party.invitedUsernames.filter(username => normalizeUsername(username) !== normalizeUsername(request.receiverUsername)),
+      updatedAt: now,
+    };
+    nextUsers = setPartyForUsers(nextUsers, nextParty, [...party.memberUsernames, ...party.invitedUsernames]);
+  });
+
+  return nextUsers;
+}
+
 function getPartyKey(party: PartyState | undefined): string | undefined {
   if (!party) return undefined;
   return uniqueUsernames(party.memberUsernames).map(normalizeUsername).sort().join('|');
@@ -2364,6 +2468,14 @@ function getPartyKey(party: PartyState | undefined): string | undefined {
 
 export function getSocialState(user: Pick<User, 'username' | 'social'> | null | undefined = getCurrentUser()): SocialState {
   return normalizeSocialStateForUser(user);
+}
+
+export function getIncomingSocialRequests(
+  user: Pick<User, 'username' | 'social'> | null | undefined = getCurrentUser(),
+  now = Date.now(),
+): SocialRequestRecord[] {
+  if (!user) return [];
+  return getIncomingSocialRequestRecords(getSocialState(user).requests, user.username, now);
 }
 
 export function getFriendRecord(user: Pick<User, 'username' | 'social'> | null | undefined, username: string): FriendRecord | undefined {
@@ -2474,7 +2586,7 @@ export function invitePlayerToParty(targetUsername: string): { success: boolean;
   const unlock = requireMultiplayerUnlock('party', current);
   if (!unlock.allowed) return { success: false, error: unlock.error };
 
-  const users = getUsers();
+  const users = reconcileExpiredSocialRequests(getUsers());
   const currentIndex = findUserIndex(users, current.username);
   const targetIndex = findUserIndex(users, targetUsername);
   if (currentIndex === -1 || targetIndex === -1) return { success: false, error: 'Player not found.' };
@@ -2530,21 +2642,37 @@ export function invitePlayerToParty(targetUsername: string): { success: boolean;
     target.username,
     current.username,
   ];
-  const nextUsers = setPartyForUsers(users, nextParty, affected);
+  const request = createSocialRequest({
+    kind: 'party',
+    senderUsername: current.username,
+    receiverUsername: target.username,
+    payload: {
+      partyLeaderUsername: nextParty.leaderUsername,
+      partyMemberCount: nextParty.memberUsernames.length,
+    },
+  });
+  let nextUsers = setPartyForUsers(users, nextParty, affected);
+  nextUsers = upsertSocialRequestForUsers(nextUsers, request);
   persistUsersWithCurrent(nextUsers, current.username);
 
   return { success: true, message: `Party invite sent to ${target.username}.` };
 }
 
-export function acceptPartyInvite(): { success: boolean; message?: string; error?: string } {
+export function acceptPartyInvite(requestId?: string): { success: boolean; message?: string; error?: string } {
   const current = getCurrentUser();
   if (!current) return { success: false, error: 'Login required.' };
   const unlock = requireMultiplayerUnlock('party', current);
   if (!unlock.allowed) return { success: false, error: unlock.error };
 
-  const users = getUsers();
+  const users = reconcileExpiredSocialRequests(getUsers());
   const currentIndex = findUserIndex(users, current.username);
   if (currentIndex === -1) return { success: false, error: 'Player not found.' };
+
+  const incomingRequests = getIncomingSocialRequests(users[currentIndex]);
+  const request = requestId
+    ? incomingRequests.find(candidate => candidate.id === requestId && candidate.kind === 'party')
+    : incomingRequests.find(candidate => candidate.kind === 'party');
+  if (requestId && !request) return { success: false, error: 'Party invitation expired or was withdrawn.' };
 
   const party = normalizePartyState(getSocialState(users[currentIndex]).party, current.username);
   if (!party || !party.invitedUsernames.some(username => normalizeUsername(username) === normalizeUsername(current.username))) {
@@ -2561,10 +2689,49 @@ export function acceptPartyInvite(): { success: boolean; message?: string; error
     updatedAt: Date.now(),
   };
 
-  const nextUsers = setPartyForUsers(users, nextParty, [...party.memberUsernames, ...party.invitedUsernames]);
+  let nextUsers = setPartyForUsers(users, nextParty, [...party.memberUsernames, ...party.invitedUsernames]);
+  if (request) nextUsers = respondToSocialRequestForUsers(nextUsers, request, 'accepted');
   persistUsersWithCurrent(nextUsers, current.username);
 
   return { success: true, message: 'Joined party.' };
+}
+
+export function declinePartyInvite(requestId?: string): { success: boolean; message?: string; error?: string } {
+  const current = getCurrentUser();
+  if (!current) return { success: false, error: 'Login required.' };
+  const users = reconcileExpiredSocialRequests(getUsers());
+  const currentIndex = findUserIndex(users, current.username);
+  if (currentIndex === -1) return { success: false, error: 'Player not found.' };
+
+  const incomingRequests = getIncomingSocialRequests(users[currentIndex]);
+  const request = requestId
+    ? incomingRequests.find(candidate => candidate.id === requestId && candidate.kind === 'party')
+    : incomingRequests.find(candidate => candidate.kind === 'party');
+  const party = normalizePartyState(getSocialState(users[currentIndex]).party, current.username);
+  if (!party || !party.invitedUsernames.some(username => normalizeUsername(username) === normalizeUsername(current.username))) {
+    return { success: false, error: 'No party invite pending.' };
+  }
+  if (requestId && !request) return { success: false, error: 'Party invitation expired or was withdrawn.' };
+
+  const nextParty: PartyState = {
+    ...party,
+    invitedUsernames: party.invitedUsernames.filter(username => normalizeUsername(username) !== normalizeUsername(current.username)),
+    updatedAt: Date.now(),
+  };
+  let nextUsers = setPartyForUsers(users, nextParty, [...party.memberUsernames, ...party.invitedUsernames]);
+  if (request) nextUsers = respondToSocialRequestForUsers(nextUsers, request, 'declined');
+  persistUsersWithCurrent(nextUsers, current.username);
+  return { success: true, message: 'Party invitation declined.' };
+}
+
+export function expireCurrentSocialRequests(now = Date.now()): void {
+  const current = getCurrentUser();
+  if (!current) return;
+  const users = getUsers();
+  const nextUsers = reconcileExpiredSocialRequests(users, now);
+  if (JSON.stringify(nextUsers) !== JSON.stringify(users)) {
+    persistUsersWithCurrent(nextUsers, current.username);
+  }
 }
 
 export function leaveParty(): { success: boolean; message?: string; error?: string } {
@@ -2577,15 +2744,21 @@ export function leaveParty(): { success: boolean; message?: string; error?: stri
 
   const party = normalizePartyState(getSocialState(users[currentIndex]).party, current.username);
   if (!party) return { success: false, error: 'Not in a party.' };
+  const pendingInviteRequest = getIncomingSocialRequests(users[currentIndex])
+    .find(request => request.kind === 'party');
+  const wasInvited = party.invitedUsernames.some(username => normalizeUsername(username) === normalizeUsername(current.username));
 
   const affected = [...party.memberUsernames, ...party.invitedUsernames];
   const remainingMembers = party.memberUsernames.filter(username => normalizeUsername(username) !== normalizeUsername(current.username));
   const remainingInvites = party.invitedUsernames.filter(username => normalizeUsername(username) !== normalizeUsername(current.username));
 
   if (remainingMembers.length === 0) {
-    const nextUsers = setPartyForUsers(users, null, affected);
+    let nextUsers = setPartyForUsers(users, null, affected);
+    if (pendingInviteRequest) {
+      nextUsers = setSocialRequestStatusForUsers(nextUsers, pendingInviteRequest.id, 'declined');
+    }
     persistUsersWithCurrent(nextUsers, current.username);
-    return { success: true, message: 'Party disbanded.' };
+    return { success: true, message: wasInvited ? 'Party invitation declined.' : 'Party disbanded.' };
   }
 
   const nextParty: PartyState = {
@@ -2596,10 +2769,13 @@ export function leaveParty(): { success: boolean; message?: string; error?: stri
     invitedUsernames: remainingInvites,
     updatedAt: Date.now(),
   };
-  const nextUsers = setPartyForUsers(users, nextParty, affected);
+  let nextUsers = setPartyForUsers(users, nextParty, affected);
+  if (pendingInviteRequest) {
+    nextUsers = setSocialRequestStatusForUsers(nextUsers, pendingInviteRequest.id, 'declined');
+  }
   persistUsersWithCurrent(nextUsers, current.username);
 
-  return { success: true, message: 'Left party.' };
+  return { success: true, message: wasInvited ? 'Party invitation declined.' : 'Left party.' };
 }
 
 export function promotePartyMember(targetUsername: string): { success: boolean; message?: string; error?: string } {
@@ -2661,7 +2837,15 @@ export function removePlayerFromParty(targetUsername: string): { success: boolea
     updatedAt: Date.now(),
   };
   const affected = [...party.memberUsernames, ...party.invitedUsernames, targetUsername];
-  const nextUsers = setPartyForUsers(users, nextParty, affected);
+  let nextUsers = setPartyForUsers(users, nextParty, affected);
+  if (removedInvite) {
+    const request = getSocialState(users[currentIndex]).requests?.find(candidate => (
+      candidate.kind === 'party'
+      && candidate.status === 'pending'
+      && normalizeUsername(candidate.receiverUsername) === normalizeUsername(removedInvite)
+    ));
+    if (request) nextUsers = setSocialRequestStatusForUsers(nextUsers, request.id, 'cancelled');
+  }
   persistUsersWithCurrent(nextUsers, current.username);
 
   return {
@@ -4514,6 +4698,7 @@ export interface MultiplayerEngagementView {
   dailyContracts: MultiplayerContractView[];
   weeklyOath: MultiplayerWeeklyOathView;
   returnTrack: MultiplayerReturnTrackView;
+  regionalThreat: RegionalThreatView;
   claimableCount: number;
 }
 
@@ -4523,12 +4708,15 @@ export function getMultiplayerEngagementView(
 ): MultiplayerEngagementView | null {
   if (!user) return null;
   const state = normalizeMultiplayerEngagementState(user.multiplayerEngagement, user.username, now);
+  const regionalThreat = getMultiplayerRegionalThreat(state, user.username, user.stats.level, now);
   return {
     state,
     dailyContracts: getMultiplayerDailyContracts(state, user.username, now),
     weeklyOath: getMultiplayerWeeklyOath(state, user.username, now),
     returnTrack: getMultiplayerReturnTrack(state, user.username, now),
-    claimableCount: getMultiplayerEngagementClaimableCount(state, user.username, now),
+    regionalThreat,
+    claimableCount: getMultiplayerEngagementClaimableCount(state, user.username, now)
+      + (regionalThreat.complete && !regionalThreat.claimed ? 1 : 0),
   };
 }
 
@@ -4642,6 +4830,51 @@ export function claimCurrentMultiplayerWeeklyOath(
       completedAt: now,
       rewards,
       description: 'Weekly multiplayer contribution oath claimed.',
+    }),
+  });
+  levelUp();
+  return { success: true, rewards };
+}
+
+export function claimCurrentMultiplayerRegionalThreat(
+  now = Date.now(),
+): { success: boolean; rewards?: RewardSummary; error?: string } {
+  const currentUser = getCurrentUser();
+  if (!currentUser) return { success: false, error: 'Not logged in.' };
+  const result = claimMultiplayerRegionalThreatState(
+    currentUser.multiplayerEngagement,
+    currentUser.username,
+    currentUser.stats.level,
+    now,
+  );
+  if (!result.success) return { success: false, error: result.error };
+
+  const gemResult = addInventoryItemsWithLimit(
+    currentUser.inventory || [],
+    result.threat.rewardRareGems > 0 ? [makeInventoryItem('rare-gem', result.threat.rewardRareGems)] : [],
+    getInventorySlotCapacity(currentUser),
+  );
+  const acceptedRareGems = gemResult.acceptedItems
+    .filter(item => item.id === 'rare-gem')
+    .reduce((total, item) => total + item.quantity, 0);
+  const rewards: RewardSummary = {
+    gold: result.threat.rewardGold,
+    exp: result.threat.rewardExp,
+    rareGems: acceptedRareGems || undefined,
+  };
+  updateCurrentUser({
+    multiplayerEngagement: result.state,
+    gold: currentUser.gold + result.threat.rewardGold,
+    exp: currentUser.exp + result.threat.rewardExp,
+    inventory: gemResult.inventory,
+    activityLog: pushActivityEntry(currentUser.activityLog, {
+      id: `activity-regional-threat-${result.threat.instanceId}-${now}`,
+      type: 'quest',
+      title: result.threat.title,
+      source: 'Regional Threat Board',
+      completedAt: now,
+      rewards,
+      description: `${result.threat.regionName} threat reward claimed.`,
     }),
   });
   levelUp();
@@ -5256,6 +5489,8 @@ export function checkJobsComplete(): void {
   const updatedQueue = [...currentUser.jobQueue];
   let goldEarned = 0;
   let expEarned = 0;
+  let restedBonusExp = 0;
+  let nextMultiplayerEngagement = currentUser.multiplayerEngagement;
   let healthRestored = 0;
   const itemsEarned: InventoryItem[] = [];
   const equipmentEarned: Equipment[] = [];
@@ -5270,7 +5505,15 @@ export function checkJobsComplete(): void {
       if (workElapsed >= firstJob.workDuration) {
         // Job complete! Give rewards
         goldEarned += firstJob.rewards.gold;
-        expEarned += firstJob.rewards.exp;
+        const restedBonus = consumeMultiplayerRestedJobBonus(
+          currentUser.multiplayerEngagement,
+          currentUser.username,
+          firstJob.rewards.exp,
+          now,
+        );
+        restedBonusExp = restedBonus.bonusExp;
+        nextMultiplayerEngagement = restedBonus.state;
+        expEarned += firstJob.rewards.exp + restedBonusExp;
       
       // Restore health if job has healthRestore
       if (firstJob.rewards.healthRestore) {
@@ -5368,6 +5611,7 @@ export function checkJobsComplete(): void {
           source: firstJob.poiName,
           completedAt: now,
           jobDurationMs: firstJob.workDuration,
+          description: restedBonusExp > 0 ? `Rested command added ${restedBonusExp} bonus XP.` : undefined,
           rewards: {
             gold: goldEarned || undefined,
             exp: expEarned || undefined,
@@ -5392,7 +5636,7 @@ export function checkJobsComplete(): void {
       activityLog: updatedActivityLog,
       multiplayerEngagement: firstJob
         ? recordMultiplayerEngagementEvent(
-            currentUser.multiplayerEngagement,
+            nextMultiplayerEngagement,
             currentUser.username,
             {
               id: `job-completed:${firstJob.id}`,

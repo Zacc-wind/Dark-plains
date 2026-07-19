@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
   claimMultiplayerDailyContract,
+  claimMultiplayerRegionalThreat,
   claimMultiplayerWeeklyOath,
+  consumeMultiplayerRestedJobBonus,
   dismissMultiplayerReturningBriefing,
   getMultiplayerDailyContracts,
   getMultiplayerReturnTrack,
+  getMultiplayerRegionalThreat,
   getMultiplayerWeeklyOath,
   normalizeMultiplayerEngagementState,
   recordMultiplayerEngagementEvent,
@@ -111,7 +114,7 @@ describe('multiplayer engagement loops', () => {
     } as unknown as Parameters<typeof normalizeMultiplayerEngagementState>[0];
 
     const normalized = normalizeMultiplayerEngagementState(legacy, 'LegacyBanner', NOW + 10);
-    expect(normalized.version).toBe(2);
+    expect(normalized.version).toBe(3);
     expect(normalized.events.map(event => event.kind)).toEqual([
       'battle-result-claimed',
       'job-started',
@@ -125,8 +128,65 @@ describe('multiplayer engagement loops', () => {
     state = touchMultiplayerEngagement(state, 'ReturnBanner', NOW);
 
     expect(state.pendingBriefing?.daysAway).toBe(4);
+    expect(state.restedJobCharges).toBe(2);
     expect(state.telemetry.briefingsShown).toBe(1);
     expect(dismissMultiplayerReturningBriefing(state, 'ReturnBanner', NOW).pendingBriefing).toBeUndefined();
+  });
+
+  it('uses finite capped rested XP charges on completed jobs', () => {
+    let state = touchMultiplayerEngagement(null, 'RestedBanner', NOW - 8 * DAY);
+    state = touchMultiplayerEngagement(state, 'RestedBanner', NOW);
+    expect(state.restedJobCharges).toBe(3);
+
+    const first = consumeMultiplayerRestedJobBonus(state, 'RestedBanner', 120, NOW + 1);
+    expect(first).toMatchObject({ bonusExp: 30, consumed: true });
+    expect(first.state.restedJobCharges).toBe(2);
+
+    const capped = consumeMultiplayerRestedJobBonus(first.state, 'RestedBanner', 400, NOW + 2);
+    expect(capped.bonusExp).toBe(50);
+    const final = consumeMultiplayerRestedJobBonus(capped.state, 'RestedBanner', 40, NOW + 3);
+    expect(final.state.restedJobCharges).toBe(0);
+    expect(consumeMultiplayerRestedJobBonus(final.state, 'RestedBanner', 40, NOW + 4).consumed).toBe(false);
+  });
+
+  it('completes and claims a regional threat only from matching regional receipts', () => {
+    let state = normalizeMultiplayerEngagementState(null, 'ThreatBanner', NOW);
+    let threat = getMultiplayerRegionalThreat(state, 'ThreatBanner', 6, NOW);
+    expect(getMultiplayerRegionalThreat(state, 'ThreatBanner', 5, NOW).unlocked).toBe(false);
+
+    state = recordMultiplayerEngagementEvent(state, 'ThreatBanner', {
+      id: 'wrong-region-battle',
+      kind: 'battle-result-claimed',
+      contextId: 'somewhere-else',
+    }, NOW + 1);
+    state = recordMultiplayerEngagementEvent(state, 'ThreatBanner', {
+      id: 'wrong-boss',
+      kind: 'boss-defeated',
+      contextId: threat.regionId,
+      targetId: 'not-the-threat-boss',
+    }, NOW + 2);
+    expect(getMultiplayerRegionalThreat(state, 'ThreatBanner', 6, NOW + 3).complete).toBe(false);
+
+    for (let index = 0; index < threat.targetPatrolWins; index += 1) {
+      state = recordMultiplayerEngagementEvent(state, 'ThreatBanner', {
+        id: `threat-patrol-${index}`,
+        kind: 'battle-result-claimed',
+        contextId: threat.regionId,
+        targetId: `regional-enemy-${index}`,
+      }, NOW + 10 + index);
+    }
+    state = recordMultiplayerEngagementEvent(state, 'ThreatBanner', {
+      id: 'threat-boss-defeat',
+      kind: 'boss-defeated',
+      contextId: threat.regionId,
+      targetId: threat.bossId,
+    }, NOW + 20);
+
+    threat = getMultiplayerRegionalThreat(state, 'ThreatBanner', 6, NOW + 21);
+    expect(threat).toMatchObject({ patrolProgress: 3, bossDefeated: true, complete: true, claimed: false });
+    const claimed = claimMultiplayerRegionalThreat(state, 'ThreatBanner', 6, NOW + 22);
+    expect(claimed.success).toBe(true);
+    expect(claimMultiplayerRegionalThreat(claimed.state, 'ThreatBanner', 6, NOW + 23).success).toBe(false);
   });
 
   it('tracks seven visits inside an eight-day missed-day buffer window', () => {

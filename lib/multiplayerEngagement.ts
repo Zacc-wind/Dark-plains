@@ -1,3 +1,8 @@
+import {
+  getRegionalThreatView,
+  type RegionalThreatView,
+} from './multiplayerRegionalThreat';
+
 export type MultiplayerContractCategory = 'combat' | 'world' | 'social';
 export type MultiplayerEngagementEventKind =
   | 'job-started'
@@ -44,6 +49,8 @@ export interface MultiplayerEngagementTelemetry {
   dailyRerolls: number;
   weeklyClaims: number;
   briefingsShown: number;
+  regionalThreatClaims: number;
+  restedJobBonusesUsed: number;
 }
 
 export interface ReturningPlayerBriefingState {
@@ -59,6 +66,8 @@ export interface MultiplayerEngagementState {
   claimedContractIds: string[];
   rerollUsed: boolean;
   weeklyClaimed: boolean;
+  claimedRegionalThreatIds: string[];
+  restedJobCharges: number;
   events: MultiplayerEngagementEvent[];
   telemetry: MultiplayerEngagementTelemetry;
   returnDays: string[];
@@ -116,7 +125,9 @@ interface MultiplayerContractTemplate {
 const DAY_MS = 24 * 60 * 60 * 1000;
 const EVENT_RETENTION_MS = 15 * DAY_MS;
 const RETURN_DAY_RETENTION_MS = 30 * DAY_MS;
-export const MULTIPLAYER_ENGAGEMENT_VERSION = 2;
+export const MULTIPLAYER_ENGAGEMENT_VERSION = 3;
+export const MULTIPLAYER_RESTED_JOB_BONUS_PERCENT = 25;
+export const MULTIPLAYER_MAX_RESTED_JOB_CHARGES = 3;
 const VALID_EVENT_KINDS = new Set<MultiplayerEngagementEventKind>([
   'job-started',
   'job-completed',
@@ -286,6 +297,8 @@ function normalizeTelemetry(value?: Partial<MultiplayerEngagementTelemetry>): Mu
     dailyRerolls: Math.max(0, Math.floor(value?.dailyRerolls || 0)),
     weeklyClaims: Math.max(0, Math.floor(value?.weeklyClaims || 0)),
     briefingsShown: Math.max(0, Math.floor(value?.briefingsShown || 0)),
+    regionalThreatClaims: Math.max(0, Math.floor(value?.regionalThreatClaims || 0)),
+    restedJobBonusesUsed: Math.max(0, Math.floor(value?.restedJobBonusesUsed || 0)),
   };
 }
 
@@ -370,6 +383,13 @@ export function normalizeMultiplayerEngagementState(
       : [],
     rerollUsed: sameDate && Boolean(state?.rerollUsed),
     weeklyClaimed: sameWeek && Boolean(state?.weeklyClaimed),
+    claimedRegionalThreatIds: sameWeek
+      ? Array.from(new Set((state?.claimedRegionalThreatIds || []).filter(id => typeof id === 'string')))
+      : [],
+    restedJobCharges: Math.min(
+      MULTIPLAYER_MAX_RESTED_JOB_CHARGES,
+      Math.max(0, Math.floor(state?.restedJobCharges || 0)),
+    ),
     events,
     telemetry: normalizeTelemetry(state?.telemetry),
     returnDays,
@@ -549,12 +569,16 @@ export function touchMultiplayerEngagement(
     : 0;
   const daysAway = Math.max(0, gapDays - 1);
   const shouldBrief = daysAway >= 3 && !normalized.pendingBriefing;
+  const restedCharges = shouldBrief
+    ? Math.min(MULTIPLAYER_MAX_RESTED_JOB_CHARGES, Math.max(1, Math.ceil(daysAway / 2)))
+    : normalized.restedJobCharges;
 
   return normalizeMultiplayerEngagementState({
     ...normalized,
     returnDays: [...normalized.returnDays, today],
     lastSeenAt: now,
     pendingBriefing: shouldBrief ? { daysAway, createdAt: now } : normalized.pendingBriefing,
+    restedJobCharges: Math.max(normalized.restedJobCharges, restedCharges),
     telemetry: shouldBrief
       ? { ...normalized.telemetry, briefingsShown: normalized.telemetry.briefingsShown + 1 }
       : normalized.telemetry,
@@ -599,4 +623,70 @@ export function getMultiplayerEngagementClaimableCount(
     .filter(contract => contract.complete && !contract.claimed).length;
   const weekly = getMultiplayerWeeklyOath(state, username, now);
   return daily + (weekly.complete && !weekly.claimed ? 1 : 0);
+}
+
+export function getMultiplayerRegionalThreat(
+  state: Partial<MultiplayerEngagementState> | null | undefined,
+  username: string,
+  level: number,
+  now = Date.now(),
+): RegionalThreatView {
+  const normalized = normalizeMultiplayerEngagementState(state, username, now);
+  return getRegionalThreatView({
+    weekKey: normalized.weekKey,
+    level,
+    events: normalized.events,
+    claimedIds: normalized.claimedRegionalThreatIds,
+  });
+}
+
+export function claimMultiplayerRegionalThreat(
+  state: Partial<MultiplayerEngagementState> | null | undefined,
+  username: string,
+  level: number,
+  now = Date.now(),
+): { success: boolean; state: MultiplayerEngagementState; threat: RegionalThreatView; error?: string } {
+  const normalized = normalizeMultiplayerEngagementState(state, username, now);
+  const threat = getMultiplayerRegionalThreat(normalized, username, level, now);
+  if (!threat.unlocked) return { success: false, state: normalized, threat, error: `Regional threats unlock at level ${threat.minLevel}.` };
+  if (threat.claimed) return { success: false, state: normalized, threat, error: 'Regional threat reward already claimed.' };
+  if (!threat.complete) return { success: false, state: normalized, threat, error: 'Regional threat is not complete.' };
+
+  return {
+    success: true,
+    threat,
+    state: normalizeMultiplayerEngagementState({
+      ...normalized,
+      claimedRegionalThreatIds: [...normalized.claimedRegionalThreatIds, threat.instanceId],
+      telemetry: {
+        ...normalized.telemetry,
+        regionalThreatClaims: normalized.telemetry.regionalThreatClaims + 1,
+      },
+    }, username, now),
+  };
+}
+
+export function consumeMultiplayerRestedJobBonus(
+  state: Partial<MultiplayerEngagementState> | null | undefined,
+  username: string,
+  baseExp: number,
+  now = Date.now(),
+): { state: MultiplayerEngagementState; bonusExp: number; consumed: boolean } {
+  const normalized = normalizeMultiplayerEngagementState(state, username, now);
+  if (normalized.restedJobCharges <= 0 || baseExp <= 0) {
+    return { state: normalized, bonusExp: 0, consumed: false };
+  }
+  const bonusExp = Math.min(50, Math.max(1, Math.floor(baseExp * MULTIPLAYER_RESTED_JOB_BONUS_PERCENT / 100)));
+  return {
+    bonusExp,
+    consumed: true,
+    state: normalizeMultiplayerEngagementState({
+      ...normalized,
+      restedJobCharges: normalized.restedJobCharges - 1,
+      telemetry: {
+        ...normalized.telemetry,
+        restedJobBonusesUsed: normalized.telemetry.restedJobBonusesUsed + 1,
+      },
+    }, username, now),
+  };
 }
