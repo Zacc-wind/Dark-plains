@@ -17,6 +17,7 @@ Turn the current shared world-map prototype into a real multiplayer layer withou
 - [x] Player-vs-player combat has a versioned local two-player duel session with captured rosters, formation readiness, ownership-checked actions, timeout passing, and idempotent rating settlement. Database transport remains deployment work.
 - [x] Cooperative raids now have a complete local-authoritative session: PVE launch/resume, two independent formations, readiness, synchronized combat and AI actions, four boss phases, abandon handling, recovery, and duplicate-safe per-player settlement. Database transport remains deployment work.
 - [x] PVE intel exposes two deterministic co-op boss incursions per five-hour cycle without routing them through the solo encounter flow.
+- [x] The playable Drowned Moonwell core spans levels 6-10 with nine ordered quests, eight Moonbridge contracts, a named Blackroot elite, Mother Cindervein, exact encounter receipts, and an authored return to Naima.
 
 ## Phase 1: First-Login Mode Tutorial
 - [x] Add a first-login mode tutorial before the user can choose Singleplayer or Multiplayer.
@@ -35,7 +36,7 @@ Turn the current shared world-map prototype into a real multiplayer layer withou
 - [x] Add a journal page that can replay completed story conversations without replaying their rewards.
 - [x] Add a single explicit Skip Onboarding action; skipping marks only tutorial introductions complete and never completes quest objectives.
 - [x] Persist the exact active dialogue line server-side so a disconnected first-time player resumes cleanly.
-- [ ] Add authored player response choices to selected story scenes; choices may change tone or faction reputation but must not silently block core progression.
+- [x] Add persistent oathbound, pragmatic, and defiant player responses to selected story scenes. The chosen line changes tone, survives reload/journal replay, and never blocks core progression; reputation effects remain deferred.
 
 ## Phase 2: Social Request Popups
 - [x] Add a shared `SocialRequestOverlay` component for incoming requests. Party invitations use it now; the typed contract already reserves trade requests for the validated trade session.
@@ -48,7 +49,7 @@ Turn the current shared world-map prototype into a real multiplayer layer withou
 ## Phase 3: Party UI
 - [x] Add a compact party strip to the main map HUD showing leader, members, pending invites, health/level, and location status.
 - [x] Add a party details popover with promote leader, leave party, invite player, kick member, and party chat shortcut.
-- [ ] Show party members on the world map with a distinct but subtle frame/glow that does not collide with quest/enemy markers.
+- [x] Show party members on the world map with a distinct but subtle frame/glow that does not collide with quest/enemy markers.
 - [x] In duo raids, show party readiness and who has confirmed entry.
 - [x] Add party state validation: max 4 players, one leader, no duplicate invites, no player in two parties.
 
@@ -92,8 +93,8 @@ Turn the current shared world-map prototype into a real multiplayer layer withou
 - [x] Remove full-screen world-popup blur and replace the semi-opaque scroll asset with a transparent-edge derivative.
 - [x] Use the scroll frame as an outer shell for map commands, Campaign, Progression, PVP, PVE, town services, HUD resources, quest tracking, and dramatic confirmations.
 - [x] Keep dense lists as compact dark interiors inside the frame; do not texture every row or card as parchment.
-- [x] Put Commander, Gear, and Army directly on the world-map command rail and remove those destinations from the general Menu.
-- [x] Reduce the Menu to Overview, Jobs, Spells, Social, and Settings; keep Chat independent.
+- [x] Keep the world-map command rail focused on Menu, Chat, Campaign, PVP, and PVE.
+- [x] Keep Commander, Gear, and Army inside Menu beside Overview, Jobs, Spells, Social, and Settings; keep Chat independent.
 - [x] Show active city and daily orders under the main quest tracker with one direct route to Orders.
 - [x] Sort multiplayer formation and run rosters by tier, class, or name while leaving singleplayer roster behavior unchanged.
 - [x] Add a bottom-right retreat action and confirmation to both singleplayer and multiplayer run maps.
@@ -107,8 +108,8 @@ Turn the current shared world-map prototype into a real multiplayer layer withou
 - [x] Tune campaign rewards so a normal chapter step grants no more than about 80 percent of the intended level requirement.
 - [x] Add level-band reward curves for jobs, contracts, PVE, PVP, and co-op so later levels remain useful without trivializing early progression.
 - [x] Restrict town recruitment to one deterministic weekly Tier I offer in every town, with weekly Tier II specialist slots in Harborview and Riverside from level 5.
-- [x] Make daily and weekly objectives reliable unit sources and remove rotating unit contracts from the two-hour town stock.
-- [ ] Add authored multiplayer achievement unit rewards; keep random job recruitment uncommon.
+- [x] Make daily, weekly, story, and Chronicle milestones the reliable unit sources; remove random unit rewards from city contracts and rotating town stock.
+- [x] Add authored multiplayer achievement unit rewards; Chronicle milestone ranks 5/10/15/20 now grant fixed sidegrade and specialist units while random job recruitment stays uncommon.
 - [x] Cap direct player spell damage against boss commanders at 18 percent of max health, and at 10 percent in four-phase co-op raids.
 
 ## Phase 7: Multiplayer Combat Engine Refactor
@@ -131,6 +132,7 @@ Turn the current shared world-map prototype into a real multiplayer layer withou
 - [x] Level 3: PVP hub and duel challenges unlock with a short rules conversation backed by the shared gate and API enforcement.
 - [x] Level 4: trading unlocks after inventory and value are explained.
 - [x] Level 5: party creation and cooperative dungeon readiness unlock with an authored briefing and a guarded two-player raid entry.
+- [x] Level 7: Dungeon Tier II entry is enforced by the shared unlock registry and shown on map/PVE dungeon previews; level 12+ Tier III roads require level 16.
 - [ ] Later levels unlock harder regions, additional city services, dungeon tiers, boss rotations, and advanced social objectives.
 - [ ] Enforce every gate on the server as well as the client; a hidden button is not an authorization rule.
 - [x] Show locked features in a compact preview with level requirement and one-sentence value, rather than silently hiding the feature.
@@ -153,10 +155,11 @@ Turn the current shared world-map prototype into a real multiplayer layer withou
 - [ ] Add faction reputation only after at least two factions have distinct rewards and repeatable activities.
 - [ ] Let completed chapters change small world details, NPC lines, or available contracts without deleting required contacts.
 - [ ] Build level-band content in batches: 1-5 onboarding, 6-10 regional mastery, 11-15 veteran systems, then expand the cap only with enough enemies and bosses.
+- [x] Ship the playable core of the 6-10 Drowned Moonwell band with its guide pair, explicit objectives, named elite, capstone, return scene, and Moonbridge board.
 
 ## Phase 12: Multiplayer Scaling And Endgame
 - [ ] Scale NPC formations by player level band, party size, equipment score, and encounter type; never scale directly to every temporary combat spike.
-- [ ] Add difficulty labels based on predicted formation pressure rather than level alone.
+- [x] Add Easy, Fair, Hard, and Deadly scout labels based on commander, gear, spell, and formation pressure rather than level alone.
 - [ ] Add veteran dungeon modifiers, rotating boss abilities, and optional hard paths before raising raw health totals.
 - [ ] Add seasonal PVP rating resets with cosmetic/status rewards and placement protection for new level-3 players.
 - [ ] Add party and guild goals only after party sessions, chat moderation, and reward validation are reliable.
@@ -177,4 +180,6 @@ Turn the current shared world-map prototype into a real multiplayer layer withou
 6. [x] Complete local multiplayer sessions: duel ownership/synchronization and duo raid readiness, formation, combat, recovery, abandon, and settlement are implemented.
 7. [x] Finish the concise town-service pass and verify the new scroll-shell composition at all target viewports.
 8. [ ] Move duel, trade, and co-op session transport and validation to Supabase.
-9. Produce levels 6-30 as complete five-level content bands, one chapter at a time.
+9. [x] Ship the playable levels 6-10 Drowned Moonwell core with exact story encounters, response choices, Moonbridge contracts, and Dungeon Tier II gating.
+10. [ ] Complete its two side-story chains, bespoke enemy/item art, reputation prerequisites, and visible post-chapter world response.
+11. [ ] Produce levels 11-30 as complete five-level content bands, one chapter at a time.

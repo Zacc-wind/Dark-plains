@@ -5,6 +5,7 @@ import { useState } from 'react';
 import {
   claimCurrentMultiplayerChronicleRank,
   getInventoryItemDefinition,
+  getMinionTemplate,
   getMultiplayerChronicleView,
   type RewardSummary,
   type User,
@@ -40,6 +41,13 @@ function rewardPresentation(reward: ChronicleRankReward): { iconPath: string; la
       label: `${reward.itemQuantity || 1}x ${definition?.name || reward.itemId}`,
     };
   }
+  if (reward.minionTemplateId) {
+    const template = getMinionTemplate(reward.minionTemplateId);
+    return {
+      iconPath: template ? `/assets/minions/${template.assetName}` : '/assets/icons/attack.png',
+      label: template?.name || 'Unit recruit',
+    };
+  }
   if (reward.entitlement) {
     const iconPath = reward.entitlement.kind === 'frame'
       ? '/assets/icons/defense.png'
@@ -57,6 +65,11 @@ function completionRewardLines(rewards?: RewardSummary): CompletionRewardLine[] 
   if (rewards.gold) lines.push({ label: 'Gold', value: `+${rewards.gold}`, tone: 'gold' });
   if (rewards.rareGems) lines.push({ label: 'Rare Gems', value: `+${rewards.rareGems}`, tone: 'violet' });
   rewards.items?.forEach(item => lines.push({ label: item.name, value: `+${item.quantity}`, tone: 'neutral' }));
+  rewards.minions?.forEach(minion => lines.push({
+    label: getMinionTemplate(minion.templateId)?.name || 'Unit',
+    value: 'Recruited',
+    tone: 'green',
+  }));
   return lines;
 }
 

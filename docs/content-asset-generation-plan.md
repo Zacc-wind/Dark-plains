@@ -92,7 +92,7 @@ Quest items remain non-tradable and do not consume normal gear capacity. Each it
 
 ## Level 6-10 Content Batch: The Drowned Moonwell
 
-Ship this chapter as one complete playable band:
+The no-new-art gameplay core shipped on 2026-07-22 with nine ordered quests, eight Moonbridge contracts, the existing Blackroot Vessel and Mother Cindervein profiles, exact encounter receipts, and a post-boss return. The following asset-backed expansion remains before the band meets the full chapter production contract:
 
 1. `Road to Moonbridge`: report the Black Pike collapse to Sister Avel and travel to Moonbridge.
 2. `Silk Under Stone`: inspect the first Moonfen Broodling risk, clear the bridge nest, and recover Cathedral Silk.
@@ -133,5 +133,5 @@ The exact deed-to-unit and deed-to-spell mappings remain in `docs/progression-co
 3. Produce the ten enemy sprites in two batches of five; integrate only the level 6-10 enemies first.
 4. Generate and wire the twelve quest-item icons alongside their actual quest definitions.
 5. Implement Moonwell Vestments and Pikebreaker Harness before producing the remaining three sets.
-6. Ship The Drowned Moonwell as a complete level band and rebalance its XP against the new job curve.
+6. [In progress] Replace the Drowned Moonwell core's reused enemy art with the planned enemy/item set, add both side stories and the visible world response, then rebalance the complete band against the job curve.
 7. Begin the singleplayer discovery migration only after multiplayer and singleplayer ownership tests prove separation.

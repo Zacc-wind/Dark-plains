@@ -108,6 +108,14 @@ import {
   type RunMilestoneView,
 } from '@/lib/runMilestones';
 import {
+  getRunDiscoveryViews,
+  normalizeRunDiscoveryState,
+  RUN_STARTER_SPELL_IDS,
+  RUN_STARTER_UNIT_TEMPLATE_IDS,
+  type RunDiscoveryKind,
+  type RunDiscoveryPendingOffer,
+} from '@/lib/runDiscovery';
+import {
   createSingleplayerRunTutorialStep,
   markSingleplayerRunRewardTipSeen,
   markSingleplayerRunTutorialStepSeen,
@@ -325,6 +333,7 @@ interface RunBattleUnitReport {
   name: string;
   assetPath: string;
   side: 'player' | 'enemy';
+  kind: 'commander' | 'minion';
   alive: boolean;
   damageDealt: number;
   damageTaken: number;
@@ -344,6 +353,8 @@ interface RunBattleReport {
   damageDealt: number;
   damageTaken: number;
   healingDone: number;
+  commanderHealthRatio: number;
+  commanderUntouched: boolean;
   unitReports: RunBattleUnitReport[];
 }
 
@@ -433,7 +444,14 @@ interface RunSession {
   shopBuyHistory?: string[];
   shopGoldSpent?: number;
   omenHistory?: string[];
-  permanentSpellUnlocks?: string[];
+  discoverySpellIds?: string[];
+  discoveryUnitTemplateIds?: string[];
+  pendingDiscoveryOffers?: RunDiscoveryPendingOffer[];
+  discoveryOfferIdsSeen?: string[];
+  temporarySpellIds?: string[];
+  unitsLost?: number;
+  lowestCommanderHealthRatio?: number;
+  commanderUntouchedBattles?: number;
   runGearRarityCap?: EquipmentRarity;
   runEquipment: Equipment[];
   runEquippedSlots: Partial<Record<EquipmentSlot, string>>;
@@ -683,7 +701,7 @@ const MERCENARY_TEMPLATE_ID = 'mercenary';
 const MERCENARY_SHOP_REWARD_ID = 'mercenary-contract';
 const MERCENARY_SHOP_OFFER_CHANCE = 0.05;
 const FALLEN_FINAL_DRAFT_CHANCE = 0.06;
-const PLAYER_RUN_EXCLUDED_TEMPLATE_IDS = new Set(['thief', 'darkpriest']);
+const PLAYER_RUN_EXCLUDED_TEMPLATE_IDS = new Set<string>();
 
 function makeMercenaryShopReward(): RunRewardChoice {
   const template = getMinionTemplate(MERCENARY_TEMPLATE_ID);
@@ -694,7 +712,7 @@ function makeMercenaryShopReward(): RunRewardChoice {
       ? `${template.name} joins this run. Slow, hard to kill, and deadly when enemies strike back.`
       : 'A hardened mercenary joins this run.',
     category: 'recruit',
-    isAvailable: canAddRunMinion,
+    isAvailable: session => canAddRunMinion(session) && isRunDiscoveryContentEligible(session, 'unit', MERCENARY_TEMPLATE_ID),
     apply: session => {
       const nextTemplate = getMinionTemplate(MERCENARY_TEMPLATE_ID);
       return nextTemplate
@@ -841,6 +859,39 @@ function getRunStartingKnownSpellIds(spellIds: string[], user: User | null | und
   return Array.from(known);
 }
 
+function getRunDiscoveryForUser(user: User | null | undefined) {
+  const runState = getDailyRunState(user);
+  return normalizeRunDiscoveryState(runState.discovery, user?.knownSpellIds || [], runState.history);
+}
+
+function isRunDiscoveryContentEligible(session: RunSession, kind: RunDiscoveryKind, contentId: string): boolean {
+  if (session.mode !== 'daily') return true;
+  return kind === 'spell'
+    ? (session.discoverySpellIds || RUN_STARTER_SPELL_IDS as readonly string[]).includes(contentId)
+    : (session.discoveryUnitTemplateIds || RUN_STARTER_UNIT_TEMPLATE_IDS as readonly string[]).includes(contentId);
+}
+
+function getPendingRunDiscoveryOffer(
+  session: RunSession,
+  kind: RunDiscoveryKind,
+  candidates?: readonly string[],
+): RunDiscoveryPendingOffer | undefined {
+  const candidateIds = candidates ? new Set(candidates) : null;
+  return (session.pendingDiscoveryOffers || []).find(offer => (
+    offer.kind === kind
+    && !session.discoveryOfferIdsSeen?.includes(offer.id)
+    && (!candidateIds || candidateIds.has(offer.contentId))
+  ));
+}
+
+function markRunDiscoveryOffersSeen(session: RunSession, offerIds: readonly string[]): RunSession {
+  if (session.mode !== 'daily' || offerIds.length === 0) return session;
+  return {
+    ...session,
+    discoveryOfferIdsSeen: Array.from(new Set([...(session.discoveryOfferIdsSeen || []), ...offerIds])),
+  };
+}
+
 function learnRunSpell(session: RunSession, spellId: string): RunSession {
   if (session.knownSpellIds.includes(spellId)) {
     const spell = BATTLE_SPELLS.find(item => item.id === spellId);
@@ -851,35 +902,11 @@ function learnRunSpell(session: RunSession, spellId: string): RunSession {
   return {
     ...session,
     knownSpellIds: [...session.knownSpellIds, spellId],
+    temporarySpellIds: session.mode === 'daily'
+      ? Array.from(new Set([...(session.temporarySpellIds || []), spellId]))
+      : session.temporarySpellIds,
     notice: `${spell?.name || 'Spell'} added to your run spellbook.`,
   };
-}
-
-function maybeUnlockPermanentRunSpell(session: RunSession): string | null {
-  if (session.mode !== 'daily' || Math.random() >= 0.01) return null;
-
-  const user = getCurrentUser();
-  if (!user) return null;
-
-  const known = new Set(user.knownSpellIds || []);
-  const candidates = BATTLE_SPELLS.filter(spell => !known.has(spell.id));
-  const spell = shuffle(candidates)[0];
-  if (!spell) return null;
-
-  updateCurrentUser({
-    knownSpellIds: [...known, spell.id],
-    activityLog: [{
-      id: `activity-random-spell-${spell.id}-${Date.now()}`,
-      type: 'quest' as const,
-      title: `${spell.name} Permanently Learned`,
-      source: 'Run',
-      completedAt: Date.now(),
-      rewards: {},
-      description: 'A rare run spell unlock was added to your permanent spellbook.',
-    }, ...(user.activityLog || [])].slice(0, 30),
-  });
-
-  return spell.name;
 }
 
 function makeSpellLearnReward(spell: (typeof BATTLE_SPELLS)[number]): RunRewardChoice {
@@ -887,7 +914,10 @@ function makeSpellLearnReward(spell: (typeof BATTLE_SPELLS)[number]): RunRewardC
     id: `learn-${spell.id}`,
     name: spell.name,
     description: `Learn ${spell.name} for this run (${spell.rarity}, mana ${spell.cost}).`,
-    isAvailable: session => !session.knownSpellIds.includes(spell.id),
+    isAvailable: session => (
+      !session.knownSpellIds.includes(spell.id)
+      && isRunDiscoveryContentEligible(session, 'spell', spell.id)
+    ),
     apply: session => learnRunSpell(session, spell.id),
   };
 }
@@ -1257,7 +1287,13 @@ function RandomRunLobby({
                 <RunHistoryLine label="Route" items={lastRun.routeSummary} fallback="No route history." />
                 <RunHistoryLine label="Shop" items={lastRun.shopBuys} fallback="No shop purchases." />
                 <RunHistoryLine label="Omens" items={lastRun.omens} fallback="No omens resolved." />
-                <RunHistoryLine label="Unlocks" items={lastRun.unlockedSpellNames} fallback="No permanent spell unlock." />
+                <RunHistoryLine
+                  label="Run Spells"
+                  items={(lastRun.temporarySpellIds || []).map(spellId => (
+                    BATTLE_SPELLS.find(spell => spell.id === spellId)?.name || spellId
+                  ))}
+                  fallback="No temporary spells learned."
+                />
               </div>
             </div>
           )}
@@ -1722,20 +1758,15 @@ function RunController({
         : withHardRouteBonus;
       const rewardDestination = getRewardDestination(withBonusGear, nextWins);
       const goldEarned = getRunGoldEarned(withBonusGear, result.battle);
-      const permanentUnlock = maybeUnlockPermanentRunSpell(withBonusGear);
       const noticeParts = [
         hardRouteCleared
           ? `${result.battle.enemy.name} defeated. +${goldEarned} run gold. Hard-route boon gained; a clean omen waits after the reward.`
           : `${result.battle.enemy.name} defeated. +${goldEarned} run gold. Choose a run reward.`,
         bonusGearDrop ? `${bonusGearDrop.name} dropped into your run satchel.` : '',
-        permanentUnlock ? `${permanentUnlock} permanently unlocked.` : '',
       ].filter(Boolean);
       const updatedBossHistory = clearedNode?.type === 'boss'
         ? [...(withBonusGear.bossHistory || []), clearedNode.label]
         : withBonusGear.bossHistory || [];
-      const updatedPermanentSpellUnlocks = permanentUnlock
-        ? [...(withBonusGear.permanentSpellUnlocks || []), permanentUnlock]
-        : withBonusGear.permanentSpellUnlocks || [];
       const runGoldAfterBattle = withHardRouteBonus.runGold + goldEarned;
       const completedBattleSession: RunSession = {
         ...withBonusGear,
@@ -1744,7 +1775,6 @@ function RunController({
         runGold: runGoldAfterBattle,
         rewardDestination,
         bossHistory: updatedBossHistory,
-        permanentSpellUnlocks: updatedPermanentSpellUnlocks,
         notice: noticeParts.join(' '),
       };
 
@@ -1795,11 +1825,10 @@ function RunController({
         };
       }
 
-      return {
+      return setRunRewardChoices({
         ...completedBattleSession,
         phase: 'reward',
-        rewardChoices: pickRunRewardChoices(withHardRouteBonus),
-      };
+      }, pickRunRewardChoices(completedBattleSession));
     });
   };
 
@@ -4662,7 +4691,9 @@ function hydrateRunSession(
   if (!storedSession || storedSession.mode !== 'daily') return null;
   if (storedSession.phase === 'complete' || storedSession.rewardClaimed) return null;
   const resolvedChallenge = storedSession.dailyChallenge || challenge || createRandomRunChallenge();
-  const progressionUnlocks = getRunProgressionUnlocks(getDailyRunState(user));
+  const runState = getDailyRunState(user);
+  const progressionUnlocks = getRunProgressionUnlocks(runState);
+  const discovery = getRunDiscoveryForUser(user);
   const { rewardChoiceIds, rewardEquipmentOffers, savedAt, ownerUsername, dateKey, ...session } = storedSession;
   void savedAt;
   void ownerUsername;
@@ -4690,7 +4721,9 @@ function hydrateRunSession(
   );
   const nodes = refreshStoredRoad ? freshNodes : storedNodes.length ? storedNodes : freshNodes;
 
-  const spellIds = storedSession.spellIds?.length ? storedSession.spellIds.slice(0, 4) : pickRunSpellLoadout(resolvedChallenge.date);
+  const spellIds = storedSession.spellIds?.length
+    ? storedSession.spellIds.slice(0, 4)
+    : pickRunSpellLoadout(resolvedChallenge.date, discovery.unlockedSpellIds);
   const knownSpellIds = storedSession.knownSpellIds?.length
     ? storedSession.knownSpellIds
     : getInitialRunKnownSpellIds(spellIds);
@@ -4719,7 +4752,12 @@ function hydrateRunSession(
     spellIds,
     knownSpellIds,
     nodes,
-    battleReports: storedSession.battleReports || [],
+    battleReports: (storedSession.battleReports || []).map(report => ({
+      ...report,
+      commanderHealthRatio: Number.isFinite(report.commanderHealthRatio) ? report.commanderHealthRatio : 1,
+      commanderUntouched: Boolean(report.commanderUntouched),
+      unitReports: (report.unitReports || []).map(unit => ({ ...unit, kind: unit.kind || 'minion' })),
+    })),
     rewardChoices: rewardChoiceIds
       .map(restoreRewardChoice)
       .filter((choice): choice is RunRewardChoice => Boolean(choice)),
@@ -4740,7 +4778,14 @@ function hydrateRunSession(
     shopBuyHistory: storedSession.shopBuyHistory || [],
     shopGoldSpent: Math.max(0, storedSession.shopGoldSpent || 0),
     omenHistory: storedSession.omenHistory || [],
-    permanentSpellUnlocks: storedSession.permanentSpellUnlocks || [],
+    discoverySpellIds: storedSession.discoverySpellIds || discovery.unlockedSpellIds,
+    discoveryUnitTemplateIds: storedSession.discoveryUnitTemplateIds || discovery.unlockedUnitTemplateIds,
+    pendingDiscoveryOffers: storedSession.pendingDiscoveryOffers || discovery.pendingOffers,
+    discoveryOfferIdsSeen: storedSession.discoveryOfferIdsSeen || [],
+    temporarySpellIds: storedSession.temporarySpellIds || [],
+    unitsLost: Math.max(0, storedSession.unitsLost || 0),
+    lowestCommanderHealthRatio: Math.max(0, Math.min(1, storedSession.lowestCommanderHealthRatio ?? 1)),
+    commanderUntouchedBattles: Math.max(0, storedSession.commanderUntouchedBattles || 0),
     runGearRarityCap: storedSession.runGearRarityCap || progressionUnlocks.maxGearRarity,
   };
 }
@@ -4977,8 +5022,14 @@ function createDailySession(user: User, dailyChallenge = createRandomRunChalleng
   const runLength = getRunLengthOption(runSetup.runLength);
   const runStats = getRandomRunBaseStats(user, runSetup);
   const nodes = createDailyRunNodes(dailyChallenge, runStats.level || 1);
-  const spellIds = pickRunSpellLoadout(dailyChallenge.date);
-  const progressionUnlocks = getRunProgressionUnlocks(getDailyRunState(user));
+  const runState = getDailyRunState(user);
+  const discovery = getRunDiscoveryForUser(user);
+  const spellIds = pickRunSpellLoadout(dailyChallenge.date, discovery.unlockedSpellIds);
+  const progressionUnlocks = getRunProgressionUnlocks(runState);
+  const draftChoices = getDraftChoices(0, discovery.unlockedUnitTemplateIds, discovery.pendingOffers);
+  const initialDiscoveryOfferIds = discovery.pendingOffers
+    .filter(offer => offer.kind === 'unit' && draftChoices.some(choice => choice.templateId === offer.contentId))
+    .map(offer => offer.id);
 
   return {
     id: `random-run-${Date.now()}-${Math.random().toString(16).slice(2)}`,
@@ -4993,14 +5044,14 @@ function createDailySession(user: User, dailyChallenge = createRandomRunChalleng
     runLengthName: runLength.title,
     runLengthRewardMultiplier: runLength.rewardMultiplier,
     minions: [],
-    draftChoices: getDraftChoices(0),
+    draftChoices,
     wins: 0,
     targetBattles: normalizeRandomRunBattleCount(dailyChallenge.targetBattles),
     runGold: 0,
     activeEnemy: null,
     formation: {},
     spellIds,
-    knownSpellIds: getRunStartingKnownSpellIds(spellIds, user),
+    knownSpellIds: getInitialRunKnownSpellIds(spellIds),
     rewardChoices: [],
     rewardDestination: null,
     nodes,
@@ -5019,7 +5070,14 @@ function createDailySession(user: User, dailyChallenge = createRandomRunChalleng
     shopBuyHistory: [],
     shopGoldSpent: 0,
     omenHistory: [],
-    permanentSpellUnlocks: [],
+    discoverySpellIds: discovery.unlockedSpellIds,
+    discoveryUnitTemplateIds: discovery.unlockedUnitTemplateIds,
+    pendingDiscoveryOffers: discovery.pendingOffers,
+    discoveryOfferIdsSeen: initialDiscoveryOfferIds,
+    temporarySpellIds: [],
+    unitsLost: 0,
+    lowestCommanderHealthRatio: 1,
+    commanderUntouchedBattles: 0,
     runGearRarityCap: progressionUnlocks.maxGearRarity,
     ...createEmptyRunEquipmentState(),
   };
@@ -5234,8 +5292,16 @@ function isPlayerRunEligibleTemplate(template: MinionTemplate): boolean {
   return !PLAYER_RUN_EXCLUDED_TEMPLATE_IDS.has(template.templateId);
 }
 
-function getPlayerRunTemplatePool(allowedTiers: MinionTemplate['tier'][]): MinionTemplate[] {
-  const eligibleTemplates = MINION_TEMPLATES.filter(template => allowedTiers.includes(template.tier) && isPlayerRunEligibleTemplate(template));
+function getPlayerRunTemplatePool(
+  allowedTiers: MinionTemplate['tier'][],
+  unlockedTemplateIds?: readonly string[],
+): MinionTemplate[] {
+  const unlocked = unlockedTemplateIds ? new Set(unlockedTemplateIds) : null;
+  const eligibleTemplates = MINION_TEMPLATES.filter(template => (
+    allowedTiers.includes(template.tier)
+    && isPlayerRunEligibleTemplate(template)
+    && (!unlocked || unlocked.has(template.templateId))
+  ));
   const standard = eligibleTemplates.filter(template => !isStandaloneMinionTemplate(template.templateId));
   const standalone = eligibleTemplates.filter(template => isStandaloneMinionTemplate(template.templateId));
   const weighted = [
@@ -5248,9 +5314,11 @@ function getPlayerRunTemplatePool(allowedTiers: MinionTemplate['tier'][]): Minio
   return weighted.length > 0 ? weighted : eligibleTemplates;
 }
 
-function pickPlayerRunTemplate(tier: MinionTemplate['tier']): MinionTemplate {
-  return shuffle(getPlayerRunTemplatePool([tier]))[0]
-    || MINION_TEMPLATES.find(template => template.tier === tier && isPlayerRunEligibleTemplate(template))
+function pickPlayerRunTemplate(tier: MinionTemplate['tier'], session?: RunSession): MinionTemplate {
+  const unlockedIds = session?.mode === 'daily' ? session.discoveryUnitTemplateIds : undefined;
+  return shuffle(getPlayerRunTemplatePool([tier], unlockedIds))[0]
+    || shuffle(getPlayerRunTemplatePool(['tier1', 'tier2', 'tier3'], unlockedIds))[0]
+    || MINION_TEMPLATES.find(template => template.templateId === 'knight-squire')
     || MINION_TEMPLATES[0];
 }
 
@@ -5377,7 +5445,11 @@ function getStandaloneFirstTemplatePool(templates: MinionTemplate[]): MinionTemp
   return standalone.length > 0 ? [...standalone, ...standalone, ...standard] : templates;
 }
 
-function getDraftChoices(picksMade: number): MinionTemplate[] {
+function getDraftChoices(
+  picksMade: number,
+  unlockedTemplateIds?: readonly string[],
+  pendingOffers: readonly RunDiscoveryPendingOffer[] = [],
+): MinionTemplate[] {
   const allowedTiers: MinionTemplate['tier'][] = picksMade < 3
     ? ['tier1']
     : picksMade < 6
@@ -5385,7 +5457,9 @@ function getDraftChoices(picksMade: number): MinionTemplate[] {
       : ['tier2', 'tier3'];
   const includeRareFallen = picksMade < MAX_FIELD_MINIONS - 1 || Math.random() < FALLEN_FINAL_DRAFT_CHANCE;
   const canUseTemplate = (template: MinionTemplate) => includeRareFallen || template.templateId !== 'fallen';
-  const candidates = getPlayerRunTemplatePool(allowedTiers).filter(canUseTemplate);
+  const unlocked = unlockedTemplateIds ? new Set(unlockedTemplateIds) : null;
+  const isUnlocked = (template: MinionTemplate) => !unlocked || unlocked.has(template.templateId);
+  const candidates = getPlayerRunTemplatePool(allowedTiers, unlockedTemplateIds).filter(canUseTemplate);
   const choices: MinionTemplate[] = [];
   const seen = new Set<string>();
   const addChoice = (template: MinionTemplate) => {
@@ -5394,9 +5468,19 @@ function getDraftChoices(picksMade: number): MinionTemplate[] {
     choices.push(template);
   };
 
+  const pendingTemplate = pendingOffers
+    .filter(offer => offer.kind === 'unit')
+    .map(offer => getMinionTemplate(offer.contentId))
+    .find((template): template is MinionTemplate => Boolean(
+      template
+      && allowedTiers.includes(template.tier)
+      && isUnlocked(template)
+      && canUseTemplate(template)
+    ));
+  if (pendingTemplate) addChoice(pendingTemplate);
   shuffle(candidates).forEach(addChoice);
-  shuffle(MINION_TEMPLATES.filter(template => allowedTiers.includes(template.tier) && isPlayerRunEligibleTemplate(template) && canUseTemplate(template))).forEach(addChoice);
-  if (choices.length < 4) shuffle(MINION_TEMPLATES.filter(template => isPlayerRunEligibleTemplate(template) && canUseTemplate(template))).forEach(addChoice);
+  shuffle(MINION_TEMPLATES.filter(template => allowedTiers.includes(template.tier) && isPlayerRunEligibleTemplate(template) && isUnlocked(template) && canUseTemplate(template))).forEach(addChoice);
+  if (choices.length < 4) shuffle(MINION_TEMPLATES.filter(template => isPlayerRunEligibleTemplate(template) && isUnlocked(template) && canUseTemplate(template))).forEach(addChoice);
 
   return choices.slice(0, 4);
 }
@@ -5415,32 +5499,48 @@ function addDraftMinion(session: RunSession, template: MinionTemplate): RunSessi
   ].slice(0, MAX_FIELD_MINIONS);
   const complete = minions.length >= MAX_FIELD_MINIONS;
 
-  return {
+  const nextDraftChoices = complete ? [] : getDraftChoices(
+    minions.length,
+    session.discoveryUnitTemplateIds,
+    session.pendingDiscoveryOffers,
+  );
+  const shownOfferIds = (session.pendingDiscoveryOffers || [])
+    .filter(offer => offer.kind === 'unit' && nextDraftChoices.some(choice => choice.templateId === offer.contentId))
+    .map(offer => offer.id);
+
+  return markRunDiscoveryOffersSeen({
     ...session,
     minions,
     formation: complete ? makeDefaultFormation(minions.map(unit => unit.stack)) : session.formation,
     phase: complete ? 'map' : 'draft',
-    draftChoices: complete ? [] : getDraftChoices(minions.length),
+    draftChoices: nextDraftChoices,
     notice: complete ? 'Warband drafted. Start the first fight when ready.' : undefined,
-  };
+  }, shownOfferIds);
 }
 
-function pickRunSpellLoadout(seedLabel: string): string[] {
-  const common = BATTLE_SPELLS.filter(spell => spell.rarity === 'common');
-  const rare = BATTLE_SPELLS.filter(spell => spell.rarity === 'rare');
-  const legendary = BATTLE_SPELLS.filter(spell => spell.rarity === 'legendary');
+function pickRunSpellLoadout(seedLabel: string, unlockedSpellIds?: readonly string[]): string[] {
+  const unlocked = unlockedSpellIds ? new Set(unlockedSpellIds) : null;
+  const eligible = BATTLE_SPELLS.filter(spell => !unlocked || unlocked.has(spell.id));
+  const common = eligible.filter(spell => spell.rarity === 'common');
+  const rare = eligible.filter(spell => spell.rarity === 'rare');
+  const legendary = eligible.filter(spell => spell.rarity === 'legendary');
   const seed = seedLabel.split('').reduce((hash, char) => hash + char.charCodeAt(0), 0);
   const seededSpells = [
-    common[seed % common.length],
-    common[(seed + 3) % common.length],
-    rare[(seed + 5) % rare.length],
-    (seed % 5 === 0 ? legendary[seed % legendary.length] : rare[(seed + 9) % rare.length]),
-  ].filter(Boolean).map(spell => spell.id);
+    common.length ? common[seed % common.length] : undefined,
+    common.length ? common[(seed + 3) % common.length] : undefined,
+    rare.length ? rare[(seed + 5) % rare.length] : undefined,
+    seed % 5 === 0 && legendary.length
+      ? legendary[seed % legendary.length]
+      : rare.length ? rare[(seed + 9) % rare.length] : undefined,
+  ].filter((spell): spell is (typeof BATTLE_SPELLS)[number] => Boolean(spell)).map(spell => spell.id);
 
-  return [
-    'ember-dart',
-    ...seededSpells.filter(spellId => spellId !== 'ember-dart'),
-  ].slice(0, 4);
+  const selected = Array.from(new Set([
+    eligible.some(spell => spell.id === 'ember-dart') ? 'ember-dart' : eligible[0]?.id,
+    ...seededSpells,
+    ...eligible.map(spell => spell.id),
+  ].filter((spellId): spellId is string => Boolean(spellId))));
+
+  return selected.slice(0, 4);
 }
 
 function startDailyBattle(session: RunSession): RunSession {
@@ -6553,10 +6653,12 @@ function applyBattleLossesToRun(session: RunSession, battle: BattleState): RunSe
   );
 
   if (fallenIds.size === 0) return session;
+  const newlyLost = session.minions.filter(unit => unit.alive && fallenIds.has(unit.stack.id)).length;
 
   return {
     ...session,
     minions: session.minions.map(unit => fallenIds.has(unit.stack.id) ? { ...unit, alive: false } : unit),
+    unitsLost: (session.unitsLost || 0) + newlyLost,
   };
 }
 
@@ -6591,6 +6693,8 @@ function appendRunBattleReport(session: RunSession, report: RunBattleReport): Ru
   return {
     ...session,
     battleReports: [...(session.battleReports || []), report].slice(-12),
+    lowestCommanderHealthRatio: Math.min(session.lowestCommanderHealthRatio ?? 1, report.commanderHealthRatio),
+    commanderUntouchedBattles: (session.commanderUntouchedBattles || 0) + (report.commanderUntouched ? 1 : 0),
   };
 }
 
@@ -6617,12 +6721,19 @@ function createRunBattleReport(
         name: unit.name,
         assetPath: unit.assetPath,
         side: unit.side,
+        kind: unit.kind,
         alive: unit.currentHealth > 0,
         damageDealt,
         damageTaken,
         healingDone,
       };
     });
+
+  const commander = unitReports.find(unit => unit.kind === 'commander');
+  const commanderUnit = battle.units.find(unit => unit.side === 'player' && unit.kind === 'commander');
+  const commanderHealthRatio = commanderUnit
+    ? clamp(commanderUnit.currentHealth / Math.max(1, commanderUnit.maxHealth), 0, 1)
+    : 1;
 
   return {
     id: `${battle.id}-${status}-${Date.now()}`,
@@ -6637,6 +6748,8 @@ function createRunBattleReport(
     damageDealt: unitReports.reduce((total, unit) => total + unit.damageDealt, 0),
     damageTaken: unitReports.reduce((total, unit) => total + unit.damageTaken, 0),
     healingDone: unitReports.reduce((total, unit) => total + unit.healingDone, 0),
+    commanderHealthRatio,
+    commanderUntouched: status === 'victory' && commander?.damageTaken === 0,
     unitReports,
   };
 }
@@ -6868,6 +6981,16 @@ function pickRunRewardChoices(
     return true;
   };
 
+  const pendingSpell = getPendingRunDiscoveryOffer(
+    session,
+    'spell',
+    spellPool.map(choice => choice.id.replace(/^learn-/, '')),
+  );
+  if (pendingSpell) {
+    const guaranteedChoice = spellPool.find(choice => choice.id === `learn-${pendingSpell.contentId}`);
+    if (guaranteedChoice) tryAdd(guaranteedChoice);
+  }
+
   if (Math.random() < equipmentChance) {
     const equipmentReward = pickRunEquipmentReward(session);
     if (equipmentReward) tryAdd(equipmentReward);
@@ -6890,6 +7013,13 @@ function pickRunRewardChoices(
   return shuffle(selected).slice(0, count);
 }
 
+function setRunRewardChoices(session: RunSession, choices: RunRewardChoice[]): RunSession {
+  const shownOfferIds = (session.pendingDiscoveryOffers || [])
+    .filter(offer => offer.kind === 'spell' && choices.some(choice => choice.id === `learn-${offer.contentId}`))
+    .map(offer => offer.id);
+  return markRunDiscoveryOffersSeen({ ...session, rewardChoices: choices }, shownOfferIds);
+}
+
 function makeShopOffers(session: RunSession, count = RUN_SHOP_CHOICE_COUNT): RunShopOffer[] {
   const worldMapRun = isWorldMapRun(session);
   const offers: RunShopOffer[] = pickRunRewardChoices(session, count, {
@@ -6906,7 +7036,12 @@ function makeShopOffers(session: RunSession, count = RUN_SHOP_CHOICE_COUNT): Run
 }
 
 function makeMercenaryShopOffer(session: RunSession): RunShopOffer | null {
-  if (isWorldMapRun(session) || !canAddRunMinion(session) || !getMinionTemplate(MERCENARY_TEMPLATE_ID)) {
+  if (
+    isWorldMapRun(session)
+    || !canAddRunMinion(session)
+    || !getMinionTemplate(MERCENARY_TEMPLATE_ID)
+    || !isRunDiscoveryContentEligible(session, 'unit', MERCENARY_TEMPLATE_ID)
+  ) {
     return null;
   }
   const chanceRoll = getStableShopRoll(`${session.id}:${getShopNodeOfferKey(session)}:${session.wins}:mercenary-offer`, 10000) / 10000;
@@ -7002,13 +7137,17 @@ function ensureShopOffers(session: RunSession): RunSession {
   const key = getShopNodeOfferKey(session);
   if (Object.prototype.hasOwnProperty.call(session.shopOffers || {}, key)) return session;
 
-  return {
+  const offers = makeShopOffers(session);
+  const shownOfferIds = (session.pendingDiscoveryOffers || [])
+    .filter(offer => offer.kind === 'spell' && offers.some(item => item.choiceId === `learn-${offer.contentId}`))
+    .map(offer => offer.id);
+  return markRunDiscoveryOffersSeen({
     ...session,
     shopOffers: {
       ...(session.shopOffers || {}),
-      [key]: makeShopOffers(session),
+      [key]: offers,
     },
-  };
+  }, shownOfferIds);
 }
 
 function rerollShopOffers(session: RunSession): RunSession {
@@ -7016,27 +7155,30 @@ function rerollShopOffers(session: RunSession): RunSession {
   if (remaining <= 0) return { ...session, notice: 'No shop rerolls remain for this run.' };
   const key = getShopNodeOfferKey(session);
 
-  return {
+  const offers = makeShopOffers(session);
+  const shownOfferIds = (session.pendingDiscoveryOffers || [])
+    .filter(offer => offer.kind === 'spell' && offers.some(item => item.choiceId === `learn-${offer.contentId}`))
+    .map(offer => offer.id);
+  return markRunDiscoveryOffersSeen({
     ...session,
     shopOffers: {
       ...(session.shopOffers || {}),
-      [key]: makeShopOffers(session),
+      [key]: offers,
     },
     shopRerollsRemaining: remaining - 1,
     notice: `Shop restocked. ${remaining - 1} reroll${remaining - 1 === 1 ? '' : 's'} remain.`,
-  };
+  }, shownOfferIds);
 }
 
 function rerollRewardChoices(session: RunSession): RunSession {
   const remaining = session.blessingRerollsRemaining ?? RUN_BLESSING_REROLL_COUNT;
   if (remaining <= 0) return { ...session, notice: 'No blessing rerolls remain for this run.' };
 
-  return {
+  return setRunRewardChoices({
     ...session,
-    rewardChoices: pickRunRewardChoices(session),
     blessingRerollsRemaining: remaining - 1,
     notice: `Blessings redrawn. ${remaining - 1} reroll${remaining - 1 === 1 ? '' : 's'} remain.`,
-  };
+  }, pickRunRewardChoices(session));
 }
 
 function buyShopReward(session: RunSession, offerIndex: number, choice: RunRewardChoice, cost: number): RunSession {
@@ -7370,7 +7512,7 @@ function rollPositiveDungeonEventOutcome(session: RunSession): OmenOutcome {
       apply: current => resurrectMinions(current, 1),
     });
   } else if (canAddRunMinion(session)) {
-    const template = pickPlayerRunTemplate('tier2');
+    const template = pickPlayerRunTemplate('tier2', session);
     outcomes.push({
       id: 'hard-route-recruit',
       title: 'Oathbound Straggler',
@@ -7558,7 +7700,7 @@ function rollDungeonEventOutcome(session: RunSession): OmenOutcome {
       };
     }
 
-    const template = pickPlayerRunTemplate('tier1');
+    const template = pickPlayerRunTemplate('tier1', session);
     return {
       id: 'recruit',
       title: 'Lost Pilgrim',
@@ -7614,7 +7756,10 @@ function rollDungeonEventOutcome(session: RunSession): OmenOutcome {
   }
 
   if (roll < 0.76) {
-    const learnable = BATTLE_SPELLS.filter(spell => !session.knownSpellIds.includes(spell.id));
+    const learnable = BATTLE_SPELLS.filter(spell => (
+      !session.knownSpellIds.includes(spell.id)
+      && isRunDiscoveryContentEligible(session, 'spell', spell.id)
+    ));
     if (learnable.length > 0) {
       const spell = shuffle(learnable)[0];
       return {
@@ -7663,7 +7808,7 @@ function rollDungeonEventOutcome(session: RunSession): OmenOutcome {
     }
 
     if (deepRoad && canAddRunMinion(session)) {
-      const template = pickPlayerRunTemplate('tier2');
+      const template = pickPlayerRunTemplate('tier2', session);
       return {
         id: 'veteran-at-crossroads',
         title: 'Veteran at the Crossroads',
@@ -7689,7 +7834,7 @@ function rollDungeonEventOutcome(session: RunSession): OmenOutcome {
   }
 
   if (roll < 0.945 && canAddRunMinion(session)) {
-    const template = pickStandaloneTier1RunTemplate();
+    const template = pickStandaloneTier1RunTemplate(session);
     if (template) {
       return {
         id: `omen-standalone-tier1-${template.templateId}`,
@@ -7703,7 +7848,7 @@ function rollDungeonEventOutcome(session: RunSession): OmenOutcome {
   }
 
   if (roll < 0.975 && canAddRunMinion(session)) {
-    const template = pickStandaloneTier2RunTemplate();
+    const template = pickStandaloneTier2RunTemplate(session);
     if (template) {
       return {
         id: `omen-standalone-${template.templateId}`,
@@ -7717,7 +7862,7 @@ function rollDungeonEventOutcome(session: RunSession): OmenOutcome {
   }
 
   if (roll < 0.992 && deepRoad && canAddRunMinion(session)) {
-    const template = pickStandaloneTier3RunTemplate();
+    const template = pickStandaloneTier3RunTemplate(session);
     if (template) {
       return {
         id: `omen-standalone-tier3-${template.templateId}`,
@@ -8032,10 +8177,17 @@ function buildRandomRunCompletionSummary(session: RunSession, completedAt: numbe
       shopBuys: session.shopBuyHistory || [],
       shopGoldSpent: session.shopGoldSpent || 0,
       omens: session.omenHistory || [],
-      unlockedSpellNames: session.permanentSpellUnlocks || [],
+      unlockedSpellNames: [],
+      temporarySpellIds: session.temporarySpellIds || [],
       unitTemplateIds,
       unitClassIds,
       tierThreeUnitNames,
+      healingDone: session.battleReports.reduce((total, report) => total + report.healingDone, 0),
+      unitsLost: session.unitsLost || 0,
+      lowestCommanderHealthRatio: session.lowestCommanderHealthRatio ?? 1,
+      commanderUntouchedBattles: session.commanderUntouchedBattles || 0,
+      challengeModifierIds: session.dailyChallenge?.modifiers.map(modifier => modifier.id) || [],
+      discoveryOfferIdsSeen: session.discoveryOfferIdsSeen || [],
     },
   };
 }
@@ -8100,6 +8252,13 @@ function grantRandomRunCompletionReward(session: RunSession, user: User, complet
   );
   const newlyUnlockedMilestones = getRunMilestoneViews(dailyRun)
     .filter(milestone => milestone.unlocked && !previouslyUnlockedMilestoneIds.has(milestone.id));
+  const previousDiscoveryIds = new Set(
+    getRunDiscoveryViews(previousRunState)
+      .filter(discovery => discovery.unlocked)
+      .map(discovery => discovery.key),
+  );
+  const newlyUnlockedDiscoveries = getRunDiscoveryViews(dailyRun)
+    .filter(discovery => discovery.unlocked && !previousDiscoveryIds.has(discovery.key));
 
   if (typeof window !== 'undefined' && newlyUnlockedMilestones.length > 0) {
     const previewMilestones = newlyUnlockedMilestones.slice(0, 3);
@@ -8131,9 +8290,37 @@ function grantRandomRunCompletionReward(session: RunSession, user: User, complet
     }, 250);
   }
 
+  if (typeof window !== 'undefined' && newlyUnlockedDiscoveries.length > 0) {
+    const preview = newlyUnlockedDiscoveries.slice(0, 3);
+    window.setTimeout(() => {
+      emitCompletionNotice({
+        id: `run-discoveries-${session.id}-${completedAt}`,
+        kind: 'run',
+        kicker: 'Discovery Unlocked',
+        title: newlyUnlockedDiscoveries.length === 1
+          ? preview[0].name
+          : `${newlyUnlockedDiscoveries.length} Discoveries Unlocked`,
+        description: newlyUnlockedDiscoveries.length === 1
+          ? `${preview[0].name} can now appear in future run offers.`
+          : `${preview.map(discovery => discovery.name).join(', ')} can now appear in future runs.`,
+        artworkPath: preview[0].iconPath,
+        artworkStyle: 'item',
+        rewards: [
+          { label: 'Pool', value: preview[0].kind === 'spell' ? 'Spellbook' : 'Warband', tone: 'violet' },
+          { label: 'Guarantee', value: 'Next offer', tone: 'blue' },
+        ],
+        completedAt,
+        skipBurst: true,
+      });
+    }, newlyUnlockedMilestones.length > 0 ? 650 : 250);
+  }
+
+  const discoveryNotice = newlyUnlockedDiscoveries.length > 0
+    ? ` ${newlyUnlockedDiscoveries.length} new discover${newlyUnlockedDiscoveries.length === 1 ? 'y' : 'ies'} added to future run offers.`
+    : '';
   return levelUps > 0
-    ? `Random run cleared: ${score} score, +${runExp} run XP, ${levelUps} new run upgrade${levelUps === 1 ? '' : 's'}.`
-    : `Random run cleared: ${score} score and +${runExp} run XP.`;
+    ? `Random run cleared: ${score} score, +${runExp} run XP, ${levelUps} new run upgrade${levelUps === 1 ? '' : 's'}.${discoveryNotice}`
+    : `Random run cleared: ${score} score and +${runExp} run XP.${discoveryNotice}`;
 }
 
 function grantEncounterCompletionReward(session: RunSession, user: User, completedAt: number): string {
@@ -8483,7 +8670,10 @@ function canAddRunMinion(session: RunSession): boolean {
 }
 
 function hasUpgradeableMinion(session: RunSession): boolean {
-  return session.minions.some(unit => unit.alive && Boolean(getNextTierTemplate(unit.stack.templateId)));
+  return session.minions.some(unit => unit.alive && Boolean(getNextTierTemplate(
+    unit.stack.templateId,
+    session.mode === 'daily' ? session.discoveryUnitTemplateIds : undefined,
+  )));
 }
 
 function resurrectMinions(session: RunSession, count: number): RunSession {
@@ -8509,7 +8699,7 @@ function resurrectAllMinions(session: RunSession): RunSession {
 }
 
 function addRandomRunMinion(session: RunSession, tier: MinionTemplate['tier'], notice?: string): RunSession {
-  const template = pickPlayerRunTemplate(tier);
+  const template = pickPlayerRunTemplate(tier, session);
   const replacementIndex = session.minions.findIndex(unit => !unit.alive);
   const newUnit: RunUnit = {
     stack: applyRunCommanderUnitBonusForSession(
@@ -8541,7 +8731,7 @@ function addGuaranteedRandomRunMinion(session: RunSession, tier: MinionTemplate[
   const normalResult = addRandomRunMinion(session, tier, notice);
   if (normalResult.minions !== session.minions) return normalResult;
 
-  const template = pickPlayerRunTemplate(tier);
+  const template = pickPlayerRunTemplate(tier, session);
   const replacementIndex = session.minions.findIndex(unit => getMinionTemplate(unit.stack.templateId)?.tier !== tier);
   const safeReplacementIndex = replacementIndex >= 0 ? replacementIndex : Math.max(0, session.minions.length - 1);
   const newUnit: RunUnit = {
@@ -8560,33 +8750,37 @@ function addGuaranteedRandomRunMinion(session: RunSession, tier: MinionTemplate[
   };
 }
 
-function pickStandaloneTier2RunTemplate(): MinionTemplate | undefined {
+function pickStandaloneTier2RunTemplate(session: RunSession): MinionTemplate | undefined {
   return shuffle(MINION_TEMPLATES.filter(item => (
     item.tier === 'tier2' &&
     isStandaloneTier2MinionTemplate(item.templateId) &&
-    isPlayerRunEligibleTemplate(item)
+    isPlayerRunEligibleTemplate(item) &&
+    isRunDiscoveryContentEligible(session, 'unit', item.templateId)
   )))[0];
 }
 
-function pickStandaloneTier1RunTemplate(): MinionTemplate | undefined {
+function pickStandaloneTier1RunTemplate(session: RunSession): MinionTemplate | undefined {
   return shuffle(MINION_TEMPLATES.filter(item => (
     item.tier === 'tier1' &&
     isStandaloneTier1MinionTemplate(item.templateId) &&
-    isPlayerRunEligibleTemplate(item)
+    isPlayerRunEligibleTemplate(item) &&
+    isRunDiscoveryContentEligible(session, 'unit', item.templateId)
   )))[0];
 }
 
-function pickStandaloneTier3RunTemplate(): MinionTemplate | undefined {
+function pickStandaloneTier3RunTemplate(session: RunSession): MinionTemplate | undefined {
   return shuffle(MINION_TEMPLATES.filter(item => (
     item.tier === 'tier3' &&
     isStandaloneMinionTemplate(item.templateId) &&
-    isPlayerRunEligibleTemplate(item)
+    isPlayerRunEligibleTemplate(item) &&
+    isRunDiscoveryContentEligible(session, 'unit', item.templateId)
   )))[0];
 }
 
 function upgradeRandomMinion(session: RunSession): RunSession {
+  const unlockedTemplateIds = session.mode === 'daily' ? session.discoveryUnitTemplateIds : undefined;
   const candidates = session.minions
-    .map((unit, index) => ({ unit, index, nextTemplate: unit.alive ? getNextTierTemplate(unit.stack.templateId) : undefined }))
+    .map((unit, index) => ({ unit, index, nextTemplate: unit.alive ? getNextTierTemplate(unit.stack.templateId, unlockedTemplateIds) : undefined }))
     .filter(item => item.nextTemplate);
   const chosen = shuffle(candidates)[0];
 
@@ -8610,14 +8804,19 @@ function upgradeRandomMinion(session: RunSession): RunSession {
   };
 }
 
-function getNextTierTemplate(templateId: string): MinionTemplate | undefined {
+function getNextTierTemplate(templateId: string, unlockedTemplateIds?: readonly string[]): MinionTemplate | undefined {
   if (isStandaloneMinionTemplate(templateId)) return undefined;
 
   const template = getMinionTemplate(templateId);
   if (!template || template.tier === 'tier3') return undefined;
 
   const nextTier = template.tier === 'tier1' ? 'tier2' : 'tier3';
-  return MINION_TEMPLATES.find(item => item.class === template.class && item.tier === nextTier);
+  const unlocked = unlockedTemplateIds ? new Set(unlockedTemplateIds) : null;
+  return MINION_TEMPLATES.find(item => (
+    item.class === template.class
+    && item.tier === nextTier
+    && (!unlocked || unlocked.has(item.templateId))
+  ));
 }
 
 function woundSpecificMinion(session: RunSession, index: number): RunSession {
@@ -8626,6 +8825,7 @@ function woundSpecificMinion(session: RunSession, index: number): RunSession {
 
   return {
     ...session,
+    unitsLost: (session.unitsLost || 0) + 1,
     minions: session.minions.map((unit, unitIndex) => (
       unitIndex === index
         ? { ...unit, alive: false, stack: { ...unit.stack, runCurrentHealth: 0 } }

@@ -24,6 +24,7 @@ import {
   FIRST_BANNER_BOSS_LEVEL,
   shouldSpawnFirstBannerBoss,
 } from './multiplayerFirstBanner';
+import { getActiveDrownedMoonwellBoss } from './multiplayerDrownedMoonwell';
 import { getMultiplayerRegionalThreat } from './multiplayerEngagement';
 import { getRegionalThreatBossEnemyId } from './multiplayerRegionalThreat';
 
@@ -108,6 +109,7 @@ export interface WorldEnemy {
   expiresAt?: number;
   spawnRegionId?: string;
   spawnKind?: 'regional' | 'nearby' | 'world-boss' | 'story-boss' | 'regional-threat' | 'coop-boss';
+  storyLabel?: string;
   lootMultiplier?: number;
   requiredPlayerLevel?: number;
 }
@@ -1206,8 +1208,62 @@ function getFirstBannerStoryBoss(
     spawnedAt: now,
     spawnRegionId: region.id,
     spawnKind: 'story-boss',
+    storyLabel: 'First Banner Capstone',
     lootMultiplier: 1.7,
     requiredPlayerLevel: FIRST_BANNER_BOSS_LEVEL,
+  };
+}
+
+function getDrownedMoonwellStoryBoss(
+  user: User | null,
+  now: number,
+  occupied: Set<string>,
+  defeatedEnemyIds: Set<string>,
+): WorldEnemy | null {
+  const definition = getActiveDrownedMoonwellBoss(user);
+  if (!definition || defeatedEnemyIds.has(definition.enemyId)) return null;
+  const profile = getBossProfileById(definition.bossId);
+  if (!profile) return null;
+
+  const moonwellPier = getStaticPOIs().find(poi => poi.name === 'Moonwell Pier');
+  const centerX = moonwellPier ? moonwellPier.x + 5 : 34;
+  const centerY = moonwellPier ? moonwellPier.y + 5 : 24;
+  const region: EnemySpawnRegion = {
+    id: definition.regionId,
+    minX: clamp(centerX - 5, 1, MAP_CONFIG.width - 2),
+    minY: clamp(centerY - 5, 1, MAP_CONFIG.height - 2),
+    maxX: clamp(centerX + 5, 1, MAP_CONFIG.width - 2),
+    maxY: clamp(centerY + 5, 1, MAP_CONFIG.height - 2),
+    levels: [definition.level],
+  };
+  const seed = Math.abs(hashText(`${definition.enemyId}-${user?.username || 'commander'}`));
+  const home = findWorldEnemyHome(region, seed, occupied, 3);
+  const minions = profile.minionTemplates.map((templateId, index) => (
+    makeMinionStack(templateId, `${definition.enemyId}-${index}`, true)
+  ));
+
+  return {
+    id: definition.enemyId,
+    bossId: profile.id,
+    name: profile.name,
+    subtitle: profile.subtitle,
+    story: profile.story,
+    intro: profile.intro,
+    artworkPath: profile.assetPath,
+    x: home.x,
+    y: home.y,
+    homeX: home.x,
+    homeY: home.y,
+    level: definition.level,
+    modelNumber: profile.modelNumber,
+    personality: 'boss',
+    minions,
+    spawnedAt: now,
+    spawnRegionId: definition.regionId,
+    spawnKind: 'story-boss',
+    storyLabel: definition.storyLabel,
+    lootMultiplier: definition.lootMultiplier,
+    requiredPlayerLevel: definition.level,
   };
 }
 
@@ -1544,9 +1600,11 @@ export function getNpcEnemiesForUser(user: User | null, now = Date.now()): World
     const occupied = new Set(threatEnemies.map(enemy => `${enemy.x}:${enemy.y}`));
     const activeBoss = getHourlyWorldBoss(user, now, occupied, defeatedEnemyIds);
     const storyBoss = getFirstBannerStoryBoss(user, now, occupied, defeatedEnemyIds);
+    const moonwellBoss = getDrownedMoonwellStoryBoss(user, now, occupied, defeatedEnemyIds);
     const regionalThreatBoss = getRegionalThreatBoss(user, now, occupied, defeatedEnemyIds);
     return [
       ...(storyBoss ? [storyBoss] : []),
+      ...(moonwellBoss ? [moonwellBoss] : []),
       ...(regionalThreatBoss ? [regionalThreatBoss] : []),
       ...(activeBoss ? [activeBoss] : []),
       ...threatEnemies,
@@ -1619,10 +1677,12 @@ export function getNpcEnemiesForUser(user: User | null, now = Date.now()): World
   writeWorldEnemySnapshot(cycle, snapshotUsername, generatedEnemies);
   const activeBoss = getHourlyWorldBoss(user, now, patrolOccupied, defeatedEnemyIds);
   const storyBoss = getFirstBannerStoryBoss(user, now, patrolOccupied, defeatedEnemyIds);
+  const moonwellBoss = getDrownedMoonwellStoryBoss(user, now, patrolOccupied, defeatedEnemyIds);
   const regionalThreatBoss = getRegionalThreatBoss(user, now, patrolOccupied, defeatedEnemyIds);
   const threatEnemies = applyRegionalThreatComposition(user, generatedEnemies, now);
   return [
     ...(storyBoss ? [storyBoss] : []),
+    ...(moonwellBoss ? [moonwellBoss] : []),
     ...(regionalThreatBoss ? [regionalThreatBoss] : []),
     ...(activeBoss ? [activeBoss] : []),
     ...threatEnemies,

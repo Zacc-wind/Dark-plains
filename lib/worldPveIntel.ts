@@ -33,6 +33,8 @@ export interface PveIntelEntry {
   bossArtworkPath?: string;
   rewards: PveRewardLine[];
   minUnitsRequired: number;
+  dungeonTier?: 1 | 2 | 3;
+  requiredPlayerLevel?: number;
   requiredPlayers?: number;
   phaseCount?: number;
 }
@@ -236,6 +238,8 @@ function mapDungeonToIntel(
     bossArtworkPath: dungeon.bossArtworkPath,
     rewards: getDungeonRewardLines(dungeon.level),
     minUnitsRequired: getDungeonMinUnits(dungeon.level),
+    dungeonTier: dungeon.tier,
+    requiredPlayerLevel: dungeon.requiredPlayerLevel,
   };
 }
 

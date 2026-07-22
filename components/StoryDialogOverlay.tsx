@@ -4,29 +4,41 @@ import Image from 'next/image';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { getPlayerModelPath } from '@/lib/assetLoader';
-import type { StoryDialogSequence } from '@/lib/storyDialogue';
+import type { StoryDialogChoice, StoryDialogSequence } from '@/lib/storyDialogue';
 import CinematicScrollShell from './CinematicScrollShell';
 
 export default function StoryDialogOverlay({
   sequence,
   playerModelNumber,
   initialLineIndex = 0,
+  initialChoiceId,
   onLineChange,
+  onChoice,
   onComplete,
 }: {
   sequence: StoryDialogSequence;
   playerModelNumber: number;
   initialLineIndex?: number;
+  initialChoiceId?: string;
   onLineChange?: (lineIndex: number) => void;
+  onChoice?: (choice: StoryDialogChoice) => void;
   onComplete: () => void;
 }) {
   const [lineIndex, setLineIndex] = useState(() => (
     Math.min(Math.max(0, Math.floor(initialLineIndex)), Math.max(0, sequence.lines.length - 1))
   ));
+  const [selectedChoiceId, setSelectedChoiceId] = useState<string | undefined>(() => (
+    initialChoiceId && sequence.lines.some(item => item.choices?.some(choice => choice.id === initialChoiceId))
+      ? initialChoiceId
+      : undefined
+  ));
   const finishedRef = useRef(false);
   const line = sequence.lines[lineIndex];
   const isLastLine = lineIndex >= sequence.lines.length - 1;
   const activeSpeaker = line?.speaker || 'npc';
+  const lineChoices = line?.choices || [];
+  const selectedChoice = lineChoices.find(choice => choice.id === selectedChoiceId);
+  const isChoicePending = lineChoices.length > 0 && !selectedChoice;
 
   useEffect(() => {
     onLineChange?.(lineIndex);
@@ -39,24 +51,32 @@ export default function StoryDialogOverlay({
   }, [onComplete]);
 
   const advance = useCallback(() => {
-    if (finishedRef.current) return;
+    if (finishedRef.current || isChoicePending) return;
     if (isLastLine) {
       finish();
       return;
     }
     setLineIndex(current => current + 1);
-  }, [finish, isLastLine]);
+  }, [finish, isChoicePending, isLastLine]);
+
+  const selectChoice = useCallback((choice: StoryDialogChoice) => {
+    if (selectedChoiceId) return;
+    setSelectedChoiceId(choice.id);
+    onChoice?.(choice);
+  }, [onChoice, selectedChoiceId]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Enter' && event.key !== ' ') return;
+      if (event.target instanceof HTMLElement && event.target.closest('button, a, input, select, textarea')) return;
+      if (isChoicePending) return;
       event.preventDefault();
       advance();
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [advance]);
+  }, [advance, isChoicePending]);
 
   if (!line) return null;
 
@@ -78,6 +98,7 @@ export default function StoryDialogOverlay({
             alt="Your commander"
             width={520}
             height={720}
+            priority
             className="story-dialog-spirit-image object-contain"
             unoptimized
           />
@@ -89,6 +110,7 @@ export default function StoryDialogOverlay({
             alt={sequence.npcName}
             width={520}
             height={720}
+            priority
             className="story-dialog-spirit-image object-contain"
             unoptimized
           />
@@ -113,8 +135,28 @@ export default function StoryDialogOverlay({
             </span>
           </div>
           <p key={`${sequence.id}-${lineIndex}`} className="story-dialog-copy ui-muted mt-4 min-h-[4.5rem] max-w-3xl text-sm font-bold leading-relaxed sm:text-base">
-            {line.text}
+            {selectedChoice?.text || line.text}
           </p>
+          {isChoicePending && (
+            <div className="story-dialog-choices mt-4" role="group" aria-label={line.choicePrompt || 'Choose a response'}>
+              <div className="arcane-label mb-2">{line.choicePrompt || 'Choose a response'}</div>
+              <div className="story-dialog-choice-grid">
+                {lineChoices.map(choice => (
+                  <button
+                    key={choice.id}
+                    type="button"
+                    data-tone={choice.tone}
+                    className="story-dialog-choice"
+                    onClick={() => selectChoice(choice)}
+                  >
+                    <span className="story-dialog-choice-tone">{choice.tone}</span>
+                    <span className="story-dialog-choice-label">{choice.label}</span>
+                    <span className="story-dialog-choice-copy">{choice.text}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           {isLastLine && sequence.objective && (
             <div className="story-dialog-objective mt-4 rounded border px-4 py-3">
               <div className="arcane-label">{sequence.objective.label}</div>
@@ -125,7 +167,7 @@ export default function StoryDialogOverlay({
           <div className="mt-5 flex items-center justify-between gap-3">
             <div className="flex items-center gap-3">
               <span className="story-dialog-hint ui-faint text-[10px] font-black uppercase tracking-[0.14em]">
-                Enter or continue
+                {isChoicePending ? 'Choose a response' : 'Enter or continue'}
               </span>
               <span className="story-dialog-progress" aria-label={`Dialogue line ${lineIndex + 1} of ${sequence.lines.length}`}>
                 {sequence.lines.map((_, index) => (
@@ -133,13 +175,15 @@ export default function StoryDialogOverlay({
                 ))}
               </span>
             </div>
-            <button
-              type="button"
-              onClick={advance}
-              className="story-dialog-continue ui-button-primary rounded px-4 py-2 text-xs font-black uppercase"
-            >
-              {isLastLine ? sequence.objective ? 'Accept Order' : 'Continue' : activeSpeaker === 'npc' ? 'Respond' : 'Continue'}
-            </button>
+            {!isChoicePending && (
+              <button
+                type="button"
+                onClick={advance}
+                className="story-dialog-continue ui-button-primary rounded px-4 py-2 text-xs font-black uppercase"
+              >
+                {isLastLine ? sequence.objective ? 'Accept Order' : 'Continue' : activeSpeaker === 'npc' ? 'Respond' : 'Continue'}
+              </button>
+            )}
           </div>
         </div>
       </CinematicScrollShell>

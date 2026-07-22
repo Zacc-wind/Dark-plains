@@ -519,6 +519,80 @@ textarea {
   animation: story-dialog-copy-in 360ms ease-out both;
 }
 
+.story-dialog-choices {
+  max-width: 58rem;
+  animation: story-dialog-copy-in 420ms ease-out both;
+}
+
+.story-dialog-choice-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+
+.story-dialog-choice {
+  display: flex;
+  min-height: 7.25rem;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.35rem;
+  border: 1px solid rgba(196, 171, 115, 0.36);
+  border-radius: 4px;
+  background: rgba(5, 8, 9, 0.82);
+  padding: 0.75rem;
+  text-align: left;
+  color: rgb(244, 244, 245);
+  box-shadow: inset 3px 0 0 rgba(196, 171, 115, 0.26);
+  transition: border-color 160ms ease, background-color 160ms ease, transform 160ms ease;
+}
+
+.story-dialog-choice:hover,
+.story-dialog-choice:focus-visible {
+  border-color: rgba(244, 221, 176, 0.78);
+  background: rgba(26, 23, 18, 0.94);
+  outline: none;
+  transform: translateY(-1px);
+}
+
+.story-dialog-choice[data-tone="pragmatic"] {
+  border-color: rgba(114, 190, 205, 0.42);
+  box-shadow: inset 3px 0 0 rgba(114, 190, 205, 0.58);
+}
+
+.story-dialog-choice[data-tone="defiant"] {
+  border-color: rgba(206, 104, 119, 0.42);
+  box-shadow: inset 3px 0 0 rgba(206, 104, 119, 0.58);
+}
+
+.story-dialog-choice-tone {
+  font-size: 9px;
+  font-weight: 900;
+  line-height: 1;
+  text-transform: uppercase;
+  color: rgba(244, 221, 176, 0.88);
+}
+
+.story-dialog-choice[data-tone="pragmatic"] .story-dialog-choice-tone {
+  color: rgb(165, 228, 239);
+}
+
+.story-dialog-choice[data-tone="defiant"] .story-dialog-choice-tone {
+  color: rgb(251, 166, 178);
+}
+
+.story-dialog-choice-label {
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1.2;
+}
+
+.story-dialog-choice-copy {
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.45;
+  color: rgba(212, 212, 216, 0.82);
+}
+
 .story-dialog-objective {
   max-width: 48rem;
   border-color: rgba(114, 190, 205, 0.42);
@@ -584,6 +658,19 @@ textarea {
   .story-dialog-panel {
     max-height: min(46dvh, 25rem);
     overflow-y: auto;
+  }
+
+  .story-dialog-choice-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .story-dialog-choice {
+    min-height: 0;
+    padding: 0.65rem;
+  }
+
+  .story-dialog-choice-copy {
+    font-size: 10px;
   }
 
   .story-dialog-hint {
@@ -1650,7 +1737,7 @@ button.sp-hub-bonus-tile-spendable:focus-visible {
 
 .sp-milestones-tabs {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 0.35rem;
   border-bottom: 1px solid rgba(232, 217, 184, 0.1);
   padding: 0.55rem 1.25rem;
@@ -1777,6 +1864,44 @@ button.sp-hub-bonus-tile-spendable:focus-visible {
 .sp-milestone-status-unlocked {
   border-color: rgba(110, 231, 183, 0.34);
   color: #a7f3d0;
+}
+
+.sp-discovery-icon-frame {
+  width: 4rem;
+  height: 4rem;
+}
+
+.sp-discovery-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.sp-discovery-card .sp-milestone-icon {
+  object-fit: contain;
+}
+
+@media (max-width: 900px) {
+  .sp-discovery-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 700px) {
+  .sp-milestones-tabs {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .sp-milestone-card {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .sp-discovery-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .sp-milestone-status {
+    grid-column: 2;
+    justify-self: start;
+  }
 }
 
 
@@ -7072,7 +7197,7 @@ button.vine-frame::before,
 
   .command-center-nav {
     display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 0.35rem;
     border-right: 0;
     border-bottom: 1px solid rgba(232, 217, 184, 0.14);
@@ -7103,6 +7228,10 @@ button.vine-frame::before,
     display: contents;
   }
 
+  .command-center-nav-primary > .command-center-nav-collapse-inner {
+    display: contents;
+  }
+
   .command-center-nav-secondary {
     margin-top: 0;
     border-top: 0;
@@ -7120,6 +7249,10 @@ button.vine-frame::before,
 
   .command-center-tab-copy {
     display: none;
+  }
+
+  .army-lineup-strip {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 
   .overview-dashboard-grid,

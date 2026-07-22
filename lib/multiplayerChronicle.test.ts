@@ -24,7 +24,11 @@ describe('Black Pike Ledger Chronicle pilot', () => {
     [5, 10, 15, 20].forEach(rankNumber => {
       const rank = BLACK_PIKE_CHRONICLE_RANKS[rankNumber - 1];
       expect(rank.rewards.some(reward => reward.entitlement)).toBe(true);
+      expect(rank.rewards.some(reward => reward.minionTemplateId)).toBe(true);
     });
+    expect([5, 10, 15, 20].map(rankNumber => (
+      BLACK_PIKE_CHRONICLE_RANKS[rankNumber - 1].rewards.find(reward => reward.minionTemplateId)?.minionTemplateId
+    ))).toEqual(['crossbow', 'bell', 'enchanter', 'crow']);
   });
 
   it('applies daily and weekly caps and never awards one event id twice', () => {

@@ -50,7 +50,9 @@ Checked-in migration status:
 
 - `001`-`006` create the profile/player-state foundation, world presence, PVP challenge policies, content registry, multiplayer daily records, and enemy-only unit flags.
 - `007_multiplayer_sessions.sql` adds trade, human-duel, and duo-raid sessions with optimistic versions; co-op action receipts and duplicate-proof reward claims; participant-scoped RLS; and the missing friendship, party, and chat policies.
+- `008_singleplayer_progression.sql` adds normalized singleplayer achievement/discovery mirrors, offer guarantees, legacy backfill, indexes, triggers, and owner-scoped RLS. It is prepared but not yet applied to the hosted project.
 - Session tables are readable only by their participants. Trade, duel, co-op action, and co-op claim mutations remain server-only until the route handlers validate inventory ownership, expected revisions, legal combat actions, expiration, and rewards.
+- Multiplayer story response ids, tones, and timestamps remain inside the existing `player_states.story_quests` JSON payload, so the authored-choice work requires no additional schema migration.
 - These files are local source of truth but have not yet been applied to or validated against the hosted project.
 
 Staging deployment steps once the Supabase CLI and project access are available:
@@ -125,6 +127,53 @@ create table daily_run_records (
   completed_at timestamptz not null,
   unique (user_id, run_date)
 );
+
+-- Future singleplayer progression mirrors. `player_states.daily_run` remains the
+-- canonical prototype save until the server-authoritative migration is applied.
+create table singleplayer_achievement_unlocks (
+  user_id uuid not null references profiles(id) on delete cascade,
+  achievement_id text not null,
+  tier text not null,
+  category text not null,
+  unlocked_at timestamptz not null,
+  reward_claimed_at timestamptz,
+  metadata jsonb not null default '{}'::jsonb,
+  primary key (user_id, achievement_id)
+);
+
+create table singleplayer_discovery_unlocks (
+  user_id uuid not null references profiles(id) on delete cascade,
+  discovery_id text not null,
+  kind text not null check (kind in ('spell', 'unit')),
+  content_id text not null,
+  source_type text not null,
+  source_id text not null,
+  unlocked_at timestamptz not null,
+  metadata jsonb not null default '{}'::jsonb,
+  primary key (user_id, discovery_id),
+  unique (user_id, kind, content_id)
+);
+
+create table singleplayer_discovery_offers (
+  user_id uuid not null references profiles(id) on delete cascade,
+  discovery_id text not null,
+  offer_nodes_remaining int not null default 2 check (offer_nodes_remaining between 0 and 2),
+  first_offered_at timestamptz,
+  acquired_at timestamptz,
+  updated_at timestamptz not null default now(),
+  primary key (user_id, discovery_id),
+  foreign key (user_id, discovery_id)
+    references singleplayer_discovery_unlocks(user_id, discovery_id)
+    on delete cascade
+);
+
+-- Add RLS ownership policies for all three tables in the migration that creates
+-- them. The client must never be allowed to write another user's unlock rows.
+
+The executable version is `supabase/migrations/008_singleplayer_progression.sql`.
+It also backfills valid milestone/discovery records from `player_states.daily_run`,
+adds indexes and timestamps, and keeps mutations server-only. It is prepared but
+has not been applied to a Supabase project from this workspace.
 
 create table pvp_challenges (
   id text primary key,
@@ -243,6 +292,10 @@ from daily_run_records d
 join profiles p on p.id = d.user_id
 group by p.username;
 ```
+
+Expose the views by mode: `/api/leaderboards?scope=world` must return only
+multiplayer boards, while `scope=run` returns only singleplayer run records.
+`scope=all` is reserved for admin/debug clients.
 
 ### Phase 4: Editable Content
 

@@ -10,6 +10,7 @@ import {
 } from '@/lib/coopRaidClient';
 import { getWorldPveIntel, type PveIntelEntry, type PveRewardLine } from '@/lib/worldPveIntel';
 import { getMultiplayerUnlockStatus } from '@/lib/multiplayerUnlocks';
+import { formatDungeonTier } from '@/lib/worldEvents';
 import MultiplayerFeatureLock from '@/components/MultiplayerFeatureLock';
 import CinematicScrollShell from '@/components/CinematicScrollShell';
 
@@ -77,6 +78,11 @@ function PveIntelCard({ entry, raidAction }: { entry: PveIntelEntry; raidAction?
               {entry.kind === 'world-boss' ? 'World Boss' : entry.kind === 'regional-threat' ? 'Regional Threat' : isCoopBoss ? 'Duo Raid' : 'Dungeon'}
             </span>
             <span className="ui-faint text-[10px] font-black uppercase">Lv {entry.level}</span>
+            {entry.kind === 'dungeon' && entry.dungeonTier && (
+              <span className="ui-faint text-[10px] font-black uppercase">
+                Tier {formatDungeonTier(entry.dungeonTier)}{entry.requiredPlayerLevel ? ` - Entry Lv ${entry.requiredPlayerLevel}` : ''}
+              </span>
+            )}
             <span className="ui-faint text-[10px] font-black uppercase">{entry.expiresLabel} left</span>
           </div>
           <h4 className="fantasy-heading mt-2 text-xl leading-tight">{entry.name}</h4>

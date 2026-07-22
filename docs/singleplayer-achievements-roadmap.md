@@ -1,6 +1,6 @@
 # Singleplayer Run Achievements & Unlocks Roadmap
 
-The detailed achievement-driven spell discovery, unit blueprint, migration, and Run Archive plan lives in `docs/progression-content-roadmap.md`. It is plan-only until the current multiplayer progression/content batch is stable.
+The detailed achievement-driven spell discovery, unit blueprint, migration, and Run Archive plan lives in `docs/progression-content-roadmap.md`. The local progression model and UI are implemented; the normalized Supabase migration remains deployment work.
 
 ## Goal
 Build a dedicated singleplayer progression layer on top of random runs, separate from multiplayer world-map progress (`User` profile vs `User.dailyRun`).
@@ -36,7 +36,7 @@ Build a dedicated singleplayer progression layer on top of random runs, separate
 - [x] Add exact run-report counters and milestones for no-shop clears, flawless boss wins, 90-second boss wins, and spending 500 run gold.
 
 ## Phase 4 — Run Overview UI
-- [x] Replace placeholder card with category tabs: Milestones, Bosses, Unlocks, Recent.
+- [x] Replace placeholder card with category tabs: Milestones, Bosses, Spellbook, Warband, Recent.
 - [x] Show compact category summaries and partial progress labels for tracked milestone counters.
 - [x] Move achievements entry into the Trophies & Unlocks header and keep the hub summary compact.
 - [x] Pin 3 featured achievements on the hub overview.
@@ -49,17 +49,17 @@ Build a dedicated singleplayer progression layer on top of random runs, separate
 - [x] Export achievement summary to run completion report screen, including newly completed deeds and total claimable run XP.
 
 ## Phase 5B - Achievement-Driven Discovery
-- [ ] Split singleplayer spell ownership from multiplayer `User.knownSpellIds` without relocking existing players.
-- [ ] Replace the random permanent spell chance with deterministic achievement and boss rewards.
-- [ ] Add singleplayer-owned unlocked spell ids, unit blueprint ids, timestamps, sources, and idempotent migration state.
-- [ ] Gate 4 Tier I sidegrades, 8 Tier II units, and 8 Tier III specialists behind visible deeds.
-- [ ] Guarantee a newly unlocked spell or unit appears within the next two valid run offer nodes.
-- [ ] Keep run shops temporary: unlocking expands the future run pool instead of granting a complete build.
+- [x] Split singleplayer spell ownership from multiplayer `User.knownSpellIds` without relocking existing players.
+- [x] Replace the random permanent spell chance with deterministic achievement and boss rewards.
+- [x] Add singleplayer-owned unlocked spell ids, unit blueprint ids, timestamps, sources, and idempotent migration state.
+- [x] Gate 4 Tier I sidegrades, 8 Tier II units, and 8 Tier III specialists behind visible deeds.
+- [x] Guarantee a newly unlocked spell or unit appears within the next two valid run offer nodes.
+- [x] Keep run shops temporary: unlocking expands the future run pool instead of granting a complete build.
 
 ## Phase 6 — Database Readiness
-- [ ] Mirror achievement tables in `docs/database-deployment-plan.md`.
-- [ ] API route stub: `app/api/singleplayer/achievements/route.ts`.
-- [ ] Leaderboard split: world-map boards vs run-only boards.
+- [x] Mirror achievement tables in `docs/database-deployment-plan.md`; the unapplied, idempotent migration is `supabase/migrations/008_singleplayer_progression.sql`.
+- [x] API route stub: `app/api/singleplayer/achievements/route.ts`.
+- [x] Leaderboard split: world-map boards vs run-only boards.
 
 ## Design Notes
 - Achievements should never grant main-map gold, XP, or gear.

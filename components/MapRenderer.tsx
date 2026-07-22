@@ -25,8 +25,10 @@ import {
   startTravel,
   STORY_CHAPTERS,
   getStoryQuestStatus,
+  getStoryQuestResponseChoiceId,
   getPendingStoryDialogQuest,
   markStoryQuestIntroSeen,
+  recordStoryQuestResponse,
   recordCurrentMultiplayerEngagementEvent,
   recordQuestNpcVisit,
   updateJobTravelProgress,
@@ -42,7 +44,16 @@ import { QUEST_NPCS, getAllStoryQuestsSorted, type QuestNpc } from '@/lib/questD
 import { getStoryDialogSequence, type StoryDialogSequence } from '@/lib/storyDialogue';
 import { isDungeonQuestObjective, isPoiQuestObjective, isQuestNpcObjective } from '@/lib/questMarkers';
 import StoryDialogOverlay from './StoryDialogOverlay';
-import { WorldDungeon, formatDungeonTimeRemaining, getActiveDungeons, getRegionForTile } from '@/lib/worldEvents';
+import {
+  WorldDungeon,
+  formatDungeonTier,
+  formatDungeonTimeRemaining,
+  getActiveDungeons,
+  getDungeonRequiredPlayerLevel,
+  getDungeonTier,
+  getRegionForTile,
+} from '@/lib/worldEvents';
+import { getMultiplayerUnlockStatus, type MultiplayerFeatureId } from '@/lib/multiplayerUnlocks';
 import POIModal from './POIModal';
 import TownModal from './TownModal';
 import PlayerListModal from './PlayerListModal';
@@ -868,6 +879,7 @@ function drawCharacterSprite(
     topText?: string;
     topTextColor?: string;
     hovered?: boolean;
+    frameColor?: string;
   }
 ): void {
   const {
@@ -881,6 +893,7 @@ function drawCharacterSprite(
     topText,
     topTextColor = labelColor,
     hovered = false,
+    frameColor,
   } = options;
   const drawX = x;
   const drawY = y;
@@ -903,6 +916,21 @@ function drawCharacterSprite(
     ctx.save();
     ctx.fillStyle = fallbackColor;
     ctx.fillRect(drawX + drawSize * 0.2, drawY + drawSize * 0.2, drawSize * 0.6, drawSize * 0.6);
+    ctx.restore();
+  }
+
+  if (frameColor) {
+    const centerX = drawX + drawSize / 2;
+    const centerY = drawY + drawSize / 2;
+    ctx.save();
+    ctx.globalAlpha = 0.82;
+    ctx.strokeStyle = frameColor;
+    ctx.lineWidth = Math.max(1.5, drawSize * 0.045);
+    ctx.shadowColor = frameColor;
+    ctx.shadowBlur = Math.max(5, drawSize * 0.18);
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, drawSize * 0.44, 0, Math.PI * 2);
+    ctx.stroke();
     ctx.restore();
   }
 
@@ -1705,6 +1733,7 @@ export default function MapRenderer({
           fallbackColor: '#0e7490',
           label: player.username,
           labelColor: partyMember ? '#a7f3d0' : friend ? '#bfdbfe' : '#ffffff',
+          frameColor: partyMember ? '#6ee7b7' : undefined,
         });
       }
     });
@@ -2260,15 +2289,20 @@ export default function MapRenderer({
     {storyDialogQuestId && currentUser && (() => {
       const quest = getAllStoryQuestsSorted().find(item => item.id === storyDialogQuestId);
       const sequence = getStoryDialogSequence(quest?.dialogId);
-      if (!sequence) return null;
+      if (!sequence || !quest) return null;
       return (
         <StoryDialogOverlay
           key={sequence.id}
           sequence={sequence}
           playerModelNumber={currentUser.selectedModel || 3}
           initialLineIndex={getMultiplayerTutorialDialogueLine(currentUser.username, sequence.id)}
+          initialChoiceId={getStoryQuestResponseChoiceId(currentUser, quest.id)}
           onLineChange={(lineIndex) => {
             saveMultiplayerTutorialDialogueLine(currentUser.username, sequence.id, lineIndex);
+          }}
+          onChoice={(choice) => {
+            recordStoryQuestResponse(quest.id, choice.id);
+            setCurrentUser(getCurrentUser());
           }}
           onComplete={() => {
             clearMultiplayerTutorialDialogue(currentUser.username, sequence.id);
@@ -2423,9 +2457,7 @@ function MainQuestTracker({
   onHide: () => void;
 }) {
   const [claimError, setClaimError] = useState('');
-  const storyQuests = STORY_CHAPTERS
-    .flatMap(chapter => chapter.quests)
-    .sort((left, right) => left.order - right.order);
+  const storyQuests = getAllStoryQuestsSorted();
   const activeStory = storyQuests.find(story => {
     const status = getStoryQuestStatus(currentUser, story.id);
     return status.unlocked && !status.claimed;
@@ -2683,7 +2715,7 @@ function QuestNpcModal({ npc, onTravel, onClose }: { npc: QuestNpc; onTravel: ()
     && !getStoryQuestStatus(user, story.id).claimed
   ));
   const authoredReturnConversation = getStoryDialogSequence(returnStory?.dialogId);
-  const conversation: StoryDialogSequence = useMemo(() => authoredReturnConversation || ({
+  const conversation: StoryDialogSequence = authoredReturnConversation || {
     id: `quest-npc-conversation-${npc.id}`,
     kicker: `${npc.town} - ${npc.faction}`,
     npcName: npc.name,
@@ -2699,7 +2731,7 @@ function QuestNpcModal({ npc, onTravel, onClose }: { npc: QuestNpc; onTravel: ()
       { speaker: 'player', text: 'What do you ask of my banner?' },
       { speaker: 'npc', text: `${npc.questHook} Prove your command, then return for counsel.` },
     ],
-  }), [authoredReturnConversation, npc]);
+  };
 
   const handleClaimCounsel = () => {
     if (!atNpc) {
@@ -2731,6 +2763,12 @@ function QuestNpcModal({ npc, onTravel, onClose }: { npc: QuestNpc; onTravel: ()
       <StoryDialogOverlay
         sequence={conversation}
         playerModelNumber={user.selectedModel || 3}
+        initialChoiceId={returnStory ? getStoryQuestResponseChoiceId(user, returnStory.id) : undefined}
+        onChoice={(choice) => {
+          if (!returnStory) return;
+          recordStoryQuestResponse(returnStory.id, choice.id);
+          setUser(getCurrentUser());
+        }}
         onComplete={() => {
           recordQuestNpcVisit(npc.id);
           if (returnStory) markStoryQuestIntroSeen(returnStory.id);
@@ -2892,7 +2930,7 @@ function EnemyScoutModal({
               )}
               {enemy.spawnKind === 'story-boss' && (
                 <div className="ui-rarity-legendary mt-1 inline-flex rounded border px-2 py-1 text-[10px] font-black uppercase">
-                  First Banner Capstone
+                  {enemy.storyLabel || 'Story Encounter'}
                 </div>
               )}
               {enemy.spawnKind === 'regional-threat' && (
@@ -2997,8 +3035,17 @@ function DungeonModal({
   const region = getRegionForTile(dungeon.x, dungeon.y);
   const fieldedCount = getFieldedMinions(currentUser).length;
   const requiredMinions = dungeon.level >= 12 ? 5 : dungeon.level >= 8 ? 3 : dungeon.level >= 5 ? 1 : 0;
+  const dungeonTier = dungeon.tier || getDungeonTier(dungeon.level);
+  const dungeonTierLabel = formatDungeonTier(dungeonTier);
+  const requiredPlayerLevel = dungeon.requiredPlayerLevel || getDungeonRequiredPlayerLevel(dungeon.level);
+  const unlockFeature: MultiplayerFeatureId = dungeonTier === 3
+    ? 'dungeon-tier-iii'
+    : dungeonTier === 2
+      ? 'dungeon-tier-ii'
+      : 'dungeon-preview';
+  const dungeonUnlock = getMultiplayerUnlockStatus(unlockFeature, currentUser);
   const atDungeon = Boolean(currentUser && isTileInsideFootprint(currentUser.x, currentUser.y, dungeon.x, dungeon.y, 3, 3));
-  const canEnter = atDungeon && fieldedCount >= requiredMinions;
+  const canEnter = dungeonUnlock.unlocked && atDungeon && fieldedCount >= requiredMinions;
 
   return (
     <div className="world-popup-layer pointer-events-none fixed inset-0 flex items-center justify-center px-4">
@@ -3019,7 +3066,7 @@ function DungeonModal({
           <p className="ui-muted text-sm font-bold">{dungeon.description}</p>
           <div className="grid grid-cols-3 gap-2 text-center">
             <DungeonPill label="Region" value={region.name} />
-            <DungeonPill label="Level" value={String(dungeon.level)} />
+            <DungeonPill label="Tier" value={`${dungeonTierLabel} - Lv ${dungeon.level}`} />
             <DungeonPill label="Expires" value={formatDungeonTimeRemaining(dungeon.expiresAt, now)} />
           </div>
           <div className="ui-card rounded border p-3">
@@ -3044,14 +3091,18 @@ function DungeonModal({
           </div>
           <div className="grid grid-cols-2 gap-2 text-center">
             <DungeonPill label="Required" value={`${requiredMinions} units`} />
-            <DungeonPill label="Fielded" value={`${fieldedCount} units`} />
+            <DungeonPill label="Entry" value={dungeonUnlock.unlocked ? `${fieldedCount} fielded` : `Level ${requiredPlayerLevel}`} />
           </div>
           <button
             onClick={!atDungeon ? onTravel : onEnter}
-            disabled={!currentUser || Boolean(currentUser.traveling && !atDungeon) || (atDungeon && !canEnter)}
+            disabled={!currentUser || !dungeonUnlock.unlocked || Boolean(currentUser.traveling && !atDungeon) || (atDungeon && !canEnter)}
             className="ui-button-primary w-full rounded px-4 py-3 text-sm font-black disabled:opacity-40"
           >
-            {!atDungeon ? currentUser?.traveling ? 'Walking Here' : 'Walk Here' : canEnter ? 'Enter Dungeon Run' : 'More Units Needed'}
+            {!dungeonUnlock.unlocked
+              ? `Tier ${dungeonTierLabel} unlocks at level ${requiredPlayerLevel}`
+              : !atDungeon
+                ? currentUser?.traveling ? 'Walking Here' : 'Walk Here'
+                : canEnter ? 'Enter Dungeon Run' : 'More Units Needed'}
           </button>
           <p className="ui-muted text-xs font-bold">
             Dungeon runs now use a short chamber path with battles, shops, chance pools, and a boss reward.

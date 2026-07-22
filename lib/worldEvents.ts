@@ -29,11 +29,30 @@ export interface WorldDungeon {
   x: number;
   y: number;
   level: number;
+  tier: 1 | 2 | 3;
+  requiredPlayerLevel: number;
   expiresAt: number;
   description: string;
 }
 
 const DUNGEON_CYCLE_MS = 3 * 60 * 60 * 1000;
+
+export function getDungeonTier(level: number): 1 | 2 | 3 {
+  if (level >= 12) return 3;
+  if (level >= 7) return 2;
+  return 1;
+}
+
+export function formatDungeonTier(tier: 1 | 2 | 3): 'I' | 'II' | 'III' {
+  return tier === 3 ? 'III' : tier === 2 ? 'II' : 'I';
+}
+
+export function getDungeonRequiredPlayerLevel(level: number): number {
+  const tier = getDungeonTier(level);
+  if (tier === 3) return 16;
+  if (tier === 2) return 7;
+  return 2;
+}
 
 export const REGION_BANDS: RegionBand[] = [
   {
@@ -311,6 +330,7 @@ export function getActiveDungeons(now = Date.now(), playerLevel = 1): WorldDunge
     const { x, y } = resolveDungeonPosition(preferredX, preferredY, seed);
     const region = getRegionForTile(x, y);
     const regionFloor = Number(region.levelRange.split('-')[0]) || 1;
+    const level = Math.max(regionFloor, Math.min(25, playerLevel + regionFloor + template.levelBonus + index));
 
     return {
       id: `dungeon-${cycle}-${index}`,
@@ -327,7 +347,9 @@ export function getActiveDungeons(now = Date.now(), playerLevel = 1): WorldDunge
       bossMinionTemplates: bossProfile.minionTemplates.length > 0 ? bossProfile.minionTemplates : template.bossMinionTemplates,
       x,
       y,
-      level: Math.max(regionFloor, Math.min(25, playerLevel + regionFloor + template.levelBonus + index)),
+      level,
+      tier: getDungeonTier(level),
+      requiredPlayerLevel: getDungeonRequiredPlayerLevel(level),
       expiresAt,
       description: template.description,
     };

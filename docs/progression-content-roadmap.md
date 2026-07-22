@@ -1,6 +1,6 @@
 # Progression and Content Roadmap
 
-Updated: 2026-07-19
+Updated: 2026-07-22
 
 ## Purpose
 
@@ -19,12 +19,12 @@ This document is the execution plan for progression, retention, narrative conten
 - The shared unlock registry already covers the level 1 core, level 2 contracts/forge/PVE, level 3 PVP, level 4 trading, level 5 parties/co-op, and level 6 veteran regions.
 - Daily contracts, a weekly oath, a seven-day return track, returning-player briefing, and engagement telemetry already exist.
 - The internal Black Pike Ledger pilot now provides a persistent 20-rank free Chronicle with capped genuine-action Renown, duplicate-safe claims, modest resources, lore, banners, a frame, and a title.
-- There are 32 main-story quest definitions across the two existing acts, grouped into six five-level campaign bands.
-- 17 story quests have authored dialogue ids, including the complete eight-step First Banner opening.
-- Levels 1-5 now form a playable opening chapter with a named scout target, Black Pike capstone, real return to Orren, and level 3/4/5 system briefings. Level 6 remains the next content gap before the level 7 Moonwell quest.
-- There are 36 city contracts. Harborview and Riverside own 15 each, Blackwater Gate and Eclipse Hold own 3 each, and Moonbridge and Ashford own none.
+- There are 37 main-story quest definitions across the two existing acts, grouped into six five-level campaign bands.
+- 25 story quests have authored dialogue ids. The complete First Banner opening and Drowned Moonwell core both use authored scenes.
+- Levels 1-5 form a playable opening chapter. Levels 6-10 now add nine ordered Moonwell objectives, a named Blackroot elite, Mother Cindervein, a post-boss return, and persistent three-tone player responses.
+- There are 44 city contracts. Harborview and Riverside own 15 each, Moonbridge owns 8, Blackwater Gate and Eclipse Hold own 3 each, and Ashford remains the unfilled board.
 - There are 8 boss profiles, 24 unit templates, and 20 commander spells.
-- The world has useful fiction and assets, but the player-facing structure does not yet expose a clear chapter, next unlock, named target, or long-term collection goal.
+- Campaign, Level Path, Chronicle, named threat markers, and the quest tracker expose the active chapter, next unlock, exact target, and long-term collection track. Bespoke level 6-10 enemy/item art and side stories remain production work.
 
 ### Singleplayer
 
@@ -63,7 +63,7 @@ This document is the execution plan for progression, retention, narrative conten
 
 Multiplayer uses the gothic scroll as a recognizable outer frame for map commands, town services, Campaign, Progression, PVP, PVE, the HUD resource bar, quest tracking, tutorials, story conversations, the formation spellbook, and dramatic confirmations. Dense lists remain compact dark operational interiors inside that frame; individual rows and cards do not become parchment. The transparent-edge asset, no-blur overlay rule, and aspect-safe frame prevent black corners, stretched artwork, and expensive full-screen blur.
 
-The world-map command rail exposes `Commander`, `Gear`, and `Army` directly beside `Menu`, `Chat`, `Campaign`, `PVP`, and `PVE`. The general Menu owns only Overview, Jobs, Spells, Social, and Settings. The main quest tracker also lists the most urgent city and daily orders, so players do not search separate menus to learn what to do next.
+The world-map command rail stays focused on `Menu`, `Chat`, `Campaign`, `PVP`, and `PVE`. `Commander`, `Gear`, and `Army` live inside Menu beside Overview, Jobs, Spells, Social, and Settings. The main quest tracker lists the most urgent story, city, and daily orders so players do not search separate menus to learn what to do next.
 
 ### Multiplayer Campaign And Progression
 
@@ -116,7 +116,7 @@ Use Ser Kael Duskplate, Blackroot Vessel, and Scarlet Matron Yvane as rotating r
 
 ### Narrative Spine And Factions
 
-The current 36 city contracts use 27 faction labels. Keep those names as local orders, guilds, and religious houses, but group progression under five powers the player can remember:
+The current 44 city contracts use many local faction labels. Keep those names as local orders, guilds, and religious houses, but group progression under five powers the player can remember:
 
 | Umbrella power | Included groups | Story role |
 | --- | --- | --- |
@@ -195,7 +195,7 @@ These conversations explain a real available feature. If the feature is not impl
 | 4 | Trading and merchant-safety conversation |
 | 5 | Parties, co-op entry preview/session when available, Tier II recruitment pool |
 | 6 | Veteran roads, regional threat board, Moonbridge contract pool |
-| 7 | Dungeon tier II and first named regional boss bounty |
+| 7 | Enforced Dungeon Tier II entry and first named regional boss bounty |
 | 8 | Second saved formation preset and first town reputation track |
 | 9 | Blackwater Gate contracts and chapter-two pre-finale chain |
 | 10 | Tier III recruitment pool and the first major boss challenge |
@@ -425,7 +425,7 @@ Do not make every achievement a power grant. Players need goals after the gamepl
 4. `MP-C3 Social and return completion` - complete: shared request records, party/trade invitation overlays, a versioned local `TradeSession`, the first rotating regional threat, daily first-completion bonuses, and rested job catch-up all use genuine action receipts and duplicate-safe claims.
 5. `MP-C4 Chronicle pilot` - complete: the internal 20-rank Black Pike Ledger uses an idempotent accumulated event ledger, capped genuine-action Renown, duplicate-safe claims, permanent honors, migration tests, and a responsive progression tab.
 6. `MP-C5 Multiplayer sessions` - local slice complete: duels and duo raids have independent formation, readiness, synchronized ownership-checked combat, recovery, abandon/forfeit outcomes, and duplicate-safe settlement. Database transport remains.
-7. `MP-C6 Levels 6-10`: ship The Drowned Moonwell, Moonbridge contracts, Mother Cindervein, first reputation track, and dungeon tier II.
+7. `MP-C6 Levels 6-10` - playable core complete: nine Drowned Moonwell quests, eight Moonbridge contracts, Blackroot and Cindervein story encounters, authored tone choices, and Dungeon Tier II gating. Side stories, bespoke assets, post-chapter world response, and reputation prerequisites remain.
 8. `MP-C7 Public Chronicle`: expand the validated pilot to 40 ranks, archive support, full reward presentation, and entitlement history.
 9. `MP-C8 Levels 11-30`: produce one complete five-level chapter at a time. Do not implement all remaining quest text in one untested batch.
 
@@ -489,7 +489,7 @@ The next code batch should be intentionally smaller than this roadmap:
 ## Sixth Implementation Batch - UI, Economy, And Duo Raid Foundation - Complete 2026-07-19
 
 1. [x] Remove world-popup blur and switch scroll shells to a transparent-edge gothic asset.
-2. [x] Move Commander, Gear, and Army to the map rail; simplify Menu and expand the quest tracker with active orders.
+2. [x] Keep Commander, Gear, and Army inside Menu; simplify the map rail and expand the quest tracker with active orders.
 3. [x] Apply scroll framing to multiplayer command, progression, PVP, PVE, town, HUD, and quest surfaces while preserving dark compact list interiors.
 4. [x] Add multiplayer-only roster sorting and a confirmed retreat action to run maps.
 5. [x] Rebalance jobs to 1/10/30/60 minutes, 30 percent baseline gold/XP, gems only at 60 minutes, and later gear/drop thresholds.
@@ -508,6 +508,17 @@ The next code batch should be intentionally smaller than this roadmap:
 7. [ ] Replace local storage/event transport with Supabase session rows, realtime updates, RLS, and server action validation.
 
 The remaining `MP-C5` work is database transport and authority. Four-player route dungeons are a later scale step, not a requirement for the first reliable co-op release.
+
+## Eighth Implementation Batch - Drowned Moonwell Core - Complete 2026-07-22
+
+1. [x] Expand levels 6-10 into nine sequential objectives with Scribe Naima and Brother Kaito as recurring guides.
+2. [x] Add exact inspect and defeat receipts for the Blackroot Vessel elite and Mother Cindervein capstone so rotating bosses with the same profile cannot satisfy story progress.
+3. [x] Add both encounters to the real world-enemy roster with stable ids, level gates, story labels, and balanced loot multipliers.
+4. [x] Add eight Moonbridge contracts with varied job, battle, dungeon, item, gem, and level requirements; remove random unit rewards from city contracts.
+5. [x] Add persistent oathbound, pragmatic, and defiant responses with reload-safe journal replay and no core-progression branch lock.
+6. [x] Correct long-work thresholds to 30 minutes and expose Dungeon Tier II/III entry requirements through the shared registry, map modal, and PVE intel.
+7. [x] Add deterministic tests for encounter staging, exact receipts, chapter order, contract variety, response persistence, and dungeon tiers.
+8. [ ] Complete the two three-step side stories, bespoke Moonfen/goblin/bell-crypt enemies and quest items, first eligible reputation track, and post-chapter world-state response.
 
 ## Definition Of Done For Every Progression Slice
 

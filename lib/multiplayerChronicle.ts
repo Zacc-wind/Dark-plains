@@ -14,6 +14,7 @@ export interface ChronicleRankReward {
   rareGems?: number;
   itemId?: string;
   itemQuantity?: number;
+  minionTemplateId?: string;
   entitlement?: ChronicleEntitlement;
 }
 
@@ -76,17 +77,17 @@ export const BLACK_PIKE_CHRONICLE_RANKS: ChronicleRankDefinition[] = [
   { rank: 2, renownRequired: 100, title: 'Road Provision', rewards: [{ rareGems: 1 }] },
   { rank: 3, renownRequired: 150, title: 'The Toll Records', rewards: [{ entitlement: entitlement('ledger-lore-tolls', 'lore', 'The Toll Records', 'A copied leaf listing every illegal Black Pike toll on the western road.') }] },
   { rank: 4, renownRequired: 200, title: 'Amber Requisition', rewards: [{ itemId: 'black-amber', itemQuantity: 2 }] },
-  { rank: 5, renownRequired: 250, title: 'Mended Pike', rewards: [{ entitlement: entitlement('banner-mended-pike', 'banner', 'Mended Pike Pattern', 'A stitched black-and-blue banner pattern reclaimed from the toll camps.') }] },
+  { rank: 5, renownRequired: 250, title: 'Mended Pike', rewards: [{ minionTemplateId: 'crossbow' }, { entitlement: entitlement('banner-mended-pike', 'banner', 'Mended Pike Pattern', 'A stitched black-and-blue banner pattern reclaimed from the toll camps.') }] },
   { rank: 6, renownRequired: 300, title: 'Road Pay', rewards: [{ gold: 160 }] },
   { rank: 7, renownRequired: 350, title: 'Compact Gem', rewards: [{ rareGems: 1 }] },
   { rank: 8, renownRequired: 400, title: 'Names Of Defectors', rewards: [{ entitlement: entitlement('ledger-lore-defectors', 'lore', 'Names Of Defectors', 'Marshal Orren\'s notes on the soldiers who abandoned the Pike.') }] },
   { rank: 9, renownRequired: 450, title: 'Recovered Cache', rewards: [{ itemId: 'decent-loot-chest', itemQuantity: 1 }] },
-  { rank: 10, renownRequired: 500, title: 'Ledger Keeper', rewards: [{ entitlement: entitlement('frame-ledger-bronze', 'frame', 'Ledger Keeper Frame', 'A bronze nameplate frame stamped with the Candle Compact road seal.') }] },
+  { rank: 10, renownRequired: 500, title: 'Ledger Keeper', rewards: [{ minionTemplateId: 'bell' }, { entitlement: entitlement('frame-ledger-bronze', 'frame', 'Ledger Keeper Frame', 'A bronze nameplate frame stamped with the Candle Compact road seal.') }] },
   { rank: 11, renownRequired: 550, title: 'Marshal Pay', rewards: [{ gold: 200 }] },
   { rank: 12, renownRequired: 600, title: 'River Gems', rewards: [{ rareGems: 2 }] },
   { rank: 13, renownRequired: 650, title: 'The Failed Expedition', rewards: [{ entitlement: entitlement('ledger-lore-expedition', 'lore', 'The Failed Expedition', 'The missing field report from Orren\'s first western campaign.') }] },
   { rank: 14, renownRequired: 700, title: 'Quartermaster Cache', rewards: [{ itemId: 'rare-loot-chest', itemQuantity: 1 }] },
-  { rank: 15, renownRequired: 750, title: 'Eclipsed Ledger', rewards: [{ entitlement: entitlement('banner-eclipsed-ledger', 'banner', 'Eclipsed Ledger Pattern', 'A black ledger-line pattern crossed by the repaired blue oath.') }] },
+  { rank: 15, renownRequired: 750, title: 'Eclipsed Ledger', rewards: [{ minionTemplateId: 'enchanter' }, { entitlement: entitlement('banner-eclipsed-ledger', 'banner', 'Eclipsed Ledger Pattern', 'A black ledger-line pattern crossed by the repaired blue oath.') }] },
   { rank: 16, renownRequired: 800, title: 'Veteran Pay', rewards: [{ gold: 240 }] },
   { rank: 17, renownRequired: 850, title: 'Moonwell Gems', rewards: [{ rareGems: 2 }] },
   { rank: 18, renownRequired: 900, title: 'Moonwell Payments', rewards: [{ entitlement: entitlement('ledger-lore-moonwell', 'lore', 'Moonwell Payments', 'A cipher page connecting Black Pike toll money to the Drowned Moonwell.') }] },
@@ -96,6 +97,7 @@ export const BLACK_PIKE_CHRONICLE_RANKS: ChronicleRankDefinition[] = [
     renownRequired: 1000,
     title: 'Roadsworn',
     rewards: [
+      { minionTemplateId: 'crow' },
       { entitlement: entitlement('title-roadsworn', 'title', 'Roadsworn', 'A commander title for completing the Black Pike Ledger pilot.') },
       { entitlement: entitlement('banner-repaired-eclipsed', 'banner', 'Repaired Eclipsed Banner', 'The completed Season Zero banner set.') },
     ],

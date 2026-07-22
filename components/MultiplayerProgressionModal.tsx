@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   MULTIPLAYER_ONBOARDING_STORY_QUEST_IDS,
   getAllStoryQuestsSorted,
+  getStoryQuestResponseChoiceId,
   getStoryQuestStatus,
   type User,
 } from '@/lib/auth';
@@ -44,7 +45,7 @@ const TABS: Array<{ id: MultiplayerProgressionTab; label: string }> = [
 ];
 
 const FUTURE_LEVEL_BANDS = [
-  { levels: '7-10', title: 'The Drowned Moonwell', detail: 'Veteran roads, dungeon tier II, and the first regional boss.' },
+  { levels: '6-10', title: 'The Drowned Moonwell', detail: 'Veteran roads, dungeon tier II, and the first regional boss.' },
   { levels: '11-15', title: 'The Broken Crown', detail: 'Eastern contracts, named elites, and Grave-Aurel.' },
   { levels: '16-20', title: 'The Glass Road', detail: 'Mirror Court access, veteran co-op, and Eclipse Hold.' },
   { levels: '21-25', title: 'The Candle Key', detail: 'Elite modifiers, advanced services, and key fragments.' },
@@ -412,6 +413,7 @@ export default function MultiplayerProgressionModal({
           key={`progression-journal-${replayEntry.sequence.id}`}
           sequence={replayEntry.sequence}
           playerModelNumber={player.selectedModel || 3}
+          initialChoiceId={getStoryQuestResponseChoiceId(player, replayEntry.story.id) || replayEntry.sequence.defaultChoiceId}
           onComplete={() => setReplayQuestId(null)}
         />
       )}

@@ -1,8 +1,18 @@
 export type StoryDialogSpeaker = 'player' | 'npc';
+export type StoryResponseTone = 'oathbound' | 'pragmatic' | 'defiant';
+
+export interface StoryDialogChoice {
+  id: string;
+  tone: StoryResponseTone;
+  label: string;
+  text: string;
+}
 
 export interface StoryDialogLine {
   speaker: StoryDialogSpeaker;
   text: string;
+  choicePrompt?: string;
+  choices?: StoryDialogChoice[];
 }
 
 export interface StoryDialogObjective {
@@ -19,6 +29,7 @@ export interface StoryDialogSequence {
   npcModelNumber?: 1 | 2 | 3 | 4 | 5 | 6;
   npcAssetPath?: string;
   objective?: StoryDialogObjective;
+  defaultChoiceId?: string;
   lines: StoryDialogLine[];
 }
 
@@ -29,6 +40,7 @@ export const STORY_DIALOG_SEQUENCES: Record<string, StoryDialogSequence> = {
     npcName: 'Sister Avel',
     npcTitle: 'Hospitaller of the Candle Road',
     npcModelNumber: 4,
+    defaultChoiceId: 'first-banner-oathbound',
     objective: {
       label: 'First Order',
       title: 'Complete one road job',
@@ -36,7 +48,31 @@ export const STORY_DIALOG_SEQUENCES: Record<string, StoryDialogSequence> = {
     },
     lines: [
       { speaker: 'npc', text: 'Another commander has reached the old road. Tell me, do you have a banner, or only a weapon?' },
-      { speaker: 'player', text: 'I have a name. The banner can be earned.' },
+      {
+        speaker: 'player',
+        text: 'I have a name. The banner can be earned.',
+        choicePrompt: 'How will your commander answer?',
+        choices: [
+          {
+            id: 'first-banner-oathbound',
+            tone: 'oathbound',
+            label: 'Swear the road oath',
+            text: 'I have a name. I will earn the banner by defending this road.',
+          },
+          {
+            id: 'first-banner-pragmatic',
+            tone: 'pragmatic',
+            label: 'Ask for the work',
+            text: 'Give me work the road can measure. The banner can follow the results.',
+          },
+          {
+            id: 'first-banner-defiant',
+            tone: 'defiant',
+            label: 'Refuse borrowed honor',
+            text: 'I carry no borrowed colors. The road will learn my name before it sees my banner.',
+          },
+        ],
+      },
       { speaker: 'npc', text: 'Then begin with work the road can measure. Finish one local job. Gold, movement, and command all begin with knowing where you stand.' },
     ],
   },
@@ -157,6 +193,192 @@ export const STORY_DIALOG_SEQUENCES: Record<string, StoryDialogSequence> = {
       { speaker: 'npc', text: 'Lieutenant Veyr\'s pike is broken, his ledger is ash, and the toll bell has stopped. Harborview records the road under your protection.' },
       { speaker: 'player', text: 'Then my banner has earned its place.' },
       { speaker: 'npc', text: 'On the western road, yes. Beyond Riverside the Moonwell is filling with voices again. Reach veteran authority before you answer them.' },
+    ],
+  },
+  'story-09-moonwell-summons': {
+    id: 'story-09-moonwell-summons',
+    kicker: 'Chapter I - The Drowned Moonwell',
+    npcName: 'Scribe Naima',
+    npcTitle: 'Star Lawkeeper',
+    npcModelNumber: 5,
+    defaultChoiceId: 'moonwell-summons-pragmatic',
+    objective: {
+      label: 'Moonwell Order',
+      title: 'Find Scribe Naima',
+      description: 'Follow the quest marker to Naima near Riverside and inspect the erased tithe ledger.',
+    },
+    lines: [
+      { speaker: 'npc', text: 'Commander, Black Pike coin appears beside names scraped from the Moonwell tithe. Some of those names belong to people still walking.' },
+      {
+        speaker: 'player',
+        text: 'Show me the ledger.',
+        choicePrompt: 'What matters first?',
+        choices: [
+          {
+            id: 'moonwell-summons-oathbound',
+            tone: 'oathbound',
+            label: 'Protect the named',
+            text: 'No living soul will be tithed while my banner holds the road. Show me every stolen name.',
+          },
+          {
+            id: 'moonwell-summons-pragmatic',
+            tone: 'pragmatic',
+            label: 'Trace the payments',
+            text: 'Show me the ledger and the coin trail. We find who profits before we announce the hunt.',
+          },
+          {
+            id: 'moonwell-summons-defiant',
+            tone: 'defiant',
+            label: 'Challenge the well',
+            text: 'If the Moonwell has begun choosing my people, it can answer to me directly.',
+          },
+        ],
+      },
+      { speaker: 'npc', text: 'Meet me beyond Riverside. Bring patience. The ink moves whenever a bell rings beneath the water.' },
+    ],
+  },
+  'story-07-moonwell': {
+    id: 'story-07-moonwell',
+    kicker: 'Chapter I - Drowned Road',
+    npcName: 'Scribe Naima',
+    npcTitle: 'Star Lawkeeper',
+    npcModelNumber: 5,
+    objective: {
+      label: 'March Order',
+      title: 'Reach Moonwell Pier',
+      description: 'Travel to Moonwell Pier and locate the guarded ledger posts along the drowned road.',
+    },
+    lines: [
+      { speaker: 'npc', text: 'The erased names all share one final mark: cargo received at Moonwell Pier after midnight.' },
+      { speaker: 'player', text: 'Then the pier is where the lie becomes physical.' },
+      { speaker: 'npc', text: 'Walk there before the next bell. Do not trust a reflection that knows your name before you speak it.' },
+    ],
+  },
+  'story-08-templar-seal': {
+    id: 'story-08-templar-seal',
+    kicker: 'Chapter I - The Tongueless Bell',
+    npcName: 'Brother Kaito',
+    npcTitle: 'Bell Tower Monk',
+    npcModelNumber: 2,
+    objective: {
+      label: 'Cipher Order',
+      title: 'Find Brother Kaito',
+      description: 'Bring the Moonwell tithe marks to Kaito and learn what the drowned bell is waking.',
+    },
+    lines: [
+      { speaker: 'npc', text: 'Those marks are not cargo numbers. They are pauses in a bell sequence too old for any living tower.' },
+      { speaker: 'player', text: 'What answers the sequence?' },
+      { speaker: 'npc', text: 'Roots beneath drowned graves. Find me on the river road. I will teach your banner which toll must never be completed.' },
+    ],
+  },
+  'story-10-blackroot-warning': {
+    id: 'story-10-blackroot-warning',
+    kicker: 'Chapter I - Blackroot',
+    npcName: 'Brother Kaito',
+    npcTitle: 'Bell Tower Monk',
+    npcModelNumber: 2,
+    objective: {
+      label: 'Threat Order',
+      title: 'Inspect the Blackroot Vessel',
+      description: 'Open the named Moonwell threat and study its formation before committing your army.',
+    },
+    lines: [
+      { speaker: 'npc', text: 'The bell stopped one beat short. Something climbed from the road to finish it with armored hands.' },
+      { speaker: 'player', text: 'A soldier?' },
+      { speaker: 'npc', text: 'A vessel. Root, plate, and the memories of drowned recruits. Read its host before you strike.' },
+    ],
+  },
+  'story-09-gravebound-script': {
+    id: 'story-09-gravebound-script',
+    kicker: 'Chapter I - The Blackroot Vessel',
+    npcName: 'Brother Kaito',
+    npcTitle: 'Bell Tower Monk',
+    npcModelNumber: 2,
+    objective: {
+      label: 'Elite Order',
+      title: 'Defeat the Blackroot Vessel',
+      description: 'Return to the named level-eight threat and recover the orders sealed inside its armor.',
+    },
+    lines: [
+      { speaker: 'npc', text: 'You have seen its ranks. The hollow center is not a weakness; it is where the vessel stores its orders.' },
+      { speaker: 'player', text: 'Then I break the armor and take the message.' },
+      { speaker: 'npc', text: 'Protect your commander and silence the bell-bearers first. Blackroot grows strongest around a fallen banner.' },
+    ],
+  },
+  'story-12-cindervein-warning': {
+    id: 'story-12-cindervein-warning',
+    kicker: 'Chapter I - Black Candles',
+    npcName: 'Scribe Naima',
+    npcTitle: 'Star Lawkeeper',
+    npcModelNumber: 5,
+    objective: {
+      label: 'Threat Order',
+      title: 'Inspect Mother Cindervein',
+      description: 'Open the named capstone threat and study the candle host gathered beneath Moonwell Pier.',
+    },
+    lines: [
+      { speaker: 'npc', text: 'The vessel carried one command: prepare every stolen name for Mother Cindervein.' },
+      { speaker: 'player', text: 'A title or a creature?' },
+      { speaker: 'npc', text: 'Both. She keeps a black candle for every recruit the river forgot. See her host before she lights yours.' },
+    ],
+  },
+  'story-10-field-council': {
+    id: 'story-10-field-council',
+    kicker: 'Chapter I - Moonwell Capstone',
+    npcName: 'Scribe Naima',
+    npcTitle: 'Star Lawkeeper',
+    npcModelNumber: 5,
+    objective: {
+      label: 'Capstone Order',
+      title: 'Defeat Mother Cindervein',
+      description: 'Reach level ten, return to the named threat, and end the recruitment rite beneath the pier.',
+    },
+    lines: [
+      { speaker: 'npc', text: 'Cindervein has begun the final count. When the last candle answers, every erased name becomes a soldier.' },
+      { speaker: 'player', text: 'Then there will be no last candle.' },
+      { speaker: 'npc', text: 'Break each phase of her host and keep your commander standing. She will rise stronger whenever the chamber goes dark.' },
+    ],
+  },
+  'story-14-moonwell-sealed': {
+    id: 'story-14-moonwell-sealed',
+    kicker: 'Chapter I - Names Returned',
+    npcName: 'Scribe Naima',
+    npcTitle: 'Star Lawkeeper',
+    npcModelNumber: 5,
+    defaultChoiceId: 'moonwell-sealed-oathbound',
+    objective: {
+      label: 'Chapter Complete',
+      title: 'Release the drowned names',
+      description: 'Claim Naima\'s chapter reward. The eastern march opens at level eleven.',
+    },
+    lines: [
+      { speaker: 'npc', text: 'Cindervein is ash. The ledger is readable again, but the river asks whose law replaces her tithe.' },
+      {
+        speaker: 'player',
+        text: 'Return every name to its family.',
+        choicePrompt: 'What law will your banner leave behind?',
+        choices: [
+          {
+            id: 'moonwell-sealed-oathbound',
+            tone: 'oathbound',
+            label: 'Guard every name',
+            text: 'Return every name to its family. My banner will guard the ledger as long as this road stands.',
+          },
+          {
+            id: 'moonwell-sealed-pragmatic',
+            tone: 'pragmatic',
+            label: 'Keep a sealed copy',
+            text: 'Return the names, but keep one sealed copy. Someone funded this rite, and I intend to follow the account.',
+          },
+          {
+            id: 'moonwell-sealed-defiant',
+            tone: 'defiant',
+            label: 'End the tithe',
+            text: 'Burn every tithe mark. The river will carry names freely, or it will answer to my army again.',
+          },
+        ],
+      },
+      { speaker: 'npc', text: 'So recorded. The Moonwell road will remember not only that you won, but what you chose to preserve.' },
     ],
   },
   'story-15-broken-crown': {

@@ -13,7 +13,9 @@ export type MultiplayerFeatureId =
   | 'trading'
   | 'party'
   | 'coop-dungeons'
-  | 'veteran-regions';
+  | 'veteran-regions'
+  | 'dungeon-tier-ii'
+  | 'dungeon-tier-iii';
 
 export interface MultiplayerUnlockDefinition {
   id: MultiplayerFeatureId;
@@ -129,6 +131,18 @@ export const MULTIPLAYER_UNLOCK_REGISTRY: Record<MultiplayerFeatureId, Multiplay
     title: 'Veteran Regions',
     minLevel: 6,
     description: 'Access harder regions, dungeon tiers, and boss rotations.',
+  },
+  'dungeon-tier-ii': {
+    id: 'dungeon-tier-ii',
+    title: 'Dungeon Tier II',
+    minLevel: 7,
+    description: 'Enter level 7-11 dungeon roads with stronger formation requirements.',
+  },
+  'dungeon-tier-iii': {
+    id: 'dungeon-tier-iii',
+    title: 'Dungeon Tier III',
+    minLevel: 16,
+    description: 'Enter level 12+ veteran dungeon roads and boss chambers.',
   },
 };
 

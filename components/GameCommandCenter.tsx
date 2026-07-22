@@ -144,7 +144,9 @@ const panelButtons: PanelButtonConfig[] = [
   { id: 'social', label: 'Social', icon: 'social' },
   { id: 'settings', label: 'Settings', icon: 'settings' },
 ];
-const primaryPanelButtons = panelButtons.filter(button => ['overview', 'jobs', 'spells', 'social', 'settings'].includes(button.id));
+const primaryPanelButtons = panelButtons.filter(button => (
+  ['overview', 'character', 'inventory', 'minions', 'jobs', 'spells', 'social', 'settings'].includes(button.id)
+));
 
 function isPanelId(value: unknown): value is PanelId {
   return typeof value === 'string' && panelButtons.some(button => button.id === value);
@@ -1379,6 +1381,7 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
                 src="/assets/icons/xp.png"
                 alt=""
                 fill
+                sizes="2rem"
                 className="object-contain p-1"
                 style={{ imageRendering: 'pixelated' }}
               />
@@ -1405,51 +1408,9 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
           </span>
           <span className="map-action-copy">
             <span className="map-action-label">Menu</span>
-            <span className="map-action-detail">Jobs, spells, social</span>
+            <span className="map-action-detail">Commander, gear, army &amp; work</span>
           </span>
           <span className="map-action-badge">{gearUsed}/{inventorySlots}</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => openPanel('character')}
-          className="map-action-button"
-          title="Open commander"
-        >
-          <span className="map-action-icon"><PanelIcon icon="character" /></span>
-          <span className="map-action-copy">
-            <span className="map-action-label">Commander</span>
-            <span className="map-action-detail">Stats and level points</span>
-          </span>
-          <span className="map-action-badge">Lv {player.stats.level}</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => openPanel('inventory')}
-          className="map-action-button"
-          title="Open gear"
-        >
-          <span className="map-action-icon"><PanelIcon icon="inventory" /></span>
-          <span className="map-action-copy">
-            <span className="map-action-label">Gear</span>
-            <span className="map-action-detail">Equipment and storage</span>
-          </span>
-          <span className="map-action-badge">{gearUsed}/{inventorySlots}</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => openPanel('minions')}
-          className="map-action-button"
-          title="Open army"
-        >
-          <span className="map-action-icon"><PanelIcon icon="minions" /></span>
-          <span className="map-action-copy">
-            <span className="map-action-label">Army</span>
-            <span className="map-action-detail">Field and order units</span>
-          </span>
-          <span className="map-action-badge">{fieldedMinions.length}/{MAX_FIELD_MINIONS}</span>
         </button>
 
         <button
@@ -1485,6 +1446,7 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
                   src="/assets/icons/xp.png"
                   alt=""
                   fill
+                  sizes="2rem"
                   className="object-contain p-1"
                   style={{ imageRendering: 'pixelated' }}
                 />
@@ -1527,6 +1489,7 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
                   src="/assets/icons/loot-chest.png"
                   alt=""
                   fill
+                  sizes="2rem"
                   className="object-contain p-1"
                   style={{ imageRendering: 'pixelated' }}
                 />

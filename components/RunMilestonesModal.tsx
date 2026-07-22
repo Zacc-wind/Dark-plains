@@ -1,7 +1,7 @@
 'use client';
 
 import Image from 'next/image';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   claimRunMilestoneReward,
   getCurrentUser,
@@ -18,20 +18,21 @@ import {
   type RunMilestoneCategory,
   type RunMilestoneView,
 } from '@/lib/runMilestones';
+import { getRunDiscoveryViews, type RunDiscoveryView } from '@/lib/runDiscovery';
 
-type MilestoneTab = 'milestones' | 'bosses' | 'unlocks' | 'recent';
+type MilestoneTab = 'milestones' | 'bosses' | 'spellbook' | 'warband' | 'recent';
 
 const MILESTONE_TABS: Array<{ id: MilestoneTab; label: string }> = [
   { id: 'milestones', label: 'Milestones' },
   { id: 'bosses', label: 'Bosses' },
-  { id: 'unlocks', label: 'Unlocks' },
+  { id: 'spellbook', label: 'Spellbook' },
+  { id: 'warband', label: 'Warband' },
   { id: 'recent', label: 'Recent' },
 ];
 
-const TAB_CATEGORIES: Record<Exclude<MilestoneTab, 'recent'>, RunMilestoneCategory[]> = {
+const TAB_CATEGORIES: Record<'milestones' | 'bosses', RunMilestoneCategory[]> = {
   milestones: ['road', 'meta', 'economy'],
   bosses: ['boss'],
-  unlocks: ['army', 'spell'],
 };
 
 function formatMilestoneUnlockTime(unlockedAt: number | undefined): string | null {
@@ -88,9 +89,46 @@ export default function RunMilestonesModal({ isOpen, runState, onClose, onClaim 
   const [, setRefreshKey] = useState(0);
   const [claimNotice, setClaimNotice] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<MilestoneTab>('milestones');
+  const panelRef = useRef<HTMLElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
   const currentRunState = getDailyRunState(getCurrentUser() || { dailyRun: runState });
   const views = getRunMilestoneViews(currentRunState);
   const counts = getRunMilestoneUnlockCounts(currentRunState);
+  const discoveryViews = getRunDiscoveryViews(
+    currentRunState,
+    activeTab === 'spellbook' ? 'spell' : activeTab === 'warband' ? 'unit' : undefined,
+  );
+  const isDiscoveryTab = activeTab === 'spellbook' || activeTab === 'warband';
+
+  useEffect(() => {
+    if (!isOpen) return;
+    closeButtonRef.current?.focus();
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onClose();
+        return;
+      }
+      if (event.key !== 'Tab' || !panelRef.current) return;
+      const focusable = Array.from(panelRef.current.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), [href], [tabindex]:not([tabindex="-1"])',
+      ));
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
 
   if (!isOpen) return null;
 
@@ -136,11 +174,13 @@ export default function RunMilestonesModal({ isOpen, runState, onClose, onClaim 
           .filter(view => view.unlocked && view.unlockedAt)
           .sort((left, right) => (right.unlockedAt || 0) - (left.unlockedAt || 0)),
       }]
-    : TAB_CATEGORIES[activeTab].map(category => ({
+    : activeTab === 'milestones' || activeTab === 'bosses'
+      ? TAB_CATEGORIES[activeTab].map(category => ({
         id: category,
         label: RUN_MILESTONE_CATEGORY_LABELS[category],
         milestones: views.filter(view => view.category === category),
-      }));
+      }))
+      : [];
 
   return (
     <div
@@ -149,6 +189,7 @@ export default function RunMilestonesModal({ isOpen, runState, onClose, onClaim 
       role="presentation"
     >
       <section
+        ref={panelRef}
         className="command-panel vine-frame sp-milestones-panel max-h-[calc(100vh-2rem)] w-full max-w-5xl overflow-hidden rounded border"
         onClick={event => event.stopPropagation()}
         role="dialog"
@@ -158,13 +199,13 @@ export default function RunMilestonesModal({ isOpen, runState, onClose, onClaim 
         <div className="panel-header flex items-center justify-between border-b px-5 py-4">
           <div>
             <p className="arcane-label">Singleplayer Campaign</p>
-            <h2 id="sp-milestones-title" className="fantasy-heading text-2xl">Run Milestones</h2>
+            <h2 id="sp-milestones-title" className="fantasy-heading text-2xl">Run Archive</h2>
             <p className="ui-muted mt-1 text-sm font-bold">
-              {counts.unlocked} of {counts.total} unlocked - select a completed milestone to claim run XP.
+              {counts.unlocked} of {counts.total} milestones unlocked. Discoveries expand future run offers.
             </p>
             {claimNotice ? <p className="ui-value mt-1 text-xs font-bold">{claimNotice}</p> : null}
           </div>
-          <button type="button" onClick={onClose} className="ui-button rounded px-3 py-1 text-xs font-bold">
+          <button ref={closeButtonRef} type="button" onClick={onClose} className="ui-button rounded px-3 py-1 text-xs font-bold">
             Close
           </button>
         </div>
@@ -184,6 +225,12 @@ export default function RunMilestonesModal({ isOpen, runState, onClose, onClaim 
         </nav>
 
         <div className="sp-milestones-scroll max-h-[calc(100vh-11rem)] overflow-y-auto p-5">
+          {isDiscoveryTab ? (
+            <DiscoveryArchive
+              title={activeTab === 'spellbook' ? 'Spell Discoveries' : 'Unit Blueprints'}
+              views={discoveryViews}
+            />
+          ) : null}
           {sections.map(section => {
             const inCategory = section.milestones;
             if (inCategory.length === 0) {
@@ -263,5 +310,59 @@ export default function RunMilestonesModal({ isOpen, runState, onClose, onClaim 
         </div>
       </section>
     </div>
+  );
+}
+
+function DiscoveryArchive({ title, views }: { title: string; views: RunDiscoveryView[] }) {
+  const unlocked = views.filter(view => view.unlocked).length;
+
+  return (
+    <section className="sp-milestones-section">
+      <div className="sp-milestones-section-head">
+        <div>
+          <h3 className="fantasy-heading text-lg">{title}</h3>
+          <p className="ui-muted mt-1 text-xs font-bold">
+            Unlocked entries can appear in later drafts and rewards; they are not granted during the current run.
+          </p>
+        </div>
+        <span className="ui-pill rounded border px-2 py-1 text-[10px] font-black uppercase">
+          {unlocked}/{views.length}
+        </span>
+      </div>
+
+      <div className="sp-milestones-grid sp-discovery-grid">
+        {views.map(view => (
+          <article
+            key={view.key}
+            className={`sp-milestone-card sp-discovery-card${view.unlocked ? ' sp-milestone-card-unlocked' : ' sp-milestone-card-locked'}`}
+          >
+            <div className="sp-milestone-icon-frame sp-discovery-icon-frame">
+              <Image
+                src={view.iconPath}
+                alt=""
+                width={64}
+                height={64}
+                className="sp-milestone-icon"
+                unoptimized
+              />
+              {!view.unlocked ? <span className="sp-milestone-lock" aria-hidden>Locked</span> : null}
+            </div>
+            <div className="sp-milestone-card-copy min-w-0">
+              <h4 className="sp-milestone-card-title">{view.name}</h4>
+              <p className="sp-milestone-card-desc ui-muted">{view.description}</p>
+              <p className="sp-milestone-card-progress ui-value">{view.progressLabel}</p>
+              {view.unlocked ? (
+                <p className="sp-milestone-record sp-milestone-tier-gold">
+                  {formatMilestoneUnlockTime(view.unlockedAt) || 'Recorded this run'}
+                </p>
+              ) : null}
+            </div>
+            <span className={`sp-milestone-status ui-pill rounded border px-2 py-1 text-[10px] font-black uppercase${view.unlocked ? ' sp-milestone-status-unlocked' : ''}`}>
+              {view.pendingOffer ? 'Next Offer' : view.unlocked ? 'Unlocked' : 'Locked'}
+            </span>
+          </article>
+        ))}
+      </div>
+    </section>
   );
 }

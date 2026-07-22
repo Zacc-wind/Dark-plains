@@ -79,9 +79,10 @@ export function userToPlayerStateRow(user: User, userId: string): PlayerStateRow
     social: user.social,
     activity_log: user.activityLog || [],
     spell_unlock_version: user.spellUnlockVersion || 1,
-    game_sessions: user.multiplayerEngagement
-      ? { multiplayerEngagement: user.multiplayerEngagement }
-      : {},
+    game_sessions: {
+      ...(user.multiplayerEngagement ? { multiplayerEngagement: user.multiplayerEngagement } : {}),
+      ...(user.multiplayerChronicle ? { multiplayerChronicle: user.multiplayerChronicle } : {}),
+    },
     updated_at: new Date().toISOString(),
   };
 }
@@ -116,6 +117,7 @@ export function playerStateRowToUser(row: PlayerStateRow, profile: ProfileRow): 
     spellUnlockVersion: row.spell_unlock_version,
     social: row.social,
     multiplayerEngagement: row.game_sessions?.multiplayerEngagement as User['multiplayerEngagement'],
+    multiplayerChronicle: row.game_sessions?.multiplayerChronicle as User['multiplayerChronicle'],
   };
 }
 

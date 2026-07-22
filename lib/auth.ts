@@ -13,6 +13,10 @@ import {
   type StoryQuestTemplate,
 } from './questData';
 import {
+  getStoryDialogSequence,
+  type StoryResponseTone,
+} from './storyDialogue';
+import {
   TRAVEL_EVENT_CONTENT_COUNTS,
   rollTravelEvents,
   type TravelEventTemplate,
@@ -41,6 +45,11 @@ import {
   type MultiplayerRewardSource,
 } from './multiplayerRewards';
 import { syncRunMilestoneUnlockRecords } from './runMilestones';
+import {
+  normalizeRunDiscoveryState,
+  syncRunDiscoveryState,
+  type RunDiscoveryState,
+} from './runDiscovery';
 import {
   TOWN_RECRUITMENT_TOWNS,
   getTownRecruitmentSlots,
@@ -331,9 +340,16 @@ export interface DailyRunHistoryEntry {
   shopGoldSpent?: number;
   omens?: string[];
   unlockedSpellNames?: string[];
+  temporarySpellIds?: string[];
   unitTemplateIds?: string[];
   unitClassIds?: MinionClass[];
   tierThreeUnitNames?: string[];
+  healingDone?: number;
+  unitsLost?: number;
+  lowestCommanderHealthRatio?: number;
+  commanderUntouchedBattles?: number;
+  challengeModifierIds?: string[];
+  discoveryOfferIdsSeen?: string[];
   runLevelAfter?: number;
   streakAfter: number;
 }
@@ -371,6 +387,7 @@ export interface DailyRunState {
   permanentStats: RandomRunPermanentStats;
   claimedMilestoneIds?: string[];
   milestoneUnlocks?: RunMilestoneUnlockRecord[];
+  discovery?: RunDiscoveryState;
 }
 
 export interface DailyRunStatus {
@@ -391,6 +408,7 @@ export interface DailyRunLeaderboardEntry {
 }
 
 export type LeaderboardCategory = 'power' | 'daily' | 'gold' | 'battles' | 'pvp';
+export type LeaderboardScope = 'world' | 'run' | 'all';
 
 export interface LeaderboardEntry {
   rank: number;
@@ -616,6 +634,9 @@ export interface StoryQuestProgress {
   claimed: boolean;
   completedAt?: number;
   introSeen?: boolean;
+  responseChoiceId?: string;
+  responseTone?: StoryResponseTone;
+  responseSelectedAt?: number;
 }
 
 export interface InventoryActionResult {
@@ -1252,11 +1273,18 @@ function hasVisitedQuestPoi(user: User, requirement: QuestRequirementSpec): bool
   ));
 }
 
-function getBossDefeatCount(user: User, bossId?: string): number {
+function getBossDefeatCount(user: User, bossId?: string, enemyId?: string): number {
   return (user.activityLog || []).filter(activity => {
     if (activity.type !== 'battle') return false;
+    const activityId = activity.id?.toLowerCase() || '';
+    const target = `${activity.id || ''} ${activity.title || ''} ${activity.source || ''} ${activity.description || ''}`.toLowerCase();
+    if (enemyId) {
+      const normalizedEnemyId = enemyId.toLowerCase();
+      const isExactEncounter = activityId.includes(normalizedEnemyId)
+        || target.includes(`enemy:${normalizedEnemyId}`);
+      if (!isExactEncounter) return false;
+    }
     if (!bossId) return true;
-    const target = `${activity.title} ${activity.source} ${activity.description || ''}`.toLowerCase();
     return target.includes(bossId.replace(/-/g, ' ')) || target.includes(bossId);
   }).length;
 }
@@ -1308,7 +1336,7 @@ function getQuestRequirementProgressValue(
     case 'inspect_enemy':
       return getEnemyInspectionCount(user, requirement.enemyId);
     case 'defeat_boss':
-      return getBossDefeatCount(user, requirement.bossId);
+      return getBossDefeatCount(user, requirement.bossId, requirement.enemyId);
     default:
       return acceptedProgress;
   }
@@ -1421,18 +1449,64 @@ export function markStoryQuestIntroSeen(questId: string): void {
 
   const storyQuests = currentUser.storyQuests || [];
   if (storyQuests.some(item => item.questId === questId && item.introSeen)) return;
+  const existing = storyQuests.find(item => item.questId === questId);
 
   updateCurrentUser({
     storyQuests: [
       ...storyQuests.filter(item => item.questId !== questId),
       {
+        ...existing,
         questId,
-        claimed: storyQuests.find(item => item.questId === questId)?.claimed || false,
-        completedAt: storyQuests.find(item => item.questId === questId)?.completedAt,
+        claimed: existing?.claimed || false,
         introSeen: true,
       },
     ],
   });
+}
+
+export function getStoryQuestResponseChoiceId(
+  user: Pick<User, 'storyQuests'> | null | undefined,
+  questId: string,
+): string | undefined {
+  return user?.storyQuests?.find(item => item.questId === questId)?.responseChoiceId;
+}
+
+export function recordStoryQuestResponse(
+  questId: string,
+  choiceId: string,
+): { success: boolean; error?: string } {
+  const currentUser = getCurrentUser();
+  if (!currentUser) return { success: false, error: 'Not logged in.' };
+
+  const quest = getStoryQuestTemplate(questId);
+  const sequence = getStoryDialogSequence(quest?.dialogId);
+  const choice = sequence?.lines.flatMap(line => line.choices || []).find(item => item.id === choiceId);
+  if (!quest || !sequence || !choice) {
+    return { success: false, error: 'Story response not found.' };
+  }
+
+  const storyQuests = currentUser.storyQuests || [];
+  const existing = storyQuests.find(item => item.questId === questId);
+  if (existing?.responseChoiceId) {
+    return existing.responseChoiceId === choice.id
+      ? { success: true }
+      : { success: false, error: 'This story response is already set.' };
+  }
+
+  updateCurrentUser({
+    storyQuests: [
+      ...storyQuests.filter(item => item.questId !== questId),
+      {
+        ...existing,
+        questId,
+        claimed: existing?.claimed || false,
+        responseChoiceId: choice.id,
+        responseTone: choice.tone,
+        responseSelectedAt: Date.now(),
+      },
+    ],
+  });
+  return { success: true };
 }
 
 export const MULTIPLAYER_ONBOARDING_STORY_QUEST_IDS = [
@@ -1462,9 +1536,9 @@ export function skipMultiplayerOnboarding(): {
     const existing = progressByQuestId.get(questId);
     if (!existing?.introSeen) skippedCount += 1;
     progressByQuestId.set(questId, {
+      ...existing,
       questId,
       claimed: existing?.claimed || false,
-      completedAt: existing?.completedAt,
       introSeen: true,
     });
   });
@@ -1902,6 +1976,7 @@ export function claimStoryQuestReward(questId: string): {
   );
 
   const completedAt = Date.now();
+  const existingStoryProgress = storyQuests.find(item => item.questId === questId);
   const updatedStats = { ...currentUser.stats };
   if (reward.healthRestore > 0) {
     updatedStats.health = Math.min(updatedStats.maxHealth, updatedStats.health + reward.healthRestore);
@@ -1928,7 +2003,7 @@ export function claimStoryQuestReward(questId: string): {
     knownSpellIds: spellUnlock.knownSpellIds,
     storyQuests: [
       ...storyQuests.filter(item => item.questId !== questId),
-      { questId, claimed: true, completedAt, introSeen: true },
+      { ...existingStoryProgress, questId, claimed: true, completedAt, introSeen: true },
     ],
     ...recordUserMultiplayerEvent(
       currentUser,
@@ -5193,7 +5268,7 @@ export function getCurrentUser(): User | null {
     parsedUser.cityQuests = [];
   }
   parsedUser.social = normalizeSocialStateForUser(parsedUser);
-  parsedUser.dailyRun = normalizeDailyRunState(parsedUser.dailyRun);
+  parsedUser.dailyRun = normalizeDailyRunState(parsedUser.dailyRun, parsedUser.knownSpellIds);
   parsedUser.mpDailyDungeon = normalizeMpDailyDungeonState(parsedUser.mpDailyDungeon);
   parsedUser.pvpRating = normalizePvpRatingState(parsedUser.pvpRating);
   parsedUser.multiplayerEngagement = normalizeMultiplayerEngagementState(
@@ -5353,6 +5428,11 @@ export function claimCurrentMultiplayerChronicleRank(
       ? [makeInventoryItem(reward.itemId, reward.itemQuantity)]
       : []
   ));
+  const rewardMinions = result.rank.rewards.flatMap(reward => {
+    if (!reward.minionTemplateId) return [];
+    const template = getMinionTemplate(reward.minionTemplateId);
+    return template ? [createMinionStack(template)] : [];
+  });
   if (rareGems > 0) rewardItems.push(makeInventoryItem('rare-gem', rareGems));
   const inventoryResult = addInventoryItemsWithLimit(
     currentUser.inventory || [],
@@ -5367,6 +5447,7 @@ export function claimCurrentMultiplayerChronicleRank(
     gold: gold || undefined,
     rareGems: acceptedRareGems || undefined,
     items: acceptedItems.length > 0 ? acceptedItems : undefined,
+    minions: rewardMinions.length > 0 ? rewardMinions : undefined,
   };
   const entitlementLabels = result.rank.rewards
     .flatMap(reward => reward.entitlement ? [reward.entitlement.label] : []);
@@ -5376,6 +5457,7 @@ export function claimCurrentMultiplayerChronicleRank(
     multiplayerChronicle: result.state,
     gold: currentUser.gold + gold,
     inventory: inventoryResult.inventory,
+    minions: mergeMinionStacks(currentUser.minions || [], rewardMinions),
     activityLog: pushActivityEntry(currentUser.activityLog, {
       id: `activity-chronicle-rank-${result.rank.rank}-${now}`,
       type: 'quest',
@@ -7173,7 +7255,10 @@ function applyAutomaticRandomRunUpgrade(stats: RandomRunPermanentStats, newLevel
   return upgraded;
 }
 
-function normalizeDailyRunState(state?: Partial<DailyRunState> | null): DailyRunState {
+function normalizeDailyRunState(
+  state?: Partial<DailyRunState> | null,
+  legacySpellIds: readonly string[] = [],
+): DailyRunState {
   const runLevel = getRandomRunEffectiveLevel(toFiniteNumber(state?.runLevel, 1));
   const runExp = Math.max(0, Math.floor(toFiniteNumber(state?.runExp, 0)));
   const history = (state?.history || []).slice(0, 12).map(entry => ({
@@ -7193,9 +7278,16 @@ function normalizeDailyRunState(state?: Partial<DailyRunState> | null): DailyRun
     shopGoldSpent: Math.max(0, Math.floor(toFiniteNumber(entry.shopGoldSpent, 0))),
     omens: (entry.omens || []).slice(0, 24),
     unlockedSpellNames: (entry.unlockedSpellNames || []).slice(0, 12),
+    temporarySpellIds: (entry.temporarySpellIds || []).filter(Boolean).slice(0, 20),
     unitTemplateIds: (entry.unitTemplateIds || []).filter(Boolean).slice(0, 24),
     unitClassIds: (entry.unitClassIds || []).filter(Boolean).slice(0, 8) as MinionClass[],
     tierThreeUnitNames: (entry.tierThreeUnitNames || []).filter(Boolean).slice(0, 12),
+    healingDone: Math.max(0, Math.floor(toFiniteNumber(entry.healingDone, 0))),
+    unitsLost: Math.max(0, Math.floor(toFiniteNumber(entry.unitsLost, 0))),
+    lowestCommanderHealthRatio: Math.max(0, Math.min(1, toFiniteNumber(entry.lowestCommanderHealthRatio, 1))),
+    commanderUntouchedBattles: Math.max(0, Math.floor(toFiniteNumber(entry.commanderUntouchedBattles, 0))),
+    challengeModifierIds: Array.from(new Set((entry.challengeModifierIds || []).filter(Boolean))).slice(0, 12),
+    discoveryOfferIdsSeen: Array.from(new Set((entry.discoveryOfferIdsSeen || []).filter(Boolean))).slice(0, 36),
     runLevelAfter: Math.max(1, Math.floor(toFiniteNumber(entry.runLevelAfter, runLevel))),
     streakAfter: Math.max(0, Math.floor(toFiniteNumber(entry.streakAfter, 0))),
   }));
@@ -7214,14 +7306,21 @@ function normalizeDailyRunState(state?: Partial<DailyRunState> | null): DailyRun
     milestoneUnlocks: (state?.milestoneUnlocks || []).filter(record => (
       Boolean(record?.id) && Number.isFinite(record?.unlockedAt)
     )),
+    discovery: normalizeRunDiscoveryState(state?.discovery, legacySpellIds, history),
   };
 
   const migrationTimestamp = history[history.length - 1]?.completedAt || 1;
-  return syncRunMilestoneUnlockRecords(normalized, migrationTimestamp);
+  const withMilestones = syncRunMilestoneUnlockRecords(normalized, migrationTimestamp);
+  return {
+    ...withMilestones,
+    discovery: syncRunDiscoveryState(withMilestones, legacySpellIds, migrationTimestamp),
+  };
 }
 
-export function getDailyRunState(user: Pick<User, 'dailyRun'> | null | undefined = getCurrentUser()): DailyRunState {
-  return normalizeDailyRunState(user?.dailyRun);
+export function getDailyRunState(
+  user: (Pick<User, 'dailyRun'> & Partial<Pick<User, 'knownSpellIds'>>) | null | undefined = getCurrentUser(),
+): DailyRunState {
+  return normalizeDailyRunState(user?.dailyRun, user?.knownSpellIds || []);
 }
 
 export function getDailyRunStatus(user: Pick<User, 'dailyRun'> | null | undefined = getCurrentUser(), now = Date.now()): DailyRunStatus {
@@ -7280,7 +7379,7 @@ function normalizeLeaderboardUser(user: User): User {
     dailyQuests: user.dailyQuests,
     cityQuests: user.cityQuests || [],
     storyQuests: user.storyQuests || [],
-    dailyRun: normalizeDailyRunState(user.dailyRun),
+    dailyRun: normalizeDailyRunState(user.dailyRun, user.knownSpellIds),
     knownSpellIds: normalizeSpellIds(user.knownSpellIds || DEFAULT_KNOWN_SPELL_IDS),
     equippedSpellIds: (user.equippedSpellIds || DEFAULT_EQUIPPED_SPELL_IDS).slice(0, 4),
     spellUnlockVersion: user.spellUnlockVersion || 1,
@@ -7594,10 +7693,10 @@ function makeLeaderboardEntries(
     .map((entry, index) => ({ ...entry, rank: index + 1 }));
 }
 
-export function getLeaderboardBoards(): LeaderboardBoard[] {
+export function getLeaderboardBoards(scope: LeaderboardScope = 'world'): LeaderboardBoard[] {
   const users = getUsers().map(normalizeLeaderboardUser);
 
-  return [
+  const boards: LeaderboardBoard[] = [
     {
       id: 'power',
       title: 'Commander Power',
@@ -7668,6 +7767,9 @@ export function getLeaderboardBoards(): LeaderboardBoard[] {
       ),
     },
   ];
+
+  if (scope === 'all') return boards;
+  return boards.filter(board => scope === 'run' ? board.id === 'daily' : board.id !== 'daily');
 }
 
 export function getNextDailyRunStreak(user: Pick<User, 'dailyRun'>, completedAt = Date.now()): number {
@@ -7718,7 +7820,7 @@ export function recordDailyRunCompletionState(
     streakAfter: nextStreak,
   };
 
-  return syncRunMilestoneUnlockRecords({
+  const withMilestones = syncRunMilestoneUnlockRecords({
     lastCompletedDate: completedDate,
     streak: nextStreak,
     bestWins: Math.max(state.bestWins, report.wins),
@@ -7730,7 +7832,12 @@ export function recordDailyRunCompletionState(
     permanentStats,
     claimedMilestoneIds: state.claimedMilestoneIds || [],
     milestoneUnlocks: state.milestoneUnlocks || [],
+    discovery: state.discovery,
   }, report.completedAt);
+  return {
+    ...withMilestones,
+    discovery: syncRunDiscoveryState(withMilestones, [], report.completedAt),
+  };
 }
 
 export type RandomRunUpgradeStat = keyof RandomRunPermanentStats;
@@ -7821,10 +7928,14 @@ export function claimRunMilestoneReward(
     return { ok: false, message: 'Milestone reward already claimed.', dailyRun: state };
   }
 
-  const dailyRun = syncRunMilestoneUnlockRecords(applyRandomRunExperienceGain({
+  const withMilestones = syncRunMilestoneUnlockRecords(applyRandomRunExperienceGain({
     ...state,
     claimedMilestoneIds: [...claimed, milestoneId],
   }, rewardExp), Date.now());
+  const dailyRun = {
+    ...withMilestones,
+    discovery: syncRunDiscoveryState(withMilestones, [], Date.now()),
+  };
 
   return {
     ok: true,

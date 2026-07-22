@@ -47,7 +47,11 @@ describe('First Banner capstone state', () => {
     expect(shouldSpawnFirstBannerBoss(makeSubject())).toBe(true);
 
     const defeated = makeSubject({
-      activityLog: [{ type: 'battle', description: `boss:${FIRST_BANNER_BOSS_ID}` }],
+      activityLog: [{
+        id: `activity-battle-${FIRST_BANNER_BOSS_ENEMY_ID}-1`,
+        type: 'battle',
+        description: `boss:${FIRST_BANNER_BOSS_ID}`,
+      }],
     });
     expect(hasDefeatedFirstBannerBoss(defeated)).toBe(true);
     expect(shouldSpawnFirstBannerBoss(defeated)).toBe(false);
@@ -92,13 +96,22 @@ describe('First Banner capstone state', () => {
     const capstoneUser = {
       stats: { level: 5 },
       storyQuests: [...baseStory, { questId: 'story-06-black-pike', claimed: true, introSeen: true }],
-      activityLog: [{ type: 'battle', description: `boss:${FIRST_BANNER_BOSS_ID}` }],
+      activityLog: [{
+        id: `activity-battle-${FIRST_BANNER_BOSS_ENEMY_ID}-1`,
+        type: 'battle',
+        description: `boss:${FIRST_BANNER_BOSS_ID}`,
+      }],
     } as unknown as User;
     expect(getStoryQuestStatus(capstoneUser, 'story-07-broken-toll')).toMatchObject({
       unlocked: true,
       complete: true,
       progress: 1,
     });
+
+    expect(getStoryQuestStatus({
+      ...capstoneUser,
+      activityLog: [{ type: 'battle', description: `boss:${FIRST_BANNER_BOSS_ID}` }],
+    } as User, 'story-07-broken-toll').complete).toBe(false);
   });
 
   it('requires a new Orren visit after the capstone instead of reusing the opening muster', () => {

@@ -15,6 +15,8 @@ describe('multiplayer unlock registry', () => {
     expect(MULTIPLAYER_UNLOCK_REGISTRY['pvp-challenges'].minLevel).toBe(3);
     expect(MULTIPLAYER_UNLOCK_REGISTRY.trading.minLevel).toBe(4);
     expect(MULTIPLAYER_UNLOCK_REGISTRY.party.minLevel).toBe(5);
+    expect(MULTIPLAYER_UNLOCK_REGISTRY['dungeon-tier-ii'].minLevel).toBe(7);
+    expect(MULTIPLAYER_UNLOCK_REGISTRY['dungeon-tier-iii'].minLevel).toBe(16);
   });
 
   it('normalizes malformed or missing player levels to level one', () => {
@@ -41,7 +43,7 @@ describe('multiplayer unlock registry', () => {
 
   it('builds a stable level path and previews only later implemented unlocks', () => {
     const groups = getMultiplayerUnlockLevelGroups({ stats: { level: 3 } });
-    expect(groups.map(group => group.level)).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(groups.map(group => group.level)).toEqual([1, 2, 3, 4, 5, 6, 7, 16]);
     expect(groups.find(group => group.level === 3)?.current).toBe(true);
     expect(groups.find(group => group.level === 4)?.unlocked).toBe(false);
     expect(getNextMultiplayerUnlocks({ stats: { level: 3 } }, 2).map(item => item.id)).toEqual([

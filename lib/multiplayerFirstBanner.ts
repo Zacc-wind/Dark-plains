@@ -11,6 +11,7 @@ export interface FirstBannerSubject {
     claimed?: boolean;
   }> | null;
   activityLog?: Array<{
+    id?: string;
     type?: string;
     title?: string;
     source?: string;
@@ -22,7 +23,8 @@ export function hasDefeatedFirstBannerBoss(subject: FirstBannerSubject | null | 
   return (subject?.activityLog || []).some(activity => {
     if (activity.type !== 'battle') return false;
     const receipt = `${activity.title || ''} ${activity.source || ''} ${activity.description || ''}`.toLowerCase();
-    return receipt.includes(FIRST_BANNER_BOSS_ID) || receipt.includes('black pike lieutenant');
+    return activity.id?.toLowerCase().includes(FIRST_BANNER_BOSS_ENEMY_ID)
+      || receipt.includes(`enemy:${FIRST_BANNER_BOSS_ENEMY_ID}`);
   });
 }
 
