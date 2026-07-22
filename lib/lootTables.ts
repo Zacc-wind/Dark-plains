@@ -1,5 +1,6 @@
 import type { Equipment, EquipmentRarity, EquipmentSlot } from './auth';
 import { GEAR_SETS, getGearSetById, getGearSetPieceName, rollGearSetForSource, type GearSetId } from './gearSets';
+import { capEquipmentRarityForLevel } from './gearProgression';
 
 export type LootSource =
   | 'job'
@@ -18,6 +19,7 @@ export interface LootDropContext {
   dungeonId?: string;
   forcedRarity?: EquipmentRarity;
   dropBonus?: number;
+  playerLevel?: number;
 }
 
 const BOSS_EXCLUSIVE_SETS: Record<string, GearSetId> = {
@@ -31,30 +33,60 @@ const DUNGEON_EXCLUSIVE_SETS: Record<string, GearSetId> = {
   'sunken-vault': 'guardian',
 };
 
-function rollRarity(source: LootSource, dropBonus = 0): EquipmentRarity | null {
-  const roll = Math.random() * 100 + dropBonus;
+export function getLootEquipmentDropChance(source: LootSource, dropBonus = 0): number {
+  const baseChance: Record<LootSource, number> = {
+    job: 0,
+    battle: 10,
+    dungeon: 18,
+    'dungeon-boss': 65,
+    'daily-run': 16,
+    'mp-daily': 70,
+    elite: 25,
+    'gem-vendor': 100,
+    quest: 35,
+  };
+  return Math.min(100, baseChance[source] + Math.max(0, dropBonus) * 0.15);
+}
 
-  if (source === 'gem-vendor') return roll < 70 ? 'epic' : 'legendary';
-  if (source === 'dungeon-boss' || source === 'mp-daily') {
-    if (roll < 8) return 'legendary';
-    if (roll < 28) return 'epic';
-    if (roll < 55) return 'rare';
-    return 'decent';
-  }
-  if (source === 'dungeon' || source === 'elite') {
-    if (roll < 3) return 'legendary';
-    if (roll < 12) return 'epic';
-    if (roll < 35) return 'rare';
-    return roll < 60 ? 'decent' : null;
-  }
-  if (source === 'battle') {
-    if (roll < 1.5) return 'legendary';
-    if (roll < 6) return 'epic';
-    if (roll < 18) return 'rare';
-    return roll < 40 ? 'decent' : null;
+export function rollLootEquipmentRarity(
+  source: LootSource,
+  playerLevel: number,
+  dropBonus = 0,
+  dropRoll = Math.random(),
+  rarityRoll = Math.random(),
+): EquipmentRarity | null {
+  if (dropRoll * 100 >= getLootEquipmentDropChance(source, dropBonus)) return null;
+
+  let requestedRarity: EquipmentRarity;
+  if (source === 'gem-vendor') {
+    requestedRarity = rarityRoll < 0.08 ? 'legendary' : 'epic';
+  } else if (source === 'dungeon-boss' || source === 'mp-daily') {
+    requestedRarity = rarityRoll < 0.025
+      ? 'legendary'
+      : rarityRoll < 0.16
+        ? 'epic'
+        : rarityRoll < 0.5
+          ? 'rare'
+          : 'decent';
+  } else if (source === 'dungeon' || source === 'elite') {
+    requestedRarity = rarityRoll < 0.006
+      ? 'legendary'
+      : rarityRoll < 0.055
+        ? 'epic'
+        : rarityRoll < 0.28
+          ? 'rare'
+          : 'decent';
+  } else {
+    requestedRarity = rarityRoll < 0.002
+      ? 'legendary'
+      : rarityRoll < 0.018
+        ? 'epic'
+        : rarityRoll < 0.13
+          ? 'rare'
+          : 'decent';
   }
 
-  return null;
+  return capEquipmentRarityForLevel(requestedRarity, playerLevel);
 }
 
 function pickSetForContext(context: LootDropContext): GearSetId | null {
@@ -94,7 +126,10 @@ function buildSetPieceStats(rarity: EquipmentRarity, slot: EquipmentSlot): Equip
 }
 
 export function generateLootEquipment(context: LootDropContext): Equipment | null {
-  const rarity = context.forcedRarity || rollRarity(context.source, context.dropBonus || 0);
+  const playerLevel = Math.max(1, Math.floor(context.playerLevel || 30));
+  const rarity = context.forcedRarity
+    ? capEquipmentRarityForLevel(context.forcedRarity, playerLevel)
+    : rollLootEquipmentRarity(context.source, playerLevel, context.dropBonus || 0);
   if (!rarity) return null;
 
   const slots: EquipmentSlot[] = ['sword', 'shield', 'armor', 'armor-pants', 'boots', 'gloves', 'helmet'];

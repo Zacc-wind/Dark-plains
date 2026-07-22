@@ -22,7 +22,7 @@ This document is the execution plan for progression, retention, narrative conten
 - There are 37 main-story quest definitions across the two existing acts, grouped into six five-level campaign bands.
 - 25 story quests have authored dialogue ids. The complete First Banner opening and Drowned Moonwell core both use authored scenes.
 - Levels 1-5 form a playable opening chapter. Levels 6-10 now add nine ordered Moonwell objectives, a named Blackroot elite, Mother Cindervein, a post-boss return, and persistent three-tone player responses.
-- There are 44 city contracts. Harborview and Riverside own 15 each, Moonbridge owns 8, Blackwater Gate and Eclipse Hold own 3 each, and Ashford remains the unfilled board.
+- There are 49 city contracts. Harborview and Riverside own 15 each, Moonbridge owns 8, Ashford owns 5, and Blackwater Gate and Eclipse Hold own 3 each. The remaining board work is consolidation toward eight strong contracts per town, not another generic-job expansion.
 - There are 8 boss profiles, 24 unit templates, and 20 commander spells.
 - Campaign, Level Path, Chronicle, named threat markers, and the quest tracker expose the active chapter, next unlock, exact target, and long-term collection track. Bespoke level 6-10 enemy/item art and side stories remain production work.
 
@@ -63,7 +63,7 @@ This document is the execution plan for progression, retention, narrative conten
 
 Multiplayer uses the gothic scroll as a recognizable outer frame for map commands, town services, Campaign, Progression, PVP, PVE, the HUD resource bar, quest tracking, tutorials, story conversations, the formation spellbook, and dramatic confirmations. Dense lists remain compact dark operational interiors inside that frame; individual rows and cards do not become parchment. The transparent-edge asset, no-blur overlay rule, and aspect-safe frame prevent black corners, stretched artwork, and expensive full-screen blur.
 
-The world-map command rail stays focused on `Menu`, `Chat`, `Campaign`, `PVP`, and `PVE`. `Commander`, `Gear`, and `Army` live inside Menu beside Overview, Jobs, Spells, Social, and Settings. The main quest tracker lists the most urgent story, city, and daily orders so players do not search separate menus to learn what to do next.
+The world-map command rail stays focused on `Menu`, `Chat`, `Campaign`, `PVP`, and `PVE`. `Commander`, `Gear`, and `Army` live inside Menu beside Overview, Jobs, Spells, Social, and Settings. The map ledger separates Story and Daily tabs, keeps city contracts with Story, and allows completed daily orders to be claimed in place.
 
 ### Multiplayer Campaign And Progression
 
@@ -192,13 +192,13 @@ These conversations explain a real available feature. If the feature is not impl
 | 1 | Jobs, towns, story, contacts, inventory, army, four starter spells |
 | 2 | City contracts, forge upgrades, PVE intel, first dungeon preview |
 | 3 | PVP hub and duel charter conversation |
-| 4 | Trading and merchant-safety conversation |
-| 5 | Parties, co-op entry preview/session when available, Tier II recruitment pool |
+| 4 | Trading, merchant-safety conversation, and Tier II unit acquisition |
+| 5 | Parties and co-op entry preview/session when available |
 | 6 | Veteran roads, regional threat board, Moonbridge contract pool |
-| 7 | Enforced Dungeon Tier II entry and first named regional boss bounty |
+| 7 | Enforced Dungeon Tier II entry, first named regional boss bounty, and Tier III unit acquisition |
 | 8 | Second saved formation preset and first town reputation track |
 | 9 | Blackwater Gate contracts and chapter-two pre-finale chain |
-| 10 | Tier III recruitment pool and the first major boss challenge |
+| 10 | First major boss challenge and veteran Tier III reward sources |
 | 11-14 | Eastern road services, veteran contracts, named elites, and escalating boss preparation |
 | 15 | Eclipsed Banner act completion, permanent title/banner cosmetic, and Mirror Court preview |
 | 16-20 | Mirror Court act, Eclipse Hold access, first veteran co-op dungeon, and second reputation track |
@@ -519,6 +519,18 @@ The remaining `MP-C5` work is database transport and authority. Four-player rout
 6. [x] Correct long-work thresholds to 30 minutes and expose Dungeon Tier II/III entry requirements through the shared registry, map modal, and PVE intel.
 7. [x] Add deterministic tests for encounter staging, exact receipts, chapter order, contract variety, response persistence, and dungeon tiers.
 8. [ ] Complete the two three-step side stories, bespoke Moonfen/goblin/bell-crypt enemies and quest items, first eligible reputation track, and post-chapter world-state response.
+
+## Ninth Implementation Batch - Menu, Retention UI, And Drop Integrity - Complete 2026-07-22
+
+1. [x] Restyle the Menu and spell archive as dark gothic operational surfaces, keep fixed card geometry, and remove clipped spell names and metadata.
+2. [x] Replace browser-only global chat history with an authenticated Supabase route, two-second refresh, and a hard 50-message retention cap; keep party chat on the existing local session path until party transport moves server-side.
+3. [x] Split the map ledger into Story and Daily tabs and add direct daily reward claims.
+4. [x] Give Ashford five native contracts and render location, enemy-level, and dungeon requirements explicitly on every city board.
+5. [x] Unlock Tier II acquisition at level 4 and Tier III at level 7 while retaining units already owned by legacy accounts.
+6. [x] Make random gear a two-stage chance: first roll whether gear drops, then roll rarity; gate decent, rare, epic, and legendary multiplayer gear at levels 3, 5, 10, and 15.
+7. [x] Apply 50 percent healing effectiveness from the third successful heal on the same unit in one battle.
+8. [x] Add the shared bard music controller with previous, play/pause, next, and volume controls.
+9. [ ] Apply and validate hosted migrations `008` and `009`, then verify global chat with two authenticated browsers.
 
 ## Definition Of Done For Every Progression Slice
 

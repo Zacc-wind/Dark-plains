@@ -1,3 +1,5 @@
+import { getMinionTierMinLevel } from './minionProgression';
+
 export type TownRecruitmentTown =
   | 'Harborview'
   | 'Riverside'
@@ -109,7 +111,7 @@ function buildSlot(
   const weekKey = getTownRecruitmentWeekKey(now);
   const seed = hashText(`${weekKey}:${townName}:${tier}`);
   const templateId = pool[seed % pool.length];
-  const minLevel = tier === 'tier2' ? 5 : 1;
+  const minLevel = getMinionTierMinLevel(tier);
   const price = tier === 'tier2' ? 800 + (seed % 151) : 220 + (seed % 81);
   const offerId = `${weekKey}:${townName.toLowerCase().replace(/\s+/g, '-')}:${tier}`;
 

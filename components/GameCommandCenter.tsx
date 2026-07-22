@@ -32,6 +32,7 @@ import {
   MinionTier,
   RewardSummary,
   SocialChatChannel,
+  type SocialChatMessage,
   TravelState,
   assignMinionToBattleSlot,
   allocateStatPoint,
@@ -62,7 +63,6 @@ import {
   getOrderedMinions,
   getPartyMembers,
   getRareGemCount,
-  getSocialChatMessages,
   getSocialState,
   getUsers,
   formatMinionInjuryTime,
@@ -87,7 +87,6 @@ import {
   recordCurrentMultiplayerEngagementEvent,
   requestPlayerTrade,
   sendFriendRequest,
-  sendSocialChatMessage,
   skipMultiplayerOnboarding,
   toggleMinionFielded,
   touchCurrentMultiplayerEngagement,
@@ -95,6 +94,11 @@ import {
   upgradeInventoryCapacity,
   activateInventoryItem,
 } from '@/lib/auth';
+import {
+  fetchSharedChatHistory,
+  MAX_VISIBLE_CHAT_HISTORY,
+  sendSharedChatMessage,
+} from '@/lib/socialChatClient';
 import { emitCompletionNotice, type CompletionRewardLine } from '@/lib/completionEvents';
 import { emitFxEvent } from '@/lib/fxEvents';
 import {
@@ -150,6 +154,14 @@ const primaryPanelButtons = panelButtons.filter(button => (
 
 function isPanelId(value: unknown): value is PanelId {
   return typeof value === 'string' && panelButtons.some(button => button.id === value);
+}
+
+function formatChatMessageTime(createdAt: number): string {
+  return new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' }).format(createdAt);
+}
+
+function spellTargetLabelFor(spell: Pick<BattleSpell, 'target'>): string {
+  return spell.target === 'enemy' ? 'Enemy' : spell.target === 'ally' ? 'Ally' : 'Field';
 }
 
 const equipmentSlots: EquipmentSlot[] = ['sword', 'shield', 'armor', 'armor-pants', 'boots', 'gloves', 'helmet'];
@@ -519,6 +531,9 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
   const [friendSearch, setFriendSearch] = useState('');
   const [chatChannel, setChatChannel] = useState<SocialChatChannel>('global');
   const [chatDraft, setChatDraft] = useState('');
+  const [chatHistory, setChatHistory] = useState<SocialChatMessage[]>([]);
+  const [chatSending, setChatSending] = useState(false);
+  const latestChatMessageId = chatHistory.at(-1)?.id;
   const [isChatDockOpen, setIsChatDockOpen] = useState(false);
   const [showMultiplayerHub, setShowMultiplayerHub] = useState(false);
   const [showPveHub, setShowPveHub] = useState(false);
@@ -529,6 +544,7 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
   const [isPartyDetailsOpen, setIsPartyDetailsOpen] = useState(false);
   const [partyInviteDraft, setPartyInviteDraft] = useState('');
   const lastActivityNoticeId = useRef<string | null>(null);
+  const chatHistoryRef = useRef<HTMLDivElement | null>(null);
   const router = useRouter();
   const engagementDayKey = new Date(now).toDateString();
 
@@ -620,6 +636,31 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
   }, []);
 
   useEffect(() => {
+    let active = true;
+
+    const refresh = async () => {
+      const messages = await fetchSharedChatHistory(chatChannel, getCurrentUser());
+      if (active) setChatHistory(messages.slice(-MAX_VISIBLE_CHAT_HISTORY));
+    };
+
+    setChatHistory([]);
+    void refresh();
+    const interval = window.setInterval(() => void refresh(), 2000);
+
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+    };
+  }, [chatChannel, user?.social?.party?.updatedAt, user?.username]);
+
+  useLayoutEffect(() => {
+    const list = chatHistoryRef.current;
+    if (!list) return;
+    const distanceFromBottom = list.scrollHeight - list.scrollTop - list.clientHeight;
+    if (distanceFromBottom < 96) list.scrollTop = list.scrollHeight;
+  }, [chatChannel, latestChatMessageId]);
+
+  useEffect(() => {
     if (showRandomRun) return;
     const engagement = touchCurrentMultiplayerEngagement();
     if (engagement?.pendingBriefing) {
@@ -647,9 +688,6 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
     const handleOpenCommandPanel = (event: Event) => {
       const panel = (event as CustomEvent<{ panel?: unknown }>).detail?.panel;
       const nextPanel = isPanelId(panel) ? panel : 'overview';
-      if (!showRandomRun && nextPanel === 'jobs') {
-        completeMultiplayerTutorialCallout(user?.username, 'jobs-open');
-      }
       setActivePanel(nextPanel);
       setShowDailyRun(false);
       setIsCommandOpen(true);
@@ -658,7 +696,7 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
 
     window.addEventListener('wizardy:open-command-panel', handleOpenCommandPanel);
     return () => window.removeEventListener('wizardy:open-command-panel', handleOpenCommandPanel);
-  }, [showRandomRun, user?.username]);
+  }, []);
 
   useEffect(() => {
     if (!showRandomRun) return;
@@ -670,6 +708,11 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
     document.body.classList.toggle('command-center-open', isCommandOpen);
     return () => document.body.classList.remove('command-center-open');
   }, [isCommandOpen]);
+
+  useEffect(() => {
+    if (showRandomRun || !isCommandOpen || activePanel !== 'jobs') return;
+    completeMultiplayerTutorialCallout(user?.username, 'jobs-open');
+  }, [activePanel, isCommandOpen, showRandomRun, user?.username]);
 
   useEffect(() => {
     const latestActivity = user?.activityLog?.[0];
@@ -738,7 +781,8 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
   );
   const partyMembers = getPartyMembers(player);
   const partyInvites = socialState.party?.invitedUsernames || [];
-  const chatMessages = getSocialChatMessages(chatChannel, player).slice(-12);
+  const chatMessages = chatHistory.slice(-MAX_VISIBLE_CHAT_HISTORY);
+  const chatDockMessages = chatMessages.slice(-12);
   const socialCandidates = getUsers()
     .filter(candidate => candidate.username.toLowerCase() !== player.username.toLowerCase())
     .sort((left, right) => left.username.localeCompare(right.username));
@@ -824,10 +868,19 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
     applyFriendResult(result, friendSearch.trim());
   };
 
-  const handleSendChat = () => {
-    const result = sendSocialChatMessage(chatChannel, chatDraft);
+  const handleSendChat = async () => {
+    if (chatSending) return;
+    setChatSending(true);
+    const result = await sendSharedChatMessage(chatChannel, chatDraft);
+    setChatSending(false);
     if (result.success) {
       setChatDraft('');
+      if (result.chat) {
+        setChatHistory(previous => [
+          ...previous.filter(message => message.id !== result.chat?.id),
+          result.chat!,
+        ].slice(-MAX_VISIBLE_CHAT_HISTORY));
+      }
       recordCurrentMultiplayerEngagementEvent({
         kind: 'chat-sent',
         contextId: chatChannel,
@@ -1055,9 +1108,6 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
   const panelTitle = panelButtons.find(button => button.id === activePanel)?.label || 'Overview';
 
   const openPanel = (panelId: PanelId) => {
-    if (!showRandomRun && panelId === 'jobs') {
-      completeMultiplayerTutorialCallout(player.username, 'jobs-open');
-    }
     setActivePanel(panelId);
     setIsCommandOpen(true);
   };
@@ -1536,12 +1586,12 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
           </button>
         </div>
         <div className="social-chat-messages no-scrollbar max-h-56 space-y-1.5 overflow-y-auto px-3 py-2 text-sm font-bold">
-          {chatMessages.length === 0 ? (
+          {chatDockMessages.length === 0 ? (
             <div className="social-chat-empty rounded px-3 py-4 text-center text-xs">
               No messages yet.
             </div>
           ) : (
-            chatMessages.map(message => (
+            chatDockMessages.map(message => (
               <div key={message.id} className="chat-line-modern">
                 <span className="chat-line-author">{message.author}</span>
                 <span className="chat-line-text">{message.text}</span>
@@ -1553,7 +1603,7 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
           className="social-chat-compose flex gap-2 px-3 py-2.5"
           onSubmit={(event) => {
             event.preventDefault();
-            handleSendChat();
+            void handleSendChat();
           }}
         >
           <input
@@ -1563,8 +1613,8 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
             className="social-chat-input min-w-0 flex-1 rounded-lg px-3 py-2 text-xs font-bold"
             placeholder={chatChannel === 'party' ? 'Party message' : 'Global message'}
           />
-          <button type="submit" className="social-chat-send rounded-lg px-3 py-2 text-xs font-black">
-            Send
+          <button type="submit" disabled={chatSending} className="social-chat-send rounded-lg px-3 py-2 text-xs font-black disabled:opacity-45">
+            {chatSending ? 'Sending' : 'Send'}
           </button>
         </form>
       </aside>
@@ -2066,7 +2116,7 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
         </section>
 
         <section className="ui-card rounded border p-4">
-          <SectionTitle title="Chat" action={chatChannel} />
+          <SectionTitle title="Chat History" action={`${chatMessages.length}/${MAX_VISIBLE_CHAT_HISTORY}`} />
           <div className="mb-3 flex gap-2">
             {(['global', 'party'] as SocialChatChannel[]).map(channel => (
               <button
@@ -2080,14 +2130,20 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
               </button>
             ))}
           </div>
-          <div className="min-h-56 space-y-2 rounded bg-black/16 p-3 text-xs font-bold">
+          <div
+            ref={chatHistoryRef}
+            className="social-chat-history min-h-56 max-h-[24rem] space-y-2 overflow-y-auto rounded border p-3 text-xs font-bold"
+          >
             {chatMessages.length === 0 ? (
               <EmptyState text="No messages." />
             ) : (
               chatMessages.map(message => (
-                <div key={`panel-${message.id}`} className="chat-line">
-                  <span className="ui-accent font-black">{message.author}</span>
-                  <span className="ml-2 text-zinc-100">{message.text}</span>
+                <div key={`panel-${message.id}`} className="chat-line chat-history-line">
+                  <div className="chat-history-meta">
+                    <span className="ui-accent font-black">{message.author}</span>
+                    <time dateTime={new Date(message.createdAt).toISOString()}>{formatChatMessageTime(message.createdAt)}</time>
+                  </div>
+                  <span className="chat-history-text text-zinc-100">{message.text}</span>
                 </div>
               ))
             )}
@@ -2096,7 +2152,7 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
             className="mt-3 flex gap-2"
             onSubmit={(event) => {
               event.preventDefault();
-              handleSendChat();
+              void handleSendChat();
             }}
           >
             <input
@@ -2106,8 +2162,8 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
               className="ui-input min-w-0 flex-1 rounded px-3 py-2 text-xs font-bold"
               placeholder="Message"
             />
-            <button type="submit" className="ui-button-primary rounded px-3 py-2 text-xs font-black">
-              Send
+            <button type="submit" disabled={chatSending} className="ui-button-primary rounded px-3 py-2 text-xs font-black disabled:opacity-45">
+              {chatSending ? 'Sending' : 'Send'}
             </button>
           </form>
         </section>
@@ -2709,8 +2765,7 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
       BATTLE_SPELLS[0];
     const inspectedEquippedIndex = equippedSpellIds.findIndex(spellId => spellId === inspectedSpell.id);
     const inspectedKnown = knownSpellIds.has(inspectedSpell.id);
-    const spellTargetLabel =
-      inspectedSpell.target === 'enemy' ? 'Enemy' : inspectedSpell.target === 'ally' ? 'Ally' : 'Field';
+    const spellTargetLabel = spellTargetLabelFor(inspectedSpell);
 
     return (
       <div className="spells-panel spells-panel-modern">
@@ -2760,9 +2815,11 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
                 onFocus={() => setHoveredSpellId(spell.id)}
                 className={`spells-loadout-slot transition ${selectedSpellSlot === index ? 'spell-loadout-slot-selected' : ''}`}
                 aria-pressed={selectedSpellSlot === index}
+                aria-label={`Inspect slot ${index + 1}, ${spell.name}`}
               >
                 <SpellArt spell={spell} variant="loadout" />
-                <span className="spells-loadout-slot-label">Slot {index + 1}</span>
+                <span className="spells-loadout-slot-name">{spell.name}</span>
+                <span className="spells-loadout-slot-label">Slot {index + 1} · M {spell.cost}</span>
               </button>
             ))}
           </div>
@@ -2770,7 +2827,7 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
 
         <section className="spells-archive-section ui-card rounded border p-4">
           <SectionTitle title="Archive" action={`${knownSpellIds.size} / ${BATTLE_SPELLS.length}`} compact />
-          <div className="spells-archive-grid">
+          <div className="spells-archive-grid no-scrollbar">
             {BATTLE_SPELLS.map(spell => {
               const known = knownSpellIds.has(spell.id);
               const equippedIndex = equippedSpellIds.findIndex(id => id === spell.id);
@@ -2787,6 +2844,8 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
                   onMouseEnter={() => setHoveredSpellId(spell.id)}
                   onFocus={() => setHoveredSpellId(spell.id)}
                   aria-disabled={!known}
+                  aria-label={`${spell.name}, ${known ? equipped ? `equipped in slot ${equippedIndex + 1}` : `${spell.cost} mana` : 'locked'}`}
+                  title={spell.name}
                   className={`spells-archive-tile transition ${!known ? 'spells-archive-tile-locked' : ''} ${equipped ? 'spells-archive-tile-equipped' : ''} ${hoveredSpellId === spell.id ? 'spells-archive-tile-active' : ''}`}
                 >
                   <span className="spells-archive-tile-art">
@@ -2795,7 +2854,7 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
                   </span>
                   <span className="spells-archive-tile-name">{spell.name}</span>
                   <span className="spells-archive-tile-meta">
-                    {!known ? 'Locked' : equipped ? 'Equipped' : `M ${spell.cost}`}
+                    {!known ? 'Locked' : equipped ? `Slot ${equippedIndex + 1}` : `${spellTargetLabelFor(spell)} · M ${spell.cost}`}
                   </span>
                 </button>
               );

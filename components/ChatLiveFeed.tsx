@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { getSocialChatMessages } from '@/lib/auth';
+import { fetchSharedChatHistory } from '@/lib/socialChatClient';
 
 const RECENT_MESSAGE_WINDOW_MS = 60_000;
 const MAX_VISIBLE_TOASTS = 6;
@@ -26,9 +26,17 @@ export default function ChatLiveFeed({ enabled = true }: ChatLiveFeedProps) {
   useEffect(() => {
     if (!enabled) return undefined;
 
-    const poll = () => {
+    let active = true;
+    let polling = false;
+
+    const poll = async () => {
+      if (polling) return;
+      polling = true;
       const cutoff = Date.now() - RECENT_MESSAGE_WINDOW_MS;
-      const messages = getSocialChatMessages('global').filter(message => message.createdAt >= cutoff);
+      const messages = (await fetchSharedChatHistory('global'))
+        .filter(message => message.createdAt >= cutoff);
+      polling = false;
+      if (!active) return;
 
       if (!bootstrapped.current) {
         messages.forEach(message => seenIds.current.add(message.id));
@@ -54,11 +62,12 @@ export default function ChatLiveFeed({ enabled = true }: ChatLiveFeedProps) {
       }
     };
 
-    poll();
-    const pollInterval = window.setInterval(poll, 900);
+    void poll();
+    const pollInterval = window.setInterval(() => void poll(), 2000);
     const clockInterval = window.setInterval(() => setNow(Date.now()), 250);
 
     return () => {
+      active = false;
       window.clearInterval(pollInterval);
       window.clearInterval(clockInterval);
     };

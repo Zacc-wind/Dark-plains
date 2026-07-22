@@ -60,7 +60,6 @@ import {
   User,
   addEquipmentWithLimit,
   addInventoryItemsWithLimit,
-  generateEquipment,
   getCurrentUser,
   getDailyRunChallenge,
   getMinionTemplate,
@@ -7943,9 +7942,9 @@ function grantMpDailyCompletionReward(session: RunSession, user: User, completed
   const durationMs = Math.max(0, completedAt - (session.startedAt || completedAt));
   const gold = challenge.rewardGold + Math.floor(session.runGold * 0.25);
   const exp = challenge.rewardExp + session.wins * 8;
-  const lootRoll = generateLootEquipment({ source: 'mp-daily', forcedRarity: Math.random() < 0.22 ? 'legendary' : 'epic' });
-  const bonusLoot = Math.random() < 0.35
-    ? generateLootEquipment({ source: 'mp-daily', forcedRarity: 'rare' })
+  const lootRoll = generateLootEquipment({ source: 'mp-daily', playerLevel: user.stats.level || 1 });
+  const bonusLoot = Math.random() < 0.12
+    ? generateLootEquipment({ source: 'dungeon', playerLevel: user.stats.level || 1 })
     : null;
   const equipment = [lootRoll, bonusLoot].filter(Boolean) as Equipment[];
   const rewardItems: InventoryItem[] = [
@@ -8029,6 +8028,7 @@ function grantCompletionReward(session: RunSession): string {
     source: session.dungeon ? 'dungeon-boss' : 'dungeon',
     dungeonId: session.dungeon?.id,
     forcedRarity: rarity,
+    playerLevel: user.stats.level || 1,
   })].filter(Boolean) as Equipment[];
   const slots = user.inventorySlots || 20;
   const rewardItems: InventoryItem[] = [
@@ -8336,14 +8336,16 @@ function grantEncounterCompletionReward(session: RunSession, user: User, complet
     : enemy.level >= 3
       ? 1
       : 0;
-  const rarity: EquipmentRarity | undefined = enemy.spawnKind === 'world-boss'
-    ? enemy.level >= 14 ? 'legendary' : 'epic'
-    : enemy.level >= 10
-      ? 'rare'
-      : enemy.level >= 4
-        ? 'decent'
-        : undefined;
-  const equipment = rarity ? [generateEquipment(0, rarity)].filter(Boolean) as Equipment[] : [];
+  const encounterLoot = generateLootEquipment({
+    source: enemy.spawnKind === 'world-boss'
+      ? 'dungeon-boss'
+      : enemy.personality === 'boss'
+        ? 'elite'
+        : 'battle',
+    playerLevel: user.stats.level || 1,
+    dropBonus: Math.max(0, Math.round((lootMultiplier - 1) * 10)),
+  });
+  const equipment = encounterLoot ? [encounterLoot] : [];
   const rewardItems: InventoryItem[] = [
     ...(rareGems > 0 ? [makeInventoryItem('rare-gem', rareGems)] : []),
     ...rollInventoryBonusDrops(enemy.level, enemy.spawnKind === 'nearby' ? 'nearbyBattle' : 'battle'),
@@ -8399,7 +8401,7 @@ function grantEncounterCompletionReward(session: RunSession, user: User, complet
 
   return gearResult.rejectedEquipment.length > 0
     ? `Claimed ${gold} gold and ${exp} XP from ${enemy.name}. Gear storage was full for some loot.`
-    : `Claimed ${gold} gold, ${exp} XP${acceptedGems > 0 ? `, ${acceptedGems} gem${acceptedGems === 1 ? '' : 's'}` : ''}${rarity ? `, and ${rarity} gear` : ''} from ${enemy.name}.`;
+    : `Claimed ${gold} gold, ${exp} XP${acceptedGems > 0 ? `, ${acceptedGems} gem${acceptedGems === 1 ? '' : 's'}` : ''}${gearResult.acceptedEquipment.length > 0 ? `, and ${gearResult.acceptedEquipment[0].rarity} gear` : ''} from ${enemy.name}.`;
 }
 
 function makeStatBuff(

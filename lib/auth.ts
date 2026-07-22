@@ -29,6 +29,14 @@ import { getStaticPOIs, MAP_CONFIG, POIType } from './mapData';
 import { BOSS_PROFILES, type BossProfile } from './bosses';
 import { sumGearSetBonusStats } from './gearSets';
 import { generateLootEquipment } from './lootTables';
+import {
+  capEquipmentRarityForLevel,
+  getEquipmentRarityMinLevel,
+  getHighestJobEquipmentRarity,
+  getJobEquipmentDropChance,
+  rollJobEquipmentRarity,
+} from './gearProgression';
+import { canAcquireMinionTier, getMinionTierMinLevel } from './minionProgression';
 import { normalizeMpDailyDungeonState, type MpDailyDungeonState } from './mpDailyDungeon';
 import {
   applyPvpRatingLoss,
@@ -570,6 +578,7 @@ export interface JobRewards {
 export interface JobRewardPreview extends JobRewards {
   levelRequirement?: number;
   equipmentRarity?: EquipmentRarity;
+  equipmentDropChance?: number;
   minionTier?: MinionTier;
   rewardNote?: string;
 }
@@ -850,6 +859,7 @@ export interface ShopOffer {
   kind: 'heal' | 'gem' | 'equipment' | 'minion';
   value?: number;
   rarity?: EquipmentRarity;
+  minLevel?: number;
   minionTemplateId?: string;
 }
 
@@ -1128,7 +1138,12 @@ export const SHOP_OFFERS: ShopOffer[] = [
 export function getTownShopOffers(townName: string, now = Date.now(), limit = 5): ShopOffer[] {
   const availableOffers = SHOP_OFFERS.filter(offer => (
     offer.kind !== 'minion' && (offer.town === 'all' || offer.town === townName)
-  ));
+  )).map(offer => ({
+    ...offer,
+    minLevel: offer.kind === 'equipment' && offer.rarity
+      ? getEquipmentRarityMinLevel(offer.rarity)
+      : offer.minLevel,
+  }));
   const fixedOffers = availableOffers
     .filter(offer => offer.id === 'harbor-draught' || offer.id === 'harbor-gem')
     .slice(0, 2);
@@ -1718,8 +1733,13 @@ function buildQuestRewardSummary(
   minions: MinionStack[];
   spellIds: string[];
 } {
-  const equipment = rewards.equipmentRarity ? [generateEquipment(0, rewards.equipmentRarity)].filter(Boolean) as Equipment[] : [];
-  const minions = rewards.minionTier ? [generateMinionDrop(0, rewards.minionTier)].filter(Boolean) as MinionStack[] : [];
+  const rewardRarity = rewards.equipmentRarity
+    ? capEquipmentRarityForLevel(rewards.equipmentRarity, playerLevel)
+    : null;
+  const equipment = rewardRarity ? [generateEquipment(0, rewardRarity)].filter(Boolean) as Equipment[] : [];
+  const minions = rewards.minionTier
+    ? [generateMinionDrop(0, rewards.minionTier, 1, playerLevel)].filter(Boolean) as MinionStack[]
+    : [];
   const spellIds = normalizeSpellIds(rewards.spellIds);
   const items = rewards.rareGems
     ? [{
@@ -3856,8 +3876,10 @@ function getContainerRewards(itemId: string, user: User): RewardSummary {
   }
 
   if (itemId === 'decent-loot-chest') {
+    const requestedRarity: EquipmentRarity = Math.random() < 0.12 ? 'rare' : 'decent';
+    const unlockedRarity = capEquipmentRarityForLevel(requestedRarity, level);
     const equipment = Math.random() < 0.72
-      ? [generateEquipment(0, Math.random() < 0.12 ? 'rare' : 'decent')].filter(Boolean) as Equipment[]
+      ? [generateEquipment(0, unlockedRarity || 'decent', 0, level)].filter(Boolean) as Equipment[]
       : [];
     const items = Math.random() < 0.42 ? [makeInventoryItem('red-mercy-draught')] : [];
 
@@ -3870,7 +3892,11 @@ function getContainerRewards(itemId: string, user: User): RewardSummary {
 
   if (itemId === 'rare-loot-chest') {
     const gemQuantity = randomInt(1, 2);
-    const equipment = [generateEquipment(0, Math.random() < 0.15 ? 'epic' : 'rare')].filter(Boolean) as Equipment[];
+    const requestedRarity: EquipmentRarity = Math.random() < 0.15 ? 'epic' : 'rare';
+    const unlockedRarity = capEquipmentRarityForLevel(requestedRarity, level);
+    const equipment = unlockedRarity
+      ? [generateEquipment(0, unlockedRarity, 0, level)].filter(Boolean) as Equipment[]
+      : [];
 
     return {
       gold: randomInt(70 + level * 4, 150 + level * 7),
@@ -3882,7 +3908,11 @@ function getContainerRewards(itemId: string, user: User): RewardSummary {
 
   if (itemId === 'epic-loot-chest') {
     const gemQuantity = randomInt(2, 4);
-    const equipment = [generateEquipment(0, Math.random() < 0.16 ? 'legendary' : 'epic')].filter(Boolean) as Equipment[];
+    const requestedRarity: EquipmentRarity = Math.random() < 0.16 ? 'legendary' : 'epic';
+    const unlockedRarity = capEquipmentRarityForLevel(requestedRarity, level);
+    const equipment = unlockedRarity
+      ? [generateEquipment(0, unlockedRarity, 0, level)].filter(Boolean) as Equipment[]
+      : [];
 
     return {
       gold: randomInt(140 + level * 8, 260 + level * 10),
@@ -4287,7 +4317,8 @@ function makeTravelEventReward(user: User, event: TravelEventTemplate, durationM
       break;
     case 'equipment': {
       const rarity: EquipmentRarity = level >= 12 ? 'epic' : level >= 6 ? 'rare' : 'decent';
-      const item = generateEquipment(0, rarity);
+      const unlockedRarity = capEquipmentRarityForLevel(rarity, level);
+      const item = unlockedRarity ? generateEquipment(0, unlockedRarity) : null;
       if (item) {
         equipment.push(item);
         summary.equipment = [item];
@@ -4295,8 +4326,12 @@ function makeTravelEventReward(user: User, event: TravelEventTemplate, durationM
       break;
     }
     case 'minion': {
-      const tier: MinionTier = level >= 12 ? 'tier3' : level >= 6 ? 'tier2' : 'tier1';
-      const minion = generateMinionDrop(0, tier);
+      const tier: MinionTier = level >= getMinionTierMinLevel('tier3')
+        ? 'tier3'
+        : level >= getMinionTierMinLevel('tier2')
+          ? 'tier2'
+          : 'tier1';
+      const minion = generateMinionDrop(0, tier, 1, level);
       if (minion) {
         minions.push(minion);
         summary.minions = [minion];
@@ -4872,6 +4907,12 @@ export function recruitMinionsFromOffer(
   const currentUser = getCurrentUser();
   if (!currentUser) return { success: false, error: 'Not logged in.' };
   if (minions.length === 0) return { success: false, error: 'No minions offered.' };
+  const blockedTier = minions
+    .map(minion => getMinionTemplate(minion.templateId)?.tier)
+    .find((tier): tier is MinionTier => Boolean(tier && !canAcquireMinionTier(tier, currentUser.stats.level || 1)));
+  if (blockedTier) {
+    return { success: false, error: `${MINION_TIER_LABELS[blockedTier]} recruits require level ${getMinionTierMinLevel(blockedTier)}.` };
+  }
 
   const completedAt = Date.now();
   updateCurrentUser({
@@ -4917,6 +4958,10 @@ export function buyShopOffer(offerId: string, townName: string): { success: bool
   }
 
   if (offer.kind === 'equipment') {
+    const requiredLevel = offer.rarity ? getEquipmentRarityMinLevel(offer.rarity) : 1;
+    if ((currentUser.stats.level || 1) < requiredLevel) {
+      return { success: false, error: `This gear rarity requires level ${requiredLevel}.` };
+    }
     const item = generateEquipment(0, offer.rarity || 'decent');
     if (item) {
       if (!canAcceptGearReward(currentUser, 1)) {
@@ -4930,6 +4975,9 @@ export function buyShopOffer(offerId: string, townName: string): { success: bool
   if (offer.kind === 'minion' && offer.minionTemplateId) {
     const template = getMinionTemplate(offer.minionTemplateId);
     if (template) {
+      if (!canAcquireMinionTier(template.tier, currentUser.stats.level || 1)) {
+        return { success: false, error: `${MINION_TIER_LABELS[template.tier]} recruits require level ${getMinionTierMinLevel(template.tier)}.` };
+      }
       const minion = createMinionStack(template, 1);
       nextMinions = mergeMinionStacks(nextMinions, [minion]);
       rewards.minions = [minion];
@@ -4979,6 +5027,9 @@ export function recruitTownWeeklyOffer(
   const template = getMinionTemplate(offer.templateId);
   if (!template || !isPlayerRecruitableMinionTemplate(template.templateId)) {
     return { success: false, error: 'Recruit template is unavailable.' };
+  }
+  if (!canAcquireMinionTier(template.tier, currentUser.stats.level || 1)) {
+    return { success: false, error: `${MINION_TIER_LABELS[template.tier]} recruits require level ${getMinionTierMinLevel(template.tier)}.` };
   }
 
   const minion = createMinionStack(template, 1);
@@ -6158,9 +6209,16 @@ function getJobRewardProfile(poiType?: string): JobRewardProfile {
 export function getJobRewardPreview(jobIndex: number, poiType?: string, playerLevel = 1): JobRewardPreview {
   const safeIndex = Math.max(0, Math.min(JOB_DURATIONS.length - 1, jobIndex));
   const profile = getJobRewardProfile(poiType);
+  const workDuration = JOB_DURATIONS[safeIndex];
   const itemId = profile.itemIds?.[safeIndex] || null;
-  const equipmentRarity = profile.equipmentRarities?.[safeIndex] || undefined;
-  const minionTier = profile.minionTiers?.[safeIndex] || undefined;
+  const equipmentDropChance = getJobEquipmentDropChance(workDuration, playerLevel);
+  const equipmentRarity = equipmentDropChance > 0
+    ? getHighestJobEquipmentRarity(workDuration, playerLevel) || undefined
+    : undefined;
+  const offeredMinionTier = profile.minionTiers?.[safeIndex] || undefined;
+  const minionTier = offeredMinionTier && canAcquireMinionTier(offeredMinionTier, playerLevel)
+    ? offeredMinionTier
+    : undefined;
   const rareGems = safeIndex === JOB_DURATIONS.length - 1 ? profile.rareGems?.[safeIndex] || 0 : 0;
   const healthRestore = profile.healthRestore?.[safeIndex] || 0;
 
@@ -6176,6 +6234,7 @@ export function getJobRewardPreview(jobIndex: number, poiType?: string, playerLe
     healthRestore: healthRestore > 0 ? healthRestore : undefined,
     items: itemId ? [makeInventoryItem(itemId)] : undefined,
     equipmentRarity,
+    equipmentDropChance: equipmentDropChance > 0 ? equipmentDropChance : undefined,
     minionTier,
     levelRequirement: profile.levelRequirements?.[safeIndex] || 1,
     rewardNote: profile.notes?.[safeIndex] || undefined,
@@ -6224,11 +6283,8 @@ export function startJob(poiId: string, poiName: string, jobName: string, jobInd
   
   const totalDuration = travelTime + workDuration;
   
-  const guaranteedEquipment = rewardPreview.equipmentRarity
-    ? [generateEquipment(workDuration, rewardPreview.equipmentRarity)].filter(Boolean) as Equipment[]
-    : [];
   const guaranteedMinions = rewardPreview.minionTier
-    ? [generateMinionDrop(workDuration, rewardPreview.minionTier)].filter(Boolean) as MinionStack[]
+    ? [generateMinionDrop(workDuration, rewardPreview.minionTier, 1, currentUser.stats.level || 1)].filter(Boolean) as MinionStack[]
     : [];
   const guaranteedItems = rewardPreview.items?.map(item => ({ ...item })) || [];
 
@@ -6246,7 +6302,6 @@ export function startJob(poiId: string, poiName: string, jobName: string, jobInd
       rareGems: rewardPreview.rareGems,
       healthRestore: rewardPreview.healthRestore,
       items: guaranteedItems.length > 0 ? guaranteedItems : undefined,
-      equipment: guaranteedEquipment.length > 0 ? guaranteedEquipment : undefined,
       minions: guaranteedMinions.length > 0 ? guaranteedMinions : undefined,
     },
     targetX: poiX,
@@ -6402,7 +6457,12 @@ export function checkJobsComplete(): void {
       itemsEarned.push(...rollInventoryBonusDrops(currentUser.stats.level || 1, 'job'));
       
       // Generate equipment drop
-      const droppedEquipment = generateEquipment(firstJob.workDuration, undefined, getEquipmentDropBonus(currentUser));
+      const droppedEquipment = generateEquipment(
+        firstJob.workDuration,
+        undefined,
+        getEquipmentDropBonus(currentUser),
+        currentUser.stats.level || 1,
+      );
       if (droppedEquipment) {
         equipmentEarned.push(droppedEquipment);
       }
@@ -6719,34 +6779,16 @@ export function getExpNeeded(currentLevel: number): number {
 }
 
 // Generate random equipment
-export function generateEquipment(jobDuration: number, forcedRarity?: EquipmentRarity, dropBonus = 0): Equipment | null {
-  let rarity: EquipmentRarity;
-  
-  if (forcedRarity) {
-    // Use forced rarity (for quest rewards)
-    rarity = forcedRarity;
-  } else {
-    // Normal drop logic
-    const random = Math.random() * 100;
-    const bonus = Math.max(0, dropBonus);
-    
-    // Determine rarity based on percentages
-    if (random < 2) {
-      if (jobDuration < JOB_WORK_DURATIONS_MS[3]) return null;
-      rarity = 'legendary';
-    } else if (random < 7 + bonus * 0.2) { // 2 + 5, with small lucky bump
-      if (jobDuration < JOB_WORK_DURATIONS_MS[3]) return null;
-      rarity = 'epic';
-    } else if (random < 19 + bonus * 0.55) { // 7 + 12, with lucky bump
-      if (jobDuration < JOB_WORK_DURATIONS_MS[2]) return null;
-      rarity = 'rare';
-    } else if (random < 44 + bonus) { // 19 + 25, with lucky bump
-      if (jobDuration < JOB_WORK_DURATIONS_MS[1]) return null;
-      rarity = 'decent';
-    } else {
-      return null; // No drop
-    }
-  }
+export function generateEquipment(
+  jobDuration: number,
+  forcedRarity?: EquipmentRarity,
+  dropBonus = 0,
+  playerLevel = MAX_PLAYER_LEVEL,
+): Equipment | null {
+  const rarity = forcedRarity
+    ? capEquipmentRarityForLevel(forcedRarity, playerLevel)
+    : rollJobEquipmentRarity(jobDuration, playerLevel, dropBonus);
+  if (!rarity) return null;
   
   // Random equipment slot
   const slots: EquipmentSlot[] = ['sword', 'shield', 'armor', 'armor-pants', 'boots', 'gloves', 'helmet'];
@@ -6805,8 +6847,8 @@ export function generateEquipment(jobDuration: number, forcedRarity?: EquipmentR
 
 function rollMinionTier(workDuration: number, playerLevel: number): MinionTier | null {
   const roll = Math.random();
-  const tier2Unlocked = playerLevel >= 5;
-  const tier3Unlocked = playerLevel >= 10;
+  const tier2Unlocked = canAcquireMinionTier('tier2', playerLevel);
+  const tier3Unlocked = canAcquireMinionTier('tier3', playerLevel);
   const rates = workDuration >= JOB_WORK_DURATIONS_MS[3]
     ? { tier1: 0.009, tier2: 0.0018, tier3: 0.0003 }
     : workDuration >= JOB_WORK_DURATIONS_MS[2]
@@ -6831,6 +6873,7 @@ export function generateMinionDrop(
 ): MinionStack | null {
   const tier = forcedTier || rollMinionTier(workDuration, playerLevel);
   if (!tier) return null;
+  if (!canAcquireMinionTier(tier, playerLevel)) return null;
 
   const eligibleTemplates = MINION_TEMPLATES.filter(template => (
     template.tier === tier && isPlayerRecruitableMinionTemplate(template.templateId)
@@ -7538,7 +7581,12 @@ export function recordCoopRaidOutcome(
     return { success: true, duplicate: true };
   }
 
-  const equipment = generateEquipment(60 * 60 * 1000, reward.equipmentRarity);
+  const equipment = generateEquipment(
+    60 * 60 * 1000,
+    reward.equipmentRarity,
+    0,
+    user.stats.level || 1,
+  );
   if (equipment) equipment.id = `raid-gear-${normalizedRaidId}-${usernameKey}`;
   const equipmentResult = addEquipmentWithLimit(
     user.equipment || [],
@@ -8128,8 +8176,9 @@ export function claimQuestReward(questId: string): { success: boolean; rewards?:
     if (Math.random() < 0.08) {
       const minion = generateMinionDrop(
         5 * 60 * 1000,
-        (currentUser.stats.level || 1) >= 5 && Math.random() < 0.10 ? 'tier2' : 'tier1',
+        canAcquireMinionTier('tier2', currentUser.stats.level || 1) && Math.random() < 0.10 ? 'tier2' : 'tier1',
         1,
+        currentUser.stats.level || 1,
       );
       if (minion) rewardMinions.push(minion);
     } else {
@@ -8140,12 +8189,20 @@ export function claimQuestReward(questId: string): { success: boolean; rewards?:
           : Math.random() < 0.55
             ? 'rare'
             : 'decent';
-      const supplyItem = generateLootEquipment({ source: 'quest', forcedRarity });
+      const supplyItem = generateLootEquipment({
+        source: 'quest',
+        forcedRarity,
+        playerLevel: currentUser.stats.level || 1,
+      });
       if (supplyItem) rewardEquipment.push(supplyItem);
     }
   } else {
     // Guaranteed item
-    const guaranteedItem = generateEquipment(0, quest.rewards.guaranteedItem);
+    const guaranteedRarity = capEquipmentRarityForLevel(
+      quest.rewards.guaranteedItem,
+      currentUser.stats.level || 1,
+    );
+    const guaranteedItem = guaranteedRarity ? generateEquipment(0, guaranteedRarity) : null;
     if (guaranteedItem) {
       rewardEquipment.push(guaranteedItem);
     }
@@ -8154,7 +8211,11 @@ export function claimQuestReward(questId: string): { success: boolean; rewards?:
     if (quest.rewards.bonusItem) {
       const bonusRoll = Math.random();
       if (bonusRoll < quest.rewards.bonusItem.chance) {
-        const bonusItem = generateEquipment(0, quest.rewards.bonusItem.rarity);
+        const bonusRarity = capEquipmentRarityForLevel(
+          quest.rewards.bonusItem.rarity,
+          currentUser.stats.level || 1,
+        );
+        const bonusItem = bonusRarity ? generateEquipment(0, bonusRarity) : null;
         if (bonusItem) {
           rewardEquipment.push(bonusItem);
         }
@@ -8164,7 +8225,8 @@ export function claimQuestReward(questId: string): { success: boolean; rewards?:
     // Legendary chance
     const legendaryRoll = Math.random();
     if (legendaryRoll < quest.rewards.legendaryChance) {
-      const legendaryItem = generateEquipment(0, 'legendary');
+      const legendaryRarity = capEquipmentRarityForLevel('legendary', currentUser.stats.level || 1);
+      const legendaryItem = legendaryRarity ? generateEquipment(0, legendaryRarity) : null;
       if (legendaryItem) {
         rewardEquipment.push(legendaryItem);
       }

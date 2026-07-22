@@ -79,7 +79,20 @@ function rewardSummaryToCompletionRewards(rewards?: RewardSummary): CompletionRe
   return lines;
 }
 
-function getCityQuestRequirementText(quest: { id?: string; town?: string; requirement: { type: string; count: number; itemId?: string; minDuration?: number; poiName?: string } }): string {
+function getCityQuestRequirementText(quest: {
+  id?: string;
+  town?: string;
+  requirement: {
+    type: string;
+    count: number;
+    itemId?: string;
+    minDuration?: number;
+    poiName?: string;
+    minEnemyLevel?: number;
+    maxEnemyLevel?: number;
+    minDungeonLevel?: number;
+  };
+}): string {
   const { requirement } = quest;
 
   switch (requirement.type) {
@@ -90,6 +103,12 @@ function getCityQuestRequirementText(quest: { id?: string; town?: string; requir
       return `Complete ${requirement.count} ${quest.town || 'local'} job${requirement.count === 1 ? '' : 's'}.`;
     case 'complete_timed_jobs':
       return `Complete ${requirement.count} ${quest.town || 'local'} job${requirement.count === 1 ? '' : 's'} lasting ${Math.round((requirement.minDuration || 0) / 60000)}+ minutes.`;
+    case 'complete_jobs_at_poi': {
+      const duration = requirement.minDuration
+        ? ` lasting ${Math.round(requirement.minDuration / 60000)}+ minutes`
+        : '';
+      return `Complete ${requirement.count} job${requirement.count === 1 ? '' : 's'} at ${requirement.poiName || 'the marked location'}${duration}.`;
+    }
     case 'player_level':
       return `Reach level ${requirement.count}.`;
     case 'own_rare_gems':
@@ -102,8 +121,23 @@ function getCityQuestRequirementText(quest: { id?: string; town?: string; requir
       return `Recruit ${requirement.count} unit${requirement.count === 1 ? '' : 's'}.`;
     case 'win_battles':
       return `Defeat ${requirement.count} enemy warband${requirement.count === 1 ? '' : 's'} on the world map.`;
+    case 'defeat_enemies_level': {
+      const minimum = requirement.minEnemyLevel || 1;
+      const levelRange = requirement.maxEnemyLevel
+        ? `levels ${minimum}-${requirement.maxEnemyLevel}`
+        : `level ${minimum}+`;
+      return `Defeat ${requirement.count} enemy warband${requirement.count === 1 ? '' : 's'} at ${levelRange}.`;
+    }
+    case 'clear_dungeons':
+      return `Clear ${requirement.count} dungeon${requirement.count === 1 ? '' : 's'} at level ${requirement.minDungeonLevel || 1}+.`;
     case 'visit_poi':
       return `Reach ${requirement.poiName || 'the marked place'}.`;
+    case 'visit_quest_npc':
+      return 'Speak with the marked envoy on the world map.';
+    case 'inspect_enemy':
+      return 'Inspect the marked enemy warband.';
+    case 'defeat_boss':
+      return `Defeat the marked boss ${requirement.count} time${requirement.count === 1 ? '' : 's'}.`;
     default:
       return 'Complete the contract objective.';
   }
@@ -442,6 +476,7 @@ export default function TownModal({ town, onClose, onTravel }: TownModalProps) {
                     offers={offers}
                     recruitmentOffers={recruitmentOffers}
                     gold={user?.gold || 0}
+                    playerLevel={user?.stats.level || 1}
                     atTown={atTown}
                     onBuy={handleBuy}
                     onRecruit={handleRecruit}
@@ -858,6 +893,7 @@ function TownBuyGrid({
   offers,
   recruitmentOffers,
   gold,
+  playerLevel,
   atTown,
   onBuy,
   onRecruit,
@@ -865,6 +901,7 @@ function TownBuyGrid({
   offers: ReturnType<typeof getTownShopOffers>;
   recruitmentOffers: ReturnType<typeof getTownRecruitmentOffers>;
   gold: number;
+  playerLevel: number;
   atTown: boolean;
   onBuy: (offerId: string) => void;
   onRecruit: (offerId: string) => void;
@@ -929,14 +966,17 @@ function TownBuyGrid({
           </div>
           <div className="town-item-grid">
             {offers.map(offer => {
-              const canBuy = atTown && gold >= offer.price;
+              const levelLocked = playerLevel < (offer.minLevel || 1);
+              const canBuy = atTown && !levelLocked && gold >= offer.price;
               return (
                 <TownGridCell
                   key={offer.id}
                   label={offer.name}
                   meta={`${offer.price}g`}
-                  actionLabel={!atTown ? 'Travel here' : gold >= offer.price ? 'Buy' : `Need ${offer.price - gold}g`}
+                  actionLabel={levelLocked ? undefined : !atTown ? 'Travel here' : gold >= offer.price ? 'Buy' : `Need ${offer.price - gold}g`}
                   ariaLabel={`${offer.name}, ${offer.price} gold. ${!atTown ? 'Travel to town to buy' : gold >= offer.price ? 'Buy' : `Need ${offer.price - gold} more gold`}`}
+                  locked={levelLocked}
+                  lockLabel={`Lv ${offer.minLevel}`}
                   disabled={!canBuy}
                   onClick={() => onBuy(offer.id)}
                   icon={(
@@ -948,7 +988,7 @@ function TownBuyGrid({
                     <TownHoverPopover
                       title={offer.name}
                       subtitle="Shop offer"
-                      lines={[offer.description, gold < offer.price ? `Need ${offer.price - gold} more gold` : 'Click to purchase']}
+                      lines={[offer.description, levelLocked ? `Requires level ${offer.minLevel}` : gold < offer.price ? `Need ${offer.price - gold} more gold` : 'Click to purchase']}
                       footer={`${offer.price} gold`}
                     />
                   )}

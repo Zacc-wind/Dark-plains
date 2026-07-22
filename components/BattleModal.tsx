@@ -43,6 +43,7 @@ import {
   getAttackDamage,
   getBattleMana,
   getDistance,
+  getDiminishedHealAmount,
   getHealAmount,
   getMinionSupportAbility,
   getRetaliationDamage,
@@ -67,8 +68,6 @@ import {
   ActivityEntry,
   CharacterStats,
   DEFAULT_EQUIPPED_SPELL_IDS,
-  Equipment,
-  EquipmentRarity,
   InventoryItem,
   MinionCasualtyReport,
   MinionStack,
@@ -76,7 +75,6 @@ import {
   applyMinionBattleCasualties,
   addEquipmentWithLimit,
   addInventoryItemsWithLimit,
-  generateEquipment,
   getCurrentUser,
   getCityQuestStatus,
   getCityQuestTemplate,
@@ -91,6 +89,7 @@ import {
   STORY_CHAPTERS,
   updateCurrentUser,
 } from '@/lib/auth';
+import { generateLootEquipment } from '@/lib/lootTables';
 import { emitCompletionNotice, type CompletionRewardLine } from '@/lib/completionEvents';
 import {
   CombatSpeed,
@@ -279,7 +278,6 @@ interface VictoryRewardReport {
   gold: number;
   exp: number;
   rareGems?: number;
-  equipmentRarity?: EquipmentRarity;
   rareGemsAccepted?: number;
   equipmentNames?: string[];
   itemNames?: string[];
@@ -4046,7 +4044,7 @@ function BattleResultReport({
             />
             <BattleResultStat
               label="Equipment"
-              value={reward.equipmentNames?.length ? reward.equipmentNames.join(', ') : reward.equipmentRarity || 'None'}
+              value={reward.equipmentNames?.length ? reward.equipmentNames.join(', ') : 'None'}
             />
             <BattleResultStat
               label="Items"
@@ -4126,8 +4124,6 @@ function emitBattleCompletionNotice(battle: BattleState, report: BattleResultRep
 
     if (reward.equipmentNames?.length) {
       rewards.push({ label: 'Equipment', value: reward.equipmentNames.join(', '), tone: 'green' });
-    } else if (reward.equipmentRarity) {
-      rewards.push({ label: 'Equipment', value: `${reward.equipmentRarity} gear`, tone: 'green' });
     }
 
     if (reward.itemNames?.length) {
@@ -4444,7 +4440,7 @@ function getBattleHoverForecast({
     const healing = getHealAmount(activeUnit, unitAtCell, battle);
     return {
       ...baseForecast,
-      actionLabel: 'Heal',
+      actionLabel: (unitAtCell.healsReceived || 0) >= 2 ? 'Heal · 50%' : 'Heal',
       amount: healing,
       projectedHealth: Math.min(unitAtCell.maxHealth, unitAtCell.currentHealth + healing),
       tone: 'good',
@@ -4488,10 +4484,11 @@ function getSelectedSpellForecast(
 
   const healing = healingBySpell[spell.id];
   if (typeof healing === 'number') {
+    const effectiveHealing = getDiminishedHealAmount(healing, target.healsReceived);
     return {
-      actionLabel: spell.name,
-      amount: Math.min(target.maxHealth - target.currentHealth, healing),
-      projectedHealth: Math.min(target.maxHealth, target.currentHealth + healing),
+      actionLabel: (target.healsReceived || 0) >= 2 ? `${spell.name} · 50%` : spell.name,
+      amount: Math.min(target.maxHealth - target.currentHealth, effectiveHealing),
+      projectedHealth: Math.min(target.maxHealth, target.currentHealth + effectiveHealing),
       tone: 'good',
     };
   }
@@ -4719,7 +4716,7 @@ function getMinionStackName(minion: MinionStack): string {
 function getVictoryReward(
   enemy: WorldEnemy,
   playerLevel = getCurrentUser()?.stats.level || 1,
-): { gold: number; exp: number; rareGems?: number; equipmentRarity?: EquipmentRarity } {
+): { gold: number; exp: number; rareGems?: number } {
   const dungeonReward = enemy.id.startsWith('dungeon-');
   const nearbyReward = enemy.spawnKind === 'nearby';
   const lootMultiplier = enemy.lootMultiplier || 1;
@@ -4738,17 +4735,6 @@ function getVictoryReward(
       : nearbyReward && enemy.level >= 3
         ? 1
         : undefined,
-    equipmentRarity: dungeonReward
-      ? enemy.level >= 14
-        ? 'legendary'
-        : enemy.level >= 9
-          ? 'epic'
-          : 'rare'
-      : nearbyReward
-        ? enemy.level >= 10
-          ? 'rare'
-          : 'decent'
-      : undefined,
   };
 }
 
@@ -4804,9 +4790,16 @@ function applyVictoryReward(enemy: WorldEnemy): VictoryRewardReport | null {
   const questProgressBefore = getBattleQuestSnapshots(user);
   const reward = getVictoryReward(enemy, user.stats.level);
   const completedAt = Date.now();
-  const rewardEquipment = reward.equipmentRarity
-    ? [generateEquipment(0, reward.equipmentRarity)].filter(Boolean) as Equipment[]
-    : [];
+  const equipmentDrop = generateLootEquipment({
+    source: enemy.id.startsWith('dungeon-')
+      ? 'dungeon-boss'
+      : enemy.spawnKind === 'nearby' || enemy.personality === 'boss'
+        ? 'elite'
+        : 'battle',
+    playerLevel: user.stats.level || 1,
+    dropBonus: Math.max(0, Math.round(((enemy.lootMultiplier || 1) - 1) * 10)),
+  });
+  const rewardEquipment = equipmentDrop ? [equipmentDrop] : [];
   const rewardItems: InventoryItem[] = [
     ...(reward.rareGems ? [makeInventoryItem('rare-gem', reward.rareGems)] : []),
     ...rollInventoryBonusDrops(

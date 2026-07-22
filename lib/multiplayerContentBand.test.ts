@@ -42,6 +42,20 @@ describe('levels 6-10 content band', () => {
     expect(CITY_QUESTS.some(quest => Boolean(quest.rewards.minionTier))).toBe(false);
   });
 
+  it('gives Ashford a complete native contract rotation', () => {
+    const ashford = CITY_QUESTS.filter(quest => quest.town === 'Ashford');
+    const requirementTypes = new Set(ashford.map(quest => quest.requirement.type));
+
+    expect(ashford).toHaveLength(5);
+    expect(requirementTypes).toEqual(new Set([
+      'complete_jobs_at_poi',
+      'defeat_enemies_level',
+      'collect_item',
+      'clear_dungeons',
+      'complete_timed_jobs',
+    ]));
+  });
+
   it('uses real thirty-minute thresholds for long city work', () => {
     const byId = new Map(CITY_QUESTS.map(quest => [quest.id, quest]));
     expect(byId.get('hv-blackwater-nets')?.requirement.minDuration).toBe(30 * 60 * 1000);

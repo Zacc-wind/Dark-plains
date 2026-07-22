@@ -55,6 +55,7 @@ This is the current interaction sound checklist for the game. Starter CC0 files 
 - `components/BattleModal.tsx` now preloads combat sounds and separates release/impact/accent cues so hurt grunts do not dominate weapon attacks.
 - `components/BattleModal.tsx` plays victory and defeat stingers when battle result animations/screens resolve.
 - Combat grid cells opt out of generic UI hover/click sounds so they can use tactical action sounds instead.
+- `components/BardMusicControls.tsx` exposes the active background track on multiplayer map, singleplayer hub, and run roads with previous, play/pause, next, and volume controls. `lib/backgroundMusic.ts` now preserves paused tracks and previous-track history.
 
 ## Needed Custom Or Generated Sounds
 

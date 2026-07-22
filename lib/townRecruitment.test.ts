@@ -25,9 +25,11 @@ describe('weekly town recruitment', () => {
     expect(getTownRecruitmentSlots('Riverside', 30, [], WEEK_ONE).map(slot => slot.tier)).toEqual(['tier1', 'tier2']);
   });
 
-  it('previews Tier II specialists before level five without allowing recruitment', () => {
-    const specialist = getTownRecruitmentSlots('Harborview', 4, [], WEEK_ONE)[1];
-    expect(specialist).toMatchObject({ tier: 'tier2', minLevel: 5, unlocked: false, claimed: false });
+  it('unlocks Tier II specialists at commander level four', () => {
+    const lockedSpecialist = getTownRecruitmentSlots('Harborview', 3, [], WEEK_ONE)[1];
+    const unlockedSpecialist = getTownRecruitmentSlots('Harborview', 4, [], WEEK_ONE)[1];
+    expect(lockedSpecialist).toMatchObject({ tier: 'tier2', minLevel: 4, unlocked: false, claimed: false });
+    expect(unlockedSpecialist).toMatchObject({ tier: 'tier2', minLevel: 4, unlocked: true, claimed: false });
   });
 
   it('marks a claimed weekly offer and removes duplicate claim receipts', () => {

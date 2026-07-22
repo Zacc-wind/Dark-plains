@@ -22,6 +22,7 @@ export const AUDIO_SETTINGS_EVENT = 'wizardy:audio-settings';
 
 const MUSIC_VOLUME_KEY = 'wizardy_music_volume';
 const MUSIC_MUTED_KEY = 'wizardy_music_muted';
+const MUSIC_PAUSED_KEY = 'wizardy_music_paused';
 const LAST_TRACK_KEY = 'wizardy_last_music_track';
 const TRACK_BASE_VOLUME = 0.38;
 const MUSIC_CROSSFADE_MS = 2600;
@@ -33,6 +34,7 @@ let activeTrackId: BackgroundMusicTrackId | null = null;
 let unlocked = false;
 let shufflePlaylist: BackgroundMusicTrackId[] = [];
 let playlistIndex = 0;
+let previousTrackIds: BackgroundMusicTrackId[] = [];
 const endedHandlersByAudio = new WeakMap<HTMLAudioElement, () => void>();
 const fadeTimersByAudio = new WeakMap<HTMLAudioElement, number>();
 
@@ -78,12 +80,42 @@ export function setMusicMuted(muted: boolean): void {
   notifyAudioSettingsChanged();
 }
 
+export function isBackgroundMusicPaused(): boolean {
+  if (typeof window === 'undefined') return false;
+  return window.localStorage.getItem(MUSIC_PAUSED_KEY) === 'true';
+}
+
+export function setBackgroundMusicPaused(paused: boolean): void {
+  if (typeof window === 'undefined') return;
+  window.localStorage.setItem(MUSIC_PAUSED_KEY, paused ? 'true' : 'false');
+  if (paused) {
+    if (activeAudio) {
+      clearFadeTimer(activeAudio);
+      activeAudio.pause();
+    }
+  } else {
+    unlocked = true;
+    if (isMusicMuted()) setMusicMuted(false);
+  }
+  notifyAudioSettingsChanged();
+}
+
+export function toggleBackgroundMusicPaused(): boolean {
+  const paused = !isBackgroundMusicPaused();
+  setBackgroundMusicPaused(paused);
+  return paused;
+}
+
 export function shouldPlayBackgroundMusic(): boolean {
-  return canUseAudio() && unlocked && !isMusicMuted() && getMusicVolumePercent() > 0;
+  return canUseAudio() && unlocked && !isMusicMuted() && !isBackgroundMusicPaused() && getMusicVolumePercent() > 0;
 }
 
 export function getActiveBackgroundMusicTrackId(): BackgroundMusicTrackId | null {
   return activeTrackId;
+}
+
+export function getActiveBackgroundMusicTrack() {
+  return BACKGROUND_MUSIC_TRACKS.find(track => track.id === activeTrackId) || null;
 }
 
 function getEffectiveMusicVolume(): number {
@@ -228,7 +260,7 @@ function handleTrackEnded(): void {
   playTrack(takeNextTrackId(), true);
 }
 
-function playTrack(trackId: BackgroundMusicTrackId, crossfade = true): void {
+function playTrack(trackId: BackgroundMusicTrackId, crossfade = true, rememberPrevious = true): void {
   if (!canUseAudio()) return;
 
   const track = BACKGROUND_MUSIC_TRACKS.find(entry => entry.id === trackId);
@@ -236,7 +268,7 @@ function playTrack(trackId: BackgroundMusicTrackId, crossfade = true): void {
 
   if (activeTrackId === trackId && activeAudio) {
     applyActiveTrackVolume();
-    if (activeAudio.paused) {
+    if (activeAudio.paused && shouldPlayBackgroundMusic()) {
       void activeAudio.play().catch(() => {
         // Browsers can block audio before the first user gesture.
       });
@@ -245,6 +277,9 @@ function playTrack(trackId: BackgroundMusicTrackId, crossfade = true): void {
   }
 
   if (activeAudio) {
+    if (activeTrackId && rememberPrevious) {
+      previousTrackIds = [...previousTrackIds.slice(-19), activeTrackId];
+    }
     const previousAudio = activeAudio;
     detachEndedHandler(previousAudio);
     fadeOutAndStop(previousAudio, crossfade ? MUSIC_CROSSFADE_MS : 0);
@@ -259,10 +294,15 @@ function playTrack(trackId: BackgroundMusicTrackId, crossfade = true): void {
   activeTrackId = trackId;
   rememberTrackId(trackId);
 
-  void audio.play().catch(() => {
-    // Browsers can block audio before the first user gesture.
-  });
-  fadeAudioVolume(audio, getEffectiveMusicVolume(), crossfade ? MUSIC_CROSSFADE_MS : 0);
+  if (shouldPlayBackgroundMusic()) {
+    void audio.play().catch(() => {
+      // Browsers can block audio before the first user gesture.
+    });
+    fadeAudioVolume(audio, getEffectiveMusicVolume(), crossfade ? MUSIC_CROSSFADE_MS : 0);
+  } else {
+    audio.volume = getEffectiveMusicVolume();
+  }
+  notifyAudioSettingsChanged();
 }
 
 export function authorizeBackgroundMusic(): void {
@@ -282,10 +322,20 @@ export function unlockBackgroundMusic(): void {
 export function syncBackgroundMusic(): void {
   if (!canUseAudio()) return;
 
-  if (!shouldPlayBackgroundMusic()) {
+  if (isMusicMuted() || getMusicVolumePercent() <= 0) {
     stopActiveTrack();
     return;
   }
+
+  if (isBackgroundMusicPaused()) {
+    if (activeAudio) {
+      clearFadeTimer(activeAudio);
+      activeAudio.pause();
+    }
+    return;
+  }
+
+  if (!unlocked) return;
 
   if (activeAudio && activeTrackId) {
     applyActiveTrackVolume();
@@ -302,6 +352,21 @@ export function syncBackgroundMusic(): void {
 }
 
 export function skipBackgroundMusicTrack(): void {
-  if (!shouldPlayBackgroundMusic()) return;
+  if (!canUseAudio()) return;
+  unlocked = true;
   playTrack(takeNextTrackId(), true);
+}
+
+export function playPreviousBackgroundMusicTrack(): void {
+  if (!canUseAudio()) return;
+  unlocked = true;
+
+  let previousTrackId = previousTrackIds.pop();
+  if (!previousTrackId) {
+    const activeIndex = BACKGROUND_MUSIC_TRACKS.findIndex(track => track.id === activeTrackId);
+    const previousIndex = activeIndex <= 0 ? BACKGROUND_MUSIC_TRACKS.length - 1 : activeIndex - 1;
+    previousTrackId = BACKGROUND_MUSIC_TRACKS[previousIndex].id;
+  }
+
+  playTrack(previousTrackId, true, false);
 }

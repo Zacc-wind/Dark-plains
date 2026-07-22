@@ -14,6 +14,7 @@ import ThreeFxOverlay from '@/components/ThreeFxOverlay';
 import RunOverviewPanel from '@/components/RunOverviewPanel';
 import RunMilestonesModal from '@/components/RunMilestonesModal';
 import { DailyRunModal, getRandomLobbyBossPreview, getSavedDailyRunSummary } from '@/components/RoguelikeRunModal';
+import BardMusicControls from '@/components/BardMusicControls';
 
 export default function SingleplayerHub() {
   const router = useRouter();
@@ -62,6 +63,7 @@ export default function SingleplayerHub() {
   return (
     <div className="singleplayer-hub-shell fantasy-ui fixed inset-0 z-20 overflow-hidden bg-black/80 p-1 text-zinc-100 backdrop-blur-sm">
       <BackgroundMusic />
+      <BardMusicControls />
       <ThreeFxOverlay />
       <CompletionOverlay />
 

@@ -8,6 +8,7 @@ import { AssetLoader, ASSET_PATHS, getPlayerModelPath, preloadAllAssets } from '
 import {
   areFriends as areSocialFriends,
   claimReadyQuestRewards,
+  claimQuestReward,
   claimQuestNpcReward,
   checkJobsComplete,
   checkTravelComplete,
@@ -2103,6 +2104,30 @@ export default function MapRenderer({
     return { success: true };
   };
 
+  const claimTrackedDailyReward = (questId: string): { success: boolean; error?: string } => {
+    const quest = currentUser?.dailyQuests?.quests.find(item => item.id === questId);
+    const result = claimQuestReward(questId);
+    if (!result.success) {
+      return { success: false, error: result.error || 'Could not claim daily reward.' };
+    }
+
+    const rewards: RewardSummary = {
+      equipment: result.rewards?.length ? result.rewards : undefined,
+      minions: result.minions?.length ? result.minions : undefined,
+    };
+    emitCompletionNotice({
+      id: `main-tracker-daily-${questId}-${Date.now()}`,
+      kind: 'quest',
+      kicker: 'Daily Objective',
+      title: quest?.name || 'Daily Reward Claimed',
+      description: quest?.description || 'The daily objective reward was claimed.',
+      rewards: rewardSummaryToCompletionRewards(rewards),
+      completedAt: Date.now(),
+    });
+    setCurrentUser(getCurrentUser());
+    return { success: true };
+  };
+
   const mainQuestUi = (!worldPanelOpen || priorityStoryReady) && !activeBattleEnemy
     ? (
       mainQuestTrackerHidden ? (
@@ -2129,6 +2154,7 @@ export default function MapRenderer({
             setSelectedQuestNpc(null);
           }}
           onClaim={claimMainStoryReward}
+          onClaimDaily={claimTrackedDailyReward}
           onHide={() => setMainQuestTrackerVisibility(true)}
         />
       )
@@ -2446,6 +2472,7 @@ function MainQuestTracker({
   onTravel,
   onInspectEnemy,
   onClaim,
+  onClaimDaily,
   onHide,
 }: {
   currentUser: ReturnType<typeof getCurrentUser>;
@@ -2454,9 +2481,11 @@ function MainQuestTracker({
   onTravel: (targetX: number, targetY: number, label: string, kind: TravelIntentKind) => void;
   onInspectEnemy: (enemy: WorldEnemy) => void;
   onClaim: (questId: string) => { success: boolean; error?: string };
+  onClaimDaily: (questId: string) => { success: boolean; error?: string };
   onHide: () => void;
 }) {
   const [claimError, setClaimError] = useState('');
+  const [activeTab, setActiveTab] = useState<'story' | 'daily'>('story');
   const storyQuests = getAllStoryQuestsSorted();
   const activeStory = storyQuests.find(story => {
     const status = getStoryQuestStatus(currentUser, story.id);
@@ -2500,10 +2529,8 @@ function MainQuestTracker({
     })
     .filter((quest): quest is NonNullable<typeof quest> => Boolean(quest && !quest.status.claimed))
     .slice(0, 2);
-  const activeDailyQuests = (currentUser.dailyQuests?.quests || [])
-    .filter(quest => !quest.claimed)
-    .slice(0, 2);
-  const activeOrderCount = activeCityQuests.length + activeDailyQuests.length;
+  const dailyQuests = currentUser.dailyQuests?.quests || [];
+  const readyDailyCount = dailyQuests.filter(quest => !quest.claimed && quest.progress >= quest.requirement.count).length;
 
   return (
     <CinematicScrollShell
@@ -2513,8 +2540,10 @@ function MainQuestTracker({
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="arcane-label">Main Quest</div>
-          <h3 className="fantasy-heading text-lg leading-tight">{activeStory.name}</h3>
+          <div className="arcane-label">Road Ledger</div>
+          <h3 className="fantasy-heading text-lg leading-tight">
+            {activeTab === 'story' ? activeStory.name : 'Daily Objectives'}
+          </h3>
         </div>
         <div className="flex shrink-0 items-start gap-2">
           <button
@@ -2528,77 +2557,138 @@ function MainQuestTracker({
           </button>
         </div>
       </div>
-      <button
-        type="button"
-        disabled={!status.unlocked || Boolean(currentUser.traveling && (targetPoi || targetQuestNpc))}
-        onClick={() => {
-          setClaimError('');
-          if (!status.unlocked) return;
-
-          if (status.complete) {
-            const result = onClaim(activeStory.id);
-            if (!result.success) setClaimError(result.error || 'Could not claim reward.');
-            return;
-          }
-
-          if (targetPoi) {
-            const target = getPoiTravelTarget(targetPoi);
-            onTravel(target.x, target.y, targetPoi.name, targetKind);
-            return;
-          }
-
-          if (targetQuestNpc) {
-            onTravel(targetQuestNpc.x, targetQuestNpc.y, targetQuestNpc.name, 'quest');
-            return;
-          }
-
-          if (targetEnemy) {
-            onInspectEnemy(targetEnemy);
-            return;
-          }
-
-          openCommandPanel(actionPanel);
-        }}
-        className="main-quest-action first-step-row mt-3 block w-full rounded px-3 py-2.5 text-left text-xs font-bold disabled:opacity-45"
-      >
-        <span className="block leading-snug text-zinc-100">{objectiveLabel}</span>
-        <span className="ui-accent mt-2 block text-[10px] font-black uppercase tracking-[0.12em]">{actionLabel}</span>
-      </button>
-      <div className="ui-progress-track mt-3 h-1.5 overflow-hidden rounded border">
-        <div className="ui-progress-fill h-full" style={{ width: `${progress}%` }} />
+      <div className="main-quest-tabs mt-3" role="tablist" aria-label="Quest tracker view">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === 'story'}
+          onClick={() => {
+            setClaimError('');
+            setActiveTab('story');
+          }}
+          className={`main-quest-tab ${activeTab === 'story' ? 'main-quest-tab-active' : ''}`}
+        >
+          Story
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === 'daily'}
+          onClick={() => {
+            setClaimError('');
+            setActiveTab('daily');
+          }}
+          className={`main-quest-tab ${activeTab === 'daily' ? 'main-quest-tab-active' : ''}`}
+        >
+          Daily {readyDailyCount > 0 ? `(${readyDailyCount})` : ''}
+        </button>
       </div>
-      <div className="ui-faint mt-2 flex items-center justify-between text-[10px] font-black uppercase">
-        <span>{status.unlocked ? `${status.progress}/${status.required}` : 'Locked'}</span>
-        <span>{targetPoi ? targetPoi.name : targetQuestNpc ? targetQuestNpc.name : targetEnemy ? targetEnemy.name : status.complete ? 'Ready' : actionPanel}</span>
-      </div>
-      {activeOrderCount > 0 && (
-        <div className="main-quest-orders mt-3 border-t border-[rgba(232,217,184,0.16)] pt-2">
-          <div className="mb-1 flex items-center justify-between gap-2">
-            <span className="arcane-label">Active Orders</span>
-            <span className="ui-faint text-[10px] font-black">{activeOrderCount}</span>
+
+      {activeTab === 'story' ? (
+        <div role="tabpanel">
+          <button
+            type="button"
+            disabled={!status.unlocked || Boolean(currentUser.traveling && (targetPoi || targetQuestNpc))}
+            onClick={() => {
+              setClaimError('');
+              if (!status.unlocked) return;
+
+              if (status.complete) {
+                const result = onClaim(activeStory.id);
+                if (!result.success) setClaimError(result.error || 'Could not claim reward.');
+                return;
+              }
+
+              if (targetPoi) {
+                const target = getPoiTravelTarget(targetPoi);
+                onTravel(target.x, target.y, targetPoi.name, targetKind);
+                return;
+              }
+
+              if (targetQuestNpc) {
+                onTravel(targetQuestNpc.x, targetQuestNpc.y, targetQuestNpc.name, 'quest');
+                return;
+              }
+
+              if (targetEnemy) {
+                onInspectEnemy(targetEnemy);
+                return;
+              }
+
+              openCommandPanel(actionPanel);
+            }}
+            className="main-quest-action first-step-row mt-3 block w-full rounded px-3 py-2.5 text-left text-xs font-bold disabled:opacity-45"
+          >
+            <span className="block leading-snug text-zinc-100">{objectiveLabel}</span>
+            <span className="ui-accent mt-2 block text-[10px] font-black uppercase tracking-[0.12em]">{actionLabel}</span>
+          </button>
+          <div className="ui-progress-track mt-3 h-1.5 overflow-hidden rounded border">
+            <div className="ui-progress-fill h-full" style={{ width: `${progress}%` }} />
           </div>
-          {[...activeCityQuests.map(quest => ({
-            id: `city-${quest.template.id}`,
-            name: quest.template.name,
-            progress: `${quest.status.progress}/${quest.status.required}`,
-            ready: quest.status.complete,
-          })), ...activeDailyQuests.map(quest => ({
-            id: `daily-${quest.id}`,
-            name: quest.name,
-            progress: `${quest.progress}/${quest.requirement.count}`,
-            ready: quest.progress >= quest.requirement.count,
-          }))].map(order => (
-            <button
-              key={order.id}
-              type="button"
-              onClick={() => openCommandPanel('quests')}
-              className="main-quest-order-row"
-              title={`Open ${order.name}`}
-            >
-              <span>{order.name}</span>
-              <strong>{order.ready ? 'Ready' : order.progress}</strong>
-            </button>
-          ))}
+          <div className="ui-faint mt-2 flex items-center justify-between text-[10px] font-black uppercase">
+            <span>{status.unlocked ? `${status.progress}/${status.required}` : 'Locked'}</span>
+            <span>{targetPoi ? targetPoi.name : targetQuestNpc ? targetQuestNpc.name : targetEnemy ? targetEnemy.name : status.complete ? 'Ready' : actionPanel}</span>
+          </div>
+          {activeCityQuests.length > 0 && (
+            <div className="main-quest-orders mt-3 border-t border-[rgba(232,217,184,0.16)] pt-2">
+              <div className="mb-1 flex items-center justify-between gap-2">
+                <span className="arcane-label">City Contracts</span>
+                <span className="ui-faint text-[10px] font-black">{activeCityQuests.length}</span>
+              </div>
+              {activeCityQuests.map(quest => (
+                <button
+                  key={quest.template.id}
+                  type="button"
+                  onClick={() => openCommandPanel('quests')}
+                  className="main-quest-order-row"
+                  title={`Open ${quest.template.name}`}
+                >
+                  <span>{quest.template.name}</span>
+                  <strong>{quest.status.complete ? 'Ready' : `${quest.status.progress}/${quest.status.required}`}</strong>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="main-quest-daily-list mt-3" role="tabpanel">
+          {dailyQuests.map(quest => {
+            const complete = quest.progress >= quest.requirement.count;
+            const rewardLabel = quest.rewards.guaranteedMinionTier
+              ? `${quest.rewards.guaranteedMinionTier.replace('tier', 'Tier ')} recruit`
+              : quest.rewards.randomSupply
+                ? 'Supply cache'
+                : `${quest.rewards.guaranteedItem} gear`;
+
+            return (
+              <article key={quest.id} className={`main-quest-daily-row ${quest.claimed ? 'main-quest-daily-row-claimed' : ''}`}>
+                <div className="main-quest-daily-copy">
+                  <strong>{quest.name}</strong>
+                  <span>{quest.description}</span>
+                  <small>{rewardLabel}</small>
+                </div>
+                <div className="main-quest-daily-action">
+                  <span>{quest.progress}/{quest.requirement.count}</span>
+                  {quest.claimed ? (
+                    <b>Claimed</b>
+                  ) : complete ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setClaimError('');
+                        const result = onClaimDaily(quest.id);
+                        if (!result.success) setClaimError(result.error || 'Could not claim daily reward.');
+                      }}
+                    >
+                      Claim
+                    </button>
+                  ) : (
+                    <button type="button" onClick={() => openCommandPanel('jobs')}>Jobs</button>
+                  )}
+                </div>
+              </article>
+            );
+          })}
         </div>
       )}
       {claimError && <div className="mt-2 text-xs font-black text-red-100">{claimError}</div>}

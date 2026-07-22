@@ -59,4 +59,15 @@ describe('multiplayer job balance', () => {
 
     expect(getJobRewardPreview(3, 'mountain').rareGems).toBe(2);
   });
+
+  it('does not advertise random gear before its level-three unlock', () => {
+    expect(getJobRewardPreview(0, 'mountain', 2)).toMatchObject({
+      equipmentRarity: undefined,
+      equipmentDropChance: undefined,
+    });
+    expect(getJobRewardPreview(0, 'mountain', 3)).toMatchObject({
+      equipmentRarity: 'decent',
+      equipmentDropChance: 1.5,
+    });
+  });
 });

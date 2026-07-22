@@ -127,12 +127,15 @@ export function buildJobRewardChips(
   });
 
   if (reward.equipmentRarity) {
+    const chance = reward.equipmentDropChance;
     chips.push({
       id: `gear-${reward.equipmentRarity}`,
       iconPath: getEquipmentPreviewIconPath(reward.equipmentRarity),
       title: `${reward.equipmentRarity.charAt(0).toUpperCase()}${reward.equipmentRarity.slice(1)} Gear`,
-      meta: 'Equipment drop',
-      description: 'A guaranteed equipment piece of this rarity.',
+      meta: chance ? `${chance}% drop chance` : 'Equipment chance',
+      description: chance
+        ? `Chance to find equipment, with ${reward.equipmentRarity} as the highest available rarity.`
+        : 'Possible equipment reward.',
       rarityClass: getRewardRarityClass(reward.equipmentRarity),
     });
   }

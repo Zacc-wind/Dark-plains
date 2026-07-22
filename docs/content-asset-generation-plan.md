@@ -1,6 +1,6 @@
 # Content And Asset Generation Plan
 
-Updated: 2026-07-19
+Updated: 2026-07-22
 
 ## Purpose
 
@@ -19,7 +19,7 @@ Before import:
 1. Confirm real alpha in all four corners.
 2. Remove colored matte pixels and Photoshop export halos.
 3. Crop to a consistent transparent canvas without changing the feet baseline.
-4. Save source PNG under `assetsv2/source/` and optimized runtime PNG under the target `public/assets/` folder.
+4. Save source PNG under `assetsv2/` and let `npm run import-assets` produce the optimized runtime PNG under `public/assets/`.
 5. Test at 48px roster size and 120-180px battlefield size before marking complete.
 
 ## First Ten Enemy Sprites
@@ -73,20 +73,20 @@ Art filenames use `{set-id}-{slot}.png`, for example `moonwell-vestments-helmet.
 
 Generate these as centered transparent 512x512 icons. Use one object, strong silhouette, and no text.
 
-| File | Content use |
-| --- | --- |
-| `black-pike-seal.png` | Proof from the chapter-one lieutenant |
-| `orrens-muster-token.png` | Chapter-one recognition and later dialogue gate |
-| `moonwell-shard.png` | Core chapter-two investigation item |
-| `cinder-saint-candle.png` | Mother Cindervein cult evidence |
-| `drowned-tithe-ledger.png` | Riverside and River Concord side story |
-| `goblin-toll-cipher.png` | Reveals the hexer supply route |
-| `cathedral-silk-bundle.png` | Spider contract and Moonbridge crafting order |
-| `mire-troll-heartwood.png` | Regeneration research and rare forge contract |
-| `broken-bell-clapper.png` | Bell-crypt elite proof |
-| `oath-chain-link.png` | Ashen Orders reputation token |
-| `glass-key-splinter.png` | Mirror Court long-term foreshadowing |
-| `blackwater-relic-tag.png` | Dungeon provenance and trade-safe quest marker |
+| File | Content use | Generation prompt |
+| --- | --- | --- |
+| `black-pike-seal.png` | Proof from the chapter-one lieutenant | Cracked black-iron military seal stamped with a simple downward pike, torn dark red cord, heavy readable silhouette. |
+| `orrens-muster-token.png` | Chapter-one recognition and later dialogue gate | Worn brass muster token with a candle tower relief, clipped corner, small iron ring, official but field-used. |
+| `moonwell-shard.png` | Core chapter-two investigation item | Jagged translucent moonstone shard holding a dim blue-white reflection like water under glass, no loose glow cloud. |
+| `cinder-saint-candle.png` | Mother Cindervein cult evidence | Short black wax votive candle bound with thin copper saint wire, deep red wick ember, melted wax shaped like tears. |
+| `drowned-tithe-ledger.png` | Riverside and River Concord side story | Water-swollen dark leather ledger with iron corners, river weeds caught under one clasp, no readable writing. |
+| `goblin-toll-cipher.png` | Reveals the hexer supply route | Rolled strip of stained road parchment wrapped around a chipped bone tally stick and tied with red toll cord, no legible text. |
+| `cathedral-silk-bundle.png` | Spider contract and Moonbridge crafting order | Compact coil of silver-gray cathedral web silk around a broken ivory reliquary spindle, clean crafting-resource silhouette. |
+| `mire-troll-heartwood.png` | Regeneration research and rare forge contract | Dense knot of wet black heartwood with moss-green growth rings and one embedded rusted chain link, no gore. |
+| `broken-bell-clapper.png` | Bell-crypt elite proof | Heavy fractured bronze bell clapper with chipped chapel engraving, short snapped chain, dull gold edge highlights. |
+| `oath-chain-link.png` | Ashen Orders reputation token | Single oversized blackened iron chain link marked by a small pale oath ribbon and ash-filled engraving. |
+| `glass-key-splinter.png` | Mirror Court long-term foreshadowing | Slender splinter from a transparent glass key, mirrored internal facets, faint violet core line, sharp readable profile. |
+| `blackwater-relic-tag.png` | Dungeon provenance and trade-safe quest marker | Tarnished silver relic tag on a short cord, black enamel border, punched verification notch, no readable letters. |
 
 Quest items remain non-tradable and do not consume normal gear capacity. Each item must have a named source and receiver before its art is imported.
 
@@ -102,7 +102,7 @@ The no-new-art gameplay core shipped on 2026-07-22 with nine ordered quests, eig
 6. `Bells Below`: clear the Bell-Crypt Gargoyle encounter and return the Broken Bell Clapper to Brother Kaito.
 7. `Cinder Procession`: complete the pre-boss contract chain, assemble three pieces of evidence, and unlock the raid road.
 8. `Mother of Black Candles`: defeat Mother Cindervein and claim the chapter chest.
-9. `The Well Answers`: return to Moonbridge, resolve the chapter, unlock level-10 Tier III recruitment eligibility, and preview the Broken Crown.
+9. `The Well Answers`: return to Moonbridge, resolve the chapter, unlock a veteran Tier III reward source, and preview the Broken Crown. Tier III acquisition eligibility already begins at commander level 7.
 
 Supporting content contract:
 
@@ -125,6 +125,13 @@ Do not use multiplayer ownership to seed singleplayer unlocks. The next singlepl
 7. Show exact requirement, progress, ownership, and first-use status in the Run Archive.
 
 The exact deed-to-unit and deed-to-spell mappings remain in `docs/progression-content-roadmap.md`; that file is the ownership source of truth.
+
+## Bard And Music UI
+
+- [x] Source art: `assetsv2/bard.png`.
+- [x] Runtime art: `public/assets/ui/bard.png`, alpha-trimmed to a stable 512x512 canvas by the asset importer.
+- [x] Place one shared controller on the multiplayer map, singleplayer hub, and roguelike road surfaces with previous, play/pause, next, and volume controls.
+- [ ] Optional later variation: `bard-veteran.png`, the same seated musician silhouette with weathered road gear and one restrained gold trim upgrade for veteran-profile cosmetics. Do not create this until a cosmetic reward source exists.
 
 ## Implementation Order
 

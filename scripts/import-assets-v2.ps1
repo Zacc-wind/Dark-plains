@@ -8,12 +8,13 @@ $publicAssets = Join-Path $repoRoot 'public\assets'
 $equipmentRoot = Join-Path $publicAssets 'equipment'
 $iconsRoot = Join-Path $publicAssets 'icons'
 $minionsRoot = Join-Path $publicAssets 'minions'
+$uiRoot = Join-Path $publicAssets 'ui'
 
 if (-not (Test-Path $sourceRoot)) {
   throw "Missing source asset folder: $sourceRoot"
 }
 
-New-Item -ItemType Directory -Force -Path $publicAssets, $equipmentRoot, $iconsRoot, $minionsRoot | Out-Null
+New-Item -ItemType Directory -Force -Path $publicAssets, $equipmentRoot, $iconsRoot, $minionsRoot, $uiRoot | Out-Null
 
 $obsoleteAssets = @(
   'public\mapbackground.png',
@@ -345,6 +346,10 @@ foreach ($index in 1..8) {
 
 if (Test-Path (Join-Path $sourceRoot 'reaper.png')) {
   Copy-Asset 'reaper.png' (Join-Path $publicAssets 'reaper.png')
+}
+
+if (Test-Path (Join-Path $sourceRoot 'bard.png')) {
+  Save-TrimmedSprite 'bard.png' (Join-Path $uiRoot 'bard.png') 512 12
 }
 
 $minionAssets = @(

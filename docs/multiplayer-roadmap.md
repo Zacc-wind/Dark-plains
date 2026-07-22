@@ -8,7 +8,7 @@ Turn the current shared world-map prototype into a real multiplayer layer withou
 ## Current Baseline
 - [x] Multiplayer mode exists at `/game`.
 - [x] Singleplayer mode exists at `/singleplayer` with separate run progression.
-- [x] Friends, friend requests, party invites, party membership, global chat, and party chat exist in local prototype state.
+- [x] Friends, friend requests, party invites, party membership, and party chat exist in local prototype state. Global chat now reads and writes authenticated Supabase rows through `/api/chat` and retains the latest 50 messages.
 - [x] First-pass PVP challenge API route contracts exist.
 - [x] Supabase-backed profiles, presence, and online PVP challenge transport exist.
 - [x] Main-story introductions can open as two-character RPG conversations on the world map.
@@ -99,18 +99,21 @@ Turn the current shared world-map prototype into a real multiplayer layer withou
 - [x] Sort multiplayer formation and run rosters by tier, class, or name while leaving singleplayer roster behavior unchanged.
 - [x] Add a bottom-right retreat action and confirmation to both singleplayer and multiplayer run maps.
 - [x] Recompose each town service into a concise service header, primary action, price/reward row, and inventory/result list; remove repeated explanatory paragraphs.
+- [x] Restyle the spell archive with stable fantasy cards and internal scrolling so names and mana/target metadata never overlap.
+- [x] Split the map quest ledger into Story and Daily tabs with direct daily claims, and add a shared bard music controller to map and run surfaces.
 - [x] Finish visual QA at 1920x1080, 2560x1440, 3840x2160, and 390x844 after all shell conversions settle.
 
 ## Phase 6C: Economy And Recruitment Balance
 - [x] Replace 20-second/1-minute/5-minute/15-minute jobs with 1-minute/10-minute/30-minute/1-hour jobs.
 - [x] Reduce baseline job gold and XP to 30 percent of the previous values; rare gems are available only on the one-hour tier.
-- [x] Move random gear thresholds to 10/30/60 minutes and keep the best rarity rolls on the longest job.
+- [x] Move random gear thresholds to 10/30/60 minutes, roll drop chance before rarity, and keep the best rarity odds on the longest job.
 - [x] Tune campaign rewards so a normal chapter step grants no more than about 80 percent of the intended level requirement.
 - [x] Add level-band reward curves for jobs, contracts, PVE, PVP, and co-op so later levels remain useful without trivializing early progression.
-- [x] Restrict town recruitment to one deterministic weekly Tier I offer in every town, with weekly Tier II specialist slots in Harborview and Riverside from level 5.
+- [x] Restrict town recruitment to one deterministic weekly Tier I offer in every town, with weekly Tier II specialist slots in Harborview and Riverside from level 4; Tier III acquisition begins at level 7.
 - [x] Make daily, weekly, story, and Chronicle milestones the reliable unit sources; remove random unit rewards from city contracts and rotating town stock.
 - [x] Add authored multiplayer achievement unit rewards; Chronicle milestone ranks 5/10/15/20 now grant fixed sidegrade and specialist units while random job recruitment stays uncommon.
 - [x] Cap direct player spell damage against boss commanders at 18 percent of max health, and at 10 percent in four-phase co-op raids.
+- [x] Gate decent, rare, epic, and legendary equipment at levels 3, 5, 10, and 15 and halve healing from the third successful heal on one battle unit.
 
 ## Phase 7: Multiplayer Combat Engine Refactor
 - [ ] Generalize battle sides from `player` vs `enemy` into combat teams with ownership metadata.

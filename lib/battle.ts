@@ -150,6 +150,7 @@ export interface BattleUnit {
   y: number;
   retaliatedRound?: number;
   chargedHeal?: boolean;
+  healsReceived?: number;
   supportAbilityUsed?: boolean;
   statusEffects?: BattleUnitStatusEffects;
   slowDebuff?: {
@@ -2980,8 +2981,40 @@ export function getHealAmount(healer: BattleUnit, target: BattleUnit, state?: Ba
   const commanderHealScale = healer.kind === 'commander' ? 0.55 : 1;
   const chargedHealScale = healer.chargedHeal ? 1.55 : 1;
   const rawHealing = healer.healing + Math.floor(healer.magic / 2) + holyGroundBonus + 2;
-  const healing = Math.max(1, Math.floor(rawHealing * earlyHealerScale * commanderHealScale * chargedHealScale));
+  const healing = getDiminishedHealAmount(
+    Math.max(1, Math.floor(rawHealing * earlyHealerScale * commanderHealScale * chargedHealScale)),
+    target.healsReceived,
+  );
   return Math.max(0, Math.min(target.maxHealth, target.currentHealth + healing) - target.currentHealth);
+}
+
+export const FULL_STRENGTH_HEALS_PER_BATTLE = 2;
+
+export function getDiminishedHealAmount(amount: number, healsReceived = 0): number {
+  const normalizedAmount = Math.max(1, Math.floor(amount));
+  return Math.max(0, Math.floor(healsReceived)) >= FULL_STRENGTH_HEALS_PER_BATTLE
+    ? Math.max(1, Math.floor(normalizedAmount * 0.5))
+    : normalizedAmount;
+}
+
+function applyEffectiveHealingToBattleUnit(unit: BattleUnit, effectiveAmount: number): BattleUnit {
+  if (unit.currentHealth <= 0) return unit;
+  const currentHealth = Math.min(unit.maxHealth, unit.currentHealth + effectiveAmount);
+  const restored = currentHealth - unit.currentHealth;
+
+  return {
+    ...unit,
+    currentHealth,
+    statusEffects: undefined,
+    healsReceived: restored > 0 ? (unit.healsReceived || 0) + 1 : unit.healsReceived,
+  };
+}
+
+function applyHealingToBattleUnit(unit: BattleUnit, amount: number): BattleUnit {
+  return applyEffectiveHealingToBattleUnit(
+    unit,
+    getDiminishedHealAmount(amount, unit.healsReceived),
+  );
 }
 
 function updateBattleStatus(state: BattleState): BattleState {
@@ -3257,13 +3290,12 @@ export function healBattleUnit(state: BattleState, healerId: string, targetId: s
   if (!healer || !target || !canHeal(healer, target)) return state;
 
   const healing = getHealAmount(healer, target, state);
-  const nextHealth = Math.min(target.maxHealth, target.currentHealth + healing);
   const cleansed = hasCleansableStatusEffect(target);
   const healedState = {
     ...state,
     units: state.units.map(unit => {
       let nextUnit = unit;
-      if (unit.id === targetId) nextUnit = { ...nextUnit, currentHealth: nextHealth, statusEffects: undefined };
+      if (unit.id === targetId) nextUnit = applyEffectiveHealingToBattleUnit(nextUnit, healing);
       if (unit.id === healerId) nextUnit = { ...nextUnit, chargedHeal: false };
       return nextUnit;
     }),
@@ -3273,7 +3305,7 @@ export function healBattleUnit(state: BattleState, healerId: string, targetId: s
 
   return withBattleLog(
     healedState,
-    `${healer.name} heals ${target.name}${chargedText} for ${nextHealth - target.currentHealth}${cleanseText}.`,
+    `${healer.name} heals ${target.name}${chargedText} for ${healing}${cleanseText}.`,
     { side: healer.side, actor: healer.name, actorId: healer.id, targetIds: [target.id], action: 'heal', style: 'heal' }
   );
 }
@@ -3490,11 +3522,7 @@ function healUnit(state: BattleState, targetId: string, amount: number): BattleS
     ...state,
     units: state.units.map(unit => {
       if (unit.id !== targetId || unit.currentHealth <= 0) return unit;
-      return {
-        ...unit,
-        currentHealth: Math.min(unit.maxHealth, unit.currentHealth + Math.max(1, amount)),
-        statusEffects: undefined,
-      };
+      return applyHealingToBattleUnit(unit, amount);
     }),
   };
 }
@@ -3649,7 +3677,10 @@ export function castBattleSpell(state: BattleState, spellId: string, targetId?: 
   let logMessage = `${caster.name} casts ${spell.name}.`;
   let spellTargetIds = target ? [target.id] : [];
   const damageDone = (unit: BattleUnit, amount: number) => Math.min(unit.currentHealth, Math.max(1, amount));
-  const healingDone = (unit: BattleUnit, amount: number) => Math.max(0, Math.min(unit.maxHealth, unit.currentHealth + Math.max(1, amount)) - unit.currentHealth);
+  const healingDone = (unit: BattleUnit, amount: number) => {
+    const effectiveAmount = getDiminishedHealAmount(amount, unit.healsReceived);
+    return Math.max(0, Math.min(unit.maxHealth, unit.currentHealth + effectiveAmount) - unit.currentHealth);
+  };
   const cappedSpellDamage = (unit: BattleUnit, amount: number) => getCappedBattleSpellDamage(state, caster, unit, amount);
 
   switch (spell.id) {
@@ -3724,12 +3755,10 @@ export function castBattleSpell(state: BattleState, spellId: string, targetId?: 
       {
         const healing = 6 + spellPower;
         spellTargetIds = nextState.units.filter(unit => unit.side === caster.side && unit.currentHealth > 0).map(unit => unit.id);
-        nextState = mutateUnits(nextState, caster.side, unit => ({
-          ...unit,
-          currentHealth: Math.min(unit.maxHealth, unit.currentHealth + healing),
-          statusEffects: undefined,
-          speed: unit.speed + 1,
-        }));
+        nextState = mutateUnits(nextState, caster.side, unit => {
+          const healedUnit = applyHealingToBattleUnit(unit, healing);
+          return { ...healedUnit, speed: healedUnit.speed + 1 };
+        });
         logMessage = `${caster.name} sings ${spell.name}, restoring up to ${healing} to all allies.`;
       }
       break;
@@ -3830,12 +3859,10 @@ export function castBattleSpell(state: BattleState, spellId: string, targetId?: 
       {
         const healing = 16 + spellPower * 2;
         spellTargetIds = nextState.units.filter(unit => unit.side === caster.side && unit.currentHealth > 0).map(unit => unit.id);
-        nextState = mutateUnits(nextState, caster.side, unit => ({
-          ...unit,
-          currentHealth: Math.min(unit.maxHealth, unit.currentHealth + healing),
-          statusEffects: undefined,
-          defense: unit.defense + 4,
-        }));
+        nextState = mutateUnits(nextState, caster.side, unit => {
+          const healedUnit = applyHealingToBattleUnit(unit, healing);
+          return { ...healedUnit, defense: healedUnit.defense + 4 };
+        });
         logMessage = `${caster.name} casts ${spell.name}, restoring up to ${healing} and shielding all allies.`;
       }
       break;
@@ -4010,7 +4037,7 @@ function runBossSpecialAbility(state: BattleState, commander: BattleUnit): Battl
     ...incoming,
     units: incoming.units.map(unit => (
       unit.side === 'enemy' && unit.currentHealth > 0
-        ? { ...unit, currentHealth: Math.min(unit.maxHealth, unit.currentHealth + amount), statusEffects: undefined }
+        ? applyHealingToBattleUnit(unit, amount)
         : unit
     )),
   });

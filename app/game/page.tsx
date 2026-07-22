@@ -18,6 +18,7 @@ import MultiplayerTutorialSpotlight from '@/components/MultiplayerTutorialSpotli
 import PvpDuelSessionOverlay from '@/components/PvpDuelSessionOverlay';
 import CoopRaidSessionOverlay from '@/components/CoopRaidSessionOverlay';
 import { writeGameMode } from '@/lib/gameMode';
+import BardMusicControls from '@/components/BardMusicControls';
 
 export default function GamePage() {
   const router = useRouter();
@@ -60,6 +61,7 @@ export default function GamePage() {
   return (
     <div className="fantasy-ui flex min-h-screen flex-col bg-[#05080a] text-[var(--ui-text)]">
       <BackgroundMusic />
+      <BardMusicControls />
       <GameCommandCenter onOpenAvatar={() => setShowAvatar(true)} showRandomRun={false} />
       <main className="flex-1">
         <MapRenderer />
