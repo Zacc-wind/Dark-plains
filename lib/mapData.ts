@@ -230,9 +230,9 @@ export function generatePOIs(): POI[] {
     });
   });
   
-  // Farm POIs - keep at 3 (4x4 tiles)
+  // Farm POIs - keep at 3 (4x4 tiles); Witherfield pulled off the crowded crossroads belt
   const farmLocations = [
-    { x: 30, y: 22, name: "Witherfield Farm" },
+    { x: 22, y: 32, name: "Witherfield Farm" },
     { x: 42, y: 36, name: "Gallowsmere Fields" },
     { x: 61, y: 29, name: "Harvest Moon Grange" },
   ];
@@ -264,9 +264,9 @@ export function generatePOIs(): POI[] {
     });
   });
   
-  // Windmill POIs - only 2 (4x4 tiles)
+  // Windmill POIs - only 2 (4x4 tiles); Old Windmill shifted off mid-road cluster
   const windmillLocations = [
-    { x: 38, y: 23, name: "Old Windmill" },
+    { x: 48, y: 12, name: "Old Windmill" },
     { x: 14, y: 29, name: "Hilltop Windmill" },
   ];
   
@@ -281,25 +281,37 @@ export function generatePOIs(): POI[] {
     });
   });
   
-  // Campfire POIs - rest and recover HP (2x2 tiles)
+  // Campfire POIs - rest and recover HP (2x2 tiles); camps sit off the mid-road y24-25 belt
   const campfireLocations = [
     {
-      x: 36,
-      y: 25,
+      x: 33,
+      y: 18,
       name: "Crossroads Camp",
       description: "A dry roadside fire ring where guards trade rumors, bread, and a little warmth before the next march.",
     },
     {
-      x: 55,
-      y: 25,
+      x: 58,
+      y: 31,
       name: "Pilgrim Fire",
       description: "A hidden clearing under dead branches, marked by ash stones and old pilgrim cloth.",
     },
     {
-      x: 70,
-      y: 24,
+      x: 74,
+      y: 18,
       name: "East Road Camp",
       description: "A lantern-lit camp beside hard road dirt, watched by tired scouts and relic carriers.",
+    },
+    {
+      x: 16,
+      y: 30,
+      name: "Ash Road Rest",
+      description: "A low stone ring off the western ash road, kept by reserve scouts who watch for night riders.",
+    },
+    {
+      x: 46,
+      y: 34,
+      name: "South Fork Camp",
+      description: "A quiet south-fork camp under wind-bent pines, far enough from the mid-road to sleep through patrols.",
     },
   ];
   
@@ -331,10 +343,10 @@ export function generatePOIs(): POI[] {
     });
   });
   
-  // Fishing Dock POIs - keep at 3 (CAN be in/near water, 4x4 tiles)
+  // Fishing Dock POIs - keep at 3 (CAN be in/near water, 4x4 tiles); Moonwell nudged off farm/windmill pile
   const fishingDockLocations = [
     { x: 5, y: 3, name: "Fisher's Wharf" },
-    { x: 31, y: 19, name: "Moonwell Pier" },
+    { x: 33, y: 16, name: "Moonwell Pier" },
     { x: 40, y: 28, name: "Quiet Waters Pier" },
   ];
   

@@ -1,4 +1,4 @@
-import type { EquipmentRarity } from './auth';
+import type { Equipment, EquipmentRarity, EquipmentSlot } from './auth';
 
 export const EQUIPMENT_RARITY_MIN_LEVEL: Record<EquipmentRarity, number> = {
   decent: 3,
@@ -6,6 +6,91 @@ export const EQUIPMENT_RARITY_MIN_LEVEL: Record<EquipmentRarity, number> = {
   epic: 10,
   legendary: 15,
 };
+
+export type EquipmentQualityLabel = 'Fine' | 'Lucky+';
+
+export const EQUIPMENT_LUCKY_DROP_CHANCE = 0.02;
+export const EQUIPMENT_ROLL_MIN = 0.85;
+export const EQUIPMENT_ROLL_MAX = 1.15;
+export const EQUIPMENT_LUCKY_ROLL_MIN = 1;
+export const EQUIPMENT_FINE_QUALITY_THRESHOLD = 1.05;
+
+export const EQUIPMENT_STAT_RANGES: Record<EquipmentRarity, { min: number; max: number }> = {
+  decent: { min: 1, max: 3 },
+  rare: { min: 3, max: 6 },
+  epic: { min: 6, max: 10 },
+  legendary: { min: 10, max: 15 },
+};
+
+export interface EquipmentRollAffix {
+  isLucky: boolean;
+  rollMultiplier: number;
+  qualityLabel?: EquipmentQualityLabel;
+}
+
+export function rollEquipmentAffix(
+  luckyRoll = Math.random(),
+  qualityRoll = Math.random(),
+): EquipmentRollAffix {
+  const isLucky = luckyRoll < EQUIPMENT_LUCKY_DROP_CHANCE;
+  const min = isLucky ? EQUIPMENT_LUCKY_ROLL_MIN : EQUIPMENT_ROLL_MIN;
+  const rollMultiplier = Math.round((min + qualityRoll * (EQUIPMENT_ROLL_MAX - min)) * 100) / 100;
+
+  if (isLucky) {
+    return { isLucky: true, rollMultiplier, qualityLabel: 'Lucky+' };
+  }
+  if (rollMultiplier >= EQUIPMENT_FINE_QUALITY_THRESHOLD) {
+    return { isLucky: false, rollMultiplier, qualityLabel: 'Fine' };
+  }
+  return { isLucky: false, rollMultiplier };
+}
+
+export function scaleEquipmentStat(base: number, rollMultiplier: number, minValue = 1): number {
+  return Math.max(minValue, Math.round(base * rollMultiplier));
+}
+
+export function rollEquipmentBaseStat(rarity: EquipmentRarity, rng = Math.random): number {
+  const range = EQUIPMENT_STAT_RANGES[rarity];
+  return Math.floor(rng() * (range.max - range.min + 1)) + range.min;
+}
+
+export function buildRolledEquipmentStats(
+  rarity: EquipmentRarity,
+  slot: EquipmentSlot,
+  rollMultiplier: number,
+  rng = Math.random,
+): Equipment['stats'] {
+  const roll = () => scaleEquipmentStat(rollEquipmentBaseStat(rarity, rng), rollMultiplier);
+
+  if (slot === 'sword') return { armyPower: roll() };
+  if (slot === 'shield') return { defensivePower: roll() };
+  if (slot === 'armor') {
+    return {
+      defensivePower: roll(),
+      maxHealth: scaleEquipmentStat(rollEquipmentBaseStat(rarity, rng) * 5, rollMultiplier, 5),
+    };
+  }
+  if (slot === 'armor-pants') return { defensivePower: roll() };
+  if (slot === 'boots') return { morale: roll() };
+  if (slot === 'gloves') return { armyPower: roll() };
+  return { spellPower: roll() };
+}
+
+export function applyLuckyNameSuffix(name: string, isLucky: boolean): string {
+  if (!isLucky) return name;
+  return name.endsWith('+') ? name : `${name}+`;
+}
+
+export function formatEquipmentQualityLabel(
+  item: Pick<Equipment, 'isLucky' | 'qualityLabel' | 'rollMultiplier'>,
+): EquipmentQualityLabel | undefined {
+  if (item.qualityLabel === 'Lucky+' || item.qualityLabel === 'Fine') return item.qualityLabel;
+  if (item.isLucky) return 'Lucky+';
+  if (typeof item.rollMultiplier === 'number' && item.rollMultiplier >= EQUIPMENT_FINE_QUALITY_THRESHOLD) {
+    return 'Fine';
+  }
+  return undefined;
+}
 
 export const RANDOM_JOB_GEAR_MIN_LEVEL = 3;
 

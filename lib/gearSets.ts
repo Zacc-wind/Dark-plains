@@ -1,6 +1,12 @@
 import type { Equipment, EquipmentRarity, EquipmentSlot, User } from './auth';
 
-export type GearSetId = 'guardian' | 'shadow-stalker' | 'arcane-weaver' | 'storm-caller';
+export type GearSetId =
+  | 'guardian'
+  | 'shadow-stalker'
+  | 'arcane-weaver'
+  | 'storm-caller'
+  | 'ironbound'
+  | 'ember-rite';
 
 export interface GearSetBonusTier {
   pieces: 2 | 4;
@@ -98,6 +104,44 @@ export const GEAR_SETS: GearSetDefinition[] = [
       { pieces: 4, stats: { armyPower: 8, spellPower: 7, morale: 4 }, effect: 'Tempest: Chain lightning hits a second target for 40% damage.' },
     ],
     dropSources: ['boss', 'mp-daily', 'gem-vendor'],
+  },
+  {
+    id: 'ironbound',
+    name: 'Ironbound',
+    rarity: 'epic',
+    slotNames: {
+      helmet: "Ironbound Helm",
+      armor: "Ironbound Cuirass",
+      shield: "Ironbound Bulwark",
+      gloves: "Ironbound Fists",
+      boots: "Ironbound Sabatons",
+      sword: "Ironbound Cleaver",
+      'armor-pants': "Ironbound Plates",
+    },
+    bonuses: [
+      { pieces: 2, stats: { defensivePower: 5, morale: 2 }, effect: 'Brace: +10% ward while below half health.' },
+      { pieces: 4, stats: { defensivePower: 9, maxHealth: 40 }, effect: 'Holdfast: Allies adjacent to you take 12% less damage.' },
+    ],
+    dropSources: ['dungeon', 'elite', 'mp-daily'],
+  },
+  {
+    id: 'ember-rite',
+    name: 'Ember Rite',
+    rarity: 'legendary',
+    slotNames: {
+      helmet: "Ember Rite Mask",
+      armor: "Ember Rite Vestments",
+      gloves: "Ember Rite Wraps",
+      boots: "Ember Rite Treads",
+      sword: "Ember Rite Brand",
+      shield: "Ember Rite Censer",
+      'armor-pants': "Ember Rite Sashes",
+    },
+    bonuses: [
+      { pieces: 2, stats: { spellPower: 6, armyPower: 3 }, effect: 'Kindle: Opening spell deals +20% damage.' },
+      { pieces: 4, stats: { spellPower: 10, armyPower: 5, morale: 3 }, effect: 'Ashwake: After casting, your next attack burns for 25% spell power.' },
+    ],
+    dropSources: ['boss', 'gem-vendor', 'mp-daily'],
   },
 ];
 

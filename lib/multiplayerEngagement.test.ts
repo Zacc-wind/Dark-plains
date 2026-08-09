@@ -1,13 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import {
+  claimMultiplayerBannerHunt,
   claimMultiplayerDailyContract,
   claimMultiplayerFirstCompletionBonus,
+  claimMultiplayerInboxMail,
   claimMultiplayerRegionalThreat,
   claimMultiplayerWeeklyOath,
   consumeMultiplayerRestedJobBonus,
   dismissMultiplayerReturningBriefing,
+  getMultiplayerBannerHunt,
   getMultiplayerDailyContracts,
   getMultiplayerFirstCompletionBonuses,
+  getMultiplayerPendingInboxMails,
   getMultiplayerReturnTrack,
   getMultiplayerRegionalThreat,
   getMultiplayerWeeklyOath,
@@ -119,7 +123,7 @@ describe('multiplayer engagement loops', () => {
     } as unknown as Parameters<typeof normalizeMultiplayerEngagementState>[0];
 
     const normalized = normalizeMultiplayerEngagementState(legacy, 'LegacyBanner', NOW + 10);
-    expect(normalized.version).toBe(4);
+    expect(normalized.version).toBe(6);
     expect(normalized.events.map(event => event.kind)).toEqual([
       'battle-result-claimed',
       'job-started',
@@ -136,6 +140,52 @@ describe('multiplayer engagement loops', () => {
     expect(state.restedJobCharges).toBe(2);
     expect(state.telemetry.briefingsShown).toBe(1);
     expect(dismissMultiplayerReturningBriefing(state, 'ReturnBanner', NOW).pendingBriefing).toBeUndefined();
+  });
+
+  it('creates a once-per-absence login inbox packet after 24h away', () => {
+    let state = touchMultiplayerEngagement(null, 'InboxBanner', NOW - 2 * DAY);
+    expect(getMultiplayerPendingInboxMails(state, 'InboxBanner', NOW - 2 * DAY)).toHaveLength(0);
+
+    state = touchMultiplayerEngagement(state, 'InboxBanner', NOW);
+    const pending = getMultiplayerPendingInboxMails(state, 'InboxBanner', NOW);
+    expect(pending).toHaveLength(1);
+    expect(pending[0]?.id).toMatch(/^inbox:.*:return$/);
+    expect(pending[0]?.rewardGold).toBeGreaterThan(0);
+    expect(pending[0]?.rewardItemId).toBe('red-mercy-draught');
+
+    const claimed = claimMultiplayerInboxMail(state, 'InboxBanner', pending[0]!.id, NOW + 1);
+    expect(claimed.success).toBe(true);
+    expect(claimed.state.claimedInboxIds).toContain(pending[0]!.id);
+    expect(getMultiplayerPendingInboxMails(claimed.state, 'InboxBanner', NOW + 1)).toHaveLength(0);
+    expect(claimMultiplayerInboxMail(claimed.state, 'InboxBanner', pending[0]!.id, NOW + 2).success).toBe(false);
+
+    const sameDay = touchMultiplayerEngagement(claimed.state, 'InboxBanner', NOW + 3);
+    expect(getMultiplayerPendingInboxMails(sameDay, 'InboxBanner', NOW + 3)).toHaveLength(0);
+  });
+
+  it('builds a daily claim streak and weekly banner hunt progress', () => {
+    let state = normalizeMultiplayerEngagementState(null, 'StreakBanner', NOW);
+    const combat = getMultiplayerDailyContracts(state, 'StreakBanner', NOW).find(c => c.category === 'combat')!;
+    for (let count = 0; count < combat.target; count += 1) {
+      state = recordMultiplayerEngagementEvent(state, 'StreakBanner', {
+        id: `battle-result-claimed:streak-${count}`,
+        kind: 'battle-result-claimed',
+      }, NOW + count);
+    }
+    const claimed = claimMultiplayerDailyContract(state, 'StreakBanner', combat.id, NOW + 20);
+    expect(claimed.success).toBe(true);
+    expect(claimed.state.dailyClaimStreak).toBe(1);
+
+    state = recordMultiplayerEngagementEvent(claimed.state, 'StreakBanner', {
+      id: 'inspect-hunt',
+      kind: 'enemy-inspected',
+    }, NOW + 30);
+    const hunt = getMultiplayerBannerHunt(state, 'StreakBanner', NOW + 30);
+    expect(hunt.inspectProgress).toBe(1);
+    expect(hunt.complete).toBe(true);
+    const huntClaim = claimMultiplayerBannerHunt(state, 'StreakBanner', NOW + 40);
+    expect(huntClaim.success).toBe(true);
+    expect(huntClaim.state.bannerHuntClaimedWeekKey).toBe(state.weekKey);
   });
 
   it('uses finite capped rested XP charges on completed jobs', () => {

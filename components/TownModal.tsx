@@ -41,6 +41,8 @@ import {
   sellEquipmentItem,
   sellInventoryItem,
   sellMinion,
+  treatInjuredArmyAtWard,
+  salvageEquipmentToScrap,
   upgradeEquipmentSocketBonus,
 } from '@/lib/auth';
 import { BATTLE_SPELLS } from '@/lib/battle';
@@ -48,6 +50,7 @@ import { emitCompletionNotice, type CompletionRewardLine } from '@/lib/completio
 import { emitFxEvent } from '@/lib/fxEvents';
 import { POI } from '@/lib/mapData';
 import { getGearSetById } from '@/lib/gearSets';
+import { formatEquipmentQualityLabel } from '@/lib/gearProgression';
 import { formatEquipmentRarityLabel, RUN_EQUIPMENT_SLOT_LABELS } from '@/lib/runEquipment';
 import { getMultiplayerUnlockStatus, type MultiplayerUnlockStatus } from '@/lib/multiplayerUnlocks';
 import MultiplayerFeatureLock from '@/components/MultiplayerFeatureLock';
@@ -179,7 +182,11 @@ export default function TownModal({ town, onClose, onTravel }: TownModalProps) {
     : ASSET_PATHS.towns.riversideBackground;
   const offers = getTownShopOffers(town.name);
   const recruitmentOffers = getTownRecruitmentOffers(town.name, user);
-  const cityQuests = getRotatingCityQuests(town.name);
+  const cityQuests = getRotatingCityQuests(town.name, Date.now(), 5, {
+    claimedStoryQuestIds: (user?.storyQuests || [])
+      .filter(progress => progress.claimed)
+      .map(progress => progress.questId),
+  });
   const forgeEquipment = user?.equipment || [];
   const selectedForgeItem = forgeEquipment.find(item => item.id === selectedForgeItemId) || forgeEquipment[0] || null;
   const forgeSocketQuote = getEquipmentSocketAddQuote(selectedForgeItem);
@@ -517,10 +524,43 @@ export default function TownModal({ town, onClose, onTravel }: TownModalProps) {
             <div className="command-panel vine-frame town-service-panel rounded border text-zinc-100">
               <TownSectionHeader
                 title="Forge"
-                meta={`${user?.inventory?.find(item => item.id === 'rare-gem')?.quantity || 0} gems`}
+                meta={`${user?.inventory?.find(item => item.id === 'rare-gem')?.quantity || 0} gems · ${user?.inventory?.find(item => item.id === 'set-scrap')?.quantity || 0} scrap`}
                 status={atTown ? 'Open' : 'Travel required'}
               />
               <div className="town-service-body no-scrollbar">
+                {atTown && (
+                  <div className="mb-3 flex flex-wrap gap-2 px-1">
+                    <button
+                      type="button"
+                      className="ui-button rounded px-3 py-2 text-xs font-black"
+                      onClick={() => {
+                        const result = treatInjuredArmyAtWard();
+                        setNotice(result.success
+                          ? `Injury ward treated ${result.treated} soldier${result.treated === 1 ? '' : 's'} (-${result.goldCost}g).`
+                          : result.error || 'Ward unavailable.');
+                        setUser(getCurrentUser());
+                      }}
+                    >
+                      Injury Ward
+                    </button>
+                    {forgeEquipment.slice(0, 4).map(item => (
+                      <button
+                        key={`salvage-${item.id}`}
+                        type="button"
+                        className="ui-button rounded px-3 py-2 text-xs font-black"
+                        onClick={() => {
+                          const result = salvageEquipmentToScrap(item.id);
+                          setNotice(result.success
+                            ? `Salvaged for ${result.scrapGained} set scrap.`
+                            : result.error || 'Could not salvage.');
+                          setUser(getCurrentUser());
+                        }}
+                      >
+                        Salvage {item.name.slice(0, 14)}
+                      </button>
+                    ))}
+                  </div>
+                )}
                 {forgeUnlock.unlocked ? (
                   <BlacksmithPanel
                     equipment={forgeEquipment}
@@ -693,7 +733,9 @@ function formatSocketBonus(bonus: EquipmentSocketBonus): string {
 function getGearStatLines(item: Equipment): string[] {
   const lines: string[] = [];
   const stats = item.stats || {};
+  const quality = formatEquipmentQualityLabel(item);
 
+  if (quality) lines.push(`Quality ${quality}`);
   if (stats.armyPower) lines.push(`Army +${stats.armyPower}`);
   if (stats.defensivePower) lines.push(`Ward +${stats.defensivePower}`);
   if (stats.morale) lines.push(`Morale +${stats.morale}`);

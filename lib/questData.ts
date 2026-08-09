@@ -43,6 +43,7 @@ export interface QuestRewardSpec {
   minionTier?: MinionTier;
   spellIds?: string[];
   spellChestChance?: number;
+  items?: Array<{ itemId: string; quantity: number }>;
 }
 
 export interface CityQuestTemplate {
@@ -53,6 +54,8 @@ export interface CityQuestTemplate {
   description: string;
   requirement: QuestRequirementSpec;
   rewards: QuestRewardSpec;
+  /** When set, the contract only enters rotation after this story quest is claimed. */
+  requiresClaimedQuestId?: string;
 }
 
 export interface StoryQuestTemplate {
@@ -65,6 +68,9 @@ export interface StoryQuestTemplate {
   requirement: QuestRequirementSpec;
   rewards: QuestRewardSpec;
   dialogId?: string;
+  /** Mainline campaigns gate on previous main quests. Side stories use unlockAfterQuestId. */
+  track?: 'main' | 'side';
+  unlockAfterQuestId?: string;
 }
 
 export interface StoryChapter {
@@ -438,6 +444,16 @@ export const CITY_QUESTS: CityQuestTemplate[] = [
     rewards: { gold: 520, exp: 280, rareGems: 2, equipmentRarity: 'epic' },
   },
   {
+    id: 'mb-eastern-march-preview',
+    town: 'Moonbridge',
+    faction: 'Veil Scouts',
+    name: 'Eastern March Preview',
+    description: 'After the Moonwell is sealed, scout East Road Camp and prove the iron choir has not yet claimed the bridge\'s eastern rumor line.',
+    requiresClaimedQuestId: 'story-14-moonwell-sealed',
+    requirement: { type: 'visit_poi', count: 1, poiName: 'East Road Camp' },
+    rewards: { gold: 480, exp: 250, rareGems: 2, equipmentRarity: 'rare' },
+  },
+  {
     id: 'af-field-wards',
     town: 'Ashford',
     faction: 'Ashfield Reeve',
@@ -510,6 +526,51 @@ export const CITY_QUESTS: CityQuestTemplate[] = [
     rewards: { gold: 540, exp: 320, equipmentRarity: 'epic' },
   },
   {
+    id: 'bw-quarry-tally',
+    town: 'Blackwater Gate',
+    faction: 'Blackwater Syndicate',
+    name: 'Quarry Tally',
+    description: 'Work Granite Heights Quarry and return with a signed eastern stone tally.',
+    requirement: { type: 'complete_jobs_at_poi', count: 2, poiName: 'Granite Heights Quarry', minDuration: ONE_MINUTE },
+    rewards: { gold: 450, exp: 255, equipmentRarity: 'rare' },
+  },
+  {
+    id: 'bw-gate-watch',
+    town: 'Blackwater Gate',
+    faction: 'Gate Watch',
+    name: 'Gate Watch',
+    description: 'Stand a proper timed watch so the gate bells stay honest after midnight.',
+    requirement: { type: 'complete_timed_jobs', count: 2, minDuration: ONE_MINUTE },
+    rewards: { gold: 470, exp: 265, rareGems: 1, healthRestore: 40 },
+  },
+  {
+    id: 'bw-amber-bond',
+    town: 'Blackwater Gate',
+    faction: 'Relic Weighers',
+    name: 'Amber Bond',
+    description: 'Deliver two pieces of black amber to seal a syndicate escrow against forged writs.',
+    requirement: { type: 'collect_item', count: 2, itemId: 'black-amber' },
+    rewards: { gold: 500, exp: 285, rareGems: 2 },
+  },
+  {
+    id: 'bw-east-road-camp',
+    town: 'Blackwater Gate',
+    faction: 'Ossuary Order',
+    name: 'East Road Sounding',
+    description: 'Reach East Road Camp and confirm the rumor line still answers living scouts.',
+    requirement: { type: 'visit_poi', count: 1, poiName: 'East Road Camp' },
+    rewards: { gold: 430, exp: 245, equipmentRarity: 'rare' },
+  },
+  {
+    id: 'bw-writ-proof',
+    town: 'Blackwater Gate',
+    faction: 'Blackwater Syndicate',
+    name: 'Writ Proof',
+    description: 'Win two field battles and bring the broken mirror seals back to the gate ledger.',
+    requirement: { type: 'win_battles', count: 2 },
+    rewards: { gold: 520, exp: 300, equipmentRarity: 'epic' },
+  },
+  {
     id: 'eh-mirror-hunt',
     town: 'Eclipse Hold',
     faction: 'Eclipse Tribunal',
@@ -535,6 +596,51 @@ export const CITY_QUESTS: CityQuestTemplate[] = [
     description: 'Gather candle key fragments for the archivist before the court seals the hold.',
     requirement: { type: 'collect_item', count: 3, itemId: 'candle-key-fragment' },
     rewards: { gold: 760, exp: 460, rareGems: 3, spellIds: ['iron-benediction'] },
+  },
+  {
+    id: 'eh-plantation-watch',
+    town: 'Eclipse Hold',
+    faction: 'Moon Observers',
+    name: 'Plantation Watch',
+    description: 'Work Black Dawn Plantation shifts before mirror overseers rewrite the harvest tallies.',
+    requirement: { type: 'complete_jobs_at_poi', count: 2, poiName: 'Black Dawn Plantation', minDuration: ONE_MINUTE },
+    rewards: { gold: 580, exp: 350, equipmentRarity: 'epic' },
+  },
+  {
+    id: 'eh-long-eclipse',
+    town: 'Eclipse Hold',
+    faction: 'Eclipse Tribunal',
+    name: 'Long Eclipse',
+    description: 'Hold one full veteran watch while the hold relocates its glass wards.',
+    requirement: { type: 'complete_timed_jobs', count: 1, minDuration: THIRTY_MINUTES },
+    rewards: { gold: 640, exp: 390, rareGems: 2, healthRestore: 50 },
+  },
+  {
+    id: 'eh-shadowgrove-scout',
+    town: 'Eclipse Hold',
+    faction: 'Moon Court',
+    name: 'Shadowgrove Scout',
+    description: 'Reach Shadowgrove and confirm no mirror camp has claimed the southeast thicket.',
+    requirement: { type: 'visit_poi', count: 1, poiName: 'Shadowgrove' },
+    rewards: { gold: 560, exp: 340, equipmentRarity: 'rare' },
+  },
+  {
+    id: 'eh-hold-battles',
+    town: 'Eclipse Hold',
+    faction: 'Eclipse Tribunal',
+    name: 'Hold Battles',
+    description: 'Win three battles on the eclipse marches and return with formation reports.',
+    requirement: { type: 'win_battles', count: 3 },
+    rewards: { gold: 660, exp: 400, equipmentRarity: 'epic', rareGems: 1 },
+  },
+  {
+    id: 'eh-gem-reserve',
+    town: 'Eclipse Hold',
+    faction: 'Glass Reliquary',
+    name: 'Gem Reserve',
+    description: 'Show three rare gems so the hold can fund one more sealed chamber expedition.',
+    requirement: { type: 'own_rare_gems', count: 3 },
+    rewards: { gold: 720, exp: 430, equipmentRarity: 'legendary' },
   },
 ];
 
@@ -648,7 +754,7 @@ export const STORY_CHAPTERS: StoryChapter[] = [
         order: 9,
         requiredLevel: 6,
         name: 'The Drowned Summons',
-        lore: 'Scribe Naima has matched Black Pike payments to names erased from the Moonwell Pier ledger. Meet her at Riverside before the ink fades again.',
+        lore: 'Contact: Scribe Naima at Riverside. Consequence: Black Pike coin sits beside names scraped from the Moonwell Pier ledger—living people still walk those erasures.',
         dialogId: 'story-09-moonwell-summons',
         requirement: { type: 'visit_quest_npc', count: 1, questNpcId: 'quest-npc-scribe-naima' },
         rewards: { gold: 260, exp: 150, rareGems: 1 },
@@ -659,7 +765,7 @@ export const STORY_CHAPTERS: StoryChapter[] = [
         order: 10,
         requiredLevel: 6,
         name: 'Road to the Drowned Pier',
-        lore: 'The Moonwell reflects names before it reflects faces. Reach its pier and find which ledger posts are still guarded.',
+        lore: 'Place: Moonwell Pier. Consequence: midnight cargo marks still guard the drowned road; reflections there know your name before you speak.',
         dialogId: 'story-07-moonwell',
         requirement: { type: 'visit_poi', count: 1, poiName: 'Moonwell Pier' },
         rewards: { gold: 280, exp: 160, equipmentRarity: 'decent' },
@@ -670,7 +776,8 @@ export const STORY_CHAPTERS: StoryChapter[] = [
         order: 11,
         requiredLevel: 7,
         name: 'Names Beneath the Tithe',
-        lore: 'Work the pier long enough to separate honest cargo marks from the candle cult recruitment cipher.',
+        lore: 'Place: Moonwell Pier work shifts. Consequence: honest cargo separates from the candle-cult recruitment cipher Naima needs to prove the tithe is alive.',
+        dialogId: 'story-10-moonwell-tithe',
         requirement: { type: 'complete_jobs_at_poi', count: 2, poiName: 'Moonwell Pier', minDuration: ONE_MINUTE },
         rewards: { gold: 300, exp: 175, rareGems: 1 },
       },
@@ -680,7 +787,7 @@ export const STORY_CHAPTERS: StoryChapter[] = [
         order: 12,
         requiredLevel: 7,
         name: 'The Tongueless Bell',
-        lore: 'Brother Kaito recognizes the cipher as a bell sequence used to wake roots beneath drowned roads.',
+        lore: 'Contact: Brother Kaito on the river road. Consequence: the cipher is a drowned bell sequence that wakes roots beneath the graves.',
         dialogId: 'story-08-templar-seal',
         requirement: { type: 'visit_quest_npc', count: 1, questNpcId: 'quest-npc-brother-kaito' },
         rewards: { gold: 320, exp: 185, equipmentRarity: 'rare', spellIds: ['judgement'] },
@@ -691,7 +798,7 @@ export const STORY_CHAPTERS: StoryChapter[] = [
         order: 13,
         requiredLevel: 8,
         name: 'Blackroot on the Road',
-        lore: 'A vessel grown from drowned roots guards the Moonwell approach. Read its formation before the forest learns yours.',
+        lore: 'Place: the drowned approach near Moonwell Pier. Consequence: a named Blackroot Vessel finishes the interrupted bell—read its host before you strike.',
         dialogId: 'story-10-blackroot-warning',
         requirement: { type: 'inspect_enemy', count: 1, enemyId: 'story-elite-blackroot-vessel' },
         rewards: { gold: 340, exp: 195, rareGems: 1 },
@@ -702,7 +809,7 @@ export const STORY_CHAPTERS: StoryChapter[] = [
         order: 14,
         requiredLevel: 8,
         name: 'The Blackroot Vessel',
-        lore: 'Break the named vessel at the drowned road and recover the root-scarred orders inside its armor.',
+        lore: 'Place: drowned road elite. Consequence: break the vessel and recover root-scarred orders that name Mother Cindervein.',
         dialogId: 'story-09-gravebound-script',
         requirement: { type: 'defeat_boss', count: 1, bossId: 'blackroot-vessel', enemyId: 'story-elite-blackroot-vessel' },
         rewards: { gold: 380, exp: 220, equipmentRarity: 'rare' },
@@ -713,7 +820,7 @@ export const STORY_CHAPTERS: StoryChapter[] = [
         order: 15,
         requiredLevel: 9,
         name: 'The Mother of Black Candles',
-        lore: 'The recovered orders name Mother Cindervein as the voice beneath the pier. Inspect her candle host before the final descent.',
+        lore: 'Place: Moonwell Pier capstone host. Consequence: Mother Cindervein keeps a black candle for every stolen name—inspect before the final count.',
         dialogId: 'story-12-cindervein-warning',
         requirement: { type: 'inspect_enemy', count: 1, enemyId: 'story-boss-mother-cindervein' },
         rewards: { gold: 410, exp: 235, rareGems: 1 },
@@ -724,7 +831,7 @@ export const STORY_CHAPTERS: StoryChapter[] = [
         order: 16,
         requiredLevel: 10,
         name: 'The Drowned Moonwell',
-        lore: 'Descend through the candle host, defeat Mother Cindervein, and end the recruitment rite beneath the pier.',
+        lore: 'Place: candle host beneath the pier. Consequence: defeat Mother Cindervein and end the recruitment rite before erased names become soldiers.',
         dialogId: 'story-10-field-council',
         requirement: { type: 'defeat_boss', count: 1, bossId: 'mother-cindervein', enemyId: 'story-boss-mother-cindervein' },
         rewards: { gold: 500, exp: 300, rareGems: 2, equipmentRarity: 'epic', minionTier: 'tier2', spellIds: ['frost-lance'] },
@@ -735,7 +842,7 @@ export const STORY_CHAPTERS: StoryChapter[] = [
         order: 17,
         requiredLevel: 10,
         name: 'Names Returned to the River',
-        lore: 'Return Cindervein\'s burned ledger to Scribe Naima so the drowned recruits can be named and released from the tithe.',
+        lore: 'Contact: Scribe Naima at Riverside. Consequence: return the burned ledger so drowned recruits are named, released, and the eastern march can open.',
         dialogId: 'story-14-moonwell-sealed',
         requirement: {
           type: 'visit_quest_npc',
@@ -746,13 +853,117 @@ export const STORY_CHAPTERS: StoryChapter[] = [
         rewards: { gold: 560, exp: 330, rareGems: 3, spellIds: ['royal-command'] },
       },
       {
+        id: 'story-side-silk-scout',
+        chapter: 'chapter-1',
+        order: 171,
+        requiredLevel: 7,
+        track: 'side',
+        unlockAfterQuestId: 'story-07-moonwell',
+        name: 'Silk Under Stone',
+        lore: 'Contact: Brother Kaito. Place: Moonbridge underside. Consequence: Moonfen broodlings are spinning cathedral silk into the bridge stones—inspect the first nest risk.',
+        dialogId: 'story-side-silk-scout',
+        requirement: { type: 'inspect_enemy', count: 1, enemyId: 'story-elite-moonfen-brood' },
+        rewards: { gold: 220, exp: 120, rareGems: 1 },
+      },
+      {
+        id: 'story-side-silk-clear',
+        chapter: 'chapter-1',
+        order: 172,
+        requiredLevel: 8,
+        track: 'side',
+        unlockAfterQuestId: 'story-side-silk-scout',
+        name: 'Clear the Bridge Nest',
+        lore: 'Place: Moonbridge brood nest. Consequence: defeat the Moonfen Brood Mother before silk seals the river crossing.',
+        dialogId: 'story-side-silk-clear',
+        requirement: {
+          type: 'defeat_boss',
+          count: 1,
+          bossId: 'moonfen-brood-mother',
+          enemyId: 'story-elite-moonfen-brood',
+        },
+        rewards: { gold: 300, exp: 170, equipmentRarity: 'rare', items: [{ itemId: 'cathedral-silk', quantity: 1 }] },
+      },
+      {
+        id: 'story-side-silk-return',
+        chapter: 'chapter-1',
+        order: 173,
+        requiredLevel: 8,
+        track: 'side',
+        unlockAfterQuestId: 'story-side-silk-clear',
+        name: 'Cathedral Silk Delivered',
+        lore: 'Contact: Brother Kaito. Consequence: deliver cathedral silk so the Bridge Bell Monks can reweave the wards under Moonbridge.',
+        dialogId: 'story-side-silk-return',
+        requirement: {
+          type: 'visit_quest_npc',
+          count: 1,
+          questNpcId: 'quest-npc-brother-kaito',
+          afterQuestId: 'story-side-silk-clear',
+        },
+        rewards: { gold: 280, exp: 150, rareGems: 1, spellIds: ['judgement'] },
+      },
+      {
+        id: 'story-side-tithe-cutters',
+        chapter: 'chapter-1',
+        order: 174,
+        requiredLevel: 7,
+        track: 'side',
+        unlockAfterQuestId: 'story-10-moonwell-tithe',
+        name: 'The Stolen Tithe',
+        lore: 'Place: roads between Moonwell Pier and Crossroads Camp. Consequence: Tollroad Goblin Cutters still move drowned ledger pages—break two of their warbands.',
+        dialogId: 'story-side-tithe-cutters',
+        requirement: { type: 'defeat_enemies_level', count: 2, minEnemyLevel: 6, maxEnemyLevel: 9 },
+        rewards: { gold: 240, exp: 130 },
+      },
+      {
+        id: 'story-side-tithe-ledger',
+        chapter: 'chapter-1',
+        order: 175,
+        requiredLevel: 8,
+        track: 'side',
+        unlockAfterQuestId: 'story-side-tithe-cutters',
+        name: 'Recover the Drowned Ledger',
+        lore: 'Place: Crossroads Camp approach. Consequence: defeat the Tollroad Goblin Hexer and seize the water-swollen tithe ledger.',
+        dialogId: 'story-side-tithe-ledger',
+        requirement: {
+          type: 'defeat_boss',
+          count: 1,
+          bossId: 'tollroad-goblin-hexer',
+          enemyId: 'story-elite-tollroad-hexer',
+        },
+        rewards: {
+          gold: 320,
+          exp: 180,
+          equipmentRarity: 'rare',
+          items: [{ itemId: 'drowned-tithe-ledger', quantity: 1 }],
+        },
+      },
+      {
+        id: 'story-side-tithe-return',
+        chapter: 'chapter-1',
+        order: 176,
+        requiredLevel: 8,
+        track: 'side',
+        unlockAfterQuestId: 'story-side-tithe-ledger',
+        name: 'Ledger Returned to Law',
+        lore: 'Contact: Scribe Naima. Consequence: return the drowned tithe ledger so Star Law can name who funded the rite.',
+        dialogId: 'story-side-tithe-return',
+        requirement: {
+          type: 'visit_quest_npc',
+          count: 1,
+          questNpcId: 'quest-npc-scribe-naima',
+          afterQuestId: 'story-side-tithe-ledger',
+        },
+        rewards: { gold: 300, exp: 160, rareGems: 2 },
+      },
+      {
         id: 'story-11-eastward-march',
         chapter: 'chapter-1',
         order: 18,
         requiredLevel: 11,
         name: 'Eastward March',
-        lore: 'The road bends toward Blackwater and the old map begins to show places nobody painted.',
-        requirement: { type: 'complete_jobs', count: 8 },
+        lore: 'Contact: Ash Hermit Yara near the ash road. Consequence: she opens the eastern march and warns that king-magic answers faster than mercy east of Blackwater.',
+        dialogId: 'story-11-eastward-march',
+        requirement: { type: 'visit_quest_npc', count: 1, questNpcId: 'quest-npc-ash-hermit' },
         rewards: { gold: 500, exp: 320, rareGems: 3 },
       },
       {
@@ -761,8 +972,9 @@ export const STORY_CHAPTERS: StoryChapter[] = [
         order: 19,
         requiredLevel: 12,
         name: 'Choir of Iron',
-        lore: 'The enemy forges armor by singing names into steel. Silence the choir or wear its hymn.',
-        requirement: { type: 'complete_timed_jobs', count: 4, minDuration: THIRTY_MINUTES },
+        lore: 'Place: Blackwater Gate. Consequence: the iron choir forges armor by singing names into steel—walk the walls before their hymn reaches your banner.',
+        dialogId: 'story-12-choir-of-iron',
+        requirement: { type: 'visit_poi', count: 1, poiName: 'Blackwater Gate' },
         rewards: { gold: 560, exp: 360, equipmentRarity: 'epic', spellIds: ['frost-lance'] },
       },
       {
@@ -771,8 +983,9 @@ export const STORY_CHAPTERS: StoryChapter[] = [
         order: 20,
         requiredLevel: 13,
         name: 'Paragon Vow',
-        lore: 'One elite knight will kneel if your army proves it can survive the eclipse marches.',
-        requirement: { type: 'recruit_minions', count: 6 },
+        lore: 'Contact: Veil Captain Serat on the eclipse road. Consequence: she names the Iron Choir Marshal as the midpoint threat guarding Grave-Aurel\'s approach.',
+        dialogId: 'story-13-paragon-vow',
+        requirement: { type: 'visit_quest_npc', count: 1, questNpcId: 'quest-npc-veil-captain' },
         rewards: { gold: 640, exp: 410, minionTier: 'tier3' },
       },
       {
@@ -781,8 +994,14 @@ export const STORY_CHAPTERS: StoryChapter[] = [
         order: 21,
         requiredLevel: 14,
         name: 'Eclipse Field',
-        lore: 'The battlefield where the first king-mage fell is no longer empty. It has learned to wait.',
-        requirement: { type: 'win_battles', count: 4 },
+        lore: 'Place: East Road Camp approach. Consequence: silence the Iron Choir Marshal before the field learns your formations by hymn.',
+        dialogId: 'story-14-eclipse-field',
+        requirement: {
+          type: 'defeat_boss',
+          count: 1,
+          bossId: 'iron-choir-marshal',
+          enemyId: 'story-elite-iron-choir-marshal',
+        },
         rewards: { gold: 720, exp: 470, equipmentRarity: 'epic', spellIds: ['saint-king-aegis'] },
       },
       {
@@ -791,9 +1010,14 @@ export const STORY_CHAPTERS: StoryChapter[] = [
         order: 22,
         requiredLevel: 15,
         name: 'The Broken Crown',
-        lore: 'Emperor Grave-Aurel keeps a broken crown for anyone who still believes commanders rule alone.',
+        lore: 'Place: southeast of Eclipse Hold. Consequence: defeat Emperor Grave-Aurel and take the broken crown lesson before the Mirror Court claims your reflection.',
         dialogId: 'story-15-broken-crown',
-        requirement: { type: 'defeat_boss', count: 1, bossId: 'emperor-grave-aurel' },
+        requirement: {
+          type: 'defeat_boss',
+          count: 1,
+          bossId: 'emperor-grave-aurel',
+          enemyId: 'story-boss-emperor-grave-aurel',
+        },
         rewards: { gold: 900, exp: 600, equipmentRarity: 'legendary', minionTier: 'tier3', spellIds: ['eclipse-nova', 'time-crown-edict'] },
       },
     ],
@@ -809,7 +1033,7 @@ export const STORY_CHAPTERS: StoryChapter[] = [
         order: 1,
         requiredLevel: 16,
         name: 'Mirror Council',
-        lore: 'Veil Captain Serat summons commanders who survived the crown. The mirror court listens through glass and ash.',
+        lore: 'Contact: Veil Captain Serat on the eclipse road. Consequence: the Mirror Court has begun rewriting roads with glass scouts wearing your old banner colors.',
         dialogId: 'story-16-mirror-council',
         requirement: { type: 'visit_quest_npc', count: 1, questNpcId: 'quest-npc-veil-captain' },
         rewards: { gold: 520, exp: 340, equipmentRarity: 'rare', spellIds: ['moonlit-veil'] },
@@ -819,10 +1043,10 @@ export const STORY_CHAPTERS: StoryChapter[] = [
         chapter: 'chapter-2',
         order: 2,
         requiredLevel: 17,
-        name: 'Moonwell Contract',
-        lore: 'Star Law pays in ink and salt for work done where the moonwell pier still remembers drowned kings.',
+        name: 'Writs at the Gate',
+        lore: 'Contact: Gate Warden Sable at Blackwater Gate. Consequence: living writs still hold the eastern road—meet Sable before mirror forgers buy them all.',
         dialogId: 'story-17-moonwell-contract',
-        requirement: { type: 'complete_jobs_at_poi', count: 2, poiName: 'Moonwell Pier', minDuration: ONE_MINUTE },
+        requirement: { type: 'visit_quest_npc', count: 1, questNpcId: 'quest-npc-gate-warden' },
         rewards: { gold: 580, exp: 380, rareGems: 2 },
       },
       {
@@ -831,7 +1055,7 @@ export const STORY_CHAPTERS: StoryChapter[] = [
         order: 3,
         requiredLevel: 18,
         name: 'Blackwater Gate',
-        lore: 'Blackwater Gate trades in writs that outlive their signers. Walk its walls before the mirror court buys them.',
+        lore: 'Place: Blackwater Gate walls. Consequence: walk the checkpoint while it still answers living commanders, then hunt the Mirror Road Captain rewriting the quarry road.',
         dialogId: 'story-18-blackwater-gate',
         requirement: { type: 'visit_poi', count: 1, poiName: 'Blackwater Gate' },
         rewards: { gold: 640, exp: 420, equipmentRarity: 'rare' },
@@ -842,38 +1066,66 @@ export const STORY_CHAPTERS: StoryChapter[] = [
         order: 4,
         requiredLevel: 19,
         name: 'Eclipse Scouts',
-        lore: 'Mirror scouts wear your old banner colors. Break their warbands before they learn your formations.',
-        requirement: { type: 'defeat_enemies_level', count: 3, minEnemyLevel: 14, maxEnemyLevel: 19 },
-        rewards: { gold: 700, exp: 460, minionTier: 'tier2' },
+        lore: 'Place: Granite Heights Quarry approach. Consequence: defeat the Mirror Road Captain before glass scouts finish learning your formations.',
+        dialogId: 'story-19-eclipse-scouts',
+        requirement: {
+          type: 'defeat_boss',
+          count: 1,
+          bossId: 'mirror-road-captain',
+          enemyId: 'story-elite-mirror-road-captain',
+        },
+        rewards: { gold: 700, exp: 460, minionTier: 'tier2', equipmentRarity: 'epic' },
       },
       {
         id: 'story-20-first-dungeon-oath',
         chapter: 'chapter-2',
         order: 5,
         requiredLevel: 20,
-        name: 'First Dungeon Oath',
-        lore: 'The ossuaries beneath the marches are recruiting again. Clear a sealed chamber and bring proof.',
+        name: 'Prior of the Glass Road',
+        lore: 'Place: Eclipse Hold ossuary road. Consequence: defeat Prior Moon Voss and stop the court from opening every sealed chamber with reflected water.',
         dialogId: 'story-20-first-dungeon-oath',
-        requirement: { type: 'clear_dungeons', count: 1, minDungeonLevel: 5 },
+        requirement: {
+          type: 'defeat_boss',
+          count: 1,
+          bossId: 'prior-moon-voss',
+          enemyId: 'story-boss-prior-moon-voss',
+        },
+        rewards: { gold: 820, exp: 540, rareGems: 3, equipmentRarity: 'epic', spellIds: ['frost-lance'] },
+      },
+      {
+        id: 'story-20-glass-sealed',
+        chapter: 'chapter-2',
+        order: 6,
+        requiredLevel: 20,
+        name: 'Glass Road Sealed',
+        lore: 'Contact: Gate Warden Sable. Consequence: return Voss\'s broken moon glass so Blackwater records the Glass Road under living law and opens the Candle Key preview.',
+        dialogId: 'story-20-glass-sealed',
+        requirement: {
+          type: 'visit_quest_npc',
+          count: 1,
+          questNpcId: 'quest-npc-gate-warden',
+          afterQuestId: 'story-20-first-dungeon-oath',
+        },
         rewards: { gold: 760, exp: 500, rareGems: 2, equipmentRarity: 'epic' },
       },
       {
         id: 'story-21-quarry-ledger',
         chapter: 'chapter-2',
-        order: 6,
+        order: 10,
         requiredLevel: 21,
-        name: 'Quarry Ledger',
-        lore: 'Granite Heights still cuts saint-bone for the mirror court. Work the quarry and steal their tally.',
-        requirement: { type: 'complete_jobs_at_poi', count: 2, poiName: 'Granite Heights Quarry', minDuration: ONE_MINUTE },
+        name: 'Candle Key Summons',
+        lore: 'Contact: Brother Kaito. Consequence: rival powers race to assemble the candle key—Kaito opens the chapter before the Mirror Court seals the lock.',
+        dialogId: 'story-21-quarry-ledger',
+        requirement: { type: 'visit_quest_npc', count: 1, questNpcId: 'quest-npc-brother-kaito' },
         rewards: { gold: 820, exp: 540, equipmentRarity: 'epic' },
       },
       {
         id: 'story-22-eclipse-hold',
         chapter: 'chapter-2',
-        order: 7,
+        order: 11,
         requiredLevel: 22,
         name: 'Eclipse Hold',
-        lore: 'Eclipse Hold is where king-mages signed their last lies. Reach the hold before the mirror court rewrites them.',
+        lore: 'Place: Eclipse Hold. Consequence: reach the hold where king-mages signed their last lies before the court rewrites every oath recorded there.',
         dialogId: 'story-22-eclipse-hold',
         requirement: { type: 'visit_poi', count: 1, poiName: 'Eclipse Hold' },
         rewards: { gold: 880, exp: 580, spellIds: ['frost-lance'] },
@@ -881,20 +1133,26 @@ export const STORY_CHAPTERS: StoryChapter[] = [
       {
         id: 'story-23-iron-chorus',
         chapter: 'chapter-2',
-        order: 8,
+        order: 12,
         requiredLevel: 23,
-        name: 'Iron Chorus',
-        lore: 'Veteran warbands now march under mirror sigils. Hunt the strongest among them on the eastern roads.',
-        requirement: { type: 'defeat_enemies_level', count: 4, minEnemyLevel: 18, maxEnemyLevel: 24 },
-        rewards: { gold: 940, exp: 620, minionTier: 'tier3' },
+        name: 'Key Warden',
+        lore: 'Place: Granite Heights Quarry approach. Consequence: defeat Ser Kael Duskplate, the blue-oath warden guarding candle key routes.',
+        dialogId: 'story-23-iron-chorus',
+        requirement: {
+          type: 'defeat_boss',
+          count: 1,
+          bossId: 'ser-kael-duskplate',
+          enemyId: 'story-elite-ser-kael-duskplate',
+        },
+        rewards: { gold: 940, exp: 620, minionTier: 'tier3', equipmentRarity: 'epic' },
       },
       {
         id: 'story-24-candle-key',
         chapter: 'chapter-2',
-        order: 9,
+        order: 13,
         requiredLevel: 24,
         name: 'Candle Key Fragment',
-        lore: 'Brother Kaito claims a candle key can unseal the mirror court if the fragments are whole.',
+        lore: 'Contact: Brother Kaito. Consequence: gather three candle-key fragments so the synod lock can turn against the court.',
         dialogId: 'story-24-candle-key',
         requirement: { type: 'collect_item', count: 3, itemId: 'candle-key-fragment' },
         rewards: { gold: 1000, exp: 660, rareGems: 3 },
@@ -902,30 +1160,58 @@ export const STORY_CHAPTERS: StoryChapter[] = [
       {
         id: 'story-25-paragon-muster',
         chapter: 'chapter-2',
-        order: 10,
+        order: 14,
         requiredLevel: 25,
-        name: 'Paragon Muster',
-        lore: 'The mirror court fields elites that remember every defeat you ever paid for.',
-        requirement: { type: 'recruit_minions', count: 8 },
-        rewards: { gold: 1080, exp: 700, equipmentRarity: 'epic', minionTier: 'tier3' },
+        name: 'Key-Saint Ardan',
+        lore: 'Place: Eclipse Hold sealed gate. Consequence: defeat Key-Saint Ardan before he locks the court against every living banner.',
+        dialogId: 'story-25-paragon-muster',
+        requirement: {
+          type: 'defeat_boss',
+          count: 1,
+          bossId: 'key-saint-ardan',
+          enemyId: 'story-boss-key-saint-ardan',
+        },
+        rewards: { gold: 1080, exp: 700, equipmentRarity: 'epic', minionTier: 'tier3', spellIds: ['iron-benediction'] },
+      },
+      {
+        id: 'story-25-key-sealed',
+        chapter: 'chapter-2',
+        order: 15,
+        requiredLevel: 25,
+        name: 'Candle Key Sealed',
+        lore: 'Contact: Brother Kaito. Consequence: return Ardan\'s broken gate key so the synod records the lock under living hands and opens the Lady in Glass.',
+        dialogId: 'story-25-key-sealed',
+        requirement: {
+          type: 'visit_quest_npc',
+          count: 1,
+          questNpcId: 'quest-npc-brother-kaito',
+          afterQuestId: 'story-25-paragon-muster',
+        },
+        rewards: { gold: 1100, exp: 720, rareGems: 3, equipmentRarity: 'legendary' },
       },
       {
         id: 'story-26-deep-dungeon',
         chapter: 'chapter-2',
-        order: 11,
+        order: 16,
         requiredLevel: 26,
-        name: 'Deep Chamber',
-        lore: 'A deeper ossuary opens only when the mirror moon is high. Clear a veteran dungeon and return.',
-        requirement: { type: 'clear_dungeons', count: 2, minDungeonLevel: 10 },
+        name: 'Court Reflections',
+        lore: 'Contact: Archivist Letho. Consequence: the court now fields reflections of your old victories—meet Letho before Lady Mirror-Veyra chooses your image.',
+        dialogId: 'story-26-deep-dungeon',
+        requirement: {
+          type: 'visit_quest_npc',
+          count: 1,
+          questNpcId: 'quest-npc-archivist-letho',
+          afterQuestId: 'story-25-key-sealed',
+        },
         rewards: { gold: 1160, exp: 760, equipmentRarity: 'legendary' },
       },
       {
         id: 'story-27-mirror-envoy',
         chapter: 'chapter-2',
-        order: 12,
+        order: 17,
         requiredLevel: 27,
         name: 'Mirror Envoy',
-        lore: 'Archivist Letho carries the court writ in a reliquary of glass. Find the envoy on the eclipse road.',
+        lore: 'Contact: Archivist Letho on the eclipse road. Consequence: stand before the court writ and refuse to kneel before Scarlet Matron Yvane hunts your banner.',
         dialogId: 'story-27-mirror-envoy',
         requirement: { type: 'visit_quest_npc', count: 1, questNpcId: 'quest-npc-archivist-letho' },
         rewards: { gold: 1240, exp: 820, spellIds: ['saint-king-aegis'] },
@@ -933,33 +1219,61 @@ export const STORY_CHAPTERS: StoryChapter[] = [
       {
         id: 'story-28-eclipse-field',
         chapter: 'chapter-2',
-        order: 13,
+        order: 18,
         requiredLevel: 28,
-        name: 'Eclipse Field Redux',
-        lore: 'The field where Aurel fell now reflects every army you have ever lost.',
-        requirement: { type: 'win_battles', count: 6 },
+        name: 'Scarlet Matron',
+        lore: 'Place: Shadowgrove. Consequence: defeat Scarlet Matron Yvane before her red thread knots around your commander\'s heart.',
+        dialogId: 'story-28-eclipse-field',
+        requirement: {
+          type: 'defeat_boss',
+          count: 1,
+          bossId: 'scarlet-matron-yvane',
+          enemyId: 'story-elite-scarlet-matron',
+        },
         rewards: { gold: 1320, exp: 880, equipmentRarity: 'legendary' },
       },
       {
         id: 'story-29-high-war',
         chapter: 'chapter-2',
-        order: 14,
+        order: 19,
         requiredLevel: 29,
         name: 'High War',
-        lore: 'Only commanders who break mirror champions above level twenty-four earn the right to enter the court.',
-        requirement: { type: 'defeat_enemies_level', count: 5, minEnemyLevel: 24, maxEnemyLevel: 30 },
+        lore: 'Place: Eclipse Hold approaches. Consequence: inspect Lady Mirror-Veyra\'s reflected host and learn which of your old victories she intends to field.',
+        dialogId: 'story-29-high-war',
+        requirement: { type: 'inspect_enemy', count: 1, enemyId: 'story-boss-lady-mirror-veyra' },
         rewards: { gold: 1400, exp: 940, rareGems: 4, minionTier: 'tier3' },
       },
       {
         id: 'story-30-lady-in-glass',
         chapter: 'chapter-2',
-        order: 15,
+        order: 20,
         requiredLevel: 30,
         name: 'The Lady in Glass',
-        lore: 'Lady Mirror-Veyra keeps the last king-mage reflection. Shatter the court or kneel to your own image.',
+        lore: 'Place: Eclipse Hold court. Consequence: defeat Lady Mirror-Veyra and shatter the last king-mage reflection before it learns your name by heart.',
         dialogId: 'story-30-lady-in-glass',
-        requirement: { type: 'defeat_boss', count: 1, bossId: 'lady-mirror-veyra' },
+        requirement: {
+          type: 'defeat_boss',
+          count: 1,
+          bossId: 'lady-mirror-veyra',
+          enemyId: 'story-boss-lady-mirror-veyra',
+        },
         rewards: { gold: 1800, exp: 1200, equipmentRarity: 'legendary', minionTier: 'tier3', spellIds: ['blood-star', 'eclipse-nova'] },
+      },
+      {
+        id: 'story-30-court-sealed',
+        chapter: 'chapter-2',
+        order: 21,
+        requiredLevel: 30,
+        name: 'Court Shatter Recorded',
+        lore: 'Contact: Archivist Letho. Consequence: return the broken glass so the Mirror Court act closes under living law and the endgame board opens.',
+        dialogId: 'story-30-court-sealed',
+        requirement: {
+          type: 'visit_quest_npc',
+          count: 1,
+          questNpcId: 'quest-npc-archivist-letho',
+          afterQuestId: 'story-30-lady-in-glass',
+        },
+        rewards: { gold: 1600, exp: 1000, rareGems: 5, equipmentRarity: 'legendary', spellIds: ['time-crown-edict'] },
       },
     ],
   },
@@ -1110,11 +1424,114 @@ export function getCityQuestTemplate(questId: string): CityQuestTemplate | undef
   return CITY_QUESTS.find(quest => quest.id === questId);
 }
 
-export function getRotatingCityQuests(townName: string, now = Date.now(), limit = 5): CityQuestTemplate[] {
-  const townQuests = CITY_QUESTS.filter(quest => quest.town === townName);
-  const questPool = townQuests.length > 0 ? townQuests : CITY_QUESTS;
+export function getRotatingCityQuests(
+  townName: string,
+  now = Date.now(),
+  limit = 5,
+  options?: { claimedStoryQuestIds?: Iterable<string> },
+): CityQuestTemplate[] {
+  const claimed = new Set(options?.claimedStoryQuestIds || []);
+  const townQuests = CITY_QUESTS.filter(quest => {
+    if (quest.town !== townName) return false;
+    if (quest.requiresClaimedQuestId && !claimed.has(quest.requiresClaimedQuestId)) return false;
+    return true;
+  });
+  const questPool = townQuests.length > 0 ? townQuests : CITY_QUESTS.filter(quest => !quest.requiresClaimedQuestId);
+  if (questPool.length === 0) return [];
   const cycle = Math.floor(now / (3 * 60 * 60 * 1000));
   const seed = Math.abs(hashText(`${townName}-${cycle}`));
   const startIndex = seed % questPool.length;
   return questPool.map((_, index) => questPool[(startIndex + index) % questPool.length]).slice(0, limit);
+}
+
+export function getQuestNpcWorldVoice(
+  npc: QuestNpc,
+  subject?: {
+    storyQuests?: Array<{ questId: string; claimed?: boolean }> | null;
+  } | null,
+): { line: string; questHook: string } {
+  const claimed = (questId: string) => Boolean(
+    subject?.storyQuests?.some(progress => progress.questId === questId && progress.claimed),
+  );
+  const moonwellSealed = claimed('story-14-moonwell-sealed');
+  const crownBroken = claimed('story-15-broken-crown');
+  const glassSealed = claimed('story-20-glass-sealed');
+  const keySealed = claimed('story-25-key-sealed');
+  const courtSealed = claimed('story-30-court-sealed');
+
+  if (npc.id === 'quest-npc-scribe-naima' && moonwellSealed) {
+    return {
+      line: crownBroken
+        ? 'The ledger is quiet. Mirror scouts now ask for the same names you freed from the tithe.'
+        : 'The Moonwell ledger is readable again. East of Blackwater, an iron choir has begun singing commander names into steel.',
+      questHook: crownBroken
+        ? 'Keep Star Law copies sealed. The Mirror Court buys erased histories.'
+        : 'When you reach Ash Hermit Yara, tell her the river returned its names. The eastern march is open.',
+    };
+  }
+
+  if (npc.id === 'quest-npc-brother-kaito' && moonwellSealed) {
+    return {
+      line: keySealed
+        ? 'Ardan\'s key is cracked. Lady Mirror-Veyra will not forgive a lock that answered living hands.'
+        : glassSealed
+          ? 'Voss is quiet. The candle key fragments will not stay quiet for long.'
+          : 'The drowned bell stays one beat short. That is a mercy you earned under the pier.',
+      questHook: keySealed
+        ? 'Find Archivist Letho. The court already fields reflections of your victories.'
+        : glassSealed
+          ? 'When you reach twenty-one, bring me every fragment you find. The court is racing the same road.'
+          : 'If silk or goblin ledgers still trouble the bridge, finish those side roads before the east calls louder.',
+    };
+  }
+
+  if (npc.id === 'quest-npc-ash-hermit' && moonwellSealed && !crownBroken) {
+    return {
+      line: 'The Moonwell stopped choosing soldiers. The crown country will try to choose kings instead.',
+      questHook: 'Walk to me when your banner is ready. King-magic eats commanders who skip the lesson.',
+    };
+  }
+
+  if (npc.id === 'quest-npc-veil-captain' && moonwellSealed) {
+    return {
+      line: courtSealed
+        ? 'The Mirror Court act is closed. Endgame roads still remember every reflection you shattered.'
+        : glassSealed
+          ? 'The Glass Road is sealed. Candle Key country begins where reflections stop answering honestly.'
+          : crownBroken
+            ? 'Grave-Aurel fell. The mirror court already wears fragments of his hymn.'
+            : 'Moonwell smoke still rides the west wind. Good. The iron choir hates banners that arrive smelling of victory.',
+      questHook: courtSealed
+        ? 'Keep your roster breathing. Veteran boards do not forgive empty banners.'
+        : glassSealed
+          ? 'Find Brother Kaito when the key race opens. I will scout the hold\'s deeper glass.'
+          : crownBroken
+            ? 'Meet me on the eclipse road when you are ready for glass and forged writs.'
+            : 'Scout Blackwater Gate, then find me. We silence the choir before it learns your true name.',
+    };
+  }
+
+  if (npc.id === 'quest-npc-gate-warden' && crownBroken) {
+    return {
+      line: glassSealed
+        ? 'Living law owns the Glass Road for now. Mirror agents already ask about candle keys.'
+        : 'Writs outlive the hands that signed them. Bring me proof you still command east of the gate.',
+      questHook: glassSealed
+        ? 'Keep your roster breathing. The Candle Key chapter does not forgive empty banners.'
+        : 'Walk Blackwater Gate, then hunt the Mirror Road Captain near Granite Heights.',
+    };
+  }
+
+  if (npc.id === 'quest-npc-archivist-letho' && keySealed) {
+    return {
+      line: courtSealed
+        ? 'The shard is quiet. That is rarer than victory. Walk carefully—mirrors remember longer than roads.'
+        : 'The key turned. Now the court fields armies built from reflections of old victories.',
+      questHook: courtSealed
+        ? 'The Mirror Court act is recorded. Endgame work begins where living law still holds.'
+        : 'Stand with me. Scarlet Matron Yvane hunts banners that refuse to kneel.',
+    };
+  }
+
+  return { line: npc.line, questHook: npc.questHook };
 }

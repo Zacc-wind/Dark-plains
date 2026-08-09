@@ -1,6 +1,11 @@
 import type { Equipment, EquipmentRarity, EquipmentSlot } from './auth';
 import { GEAR_SETS, getGearSetById, getGearSetPieceName, rollGearSetForSource, type GearSetId } from './gearSets';
-import { capEquipmentRarityForLevel } from './gearProgression';
+import {
+  applyLuckyNameSuffix,
+  buildRolledEquipmentStats,
+  capEquipmentRarityForLevel,
+  rollEquipmentAffix,
+} from './gearProgression';
 
 export type LootSource =
   | 'job'
@@ -26,6 +31,7 @@ const BOSS_EXCLUSIVE_SETS: Record<string, GearSetId> = {
   'mirror-warden': 'arcane-weaver',
   'blackwater-revenant': 'shadow-stalker',
   'eclipse-hound': 'storm-caller',
+  'mother-cindervein': 'ember-rite',
 };
 
 const DUNGEON_EXCLUSIVE_SETS: Record<string, GearSetId> = {
@@ -106,23 +112,8 @@ function pickSetForContext(context: LootDropContext): GearSetId | null {
   return Math.random() < 0.08 ? rollGearSetForSource('boss') : null;
 }
 
-function buildSetPieceStats(rarity: EquipmentRarity, slot: EquipmentSlot): Equipment['stats'] {
-  const ranges = {
-    decent: { min: 1, max: 3 },
-    rare: { min: 3, max: 6 },
-    epic: { min: 6, max: 10 },
-    legendary: { min: 10, max: 15 },
-  } as const;
-  const range = ranges[rarity];
-  const roll = () => Math.floor(Math.random() * (range.max - range.min + 1)) + range.min;
-
-  if (slot === 'sword') return { armyPower: roll() };
-  if (slot === 'shield') return { defensivePower: roll() };
-  if (slot === 'armor') return { defensivePower: roll(), maxHealth: roll() * 5 };
-  if (slot === 'armor-pants') return { defensivePower: roll() };
-  if (slot === 'boots') return { morale: roll() };
-  if (slot === 'gloves') return { armyPower: roll() };
-  return { spellPower: roll() };
+function buildSetPieceStats(rarity: EquipmentRarity, slot: EquipmentSlot, rollMultiplier: number): Equipment['stats'] {
+  return buildRolledEquipmentStats(rarity, slot, rollMultiplier);
 }
 
 export function generateLootEquipment(context: LootDropContext): Equipment | null {
@@ -137,16 +128,24 @@ export function generateLootEquipment(context: LootDropContext): Equipment | nul
   const setId = (rarity === 'epic' || rarity === 'legendary') ? pickSetForContext(context) : null;
   const setDef = setId ? getGearSetById(setId) : undefined;
   const useSetName = Boolean(setDef && setDef.rarity === rarity);
+  const affix = rollEquipmentAffix();
+
+  const baseName = useSetName && setId
+    ? getGearSetPieceName(setId, slot)
+    : `${rarity.charAt(0).toUpperCase()}${rarity.slice(1)} ${slot.split('-').map(part => part.charAt(0).toUpperCase() + part.slice(1)).join(' ')}`;
 
   const item: Equipment = {
     id: `loot-${slot}-${rarity}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
-    name: useSetName && setId ? getGearSetPieceName(setId, slot) : `${rarity.charAt(0).toUpperCase()}${rarity.slice(1)} ${slot.split('-').map(part => part.charAt(0).toUpperCase() + part.slice(1)).join(' ')}`,
+    name: applyLuckyNameSuffix(baseName, affix.isLucky),
     slot,
     rarity,
-    stats: buildSetPieceStats(rarity, slot),
+    stats: buildSetPieceStats(rarity, slot, affix.rollMultiplier),
     socketBonuses: [],
     gearSetId: useSetName ? setId || undefined : undefined,
     lootSource: context.source,
+    rollMultiplier: affix.rollMultiplier,
+    ...(affix.qualityLabel ? { qualityLabel: affix.qualityLabel } : {}),
+    ...(affix.isLucky ? { isLucky: true } : {}),
   };
 
   if (rarity === 'legendary' && !item.gearSetId) {

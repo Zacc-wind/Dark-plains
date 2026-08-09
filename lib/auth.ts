@@ -30,11 +30,15 @@ import { BOSS_PROFILES, type BossProfile } from './bosses';
 import { sumGearSetBonusStats } from './gearSets';
 import { generateLootEquipment } from './lootTables';
 import {
+  applyLuckyNameSuffix,
+  buildRolledEquipmentStats,
   capEquipmentRarityForLevel,
   getEquipmentRarityMinLevel,
   getHighestJobEquipmentRarity,
   getJobEquipmentDropChance,
+  rollEquipmentAffix,
   rollJobEquipmentRarity,
+  type EquipmentQualityLabel,
 } from './gearProgression';
 import { canAcquireMinionTier, getMinionTierMinLevel } from './minionProgression';
 import { normalizeMpDailyDungeonState, type MpDailyDungeonState } from './mpDailyDungeon';
@@ -95,39 +99,75 @@ import {
   type TradeParticipantStatePayload,
 } from './tradeSessionClient';
 import {
+  claimMultiplayerBannerHunt as claimMultiplayerBannerHuntState,
   claimMultiplayerDailyContract as claimMultiplayerDailyContractState,
   claimMultiplayerFirstCompletionBonus as claimMultiplayerFirstCompletionBonusState,
+  claimMultiplayerInboxMail as claimMultiplayerInboxMailState,
   claimMultiplayerRegionalThreat as claimMultiplayerRegionalThreatState,
   claimMultiplayerWeeklyOath as claimMultiplayerWeeklyOathState,
   consumeMultiplayerRestedJobBonus,
   dismissMultiplayerReturningBriefing as dismissMultiplayerReturningBriefingState,
+  getMultiplayerBannerHunt,
   getMultiplayerDailyContracts,
+  getMultiplayerDailyStreakView,
   getMultiplayerEngagementClaimableCount,
   getMultiplayerFirstCompletionBonuses,
+  getMultiplayerPendingInboxMails,
   getMultiplayerReturnTrack,
   getMultiplayerRegionalThreat,
   getMultiplayerWeeklyOath,
+  markMultiplayerSocialPingShown as markMultiplayerSocialPingShownState,
   normalizeMultiplayerEngagementState,
   recordMultiplayerEngagementEvent,
   rerollMultiplayerDailyContract as rerollMultiplayerDailyContractState,
+  shouldShowMultiplayerSocialPing,
   touchMultiplayerEngagement as touchMultiplayerEngagementState,
+  type MultiplayerBannerHuntView,
   type MultiplayerContractView,
+  type MultiplayerDailyStreakView,
   type MultiplayerEngagementEventInput,
   type MultiplayerEngagementEventInputKind,
   type MultiplayerEngagementState,
   type MultiplayerFirstCompletionBonusId,
   type MultiplayerFirstCompletionBonusView,
+  type MultiplayerInboxMail,
+  type MultiplayerReturnCtaView,
   type MultiplayerReturnTrackView,
   type MultiplayerWeeklyOathView,
 } from './multiplayerEngagement';
 import type { RegionalThreatView } from './multiplayerRegionalThreat';
 import {
+  bandForPlayerLevel,
+  getChapterTalent,
+  getChapterTalentsForBand,
+} from './chapterTalents';
+import {
   claimMultiplayerChronicleRank as claimMultiplayerChronicleRankState,
+  claimMultiplayerChronicleArchiveRank as claimMultiplayerChronicleArchiveRankState,
+  getMultiplayerChronicleArchiveView as getMultiplayerChronicleArchiveViewState,
   getMultiplayerChronicleView as getMultiplayerChronicleViewState,
+  normalizeMultiplayerChronicleState,
   syncMultiplayerChronicleEvents,
+  type MultiplayerChronicleArchiveView,
   type MultiplayerChronicleState,
   type MultiplayerChronicleView,
 } from './multiplayerChronicle';
+import {
+  claimMultiplayerReputationTier as claimMultiplayerReputationTierState,
+  getMultiplayerReputationView as getMultiplayerReputationViewState,
+  syncMultiplayerReputationEvents,
+  type MultiplayerReputationState,
+  type MultiplayerReputationView,
+  type ReputationFactionId,
+} from './multiplayerReputation';
+import {
+  claimMultiplayerDeed as claimMultiplayerDeedState,
+  countClaimedChronicleRanks,
+  getMultiplayerDeedsView as getMultiplayerDeedsViewState,
+  normalizeMultiplayerDeedsState,
+  type MultiplayerDeedsState,
+  type MultiplayerDeedsView,
+} from './multiplayerDeeds';
 
 export { CITY_QUESTS, QUEST_NPCS, STORY_CHAPTERS, getAllStoryQuestsSorted, getCityQuestTemplate, getRotatingCityQuests };
 export { TRAVEL_EVENT_CONTENT_COUNTS };
@@ -199,6 +239,8 @@ export interface EquipmentSocketBonus {
   upgradeLevel: number;
 }
 
+export type { EquipmentQualityLabel };
+
 export interface Equipment {
   id: string;
   name: string;
@@ -218,6 +260,12 @@ export interface Equipment {
   passive?: string; // Legendary equipment passive effect description
   gearSetId?: string;
   lootSource?: string;
+  /** Affix roll vs rarity base (typically 0.85–1.15; Lucky+ uses 1.0–1.15). */
+  rollMultiplier?: number;
+  /** Display quality derived from the affix roll — not a 5th rarity. */
+  qualityLabel?: EquipmentQualityLabel;
+  /** ~2% of drops; name ends with +, better roll floor. */
+  isLucky?: boolean;
 }
 
 export interface MinionStats {
@@ -546,6 +594,9 @@ export interface User {
   pvpRating?: PvpRatingState;
   multiplayerEngagement?: MultiplayerEngagementState;
   multiplayerChronicle?: MultiplayerChronicleState;
+  multiplayerReputation?: MultiplayerReputationState;
+  multiplayerDeeds?: MultiplayerDeedsState;
+  chapterTalentIds?: string[];
   townRecruitmentClaims?: TownRecruitmentClaim[];
 }
 
@@ -702,6 +753,15 @@ export const INVENTORY_ITEM_DEFINITIONS: Record<string, InventoryItemDefinition>
     useLabel: 'Drink',
     healthRestore: 35,
   },
+  'set-scrap': {
+    id: 'set-scrap',
+    name: 'Set Scrap',
+    kind: 'material',
+    rarity: 'rare',
+    description: 'Salvaged gear fragments used at the forge for socket work.',
+    icon: 'gem',
+    imagePath: '/assets/icons/rare-gem.png',
+  },
   'field-surgeon-kit': {
     id: 'field-surgeon-kit',
     name: 'Field Surgeon Kit',
@@ -803,6 +863,24 @@ export const INVENTORY_ITEM_DEFINITIONS: Record<string, InventoryItemDefinition>
     kind: 'quest',
     rarity: 'rare',
     description: 'A quest relic shard. Keep it for later chapter and dungeon hooks.',
+    icon: 'magic',
+    imagePath: '/assets/icons/magic.png',
+  },
+  'cathedral-silk': {
+    id: 'cathedral-silk',
+    name: 'Cathedral Silk',
+    kind: 'quest',
+    rarity: 'rare',
+    description: 'Moonfen-spun silk recovered from under Moonbridge. Bridge Bell Monks use it to reweave river wards.',
+    icon: 'magic',
+    imagePath: '/assets/icons/magic.png',
+  },
+  'drowned-tithe-ledger': {
+    id: 'drowned-tithe-ledger',
+    name: 'Drowned Tithe Ledger',
+    kind: 'quest',
+    rarity: 'rare',
+    description: 'A water-swollen ledger seized from Tollroad Goblin Cutters. Star Law needs every funded name inside.',
     icon: 'magic',
     imagePath: '/assets/icons/magic.png',
   },
@@ -1208,7 +1286,12 @@ function getPoiFootprintSize(type: POIType): { width: number; height: number } {
 }
 
 function isPreviousStoryQuestClaimed(user: User, quest: StoryQuestTemplate): boolean {
-  const ordered = getAllStoryQuestsSorted();
+  if (quest.track === 'side') {
+    if (!quest.unlockAfterQuestId) return true;
+    return Boolean(user.storyQuests?.some(item => item.questId === quest.unlockAfterQuestId && item.claimed));
+  }
+
+  const ordered = getAllStoryQuestsSorted().filter(item => item.track !== 'side');
   const index = ordered.findIndex(item => item.id === quest.id);
   if (index <= 0) return true;
   const previous = ordered[index - 1];
@@ -1700,8 +1783,18 @@ export function acceptCityQuest(questId: string, townName: string): { success: b
   const unlock = requireMultiplayerUnlock('city-contracts', currentUser);
   if (!unlock.allowed) return { success: false, error: unlock.error };
 
-  const quest = getRotatingCityQuests(townName).find(item => item.id === questId);
-  if (!quest) return { success: false, error: 'That contract is not on this city board right now.' };
+  const claimedStoryQuestIds = (currentUser.storyQuests || [])
+    .filter(progress => progress.claimed)
+    .map(progress => progress.questId);
+  const quest = getRotatingCityQuests(townName, Date.now(), 5, { claimedStoryQuestIds })
+    .find(item => item.id === questId)
+    || getCityQuestTemplate(questId);
+  if (!quest || quest.town !== townName) {
+    return { success: false, error: 'That contract is not on this city board right now.' };
+  }
+  if (quest.requiresClaimedQuestId && !claimedStoryQuestIds.includes(quest.requiresClaimedQuestId)) {
+    return { success: false, error: 'Seal the Moonwell chapter before this contract opens.' };
+  }
 
   const cityQuests = currentUser.cityQuests || [];
   const existing = cityQuests.find(item => item.questId === questId);
@@ -1747,7 +1840,7 @@ function buildQuestRewardSummary(
     ? [generateMinionDrop(0, rewards.minionTier, 1, playerLevel)].filter(Boolean) as MinionStack[]
     : [];
   const spellIds = normalizeSpellIds(rewards.spellIds);
-  const items = rewards.rareGems
+  const gemItems = rewards.rareGems
     ? [{
         id: 'rare-gem',
         name: 'Rare Gem',
@@ -1755,6 +1848,10 @@ function buildQuestRewardSummary(
         icon: 'gem',
       }]
     : [];
+  const grantedItems = (rewards.items || [])
+    .map(entry => makeInventoryItem(entry.itemId, entry.quantity))
+    .filter(item => item.quantity > 0);
+  const items = [...gemItems, ...grantedItems];
 
   return {
     gold: getBalancedQuestGold(rewards.gold || 0, playerLevel, source),
@@ -3740,8 +3837,171 @@ export function formatMinionInjuryTime(minion: Pick<MinionStack, 'injuredUntil'>
   const hours = Math.floor(totalMinutes / 60);
   const minutes = totalMinutes % 60;
   if (hours <= 0) return `${minutes}m`;
-  if (minutes <= 0) return `${hours}h`;
   return `${hours}h ${minutes}m`;
+}
+
+export function treatInjuredArmyAtWard(
+  now = Date.now(),
+): { success: boolean; treated: number; goldCost?: number; error?: string } {
+  const current = getCurrentUser();
+  if (!current) return { success: false, treated: 0, error: 'Not logged in.' };
+  const injured = (current.minions || []).filter(minion => isMinionInjured(minion, now));
+  if (injured.length === 0) return { success: false, treated: 0, error: 'No injured soldiers need the ward.' };
+  const goldCost = 25 + injured.length * 15;
+  if (current.gold < goldCost) return { success: false, treated: 0, error: `Need ${goldCost} gold for the injury ward.` };
+
+  const hasChaplain = (current.chapterTalentIds || []).includes('field-chaplain');
+  const removeRatio = hasChaplain ? 0.7 : 0.5;
+  const nextMinions = (current.minions || []).map(minion => {
+    if (!isMinionInjured(minion, now)) return minion;
+    const remaining = getMinionInjuryTimeRemaining(minion, now);
+    const nextUntil = now + Math.floor(remaining * (1 - removeRatio));
+    if (nextUntil <= now) {
+      const { injuredUntil: _removed, ...rest } = minion;
+      return rest;
+    }
+    return { ...minion, injuredUntil: nextUntil };
+  });
+
+  updateCurrentUser({
+    gold: current.gold - goldCost,
+    minions: nextMinions,
+    activityLog: pushActivityEntry(current.activityLog, {
+      id: `activity-injury-ward-${now}`,
+      type: 'quest',
+      title: 'Injury Ward',
+      source: 'Town Camp',
+      completedAt: now,
+      description: `Treated ${injured.length} injured soldier${injured.length === 1 ? '' : 's'}.`,
+      rewards: { gold: -goldCost },
+    }),
+  });
+  return { success: true, treated: injured.length, goldCost };
+}
+
+export function salvageEquipmentToScrap(
+  equipmentId: string,
+  now = Date.now(),
+): { success: boolean; scrapGained?: number; error?: string } {
+  const current = getCurrentUser();
+  if (!current) return { success: false, error: 'Not logged in.' };
+  const item = (current.equipment || []).find(candidate => candidate.id === equipmentId);
+  if (!item) return { success: false, error: 'Equipment was not found.' };
+  if (Object.values(current.equippedSlots || {}).includes(equipmentId)) {
+    return { success: false, error: 'Unequip the item before salvaging.' };
+  }
+  const rarityScrap: Record<EquipmentRarity, number> = {
+    decent: 1,
+    rare: 2,
+    epic: 3,
+    legendary: 4,
+  };
+  const forgeBonus = (current.chapterTalentIds || []).includes('forge-adept') ? 1 : 0;
+  const scrapGained = (rarityScrap[item.rarity] || 1) + forgeBonus;
+  const inventoryResult = addInventoryItemsWithLimit(
+    current.inventory || [],
+    [makeInventoryItem('set-scrap', scrapGained)],
+    getInventorySlotCapacity(current),
+  );
+  if (inventoryResult.acceptedItems.length === 0) {
+    return { success: false, error: 'Inventory is full; free a slot for set scrap.' };
+  }
+  updateCurrentUser({
+    equipment: (current.equipment || []).filter(candidate => candidate.id !== equipmentId),
+    inventory: inventoryResult.inventory,
+    activityLog: pushActivityEntry(current.activityLog, {
+      id: `activity-salvage-${equipmentId}-${now}`,
+      type: 'quest',
+      title: `Salvaged ${item.name}`,
+      source: 'Forge Salvage',
+      completedAt: now,
+      description: `Gained ${scrapGained} set scrap.`,
+      rewards: { items: inventoryResult.acceptedItems },
+    }),
+  });
+  return { success: true, scrapGained };
+}
+
+export function spendSetScrapOnSocket(
+  equipmentId: string,
+  bonusId: string,
+  now = Date.now(),
+): { success: boolean; error?: string } {
+  const current = getCurrentUser();
+  if (!current) return { success: false, error: 'Not logged in.' };
+  const scrapOwned = (current.inventory || []).find(item => item.id === 'set-scrap')?.quantity || 0;
+  if (scrapOwned < 2) return { success: false, error: 'Need 2 set scrap to feed a socket.' };
+  const item = (current.equipment || []).find(candidate => candidate.id === equipmentId);
+  if (!item?.socketBonuses?.length) return { success: false, error: 'That gear has no sockets to feed.' };
+  const bonus = item.socketBonuses.find(entry => entry.id === bonusId);
+  if (!bonus) return { success: false, error: 'Socket bonus was not found.' };
+  if (bonus.upgradeLevel >= getEquipmentSocketLimit(item)) {
+    return { success: false, error: 'That socket is already at its limit.' };
+  }
+
+  const nextInventory = (current.inventory || []).map(entry => (
+    entry.id === 'set-scrap'
+      ? { ...entry, quantity: entry.quantity - 2 }
+      : entry
+  )).filter(entry => entry.quantity > 0);
+
+  updateCurrentUser({
+    inventory: nextInventory,
+    equipment: (current.equipment || []).map(candidate => (
+      candidate.id === equipmentId
+        ? {
+            ...candidate,
+            socketBonuses: (candidate.socketBonuses || []).map(entry => (
+              entry.id === bonusId
+                ? { ...entry, upgradeLevel: entry.upgradeLevel + 1 }
+                : entry
+            )),
+          }
+        : candidate
+    )),
+    activityLog: pushActivityEntry(current.activityLog, {
+      id: `activity-scrap-socket-${equipmentId}-${bonusId}-${now}`,
+      type: 'quest',
+      title: 'Forge Scrap Feed',
+      source: 'Blacksmith',
+      completedAt: now,
+      description: `Spent 2 set scrap to raise a socket on ${item.name}.`,
+      rewards: {},
+    }),
+  });
+  return { success: true };
+}
+
+export function chooseChapterTalent(
+  talentId: string,
+  now = Date.now(),
+): { success: boolean; error?: string } {
+  const current = getCurrentUser();
+  if (!current) return { success: false, error: 'Not logged in.' };
+  const talent = getChapterTalent(talentId);
+  if (!talent) return { success: false, error: 'Unknown chapter talent.' };
+  const band = bandForPlayerLevel(current.stats.level);
+  if (!band || talent.band !== band) {
+    return { success: false, error: 'That talent is not available for your current chapter band.' };
+  }
+  const owned = current.chapterTalentIds || [];
+  const bandOwned = getChapterTalentsForBand(band).some(option => owned.includes(option.id));
+  if (bandOwned) return { success: false, error: 'You already chose a talent for this chapter band.' };
+  if (owned.includes(talentId)) return { success: false, error: 'Talent already owned.' };
+
+  updateCurrentUser({
+    chapterTalentIds: [...owned, talentId],
+    activityLog: pushActivityEntry(current.activityLog, {
+      id: `activity-chapter-talent-${talentId}-${now}`,
+      type: 'quest',
+      title: talent.name,
+      source: 'Chapter Talent',
+      completedAt: now,
+      description: talent.effect,
+      rewards: {},
+    }),
+  });
+  return { success: true };
 }
 
 function normalizeMinionRoster(minions: MinionStack[] | undefined): MinionStack[] {
@@ -5589,6 +5849,8 @@ function recordUserMultiplayerEvent(
 ): {
   multiplayerEngagement: MultiplayerEngagementState;
   multiplayerChronicle: MultiplayerChronicleState;
+  multiplayerReputation: MultiplayerReputationState;
+  multiplayerDeeds: MultiplayerDeedsState;
 } {
   const multiplayerEngagement = recordMultiplayerEngagementEvent(
     baseEngagement,
@@ -5596,12 +5858,20 @@ function recordUserMultiplayerEvent(
     event,
     now,
   );
+  const multiplayerChronicle = syncMultiplayerChronicleEvents(
+    user.multiplayerChronicle,
+    multiplayerEngagement.events,
+  );
+  const multiplayerReputation = syncMultiplayerReputationEvents(
+    user.multiplayerReputation,
+    multiplayerEngagement.events,
+  );
+  const multiplayerDeeds = normalizeMultiplayerDeedsState(user.multiplayerDeeds);
   return {
     multiplayerEngagement,
-    multiplayerChronicle: syncMultiplayerChronicleEvents(
-      user.multiplayerChronicle,
-      multiplayerEngagement.events,
-    ),
+    multiplayerChronicle,
+    multiplayerReputation,
+    multiplayerDeeds,
   };
 }
 
@@ -5612,6 +5882,10 @@ export interface MultiplayerEngagementView {
   returnTrack: MultiplayerReturnTrackView;
   regionalThreat: RegionalThreatView;
   firstCompletionBonuses: MultiplayerFirstCompletionBonusView[];
+  inboxMails: MultiplayerInboxMail[];
+  dailyStreak: MultiplayerDailyStreakView;
+  bannerHunt: MultiplayerBannerHuntView;
+  returnCta: MultiplayerReturnCtaView | null;
   claimableCount: number;
 }
 
@@ -5642,18 +5916,66 @@ export function getMultiplayerEngagementView(
   );
   const firstCompletionBonuses = getMultiplayerFirstCompletionBonuses(state, user.username, playerLevel, now)
     .map(bonus => scaleEngagementReward(bonus, playerLevel, 'pve'));
+  const dailyContracts = getMultiplayerDailyContracts(state, user.username, now)
+    .map(contract => scaleEngagementReward(contract, playerLevel, 'contract'));
+  const weeklyOath = scaleEngagementReward(
+    getMultiplayerWeeklyOath(state, user.username, now, playerLevel),
+    playerLevel,
+    'contract',
+  );
+  const inboxMails = getMultiplayerPendingInboxMails(state, user.username, now)
+    .map(mail => scaleEngagementReward(mail, playerLevel, 'contract'));
+  const dailyStreak = getMultiplayerDailyStreakView(state, user.username, now);
+  const bannerHunt = getMultiplayerBannerHunt(state, user.username, now);
+  const activeStory = getAllStoryQuestsSorted().find(story => {
+    const status = getStoryQuestStatus(user, story.id);
+    return status.unlocked && !status.claimed;
+  }) || null;
+  const openOrder = dailyContracts.find(contract => !contract.claimed);
+  let returnCta: MultiplayerReturnCtaView | null = null;
+  if (inboxMails[0]) {
+    returnCta = {
+      kind: 'inbox',
+      title: inboxMails[0].title,
+      detail: 'Claim your courier packet before the road calls elsewhere.',
+    };
+  } else if (bannerHunt.complete && !bannerHunt.claimed) {
+    returnCta = {
+      kind: 'hunt',
+      title: bannerHunt.title,
+      detail: `Claim the cosmetic ${bannerHunt.cosmeticLabel}.`,
+    };
+  } else if (weeklyOath.complete && !weeklyOath.claimed) {
+    returnCta = {
+      kind: 'oath',
+      title: weeklyOath.title,
+      detail: 'Your weekly oath reward is ready to claim.',
+    };
+  } else if (openOrder && !openOrder.complete) {
+    returnCta = {
+      kind: 'order',
+      title: openOrder.title,
+      detail: `One fight left on today's board: ${openOrder.progress}/${openOrder.target}.`,
+    };
+  } else if (activeStory) {
+    returnCta = {
+      kind: 'story',
+      title: activeStory.name,
+      detail: activeStory.lore.slice(0, 140) || 'Continue the chapter from your journal.',
+    };
+  }
+
   return {
     state,
-    dailyContracts: getMultiplayerDailyContracts(state, user.username, now)
-      .map(contract => scaleEngagementReward(contract, playerLevel, 'contract')),
-    weeklyOath: scaleEngagementReward(
-      getMultiplayerWeeklyOath(state, user.username, now, playerLevel),
-      playerLevel,
-      'contract',
-    ),
+    dailyContracts,
+    weeklyOath,
     returnTrack: getMultiplayerReturnTrack(state, user.username, now),
     regionalThreat,
     firstCompletionBonuses,
+    inboxMails,
+    dailyStreak,
+    bannerHunt,
+    returnCta,
     claimableCount: getMultiplayerEngagementClaimableCount(state, user.username, now)
       + (regionalThreat.complete && !regionalThreat.claimed ? 1 : 0)
       + firstCompletionBonuses.filter(bonus => bonus.complete && !bonus.claimed).length,
@@ -5667,6 +5989,44 @@ export function getMultiplayerChronicleView(
   if (!user) return null;
   const engagement = normalizeMultiplayerEngagementState(user.multiplayerEngagement, user.username, now);
   return getMultiplayerChronicleViewState(user.multiplayerChronicle, engagement.events);
+}
+
+export function getMultiplayerChronicleArchiveView(
+  user: User | null = getCurrentUser(),
+  now = Date.now(),
+): MultiplayerChronicleArchiveView | null {
+  if (!user) return null;
+  const engagement = normalizeMultiplayerEngagementState(user.multiplayerEngagement, user.username, now);
+  const unlocked = Boolean(user.storyQuests?.some(progress => (
+    progress.questId === 'story-20-glass-sealed' && progress.claimed
+  )));
+  return getMultiplayerChronicleArchiveViewState(user.multiplayerChronicle, engagement.events, unlocked);
+}
+
+export function getMultiplayerReputationView(
+  user: User | null = getCurrentUser(),
+  now = Date.now(),
+): MultiplayerReputationView | null {
+  if (!user) return null;
+  const engagement = normalizeMultiplayerEngagementState(user.multiplayerEngagement, user.username, now);
+  return getMultiplayerReputationViewState(
+    user.multiplayerReputation,
+    engagement.events,
+    user.stats.level,
+  );
+}
+
+export function getMultiplayerDeedsView(
+  user: User | null = getCurrentUser(),
+  now = Date.now(),
+): MultiplayerDeedsView | null {
+  if (!user) return null;
+  const engagement = normalizeMultiplayerEngagementState(user.multiplayerEngagement, user.username, now);
+  const chronicle = normalizeMultiplayerChronicleState(user.multiplayerChronicle);
+  return getMultiplayerDeedsViewState(user.multiplayerDeeds, engagement.events, {
+    claimedChronicleRanks: countClaimedChronicleRanks(chronicle.claimedRankIds),
+    claimedStoryQuests: (user.storyQuests || []).filter(progress => progress.claimed).length,
+  });
 }
 
 export function claimCurrentMultiplayerChronicleRank(
@@ -5740,6 +6100,191 @@ export function claimCurrentMultiplayerChronicleRank(
   return { success: true, rewards };
 }
 
+export function claimCurrentMultiplayerChronicleArchiveRank(
+  rankNumber: number,
+  now = Date.now(),
+): { success: boolean; rewards?: RewardSummary; error?: string } {
+  const currentUser = getCurrentUser();
+  if (!currentUser) return { success: false, error: 'Not logged in.' };
+  const engagement = normalizeMultiplayerEngagementState(
+    currentUser.multiplayerEngagement,
+    currentUser.username,
+    now,
+  );
+  const unlocked = Boolean(currentUser.storyQuests?.some(progress => (
+    progress.questId === 'story-20-glass-sealed' && progress.claimed
+  )));
+  const result = claimMultiplayerChronicleArchiveRankState(
+    currentUser.multiplayerChronicle,
+    engagement.events,
+    rankNumber,
+    unlocked,
+  );
+  if (!result.success || !result.rank) return { success: false, error: result.error };
+
+  const gold = result.rank.rewards.reduce((total, reward) => total + (reward.gold || 0), 0);
+  const rareGems = result.rank.rewards.reduce((total, reward) => total + (reward.rareGems || 0), 0);
+  const rewardItems = result.rank.rewards.flatMap(reward => (
+    reward.itemId && reward.itemQuantity
+      ? [makeInventoryItem(reward.itemId, reward.itemQuantity)]
+      : []
+  ));
+  if (rareGems > 0) rewardItems.push(makeInventoryItem('rare-gem', rareGems));
+  const inventoryResult = addInventoryItemsWithLimit(
+    currentUser.inventory || [],
+    rewardItems,
+    getInventorySlotCapacity(currentUser),
+  );
+  const acceptedRareGems = inventoryResult.acceptedItems
+    .filter(item => item.id === 'rare-gem')
+    .reduce((total, item) => total + item.quantity, 0);
+  const acceptedItems = inventoryResult.acceptedItems.filter(item => item.id !== 'rare-gem');
+  const rewards: RewardSummary = {
+    gold: gold || undefined,
+    rareGems: acceptedRareGems || undefined,
+    items: acceptedItems.length > 0 ? acceptedItems : undefined,
+  };
+
+  updateCurrentUser({
+    multiplayerChronicle: result.state,
+    gold: currentUser.gold + gold,
+    inventory: inventoryResult.inventory,
+    activityLog: pushActivityEntry(currentUser.activityLog, {
+      id: `activity-chronicle-archive-${result.rank.rank}-${now}`,
+      type: 'quest',
+      title: `Memorial Rank ${result.rank.rank}: ${result.rank.title}`,
+      source: 'Glass Road Memorial',
+      completedAt: now,
+      rewards,
+      description: 'Archive Chronicle rank reward claimed.',
+    }),
+  });
+  return { success: true, rewards };
+}
+
+export function claimCurrentMultiplayerReputationTier(
+  factionId: ReputationFactionId,
+  tierNumber: number,
+  now = Date.now(),
+): { success: boolean; rewards?: RewardSummary; error?: string } {
+  const currentUser = getCurrentUser();
+  if (!currentUser) return { success: false, error: 'Not logged in.' };
+  const engagement = normalizeMultiplayerEngagementState(
+    currentUser.multiplayerEngagement,
+    currentUser.username,
+    now,
+  );
+  const result = claimMultiplayerReputationTierState(
+    currentUser.multiplayerReputation,
+    engagement.events,
+    factionId,
+    tierNumber,
+    currentUser.stats.level,
+  );
+  if (!result.success || !result.tier) return { success: false, error: result.error };
+
+  const gold = result.tier.rewards.reduce((total, reward) => total + (reward.gold || 0), 0);
+  const rareGems = result.tier.rewards.reduce((total, reward) => total + (reward.rareGems || 0), 0);
+  const rewardItems = result.tier.rewards.flatMap(reward => (
+    reward.itemId && reward.itemQuantity
+      ? [makeInventoryItem(reward.itemId, reward.itemQuantity)]
+      : []
+  ));
+  if (rareGems > 0) rewardItems.push(makeInventoryItem('rare-gem', rareGems));
+  const spellIds = result.tier.rewards.flatMap(reward => reward.spellIds || []);
+  const spellUnlock = applySpellUnlocks(currentUser, spellIds);
+  const inventoryResult = addInventoryItemsWithLimit(
+    currentUser.inventory || [],
+    rewardItems,
+    getInventorySlotCapacity(currentUser),
+  );
+  const acceptedRareGems = inventoryResult.acceptedItems
+    .filter(item => item.id === 'rare-gem')
+    .reduce((total, item) => total + item.quantity, 0);
+  const acceptedItems = inventoryResult.acceptedItems.filter(item => item.id !== 'rare-gem');
+  const rewards: RewardSummary = {
+    gold: gold || undefined,
+    rareGems: acceptedRareGems || undefined,
+    items: acceptedItems.length > 0 ? acceptedItems : undefined,
+    spellIds: spellUnlock.unlockedSpellIds.length > 0 ? spellUnlock.unlockedSpellIds : undefined,
+  };
+
+  updateCurrentUser({
+    multiplayerReputation: result.state,
+    gold: currentUser.gold + gold,
+    inventory: inventoryResult.inventory,
+    knownSpellIds: spellUnlock.knownSpellIds,
+    activityLog: pushActivityEntry(currentUser.activityLog, {
+      id: `activity-reputation-${factionId}-${result.tier.tier}-${now}`,
+      type: 'quest',
+      title: `${result.tier.title}`,
+      source: 'Faction Reputation',
+      completedAt: now,
+      rewards,
+      description: `Claimed ${factionId} reputation tier ${result.tier.tier}.`,
+    }),
+  });
+  return { success: true, rewards };
+}
+
+export function claimCurrentMultiplayerDeed(
+  deedId: string,
+  now = Date.now(),
+): { success: boolean; rewards?: RewardSummary; error?: string } {
+  const currentUser = getCurrentUser();
+  if (!currentUser) return { success: false, error: 'Not logged in.' };
+  const engagement = normalizeMultiplayerEngagementState(
+    currentUser.multiplayerEngagement,
+    currentUser.username,
+    now,
+  );
+  const chronicle = normalizeMultiplayerChronicleState(currentUser.multiplayerChronicle);
+  const result = claimMultiplayerDeedState(
+    currentUser.multiplayerDeeds,
+    engagement.events,
+    {
+      claimedChronicleRanks: countClaimedChronicleRanks(chronicle.claimedRankIds),
+      claimedStoryQuests: (currentUser.storyQuests || []).filter(progress => progress.claimed).length,
+    },
+    deedId,
+  );
+  if (!result.success || !result.deed) return { success: false, error: result.error };
+
+  const gold = result.deed.rewards.gold || 0;
+  const rareGems = result.deed.rewards.rareGems || 0;
+  const rewardItems = rareGems > 0 ? [makeInventoryItem('rare-gem', rareGems)] : [];
+  const inventoryResult = addInventoryItemsWithLimit(
+    currentUser.inventory || [],
+    rewardItems,
+    getInventorySlotCapacity(currentUser),
+  );
+  const acceptedRareGems = inventoryResult.acceptedItems
+    .filter(item => item.id === 'rare-gem')
+    .reduce((total, item) => total + item.quantity, 0);
+  const rewards: RewardSummary = {
+    gold: gold || undefined,
+    rareGems: acceptedRareGems || undefined,
+  };
+
+  updateCurrentUser({
+    multiplayerDeeds: result.state,
+    gold: currentUser.gold + gold,
+    inventory: inventoryResult.inventory,
+    activityLog: pushActivityEntry(currentUser.activityLog, {
+      id: `activity-deed-${result.deed.id}-${now}`,
+      type: 'quest',
+      title: result.deed.title,
+      source: 'Campaign Deeds',
+      completedAt: now,
+      rewards,
+      description: result.deed.rewards.entitlement
+        ? `Unlocked ${result.deed.rewards.entitlement.label}.`
+        : 'Deed reward claimed.',
+    }),
+  });
+  return { success: true, rewards };
+}
+
 export function touchCurrentMultiplayerEngagement(now = Date.now()): MultiplayerEngagementState | null {
   const currentUser = getCurrentUser();
   if (!currentUser) return null;
@@ -5795,14 +6340,17 @@ export function claimCurrentMultiplayerDailyContract(
   );
   if (!result.success || !result.contract) return { success: false, error: result.error };
 
+  const streak = getMultiplayerDailyStreakView(result.state, currentUser.username, now);
   const scaledReward = scaleMultiplayerRewards(
     { gold: result.contract.rewardGold, exp: result.contract.rewardExp },
     currentUser.stats.level,
     'contract',
   );
+  const streakGold = Math.round(scaledReward.gold * (streak.bonusPercent / 100));
+  const streakExp = Math.round(scaledReward.exp * (streak.bonusPercent / 100));
   const rewards: RewardSummary = {
-    gold: scaledReward.gold,
-    exp: scaledReward.exp,
+    gold: scaledReward.gold + streakGold,
+    exp: scaledReward.exp + streakExp,
   };
   const engagementUpdates = recordUserMultiplayerEvent(
     currentUser,
@@ -5818,8 +6366,8 @@ export function claimCurrentMultiplayerDailyContract(
   );
   updateCurrentUser({
     ...engagementUpdates,
-    gold: currentUser.gold + scaledReward.gold,
-    exp: currentUser.exp + scaledReward.exp,
+    gold: currentUser.gold + rewards.gold!,
+    exp: currentUser.exp + rewards.exp!,
     activityLog: pushActivityEntry(currentUser.activityLog, {
       id: `activity-daily-contract-${result.contract.id}-${now}`,
       type: 'quest',
@@ -5827,7 +6375,9 @@ export function claimCurrentMultiplayerDailyContract(
       source: 'Daily Order Board',
       completedAt: now,
       rewards,
-      description: 'Daily multiplayer order claimed.',
+      description: streak.bonusPercent > 0
+        ? `Daily multiplayer order claimed (+${streak.bonusPercent}% streak).`
+        : 'Daily multiplayer order claimed.',
     }),
   });
   levelUp();
@@ -6010,6 +6560,126 @@ export function dismissCurrentMultiplayerReturningBriefing(now = Date.now()): vo
       now,
     ),
   });
+}
+
+export function claimCurrentMultiplayerInboxMail(
+  mailId: string,
+  now = Date.now(),
+): { success: boolean; rewards?: RewardSummary; error?: string } {
+  const currentUser = getCurrentUser();
+  if (!currentUser) return { success: false, error: 'Not logged in.' };
+  const result = claimMultiplayerInboxMailState(
+    currentUser.multiplayerEngagement,
+    currentUser.username,
+    mailId,
+    now,
+  );
+  if (!result.success || !result.mail) return { success: false, error: result.error };
+
+  const scaledReward = scaleMultiplayerRewards(
+    { gold: result.mail.rewardGold, exp: result.mail.rewardExp },
+    currentUser.stats.level,
+    'contract',
+  );
+  const rewardItems = result.mail.rewardItemId
+    ? [makeInventoryItem(result.mail.rewardItemId, result.mail.rewardItemQuantity || 1)]
+    : [];
+  const inventoryResult = addInventoryItemsWithLimit(
+    currentUser.inventory || [],
+    rewardItems,
+    getInventorySlotCapacity(currentUser),
+  );
+  const rewards: RewardSummary = {
+    gold: scaledReward.gold,
+    exp: scaledReward.exp,
+    items: inventoryResult.acceptedItems.length > 0 ? inventoryResult.acceptedItems : undefined,
+  };
+  updateCurrentUser({
+    multiplayerEngagement: result.state,
+    gold: currentUser.gold + scaledReward.gold,
+    exp: currentUser.exp + scaledReward.exp,
+    inventory: inventoryResult.inventory,
+    activityLog: pushActivityEntry(currentUser.activityLog, {
+      id: `activity-inbox-${result.mail.id}-${now}`,
+      type: 'quest',
+      title: result.mail.title,
+      source: 'Login Inbox',
+      completedAt: now,
+      rewards,
+      description: result.mail.body,
+    }),
+  });
+  levelUp();
+  return { success: true, rewards };
+}
+
+export function claimCurrentMultiplayerBannerHunt(
+  now = Date.now(),
+): { success: boolean; entitlementLabel?: string; error?: string } {
+  const currentUser = getCurrentUser();
+  if (!currentUser) return { success: false, error: 'Not logged in.' };
+  const result = claimMultiplayerBannerHuntState(
+    currentUser.multiplayerEngagement,
+    currentUser.username,
+    now,
+  );
+  if (!result.success) return { success: false, error: result.error };
+
+  const entitlement = {
+    id: `banner-hunt-${result.hunt.id}`,
+    kind: 'banner' as const,
+    label: result.hunt.cosmeticLabel,
+    description: `${result.hunt.title} cosmetic honor. No combat power.`,
+  };
+  const chronicle = normalizeMultiplayerChronicleState(currentUser.multiplayerChronicle);
+  const entitlements = chronicle.entitlements.some(item => item.id === entitlement.id)
+    ? chronicle.entitlements
+    : [...chronicle.entitlements, entitlement];
+
+  updateCurrentUser({
+    multiplayerEngagement: result.state,
+    multiplayerChronicle: { ...chronicle, entitlements },
+    activityLog: pushActivityEntry(currentUser.activityLog, {
+      id: `activity-banner-hunt-${result.hunt.id}-${now}`,
+      type: 'quest',
+      title: result.hunt.title,
+      source: 'Banner Hunt',
+      completedAt: now,
+      description: `Claimed cosmetic: ${result.hunt.cosmeticLabel}.`,
+      rewards: {},
+    }),
+  });
+  return { success: true, entitlementLabel: result.hunt.cosmeticLabel };
+}
+
+export function consumeCurrentMultiplayerSocialPing(now = Date.now()): boolean {
+  const currentUser = getCurrentUser();
+  if (!currentUser) return false;
+  if (!shouldShowMultiplayerSocialPing(currentUser.multiplayerEngagement, currentUser.username, now)) {
+    return false;
+  }
+  const friends = getSocialState(currentUser).friends || [];
+  const acceptedFriends = friends.filter(friend => friend.status === 'accepted');
+  const party = getSocialState(currentUser).party;
+  const onlineNames = new Set(
+    getUsers()
+      .filter(candidate => candidate.username.toLowerCase() !== currentUser.username.toLowerCase())
+      .map(candidate => candidate.username.toLowerCase()),
+  );
+  const hasOnlineAlly = acceptedFriends.some(friend => onlineNames.has(friend.username.toLowerCase()))
+    || Boolean(party?.memberUsernames.some(name => (
+      name.toLowerCase() !== currentUser.username.toLowerCase()
+      && onlineNames.has(name.toLowerCase())
+    )));
+  if (!hasOnlineAlly) return false;
+  updateCurrentUser({
+    multiplayerEngagement: markMultiplayerSocialPingShownState(
+      currentUser.multiplayerEngagement,
+      currentUser.username,
+      now,
+    ),
+  });
+  return true;
 }
 
 export function logout(): void {
@@ -6631,7 +7301,11 @@ export function checkJobsComplete(): void {
       const workElapsed = now - firstJob.travelCompleteTime;
       if (workElapsed >= firstJob.workDuration) {
         // Job complete! Give rewards
-        goldEarned += firstJob.rewards.gold;
+        let jobGold = firstJob.rewards.gold;
+        if ((currentUser.chapterTalentIds || []).includes('road-quartermaster')) {
+          jobGold = Math.round(jobGold * 1.08);
+        }
+        goldEarned += jobGold;
         const restedBonus = consumeMultiplayerRestedJobBonus(
           currentUser.multiplayerEngagement,
           currentUser.username,
@@ -6772,6 +7446,8 @@ export function checkJobsComplete(): void {
       : {
           multiplayerEngagement: currentUser.multiplayerEngagement,
           multiplayerChronicle: currentUser.multiplayerChronicle,
+          multiplayerReputation: currentUser.multiplayerReputation,
+          multiplayerDeeds: currentUser.multiplayerDeeds,
         };
 
     updateCurrentUser({
@@ -7004,49 +7680,25 @@ export function generateEquipment(
     ? capEquipmentRarityForLevel(forcedRarity, playerLevel)
     : rollJobEquipmentRarity(jobDuration, playerLevel, dropBonus);
   if (!rarity) return null;
-  
+
   // Random equipment slot
   const slots: EquipmentSlot[] = ['sword', 'shield', 'armor', 'armor-pants', 'boots', 'gloves', 'helmet'];
   const slot = slots[Math.floor(Math.random() * slots.length)];
-  
-  // Generate stats based on rarity
+  const affix = rollEquipmentAffix();
+  const baseName = `${rarity.charAt(0).toUpperCase() + rarity.slice(1)} ${slot.split('-').map(s => s.charAt(0).toUpperCase() + s.slice(1)).join(' ')}`;
+
   const equipment: Equipment = {
     id: `${slot}-${rarity}-${Date.now()}-${Math.random()}`,
-    name: `${rarity.charAt(0).toUpperCase() + rarity.slice(1)} ${slot.split('-').map(s => s.charAt(0).toUpperCase() + s.slice(1)).join(' ')}`,
+    name: applyLuckyNameSuffix(baseName, affix.isLucky),
     slot,
     rarity,
-    stats: {},
+    stats: buildRolledEquipmentStats(rarity, slot, affix.rollMultiplier),
     socketBonuses: [],
+    rollMultiplier: affix.rollMultiplier,
+    ...(affix.qualityLabel ? { qualityLabel: affix.qualityLabel } : {}),
+    ...(affix.isLucky ? { isLucky: true } : {}),
   };
-  
-  // Stat ranges by rarity
-  const statRanges = {
-    decent: { min: 1, max: 3 },
-    rare: { min: 3, max: 6 },
-    epic: { min: 6, max: 10 },
-    legendary: { min: 10, max: 15 },
-  };
-  
-  const range = statRanges[rarity];
-  
-  // Assign stats based on equipment type
-  if (slot === 'sword') {
-    equipment.stats.armyPower = Math.floor(Math.random() * (range.max - range.min + 1)) + range.min;
-  } else if (slot === 'shield') {
-    equipment.stats.defensivePower = Math.floor(Math.random() * (range.max - range.min + 1)) + range.min;
-  } else if (slot === 'armor') {
-    equipment.stats.defensivePower = Math.floor(Math.random() * (range.max - range.min + 1)) + range.min;
-    equipment.stats.maxHealth = (Math.floor(Math.random() * (range.max - range.min + 1)) + range.min) * 5;
-  } else if (slot === 'armor-pants') {
-    equipment.stats.defensivePower = Math.floor(Math.random() * (range.max - range.min + 1)) + range.min;
-  } else if (slot === 'boots') {
-    equipment.stats.morale = Math.floor(Math.random() * (range.max - range.min + 1)) + range.min;
-  } else if (slot === 'gloves') {
-    equipment.stats.armyPower = Math.floor(Math.random() * (range.max - range.min + 1)) + range.min;
-  } else if (slot === 'helmet') {
-    equipment.stats.spellPower = Math.floor(Math.random() * (range.max - range.min + 1)) + range.min;
-  }
-  
+
   // Legendary passive effects
   if (rarity === 'legendary') {
     const passives = [
@@ -7056,7 +7708,7 @@ export function generateEquipment(
     ];
     equipment.passive = passives[Math.floor(Math.random() * passives.length)];
   }
-  
+
   return equipment;
 }
 
@@ -7728,12 +8380,16 @@ export function recordPvpDuelOutcome(
         pvpRating: users[winnerIndex].pvpRating,
         multiplayerEngagement: users[winnerIndex].multiplayerEngagement,
         multiplayerChronicle: users[winnerIndex].multiplayerChronicle,
+        multiplayerReputation: users[winnerIndex].multiplayerReputation,
+        multiplayerDeeds: users[winnerIndex].multiplayerDeeds,
       });
     } else if (currentKey === loserKey) {
       updateCurrentUser({
         pvpRating: users[loserIndex].pvpRating,
         multiplayerEngagement: users[loserIndex].multiplayerEngagement,
         multiplayerChronicle: users[loserIndex].multiplayerChronicle,
+        multiplayerReputation: users[loserIndex].multiplayerReputation,
+        multiplayerDeeds: users[loserIndex].multiplayerDeeds,
       });
     }
   }
@@ -7859,6 +8515,8 @@ export function recordCoopRaidOutcome(
     equipment: equipmentResult.equipment,
     multiplayerEngagement: engagementUser.multiplayerEngagement,
     multiplayerChronicle: engagementUser.multiplayerChronicle,
+    multiplayerReputation: engagementUser.multiplayerReputation,
+    multiplayerDeeds: engagementUser.multiplayerDeeds,
     activityLog: pushActivityEntry(user.activityLog, {
       id: `activity-coop-raid-${normalizedRaidId}-${usernameKey}`,
       type: 'battle',
@@ -7891,6 +8549,8 @@ export function recordCoopRaidOutcome(
       activityLog: nextUser.activityLog,
       multiplayerEngagement: nextUser.multiplayerEngagement,
       multiplayerChronicle: nextUser.multiplayerChronicle,
+      multiplayerReputation: nextUser.multiplayerReputation,
+      multiplayerDeeds: nextUser.multiplayerDeeds,
     });
   }
 

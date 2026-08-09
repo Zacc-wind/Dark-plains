@@ -42,9 +42,10 @@ export const MULTIPLAYER_TUTORIAL_CHANGE_EVENT = 'wizardy:multiplayer-tutorial-c
 export const MULTIPLAYER_FIND_WORK_EVENT = 'wizardy:multiplayer-find-work';
 
 export const MULTIPLAYER_TUTORIAL_CALLOUTS_BY_STORY: Record<string, MultiplayerTutorialCalloutId[]> = {
-  'story-01-first-banner': ['jobs-open', 'job-start'],
-  'story-02-candle-road': ['harborview-travel'],
-  'story-03-lost-apprentice': ['marshal-orren-contact'],
+  // Early jobs/travel teaching lives in story dialogue; spotlights are failsafe for first fight only.
+  'story-01-first-banner': [],
+  'story-02-candle-road': [],
+  'story-03-lost-apprentice': [],
   'story-04-river-law': [
     'enemy-risk',
     'formation-confirm',
@@ -52,6 +53,30 @@ export const MULTIPLAYER_TUTORIAL_CALLOUTS_BY_STORY: Record<string, MultiplayerT
     'battle-result-claim',
   ],
 };
+
+/** Failsafe-only: story dialogue teaches jobs/travel; keep battle callouts for Trial by Steel. */
+export const MULTIPLAYER_TUTORIAL_FAILSAFE_CALLOUT_IDS: MultiplayerTutorialCalloutId[] = [
+  'enemy-risk',
+  'formation-confirm',
+  'commander-loss-warning',
+  'battle-result-claim',
+];
+
+export function getNextMultiplayerTutorialCallout(
+  username: string | null | undefined,
+  activeStoryQuestId?: string | null,
+): MultiplayerTutorialCalloutId | null {
+  const progress = readMultiplayerTutorialProgress(username);
+  if (!username || progress.skipped) return null;
+  const candidates = activeStoryQuestId === undefined
+    ? MULTIPLAYER_TUTORIAL_FAILSAFE_CALLOUT_IDS
+    : activeStoryQuestId
+      ? (MULTIPLAYER_TUTORIAL_CALLOUTS_BY_STORY[activeStoryQuestId] || []).filter(id => (
+        MULTIPLAYER_TUTORIAL_FAILSAFE_CALLOUT_IDS.includes(id)
+      ))
+      : [];
+  return candidates.find(calloutId => !progress.completedCalloutIds.includes(calloutId)) || null;
+}
 
 export function normalizeMultiplayerTutorialProgress(
   progress: Partial<MultiplayerTutorialProgress> | null | undefined,
@@ -130,20 +155,6 @@ export function completeMultiplayerUnlockDialogue(
     completedUnlockDialogueIds: [...(current.completedUnlockDialogueIds || []), dialogueId],
     updatedAt: Date.now(),
   });
-}
-
-export function getNextMultiplayerTutorialCallout(
-  username: string | null | undefined,
-  activeStoryQuestId?: string | null,
-): MultiplayerTutorialCalloutId | null {
-  const progress = readMultiplayerTutorialProgress(username);
-  if (!username || progress.skipped) return null;
-  const candidates = activeStoryQuestId === undefined
-    ? MULTIPLAYER_TUTORIAL_CALLOUT_IDS
-    : activeStoryQuestId
-      ? MULTIPLAYER_TUTORIAL_CALLOUTS_BY_STORY[activeStoryQuestId] || []
-      : [];
-  return candidates.find(calloutId => !progress.completedCalloutIds.includes(calloutId)) || null;
 }
 
 export function saveMultiplayerTutorialDialogueLine(

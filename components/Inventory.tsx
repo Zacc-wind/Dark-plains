@@ -14,6 +14,7 @@ import {
   getMinionTemplate,
   unequipItem,
 } from '@/lib/auth';
+import { formatEquipmentQualityLabel } from '@/lib/gearProgression';
 
 interface InventoryProps {
   isOpen: boolean;
@@ -138,12 +139,17 @@ export default function Inventory({ isOpen, onClose }: InventoryProps) {
                       <div key={slot} className="ui-card min-h-24 rounded border p-2">
                         <div className="ui-faint text-[10px] font-black uppercase">{slot.replace('-', ' ')}</div>
                         {item ? (
-                          <div className="mt-2 flex items-center gap-2">
-                            <span className="ui-icon-frame relative h-12 w-12 shrink-0 overflow-hidden rounded border">
+                          <div className={`mt-2 flex items-center gap-2 ${item.isLucky ? 'equipment-lucky-row' : ''}`}>
+                            <span className={`ui-icon-frame relative h-12 w-12 shrink-0 overflow-hidden rounded border ${item.isLucky ? 'equipment-lucky-frame' : ''}`}>
                               <Image src={getEquipmentIconPath(item)} alt={item.name} fill className="object-contain p-1" style={{ imageRendering: 'pixelated' }} />
                             </span>
                             <div className="min-w-0">
                               <div className={`rounded border px-2 py-1 text-xs font-bold ${rarityClasses(item.rarity)}`}>{item.name}</div>
+                              {formatEquipmentQualityLabel(item) && (
+                                <div className={`mt-1 text-[10px] font-black uppercase ${item.isLucky ? 'equipment-lucky-quality' : 'ui-faint'}`}>
+                                  {formatEquipmentQualityLabel(item)}
+                                </div>
+                              )}
                               <button onClick={() => handleUnequip(slot)} className="mt-2 text-xs font-bold text-red-300 hover:text-red-100">
                                 Unequip
                               </button>
@@ -192,14 +198,17 @@ export default function Inventory({ isOpen, onClose }: InventoryProps) {
             ) : (
               <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                 {unequippedItems.map(item => (
-                  <div key={item.id} className={`flex items-center justify-between gap-3 rounded border px-3 py-2 ${rarityClasses(item.rarity)}`}>
+                  <div key={item.id} className={`flex items-center justify-between gap-3 rounded border px-3 py-2 ${rarityClasses(item.rarity)} ${item.isLucky ? 'equipment-lucky-row' : ''}`}>
                     <div className="flex min-w-0 items-center gap-3">
-                      <span className="ui-icon-frame relative h-12 w-12 shrink-0 overflow-hidden rounded border">
+                      <span className={`ui-icon-frame relative h-12 w-12 shrink-0 overflow-hidden rounded border ${item.isLucky ? 'equipment-lucky-frame' : ''}`}>
                         <Image src={getEquipmentIconPath(item)} alt={item.name} fill className="object-contain p-1" style={{ imageRendering: 'pixelated' }} />
                       </span>
                       <div className="min-w-0">
                         <div className="truncate text-sm font-bold">{item.name}</div>
-                        <div className="text-xs opacity-80">{item.slot.replace('-', ' ')}</div>
+                        <div className="text-xs opacity-80">
+                          {item.slot.replace('-', ' ')}
+                          {formatEquipmentQualityLabel(item) ? ` · ${formatEquipmentQualityLabel(item)}` : ''}
+                        </div>
                       </div>
                     </div>
                     <button onClick={() => handleEquip(item.id)} className="ui-button-primary rounded px-3 py-1 text-xs font-bold">

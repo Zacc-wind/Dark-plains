@@ -16,12 +16,12 @@ function event(id: string, kind: MultiplayerEngagementEventKind, occurredAt = NO
 }
 
 describe('Black Pike Ledger Chronicle pilot', () => {
-  it('defines a free 20-rank track with meaningful fifth-rank milestones', () => {
-    expect(BLACK_PIKE_CHRONICLE_RANKS).toHaveLength(20);
+  it('defines a free 40-rank track with meaningful fifth-rank milestones', () => {
+    expect(BLACK_PIKE_CHRONICLE_RANKS).toHaveLength(40);
     expect(BLACK_PIKE_CHRONICLE_RANKS.map(rank => rank.renownRequired)).toEqual(
-      Array.from({ length: 20 }, (_, index) => (index + 1) * 50),
+      Array.from({ length: 40 }, (_, index) => (index + 1) * 50),
     );
-    [5, 10, 15, 20].forEach(rankNumber => {
+    [5, 10, 15, 20, 25, 30, 35, 40].forEach(rankNumber => {
       const rank = BLACK_PIKE_CHRONICLE_RANKS[rankNumber - 1];
       expect(rank.rewards.some(reward => reward.entitlement)).toBe(true);
       expect(rank.rewards.some(reward => reward.minionTemplateId)).toBe(true);

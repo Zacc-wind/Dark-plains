@@ -50,6 +50,15 @@ Singleplayer and multiplayer keep separate onboarding because their economies an
 - [x] Persist active dialogue line and tutorial callout state through Supabase account state.
 - [x] Add automated opening-chain state tests for a fresh account and a returning partially completed account.
 
+## Multiplayer Continuity Remake (confirmed 2026-08-09)
+
+The spotlight layer above is complete but separate from story rewards. Remake makes First Banner one continuous story:
+
+- [x] Rewrite `story-01`…`story-06` dialogue so first job, travel, fight, and claim teaching happen inside the story beats.
+- [x] Demote `multiplayerTutorial` / `MultiplayerTutorialSpotlight` to failsafe highlights only (battle callouts for Trial by Steel).
+- [x] Keep quest ids and Skip Onboarding semantics (skip never grants quest progress or rewards).
+- [x] Preserve journal replay and opening-chain automated tests against the stable ids.
+
 ## Verification Matrix
 
 - Desktop 1920x1080: every overlay remains above the current screen without changing layout dimensions.

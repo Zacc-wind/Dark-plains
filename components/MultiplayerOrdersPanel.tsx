@@ -3,8 +3,10 @@
 import Image from 'next/image';
 import { useState } from 'react';
 import {
+  claimCurrentMultiplayerBannerHunt,
   claimCurrentMultiplayerDailyContract,
   claimCurrentMultiplayerFirstCompletionBonus,
+  claimCurrentMultiplayerInboxMail,
   claimCurrentMultiplayerRegionalThreat,
   claimCurrentMultiplayerWeeklyOath,
   dismissCurrentMultiplayerReturningBriefing,
@@ -137,12 +139,79 @@ export default function MultiplayerOrdersPanel({ now, onPlayerRefresh, onOpenPve
     refresh();
   };
 
+  const handleInboxClaim = (mailId: string, title: string) => {
+    const result = claimCurrentMultiplayerInboxMail(mailId, now);
+    setNotice(result.success ? 'Courier packet claimed.' : result.error || 'Could not claim inbox packet.');
+    if (result.success) {
+      emitCompletionNotice({
+        id: `inbox-${mailId}-${now}`,
+        kind: 'quest',
+        kicker: 'Login Inbox',
+        title,
+        description: 'The courier packet was added to your commander.',
+        rewards: rewardLines(result.rewards),
+      });
+    }
+    refresh();
+  };
+
+  const handleBannerHuntClaim = () => {
+    const result = claimCurrentMultiplayerBannerHunt(now);
+    setNotice(result.success
+      ? `Banner Hunt claimed: ${result.entitlementLabel}.`
+      : result.error || 'Could not claim Banner Hunt.');
+    refresh();
+  };
+
   const party = getSocialState(user).party;
   const briefing = view.state.pendingBriefing;
+  const hunt = view.bannerHunt;
+  const streak = view.dailyStreak;
 
   return (
     <div className="multiplayer-orders-panel">
       {notice && <div className="ui-notice border-b px-5 py-3 text-sm font-bold">{notice}</div>}
+
+      {view.returnCta && (
+        <section className="border-b px-5 py-4">
+          <p className="arcane-label">One Thing Left</p>
+          <h3 className="fantasy-heading text-lg">{view.returnCta.title}</h3>
+          <p className="ui-muted mt-1 text-sm font-bold">{view.returnCta.detail}</p>
+        </section>
+      )}
+
+      {view.inboxMails.length > 0 && (
+        <section className="multiplayer-login-inbox border-b px-5 py-5">
+          <div>
+            <p className="arcane-label">Login Inbox</p>
+            <h3 className="fantasy-heading text-xl">Courier Packets</h3>
+            <p className="ui-muted mt-1 text-sm font-bold">
+              Return kits for commanders who were away at least a day. Separate from Chronicle ranks.
+            </p>
+          </div>
+          <div className="mt-4 grid gap-3">
+            {view.inboxMails.map(mail => (
+              <article key={mail.id} className="ui-card flex flex-wrap items-start justify-between gap-3 rounded border px-4 py-3">
+                <div className="min-w-0 flex-1">
+                  <strong className="block text-sm text-zinc-100">{mail.title}</strong>
+                  <p className="ui-muted mt-1 text-xs font-bold leading-relaxed">{mail.body}</p>
+                  <p className="mt-2 text-[11px] font-black uppercase tracking-wide text-[var(--ui-accent)]">
+                    +{mail.rewardGold} gold · +{mail.rewardExp} xp
+                    {mail.rewardItemId ? ` · ${mail.rewardItemQuantity || 1} draught` : ''}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleInboxClaim(mail.id, mail.title)}
+                  className="ui-button-primary shrink-0 rounded px-4 py-2 text-xs font-black"
+                >
+                  Claim
+                </button>
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
 
       {briefing && (
         <section className="multiplayer-returning-briefing border-b px-5 py-5">
@@ -181,6 +250,12 @@ export default function MultiplayerOrdersPanel({ now, onPlayerRefresh, onOpenPve
           <div>
             <p className="arcane-label">Resets Daily</p>
             <h3 className="fantasy-heading text-xl">Today&apos;s Orders</h3>
+            {streak.streak > 0 && (
+              <p className="ui-muted mt-1 text-xs font-bold">
+                Claim streak {streak.streak}/{streak.maxStreak}
+                {streak.bonusPercent > 0 ? ` (+${streak.bonusPercent}% gold/XP)` : ''}
+              </p>
+            )}
           </div>
           <span className="ui-pill rounded border px-3 py-1 text-[10px] font-black uppercase">
             {view.state.rerollUsed ? 'Reroll used' : '1 reroll ready'}
@@ -270,6 +345,29 @@ export default function MultiplayerOrdersPanel({ now, onPlayerRefresh, onOpenPve
               </div>
             </article>
           ))}
+        </div>
+      </section>
+
+      <section className="border-t px-5 py-5">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="max-w-2xl">
+            <p className="arcane-label">Weekly Cosmetic</p>
+            <h3 className="fantasy-heading text-xl">{hunt.title}</h3>
+            <p className="ui-muted mt-1 text-sm font-bold">{hunt.description}</p>
+            <p className="mt-2 text-xs font-black uppercase tracking-wide text-[var(--ui-accent)]">
+              Inspect {hunt.inspectProgress}/{hunt.targetInspect} · Wins {hunt.winProgress}/{hunt.targetWins}
+              {' · '}
+              Reward: {hunt.cosmeticLabel}
+            </p>
+          </div>
+          <button
+            type="button"
+            disabled={!hunt.complete || hunt.claimed}
+            onClick={handleBannerHuntClaim}
+            className="ui-button-primary rounded px-4 py-2 text-xs font-black disabled:opacity-35"
+          >
+            {hunt.claimed ? 'Claimed' : hunt.complete ? 'Claim Cosmetic' : 'In Progress'}
+          </button>
         </div>
       </section>
 

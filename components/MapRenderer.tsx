@@ -41,7 +41,7 @@ import { BATTLE_SPELLS, WorldEnemy, getBattleRatingPreview, getNpcEnemiesForUser
 import { emitCompletionNotice, type CompletionRewardLine } from '@/lib/completionEvents';
 import { emitFxEvent } from '@/lib/fxEvents';
 import { emitMapFogState } from '@/lib/mapFogEvents';
-import { QUEST_NPCS, getAllStoryQuestsSorted, type QuestNpc } from '@/lib/questData';
+import { QUEST_NPCS, getAllStoryQuestsSorted, getQuestNpcWorldVoice, type QuestNpc } from '@/lib/questData';
 import { getStoryDialogSequence, type StoryDialogSequence } from '@/lib/storyDialogue';
 import { isDungeonQuestObjective, isPoiQuestObjective, isQuestNpcObjective } from '@/lib/questMarkers';
 import StoryDialogOverlay from './StoryDialogOverlay';
@@ -175,6 +175,24 @@ function campfireSeed(value: number): number {
   return seeded - Math.floor(seeded);
 }
 
+function drawCampfireGroundPad(
+  ctx: CanvasRenderingContext2D,
+  centerX: number,
+  centerY: number,
+  size: number
+): void {
+  drawGroundShadow(ctx, centerX, centerY + size * 0.22, size * 0.46, size * 0.2);
+  ctx.save();
+  ctx.fillStyle = 'rgba(28, 18, 12, 0.55)';
+  ctx.beginPath();
+  ctx.ellipse(centerX, centerY + size * 0.18, size * 0.34, size * 0.14, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(72, 48, 28, 0.55)';
+  ctx.lineWidth = Math.max(1, size * 0.03);
+  ctx.stroke();
+  ctx.restore();
+}
+
 function drawCampfireGroundGlow(
   ctx: CanvasRenderingContext2D,
   centerX: number,
@@ -182,14 +200,15 @@ function drawCampfireGroundGlow(
   size: number,
   alpha: number
 ): void {
-  const radius = size * 0.38;
-  const glow = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, radius);
-  glow.addColorStop(0, `rgba(255, 142, 58, ${alpha})`);
-  glow.addColorStop(0.55, `rgba(220, 88, 32, ${alpha * 0.35})`);
+  const radius = size * 0.3;
+  const glow = ctx.createRadialGradient(centerX, centerY + size * 0.08, 0, centerX, centerY + size * 0.08, radius);
+  glow.addColorStop(0, `rgba(255, 156, 64, ${alpha})`);
+  glow.addColorStop(0.4, `rgba(232, 96, 28, ${alpha * 0.55})`);
+  glow.addColorStop(0.78, `rgba(120, 42, 14, ${alpha * 0.18})`);
   glow.addColorStop(1, 'rgba(0, 0, 0, 0)');
   ctx.fillStyle = glow;
   ctx.beginPath();
-  ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+  ctx.arc(centerX, centerY + size * 0.08, radius, 0, Math.PI * 2);
   ctx.fill();
 }
 
@@ -474,16 +493,31 @@ function drawMapLabel(
   text: string,
   x: number,
   y: number,
-  color: string
+  color: string,
+  options?: { alpha?: number; fontSize?: number }
 ): void {
+  const alpha = options?.alpha ?? 1;
+  const fontSize = options?.fontSize ?? 10;
   ctx.save();
+  ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
   ctx.fillStyle = color;
-  ctx.font = 'bold 10px serif';
+  ctx.font = `bold ${fontSize}px serif`;
   ctx.textAlign = 'center';
   ctx.shadowColor = 'rgba(0, 0, 0, 0.9)';
   ctx.shadowBlur = 4;
   ctx.fillText(text, x, y);
   ctx.restore();
+}
+
+function getMapLabelBudget(zoom: number): { showNames: boolean; questBangAlpha: number; questBangSize: number } {
+  const zoomRatio = zoom / DEFAULT_MAP_ZOOM;
+  if (zoomRatio < 0.92) {
+    return { showNames: false, questBangAlpha: 0.38, questBangSize: 8 };
+  }
+  if (zoomRatio < 1) {
+    return { showNames: false, questBangAlpha: 0.58, questBangSize: 9 };
+  }
+  return { showNames: true, questBangAlpha: 1, questBangSize: 10 };
 }
 
 function drawGroundShadow(
@@ -721,9 +755,19 @@ function drawTownMarker(
     hovered?: boolean;
     fallbackLabel?: string;
     label: string;
+    showLabel?: boolean;
   }
 ): void {
-  const { centerX, centerY, footprint, image, hovered = false, fallbackLabel = '?', label } = options;
+  const {
+    centerX,
+    centerY,
+    footprint,
+    image,
+    hovered = false,
+    fallbackLabel = '?',
+    label,
+    showLabel = false,
+  } = options;
 
   drawCircularLandmarkMarker(ctx, {
     centerX,
@@ -735,13 +779,49 @@ function drawTownMarker(
     hovered,
     fallbackLabel,
     label,
-    showLabel: true,
+    showLabel: showLabel || hovered,
     ringColor: 'rgba(234, 220, 154, 0.72)',
     ringHoverColor: 'rgba(255, 236, 170, 0.95)',
     backingColor: 'rgba(8, 7, 9, 0.55)',
     labelColor: MAP_MARKER_TONES.town.label,
     ringWidth: 1.25,
     ringHoverWidth: 2,
+  });
+}
+
+function drawDungeonMarker(
+  ctx: CanvasRenderingContext2D,
+  options: {
+    centerX: number;
+    centerY: number;
+    size: number;
+    image?: HTMLImageElement | null;
+    hovered?: boolean;
+    label?: string;
+    showLabel?: boolean;
+  }
+): void {
+  const { centerX, centerY, size, image, hovered = false, label, showLabel = false } = options;
+
+  drawCircularLandmarkMarker(ctx, {
+    centerX,
+    centerY,
+    footprint: size / 0.34,
+    radiusRatio: 0.34,
+    hoveredRadiusRatio: 0.38,
+    image,
+    hovered,
+    fallbackLabel: 'Dg',
+    label,
+    showLabel: showLabel || hovered,
+    ringColor: 'rgba(186, 140, 255, 0.78)',
+    ringHoverColor: 'rgba(224, 190, 255, 0.96)',
+    backingColor: 'rgba(18, 8, 28, 0.72)',
+    labelColor: '#f5d0fe',
+    ringWidth: 1.35,
+    ringHoverWidth: 2.1,
+    accentColor: 'rgba(168, 85, 247, 0.7)',
+    idleImageFilter: 'saturate(0.92) brightness(0.94)',
   });
 }
 
@@ -760,23 +840,28 @@ function drawCampfireMarker(
   const { centerX, centerY, footprint, image, hovered = false, label, now = 0 } = options;
   const pulse = 0.5 + 0.5 * Math.sin(now / 1400);
   const flicker = 0.5 + 0.5 * Math.sin(now / 760 + 0.8);
-  const size = footprint * (hovered ? 1.06 : 1);
-  const poolAlpha = (0.16 + pulse * 0.1) * (0.94 + flicker * 0.06);
-  const fogHaloAlpha = (0.045 + pulse * 0.028) * (0.9 + flicker * 0.08);
+  const size = footprint * (hovered ? 1.08 : 1);
+  const poolAlpha = (0.32 + pulse * 0.14) * (0.94 + flicker * 0.06);
+  const fogHaloAlpha = (0.018 + pulse * 0.012) * (0.9 + flicker * 0.08);
 
+  drawCampfireGroundPad(ctx, centerX, centerY, size);
   drawMapGlowPool(ctx, {
     centerX,
-    centerY,
-    radiusX: size * 1.9,
-    radiusY: size * 1.55,
-    innerRgb: '255, 108, 42',
-    outerRgb: '214, 68, 22',
+    centerY: centerY + size * 0.04,
+    radiusX: size * 1.05,
+    radiusY: size * 0.82,
+    innerRgb: '255, 124, 42',
+    outerRgb: '168, 52, 18',
     alpha: fogHaloAlpha,
   });
   drawCampfireGroundGlow(ctx, centerX, centerY, size, poolAlpha);
-  drawCampfireGroundGlow(ctx, centerX, centerY, size, poolAlpha * 0.28);
+  drawCampfireGroundGlow(ctx, centerX, centerY, size, poolAlpha * 0.42);
 
   if (image) {
+    ctx.save();
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.45)';
+    ctx.shadowBlur = hovered ? 6 : 3;
+    ctx.shadowOffsetY = 1;
     ctx.drawImage(
       image,
       centerX - size / 2,
@@ -784,6 +869,7 @@ function drawCampfireMarker(
       size,
       size
     );
+    ctx.restore();
   }
 
   drawCampfireEmberParticles(ctx, centerX, centerY, size, now, pulse);
@@ -886,8 +972,11 @@ function drawCharacterSprite(
     fallbackColor: string;
     label?: string;
     labelColor: string;
+    showLabel?: boolean;
     topText?: string;
     topTextColor?: string;
+    topTextAlpha?: number;
+    topTextSize?: number;
     hovered?: boolean;
     frameColor?: string;
   }
@@ -900,8 +989,11 @@ function drawCharacterSprite(
     fallbackColor,
     label,
     labelColor,
+    showLabel = true,
     topText,
     topTextColor = labelColor,
+    topTextAlpha = 1,
+    topTextSize = 10,
     hovered = false,
     frameColor,
   } = options;
@@ -945,10 +1037,13 @@ function drawCharacterSprite(
   }
 
   if (topText) {
-    drawMapLabel(ctx, topText, x + size / 2, y - 4, topTextColor);
+    drawMapLabel(ctx, topText, x + size / 2, y - 4, topTextColor, {
+      alpha: topTextAlpha,
+      fontSize: topTextSize,
+    });
   }
 
-  if (label) {
+  if (label && (showLabel || hovered)) {
     drawMapLabel(ctx, label, x + size / 2, y + size + 10, labelColor);
   }
 }
@@ -1548,6 +1643,14 @@ export default function MapRenderer({
       });
     }
 
+    const labelBudget = getMapLabelBudget(effectiveZoom);
+    const drawQuestBang = (x: number, y: number) => {
+      drawMapLabel(ctx, '!', x, y, '#fef08a', {
+        alpha: labelBudget.questBangAlpha,
+        fontSize: labelBudget.questBangSize,
+      });
+    };
+
     const drawPoiMarker = (poi: POI) => {
       const screenX = poi.x * tileSize - cameraX;
       const screenY = poi.y * tileSize - cameraY;
@@ -1584,9 +1687,10 @@ export default function MapRenderer({
           hovered,
           fallbackLabel: poi.name.slice(0, 2).toUpperCase(),
           label: poi.name,
+          showLabel: labelBudget.showNames,
         });
         if (isPoiQuestObjective(currentUser, poi.name)) {
-          drawMapLabel(ctx, '!', markerCenterX, screenY - 6, '#fef08a');
+          drawQuestBang(markerCenterX, screenY - 6);
         }
         return;
       }
@@ -1602,7 +1706,7 @@ export default function MapRenderer({
           now: mapAnimNow,
         });
         if (isPoiQuestObjective(currentUser, poi.name)) {
-          drawMapLabel(ctx, '!', markerCenterX, screenY - 6, '#fef08a');
+          drawQuestBang(markerCenterX, screenY - 6);
         }
         return;
       }
@@ -1619,7 +1723,7 @@ export default function MapRenderer({
         now: worldNow,
       });
       if (isPoiQuestObjective(currentUser, poi.name)) {
-        drawMapLabel(ctx, '!', markerCenterX, screenY - 6, '#fef08a');
+        drawQuestBang(markerCenterX, screenY - 6);
       }
     };
 
@@ -1629,49 +1733,41 @@ export default function MapRenderer({
 
     worldDungeons.forEach(dungeon => {
       const dungeonSize = tileSize * 1.45;
-      const dungeonScreenX = dungeon.x * tileSize - cameraX + (tileSize * 3 - dungeonSize) / 2;
-      const dungeonScreenY = dungeon.y * tileSize - cameraY + (tileSize * 3 - dungeonSize) / 2;
-      const dungeonImage = AssetLoader.getImage(ASSET_PATHS.icons.xp);
+      const dungeonCenterX = dungeon.x * tileSize - cameraX + tileSize * 1.5;
+      const dungeonCenterY = dungeon.y * tileSize - cameraY + tileSize * 1.5;
+      const dungeonImage = AssetLoader.getImage(ASSET_PATHS.pois.mountain);
+      const hovered = hoveredDungeon?.id === dungeon.id;
 
       if (
-        dungeonScreenX >= -dungeonSize &&
-        dungeonScreenX < actualWidth &&
-        dungeonScreenY >= -dungeonSize &&
-        dungeonScreenY < actualHeight
+        dungeonCenterX >= -dungeonSize &&
+        dungeonCenterX < actualWidth + dungeonSize &&
+        dungeonCenterY >= -dungeonSize &&
+        dungeonCenterY < actualHeight + dungeonSize
       ) {
-        ctx.save();
-        ctx.shadowColor = hoveredDungeon?.id === dungeon.id ? 'rgba(216, 180, 254, 0.95)' : 'rgba(168, 85, 247, 0.65)';
-        ctx.shadowBlur = hoveredDungeon?.id === dungeon.id ? 16 : 9;
+        drawDungeonMarker(ctx, {
+          centerX: dungeonCenterX,
+          centerY: dungeonCenterY,
+          size: dungeonSize,
+          image: dungeonImage,
+          hovered,
+          label: dungeon.name,
+          showLabel: false,
+        });
 
-        if (dungeonImage) {
-          ctx.filter = 'hue-rotate(70deg) saturate(1.5) brightness(1.1)';
-          ctx.drawImage(dungeonImage, dungeonScreenX, dungeonScreenY, dungeonSize, dungeonSize);
-          ctx.filter = 'none';
-        } else {
-          const centerX = dungeonScreenX + dungeonSize / 2;
-          const centerY = dungeonScreenY + dungeonSize / 2;
-          ctx.fillStyle = '#6d28d9';
-          ctx.beginPath();
-          ctx.moveTo(centerX, centerY - dungeonSize * 0.32);
-          ctx.lineTo(centerX + dungeonSize * 0.28, centerY);
-          ctx.lineTo(centerX, centerY + dungeonSize * 0.32);
-          ctx.lineTo(centerX - dungeonSize * 0.28, centerY);
-          ctx.closePath();
-          ctx.fill();
-        }
-
-        ctx.shadowBlur = 0;
-        const labelPoint = { x: dungeonScreenX + dungeonSize / 2, y: dungeonScreenY + dungeonSize / 2 };
-        if (hoveredDungeon?.id === dungeon.id || isScreenPointRevealed(labelPoint, cursorScreen, playerRevealPoint, effectiveZoom)) {
+        const labelPoint = { x: dungeonCenterX, y: dungeonCenterY };
+        if (hovered || isScreenPointRevealed(labelPoint, cursorScreen, playerRevealPoint, effectiveZoom)) {
+          ctx.save();
           ctx.fillStyle = '#f5d0fe';
           ctx.font = 'bold 9px sans-serif';
           ctx.textAlign = 'center';
-          ctx.fillText(`Lv ${dungeon.level}`, dungeonScreenX + dungeonSize / 2, dungeonScreenY - 5);
+          ctx.shadowColor = 'rgba(0, 0, 0, 0.85)';
+          ctx.shadowBlur = 3;
+          ctx.fillText(`Lv ${dungeon.level}`, dungeonCenterX, dungeonCenterY - dungeonSize * 0.58);
+          ctx.restore();
         }
         if (isDungeonQuestObjective(currentUser)) {
-          drawMapLabel(ctx, '!', dungeonScreenX + dungeonSize / 2, dungeonScreenY - 16, '#fef08a');
+          drawQuestBang(dungeonCenterX, dungeonCenterY - dungeonSize * 0.72);
         }
-        ctx.restore();
       }
     });
 
@@ -1685,6 +1781,7 @@ export default function MapRenderer({
       const npcSize = getCharacterSpriteSize(tileSize, effectiveZoom, 0.9, 26);
       const npcImage = AssetLoader.getImage(getPlayerModelPath(npc.modelNumber));
       const hasQuestMarker = shouldShowQuestNpcMarker(currentUser, npc);
+      const npcHovered = hoveredQuestNpc?.id === npc.id;
 
       if (
         npcScreenX >= -npcSize &&
@@ -1700,9 +1797,12 @@ export default function MapRenderer({
           fallbackColor: '#854d0e',
           label: npc.name,
           labelColor: '#fef08a',
+          showLabel: labelBudget.showNames,
           topText: hasQuestMarker ? '!' : undefined,
           topTextColor: '#fef08a',
-          hovered: hoveredQuestNpc?.id === npc.id,
+          topTextAlpha: labelBudget.questBangAlpha,
+          topTextSize: labelBudget.questBangSize,
+          hovered: npcHovered,
         });
       }
     });
@@ -1732,6 +1832,7 @@ export default function MapRenderer({
           fallbackColor: '#ffd700',
           label: currentUser.username,
           labelColor: '#ffffff',
+          showLabel: labelBudget.showNames,
         });
       }
     }
@@ -1759,6 +1860,7 @@ export default function MapRenderer({
           fallbackColor: '#0e7490',
           label: player.username,
           labelColor: partyMember ? '#a7f3d0' : friend ? '#bfdbfe' : '#ffffff',
+          showLabel: labelBudget.showNames,
           frameColor: partyMember ? '#6ee7b7' : undefined,
         });
       }
@@ -1796,10 +1898,13 @@ export default function MapRenderer({
           y: enemyScreenY + (tileSize - enemySize) / 2 - tileSize * 0.08,
           size: enemySize,
           fallbackColor: '#7f1d1d',
-          topText: isWorldBoss ? 'Boss' : isStoryBoss ? 'Story' : isRegionalThreat ? 'Threat' : `Lv ${enemy.level}`,
+          topText: isWorldBoss ? 'Boss' : isStoryBoss ? 'Story' : isRegionalThreat ? 'Threat' : (labelBudget.showNames || hoveredEnemy?.id === enemy.id ? `Lv ${enemy.level}` : undefined),
           topTextColor: isBossThreat ? '#fca5a5' : '#fecaca',
+          topTextAlpha: labelBudget.showNames ? 1 : 0.7,
+          topTextSize: labelBudget.showNames ? 10 : 8,
           label: isBossThreat || hoveredEnemy?.id === enemy.id ? enemy.name : undefined,
           labelColor: '#fecaca',
+          showLabel: labelBudget.showNames || Boolean(hoveredEnemy?.id === enemy.id),
           hovered: hoveredEnemy?.id === enemy.id,
         });
       }
@@ -2820,6 +2925,7 @@ function QuestNpcModal({ npc, onTravel, onClose }: { npc: QuestNpc; onTravel: ()
   const [notice, setNotice] = useState('');
   const counselStatus = getQuestNpcStatus(user, npc.id);
   const claimed = counselStatus.claimed;
+  const worldVoice = getQuestNpcWorldVoice(npc, user);
   const atNpc = Boolean(user && isTileInsideFootprint(user.x, user.y, npc.x, npc.y, 2, 2));
   const [showConversation, setShowConversation] = useState(atNpc);
   const returnStory = getAllStoryQuestsSorted().find(story => (
@@ -2842,9 +2948,9 @@ function QuestNpcModal({ npc, onTravel, onClose }: { npc: QuestNpc; onTravel: ()
       description: `Return to ${npc.name} after the task is complete to claim ${formatQuestNpcRewards(npc.rewards)}.`,
     },
     lines: [
-      { speaker: 'npc', text: npc.line },
+      { speaker: 'npc', text: worldVoice.line },
       { speaker: 'player', text: 'What do you ask of my banner?' },
-      { speaker: 'npc', text: `${npc.questHook} Prove your command, then return for counsel.` },
+      { speaker: 'npc', text: `${worldVoice.questHook} Prove your command, then return for counsel.` },
     ],
   };
 
@@ -2923,9 +3029,9 @@ function QuestNpcModal({ npc, onTravel, onClose }: { npc: QuestNpc; onTravel: ()
               <div className="ui-muted text-xs font-bold">{npc.town} - Lv {npc.levelRange}</div>
             </div>
           </div>
-          <p className="text-sm font-bold text-zinc-100">&ldquo;{npc.line}&rdquo;</p>
+          <p className="text-sm font-bold text-zinc-100">&ldquo;{worldVoice.line}&rdquo;</p>
           <div className="ui-card rounded border p-3 text-xs font-bold text-yellow-100">
-            {npc.questHook}
+            {worldVoice.questHook}
           </div>
           <div className={`ui-card rounded border p-3 text-xs font-bold ${counselStatus.complete ? 'text-emerald-100' : 'text-yellow-100'}`}>
             <div className="arcane-label">Counsel Task</div>

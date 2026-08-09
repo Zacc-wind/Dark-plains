@@ -1,6 +1,6 @@
 # Progression and Content Roadmap
 
-Updated: 2026-07-22
+Updated: 2026-08-09
 
 ## Purpose
 
@@ -18,13 +18,17 @@ This document is the execution plan for progression, retention, narrative conten
 - The level cap is 30.
 - The shared unlock registry already covers the level 1 core, level 2 contracts/forge/PVE, level 3 PVP, level 4 trading, level 5 parties/co-op, and level 6 veteran regions.
 - Daily contracts, a weekly oath, a seven-day return track, returning-player briefing, and engagement telemetry already exist.
-- The internal Black Pike Ledger pilot now provides a persistent 20-rank free Chronicle with capped genuine-action Renown, duplicate-safe claims, modest resources, lore, banners, a frame, and a title.
+- The internal Black Pike Ledger now provides a persistent 40-rank free Chronicle with capped genuine-action Renown, duplicate-safe claims, modest resources, lore, banners, frames, and titles. Archive/featured rotation remains later.
 - There are 37 main-story quest definitions across the two existing acts, grouped into six five-level campaign bands.
 - 25 story quests have authored dialogue ids. The complete First Banner opening and Drowned Moonwell core both use authored scenes.
-- Levels 1-5 form a playable opening chapter. Levels 6-10 now add nine ordered Moonwell objectives, a named Blackroot elite, Mother Cindervein, a post-boss return, and persistent three-tone player responses.
-- There are 49 city contracts. Harborview and Riverside own 15 each, Moonbridge owns 8, Ashford owns 5, and Blackwater Gate and Eclipse Hold own 3 each. The remaining board work is consolidation toward eight strong contracts per town, not another generic-job expansion.
+- Levels 1-5 form a playable opening chapter. Levels 6-10 now add nine ordered Moonwell objectives, a named Blackroot elite, Mother Cindervein, a post-boss return, two three-step side stories, post-chapter NPC/contract response, and persistent three-tone player responses.
+- Levels 11-15 now form The Broken Crown: Yara and Serat guides, Blackwater Gate march, Iron Choir Marshal midpoint, and Emperor Grave-Aurel with exact enemy receipts.
+- Levels 16-20 now form The Glass Road: Serat and Sable guides, Mirror Road Captain elite, Prior Moon Voss capstone, return seal, and eight Blackwater/Eclipse contracts each.
+- Levels 21-25 now form The Candle Key: Kaito guide, Ser Kael elite, fragment gather, Key-Saint Ardan, and return seal.
+- Levels 26-30 now form The Lady In Glass: Letho guide, Scarlet Matron elite, Lady Mirror-Veyra inspect/defeat, and court seal return.
+- There are 60 city contracts. Harborview and Riverside own 15 each, Moonbridge owns 9, Ashford owns 5, and Blackwater Gate and Eclipse Hold own 8 each. Consolidation toward eight strong contracts for the western towns remains.
 - There are 8 boss profiles, 24 unit templates, and 20 commander spells.
-- Campaign, Level Path, Chronicle, named threat markers, and the quest tracker expose the active chapter, next unlock, exact target, and long-term collection track. Bespoke level 6-10 enemy/item art and side stories remain production work.
+- Campaign, Level Path, Chronicle, named threat markers, and the quest tracker expose the active chapter, next unlock, exact target, and long-term collection track. Bespoke level 6-10 enemy/item art remains production work.
 
 ### Singleplayer
 
@@ -71,7 +75,7 @@ The map HUD `Campaign` command opens a large responsive modal. Four tabs are imp
 
 1. `Orders`: active main objective, three daily contracts, weekly oath, regional threat, and returning briefing.
 2. `Campaign`: six chapter rows with guide, conflict, quest progress, midpoint, boss, rewards, and replayable conversations.
-3. `Chronicle`: the featured 20-rank pilot, challenge sources, claim states, and permanent honor collection. Archives remain later work.
+3. `Chronicle`: the featured 40-rank Black Pike Ledger, challenge sources, claim states, and permanent honor collection. Archives remain later work.
 4. `Level Path`: levels 1-30, claimed rewards, next three unlocks, and a direct link to the newly opened feature.
 5. `Deeds`: multiplayer achievements, boss trophies, titles, cosmetic collection, and account records.
 
@@ -166,7 +170,7 @@ The existing definitions count toward these totals. This is a rewrite-and-fill p
 
 ### First Shippable Chapter: Levels 1-5 - Complete 2026-07-19
 
-Preserve the six onboarding ids because tutorial state depends on them, then complete the chapter around those interactions:
+Preserve the six onboarding ids because journal/tests depend on them. Confirmed remake (2026-08-09): rewrite First Banner so teaching is inside dialogue and forced first actions; demote spotlight tutorials to failsafe-only. Do not change ids:
 
 1. [x] `First Banner`: start and complete a real road job.
 2. [x] `The Candle Road`: travel to Harborview.
@@ -176,6 +180,8 @@ Preserve the six onboarding ids because tutorial state depends on them, then com
 6. [x] `Black Pike Warning`: inspect the named threat and learn the risk rules.
 7. [x] `The Broken Toll`: defeat the Black Pike lieutenant, not two unrelated battles.
 8. [x] `Banner Recognized`: return to Orren, claim the chapter reward, and preview the level 6 Moonwell conflict.
+
+- [x] Continuity remake: fold MP tutorial teaching into `story-01`…`story-06` dialogue/actions; keep skip non-granting.
 
 Add three short system conversations at their real unlock moments:
 
@@ -423,11 +429,12 @@ Do not make every achievement a power grant. Players need goals after the gamepl
 2. `MP-C1 Progression UI` - first slice complete: Campaign and Progression now unifies Orders, Campaign, and Level Path with six chapter bands and registry-backed unlock previews.
 3. `MP-C2 Levels 1-5` - complete: The First Banner is an eight-step playable chapter with a persistent named threat, level-five Black Pike capstone, genuine post-boss return, rank briefings, chapter presentation, and focused tests.
 4. `MP-C3 Social and return completion` - complete: shared request records, party/trade invitation overlays, a versioned local `TradeSession`, the first rotating regional threat, daily first-completion bonuses, and rested job catch-up all use genuine action receipts and duplicate-safe claims.
-5. `MP-C4 Chronicle pilot` - complete: the internal 20-rank Black Pike Ledger uses an idempotent accumulated event ledger, capped genuine-action Renown, duplicate-safe claims, permanent honors, migration tests, and a responsive progression tab.
-6. `MP-C5 Multiplayer sessions` - local slice complete: duels and duo raids have independent formation, readiness, synchronized ownership-checked combat, recovery, abandon/forfeit outcomes, and duplicate-safe settlement. Database transport remains.
-7. `MP-C6 Levels 6-10` - playable core complete: nine Drowned Moonwell quests, eight Moonbridge contracts, Blackroot and Cindervein story encounters, authored tone choices, and Dungeon Tier II gating. Side stories, bespoke assets, post-chapter world response, and reputation prerequisites remain.
-8. `MP-C7 Public Chronicle`: expand the validated pilot to 40 ranks, archive support, full reward presentation, and entitlement history.
-9. `MP-C8 Levels 11-30`: produce one complete five-level chapter at a time. Do not implement all remaining quest text in one untested batch.
+5. `MP-C4 Chronicle pilot` - complete: the Black Pike Ledger uses an idempotent accumulated event ledger, capped genuine-action Renown, duplicate-safe claims, permanent honors, migration tests, and a responsive progression tab. Expanded to 40 ranks with a Glass Road Memorial archive track at half Renown after `story-20-glass-sealed`.
+6. `MP-C5 Multiplayer sessions` - local + DB transport slice complete for trade/duel/raid create/list/patch; combat action streaming remains local.
+7. `MP-C6 Levels 6-10` - playable core complete: nine Drowned Moonwell quests, nine Moonbridge contracts (including eastern-march preview after seal), Blackroot and Cindervein story encounters, authored tone choices, two side chains (silk + tithe), post-chapter NPC voice, and Dungeon Tier II gating. Bespoke assets remain parked.
+8. `MP-C9 Continuity & Retention` (confirmed 2026-08-09) — complete for the confirmed checklist.
+9. `MP-C7 Public Chronicle`: 40-rank expansion and Glass Road Memorial archive shipped. Featured seasonal rotation remains later.
+10. `MP-C8 Levels 11-30`: complete for all six chapter bands through Lady in Glass 26–30 (named elites/capstones, returns, and dialog). Candle Compact + Blackwater League reputation tracks and the Deeds tab shipped; later-band side stories remain.
 
 ### Singleplayer Later
 
@@ -506,6 +513,7 @@ The next code batch should be intentionally smaller than this roadmap:
 5. [x] Settle deterministic gold, XP, gems, and Epic/Legendary gear once per player and feed genuine engagement events.
 6. [x] Cover stale writes, ownership, AI turns, final-phase victory, abandon, expiry, and duplicate claims with deterministic tests.
 7. [ ] Replace local storage/event transport with Supabase session rows, realtime updates, RLS, and server action validation.
+   Partial: create/list/patch transport for trade, duel, and co-op raid is live; combat action streaming remains local.
 
 The remaining `MP-C5` work is database transport and authority. Four-player route dungeons are a later scale step, not a requirement for the first reliable co-op release.
 
@@ -518,7 +526,7 @@ The remaining `MP-C5` work is database transport and authority. Four-player rout
 5. [x] Add persistent oathbound, pragmatic, and defiant responses with reload-safe journal replay and no core-progression branch lock.
 6. [x] Correct long-work thresholds to 30 minutes and expose Dungeon Tier II/III entry requirements through the shared registry, map modal, and PVE intel.
 7. [x] Add deterministic tests for encounter staging, exact receipts, chapter order, contract variety, response persistence, and dungeon tiers.
-8. [ ] Complete the two three-step side stories, bespoke Moonfen/goblin/bell-crypt enemies and quest items, first eligible reputation track, and post-chapter world-state response.
+8. [x] Complete the two three-step side stories, bespoke Moonfen/goblin/bell-crypt enemies and quest items, first eligible reputation track, and post-chapter world-state response. (Side stories + quest items + post-chapter voice/contract shipped; Candle Compact reputation track shipped later with Blackwater League; bespoke art remains parked.)
 
 ## Ninth Implementation Batch - Menu, Retention UI, And Drop Integrity - Complete 2026-07-22
 

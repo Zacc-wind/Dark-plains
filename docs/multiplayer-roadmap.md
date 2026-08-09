@@ -13,9 +13,9 @@ Turn the current shared world-map prototype into a real multiplayer layer withou
 - [x] Supabase-backed profiles, presence, and online PVP challenge transport exist.
 - [x] Main-story introductions can open as two-character RPG conversations on the world map.
 - [x] Challenge, trade, and party flows have in-game request popups and acceptance UX in the local multiplayer prototype. Server-backed synchronization remains deployment work.
-- [x] The Black Pike Ledger Chronicle pilot provides 20 permanent free-track ranks driven by capped, genuine multiplayer action receipts.
-- [x] Player-vs-player combat has a versioned local two-player duel session with captured rosters, formation readiness, ownership-checked actions, timeout passing, and idempotent rating settlement. Database transport remains deployment work.
-- [x] Cooperative raids now have a complete local-authoritative session: PVE launch/resume, two independent formations, readiness, synchronized combat and AI actions, four boss phases, abandon handling, recovery, and duplicate-safe per-player settlement. Database transport remains deployment work.
+- [x] The Black Pike Ledger Chronicle provides 40 permanent free-track ranks driven by capped, genuine multiplayer action receipts. Glass Road Memorial archive progresses at half Renown after the Glass Road seal; seasonal featured rotation remains later.
+- [x] Player-vs-player combat has a versioned local two-player duel session with captured rosters, formation readiness, ownership-checked actions, timeout passing, and idempotent rating settlement. Session create/list/patch transport is live via `/api/pvp/duels` (combat action streaming still local).
+- [x] Cooperative raids now have a complete local-authoritative session: PVE launch/resume, two independent formations, readiness, synchronized combat and AI actions, four boss phases, abandon handling, recovery, and duplicate-safe per-player settlement. Session create/list/patch transport is live via `/api/coop/raids` (combat action streaming still local).
 - [x] PVE intel exposes two deterministic co-op boss incursions per five-hour cycle without routing them through the solo encounter flow.
 - [x] The playable Drowned Moonwell core spans levels 6-10 with nine ordered quests, eight Moonbridge contracts, a named Blackroot elite, Mother Cindervein, exact encounter receipts, and an authored return to Naima.
 
@@ -153,14 +153,57 @@ Turn the current shared world-map prototype into a real multiplayer layer withou
 - [x] Add capped rested job XP or contract progress so returning players can catch up without making daily players irrelevant. Returning players receive at most three +25% job-XP charges, each capped at 50 XP.
 - [x] Record completion telemetry for each loop before increasing reward volume or adding more currencies.
 
+## Phase 10B: Continuity, Retention, Gear, Map, Mechanics (confirmed 2026-08-09)
+
+Ship order: docs → retention → story/tutorial remake → gear → map/visual → interest mechanics → content bands.
+
+### Retention expand
+- [x] Login Inbox: claimable mail after ≥24h absence (gold/XP/consumable kit); once-per-absence id; separate from Chronicle.
+- [x] Daily streak soft boost on consecutive daily-order claims (cap 7); miss soft-resets; never locks content.
+- [x] Session exit / return CTA: one unfinished story/order/oath line in Orders + optional toast.
+- [x] Rotating Banner Hunt: weekly map objective with cosmetic-only reward; genuine engagement receipt.
+- [x] Social return ping: rate-limited friend/party online invite prompt at login.
+
+### Story + tutorial continuity (MP only)
+- [x] Rewrite First Banner (`story-01`…`06`) so teaching lives inside dialogue + forced first actions.
+- [x] Demote multiplayer tutorial spotlight to failsafe-only (or remove after rewrite); skip never grants quest progress.
+- [x] Keep quest ids stable; rewrite copy and beat structure only.
+- [x] Tighten Moonwell mainline pacing notes (named place, contact, world consequence).
+
+### Gear economy
+- [x] Stat roll variance 85–115% of rarity base; persist rolled values.
+- [x] Lucky `+` items (~2%): name suffix, quality flag, special inventory/equip border, better roll floor (not a 5th rarity).
+- [x] Keep `slot-rarity` icon reuse for generics and new sets.
+- [x] Ship +2 gear sets (data + loot + 2/4 bonuses); defer unique set art.
+- [x] Tooltip roll quality label (e.g. Fine / Lucky+).
+
+### Map / visual clean
+- [x] Campfire marker/ground pass; particles remain High-only.
+- [x] Density rebalance: thin center POIs; add camps off mid-road; raise enemy spacing / trim overlap.
+- [x] Dedicated dungeon map markers (replace XP-icon placeholders).
+- [x] Zoomed-out label budget / softer quest `!`.
+- [x] Battle deployed-unit shadow/frame consistency pass (no full art regen).
+
+### Interest mechanics (ship these three)
+- [x] Injury ward / recovery job for injured units.
+- [x] Chapter talent pick at end of each 5-level band (utility/identity, not raw power race).
+- [x] Set scrap salvage into blacksmith sockets / set progress.
+
+### Parked
+- Guild goals, seasonal PVP reset, 120 map expansion, combat-action DB streaming, omen SP depth, RLS harden (separate security track).
+
+### Content bands after the above
+- [x] Moonwell side stories + post-chapter world response.
+- [x] Broken Crown (11–15) as first full post-stub chapter (no counter-only mains).
+
 ## Phase 11: Story Chapters And World Direction
-- [ ] Give every main-story chapter a named guide, a regional conflict, a midpoint fight, and a boss resolution.
-- [ ] Keep each quest objective explicit about the target, location, action, and reward source.
-- [ ] Use quest contacts for authored dialogue; use compact objective cards for routine contracts.
+- [x] Give every main-story chapter a named guide, a regional conflict, a midpoint fight, and a boss resolution. (Chapters I–VI playable cores shipped.)
+- [x] Keep each quest objective explicit about the target, location, action, and reward source. (Applied to shipped chapters I–IV.)
+- [x] Use quest contacts for authored dialogue; use compact objective cards for routine contracts.
 - [x] Add visible chapter progress, guides, capstones, and replayable conversations to the Campaign view without covering the world map.
-- [ ] Add faction reputation only after at least two factions have distinct rewards and repeatable activities.
-- [ ] Let completed chapters change small world details, NPC lines, or available contracts without deleting required contacts.
-- [ ] Build level-band content in batches: 1-5 onboarding, 6-10 regional mastery, 11-15 veteran systems, then expand the cap only with enough enemies and bosses.
+- [x] Add faction reputation only after at least two factions have distinct rewards and repeatable activities.
+- [x] Let completed chapters change small world details, NPC lines, or available contracts without deleting required contacts.
+- [x] Build level-band content in batches: 1-5 onboarding, 6-10 regional mastery, 11-15 veteran systems, then expand the cap only with enough enemies and bosses.
 - [x] Ship the playable core of the 6-10 Drowned Moonwell band with its guide pair, explicit objectives, named elite, capstone, return scene, and Moonbridge board.
 
 ## Phase 12: Multiplayer Scaling And Endgame
@@ -191,5 +234,12 @@ Turn the current shared world-map prototype into a real multiplayer layer withou
    Duel sessions: GET/POST/PATCH for create/formation/cancel/forfeit/settle; combat actions still local.
    Co-op raid sessions: GET/POST/PATCH for create/formation/abandon/settle + claim dual-write; combat actions still local.
 9. [x] Ship the playable levels 6-10 Drowned Moonwell core with exact story encounters, response choices, Moonbridge contracts, and Dungeon Tier II gating.
-10. [ ] Complete its two side-story chains, bespoke enemy/item art, reputation prerequisites, and visible post-chapter world response.
-11. [ ] Produce levels 11-30 as complete five-level content bands, one chapter at a time.
+10. [x] Phase 10B retention → story/tutorial remake → gear → map → interest mechanics (see Phase 10B checklist).
+11. [x] Complete Moonwell side stories and visible post-chapter world response (bespoke enemy/item art and reputation prerequisites remain).
+12. [x] Produce Broken Crown 11–15 as a complete five-level content band; continue 16–30 one chapter at a time.
+13. [x] Produce Glass Road 16–20 playable core (Sable/Serat, Mirror Road Captain, Prior Moon Voss, return).
+14. [x] Expand Black Pike Ledger Chronicle to 40 ranks; add Glass Road Memorial archive (seasonal featured rotation remains later).
+15. [x] Fill Blackwater Gate and Eclipse Hold boards to eight contracts each.
+16. [x] Produce Candle Key 21–25 playable core (Kaito, Ser Kael, Key-Saint Ardan, return).
+17. [x] Produce Lady in Glass 26–30 playable core (Letho, Scarlet Matron, Lady Mirror-Veyra, return).
+18. [x] Ship Candle Compact + Blackwater League reputation tracks and the Campaign Deeds tab.

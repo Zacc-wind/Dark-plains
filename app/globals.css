@@ -7784,6 +7784,26 @@ button.vine-frame::before,
   color: #e7efec;
 }
 
+.equipment-lucky-frame {
+  border-color: rgba(255, 214, 120, 0.92) !important;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 236, 170, 0.35),
+    inset 0 0 16px rgba(255, 196, 86, 0.18),
+    0 0 14px rgba(255, 186, 64, 0.28);
+}
+
+.equipment-lucky-row {
+  border-color: rgba(255, 214, 120, 0.78) !important;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 236, 170, 0.18),
+    0 0 18px rgba(255, 186, 64, 0.16);
+}
+
+.equipment-lucky-quality {
+  color: #ffe7a8;
+  letter-spacing: 0.04em;
+}
+
 .minion-frame {
   box-shadow:
     inset 0 0 0 1px rgba(255, 255, 255, 0.045),
@@ -18989,15 +19009,16 @@ button.vine-frame::before,
 .battle-piece-base {
   position: absolute;
   left: 50%;
-  bottom: 4%;
+  bottom: 10%;
   z-index: 1;
-  width: 58%;
-  height: 12%;
+  width: 52%;
+  height: 11%;
   transform: translateX(-50%);
   border-radius: 999px;
-  background: rgba(0, 0, 0, 0.52);
-  filter: blur(1px);
-  display: none;
+  background: rgba(0, 0, 0, 0.48);
+  filter: blur(1.2px);
+  display: block;
+  pointer-events: none;
 }
 
 .battle-piece-wrap::before {
@@ -19006,18 +19027,18 @@ button.vine-frame::before,
   left: 50%;
   top: 50%;
   z-index: 0;
-  width: 54%;
-  height: 18%;
-  transform: translate(-50%, 28%);
+  width: 48%;
+  height: 14%;
+  transform: translate(-50%, 34%);
   border-radius: 999px;
-  background: rgba(0, 0, 0, 0.42);
-  filter: blur(3px);
-  opacity: 0.55;
+  background: rgba(0, 0, 0, 0.34);
+  filter: blur(2.5px);
+  opacity: 0.62;
   pointer-events: none;
 }
 
 .battle-piece-wrap-enemy::before {
-  background: rgba(40, 8, 8, 0.5);
+  background: rgba(40, 8, 8, 0.42);
 }
 
 .battle-piece-wrap-active::before {
@@ -19276,7 +19297,7 @@ button.vine-frame::before,
     contrast(1.08)
     saturate(1.1)
     brightness(1.04)
-    drop-shadow(0 3px 5px rgba(0, 0, 0, 0.42));
+    drop-shadow(0 2px 3px rgba(0, 0, 0, 0.28));
 }
 
 .battle-piece-body-minion .battle-piece-image {
@@ -23804,13 +23825,135 @@ body.multiplayer-progression-open {
   background: rgba(30, 79, 57, 0.22);
 }
 
-.multiplayer-chronicle-summary {
+.multiplayer-chronicle-summary.is-compact {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.multiplayer-chronicle-panes {
+  display: flex;
+  gap: 0.35rem;
+  overflow-x: auto;
+}
+
+.multiplayer-chronicle-pane {
+  position: relative;
+  flex: 0 0 auto;
+  padding: 0.85rem 0.9rem 0.95rem;
+  color: var(--ui-faint);
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.multiplayer-chronicle-pane::after {
+  content: '';
+  position: absolute;
+  left: 0.9rem;
+  right: 0.9rem;
+  bottom: 0;
+  height: 2px;
+  background: transparent;
+}
+
+.multiplayer-chronicle-pane:hover,
+.multiplayer-chronicle-pane:focus-visible,
+.multiplayer-chronicle-pane.is-active {
+  color: rgba(239, 213, 158, 0.96);
+}
+
+.multiplayer-chronicle-pane.is-active::after {
+  background: rgba(231, 194, 111, 0.72);
+}
+
+.multiplayer-reputation-list,
+.multiplayer-deed-list {
   display: grid;
-  grid-template-columns: 6rem minmax(0, 1fr) auto;
+  gap: 0.85rem;
+}
+
+.multiplayer-reputation-card,
+.multiplayer-deed-row {
+  border: 1px solid rgba(231, 194, 111, 0.18);
+  background: rgba(10, 16, 18, 0.42);
+  padding: 0.95rem 1rem;
+}
+
+.multiplayer-reputation-card.is-locked,
+.multiplayer-deed-row.is-locked {
+  opacity: 0.72;
+}
+
+.multiplayer-reputation-standing,
+.multiplayer-deed-state {
+  text-align: right;
+}
+
+.multiplayer-reputation-standing strong,
+.multiplayer-deed-state {
+  display: block;
+  color: rgba(239, 213, 158, 0.96);
+  font-family: Georgia, serif;
+  font-size: 1.35rem;
+}
+
+.multiplayer-reputation-standing span {
+  display: block;
+  color: var(--ui-faint);
+  font-size: 0.62rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.multiplayer-reputation-tiers {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.multiplayer-reputation-tier {
+  display: flex;
   align-items: center;
-  gap: 1.1rem;
-  background:
-    linear-gradient(90deg, rgba(68, 47, 23, 0.3), rgba(18, 51, 49, 0.2) 68%, rgba(8, 12, 14, 0.2));
+  justify-content: space-between;
+  gap: 0.75rem;
+  border: 1px solid rgba(231, 194, 111, 0.12);
+  background: rgba(8, 12, 14, 0.35);
+  padding: 0.7rem 0.8rem;
+}
+
+.multiplayer-reputation-tier strong,
+.multiplayer-reputation-tier span,
+.multiplayer-reputation-tier em {
+  display: block;
+}
+
+.multiplayer-reputation-tier strong {
+  color: rgba(239, 213, 158, 0.94);
+  font-size: 0.85rem;
+}
+
+.multiplayer-reputation-tier span,
+.multiplayer-reputation-tier em {
+  color: var(--ui-faint);
+  font-size: 0.68rem;
+  font-weight: 800;
+}
+
+.multiplayer-reputation-tier.is-claimable {
+  border-color: rgba(105, 195, 148, 0.38);
+}
+
+.multiplayer-deed-row {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.multiplayer-deed-row.is-claimable {
+  border-color: rgba(105, 195, 148, 0.38);
+}
+
+.multiplayer-deed-row.is-claimed {
+  border-color: rgba(231, 194, 111, 0.28);
 }
 
 .multiplayer-chronicle-guide {

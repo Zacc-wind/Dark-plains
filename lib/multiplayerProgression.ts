@@ -114,7 +114,9 @@ export function getMultiplayerChapterViews(
 
   const views = MULTIPLAYER_CHAPTER_DEFINITIONS.map(definition => {
     const quests = allQuests.filter(quest => (
-      quest.requiredLevel >= definition.minLevel && quest.requiredLevel <= definition.maxLevel
+      quest.track !== 'side'
+      && quest.requiredLevel >= definition.minLevel
+      && quest.requiredLevel <= definition.maxLevel
     ));
     const claimedCount = quests.filter(quest => progressByQuestId.get(quest.id)?.claimed).length;
     const recordedCount = quests.filter(quest => progressByQuestId.get(quest.id)?.introSeen).length;

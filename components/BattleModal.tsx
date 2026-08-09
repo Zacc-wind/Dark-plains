@@ -3460,8 +3460,8 @@ function BattlePiece({
       )}
       {isBleeding && <span className="battle-status-particles battle-status-particles-bleed" aria-hidden="true" />}
       {isPoisoned && <span className="battle-status-particles battle-status-particles-poison" aria-hidden="true" />}
+      <span className={`battle-piece-base ${unit.side === 'player' ? 'battle-piece-base-player' : 'battle-piece-base-enemy'} ${isCommander ? 'battle-piece-base-commander' : ''}`} />
       <span className={`battle-piece-body ${isCommander ? 'battle-piece-body-commander' : 'battle-piece-body-minion'} ${idleClass} ${animationClass}`}>
-        <span className={`battle-piece-base ${unit.side === 'player' ? 'battle-piece-base-player' : 'battle-piece-base-enemy'} ${isCommander ? 'battle-piece-base-commander' : ''}`} />
         <Image
           src={unit.assetPath}
           alt={unit.name}
@@ -3667,6 +3667,7 @@ function BattleUnitTransit({
       } as CSSProperties}
     >
       <span className={`battle-piece-wrap battle-piece-wrap-${unit.side} ${active ? 'battle-piece-wrap-active' : ''}`}>
+        <span className={`battle-piece-base ${unit.side === 'player' ? 'battle-piece-base-player' : 'battle-piece-base-enemy'} ${isCommander ? 'battle-piece-base-commander' : ''}`} />
         <span className={`battle-piece-body ${isCommander ? 'battle-piece-body-commander' : 'battle-piece-body-minion'} battle-piece-anim-move`}>
           <Image
             src={unit.assetPath}

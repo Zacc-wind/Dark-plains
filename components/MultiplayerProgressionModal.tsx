@@ -21,10 +21,11 @@ import { getMultiplayerUnlockLevelGroups, getNextMultiplayerUnlocks } from '@/li
 import { getStoryDialogSequence } from '@/lib/storyDialogue';
 import MultiplayerOrdersPanel from './MultiplayerOrdersPanel';
 import MultiplayerChroniclePanel from './MultiplayerChroniclePanel';
+import MultiplayerDeedsPanel from './MultiplayerDeedsPanel';
 import StoryDialogOverlay from './StoryDialogOverlay';
 import CinematicScrollShell from './CinematicScrollShell';
 
-export type MultiplayerProgressionTab = 'orders' | 'campaign' | 'chronicle' | 'path';
+export type MultiplayerProgressionTab = 'orders' | 'campaign' | 'chronicle' | 'deeds' | 'path';
 
 interface MultiplayerProgressionModalProps {
   isOpen: boolean;
@@ -41,6 +42,7 @@ const TABS: Array<{ id: MultiplayerProgressionTab; label: string }> = [
   { id: 'orders', label: 'Orders' },
   { id: 'campaign', label: 'Campaign' },
   { id: 'chronicle', label: 'Chronicle' },
+  { id: 'deeds', label: 'Deeds' },
   { id: 'path', label: 'Level Path' },
 ];
 
@@ -349,6 +351,12 @@ export default function MultiplayerProgressionModal({
             {activeTab === 'chronicle' && (
               <div id="multiplayer-progression-chronicle" role="tabpanel">
                 <MultiplayerChroniclePanel now={now} player={player} onPlayerRefresh={onPlayerRefresh} />
+              </div>
+            )}
+
+            {activeTab === 'deeds' && (
+              <div id="multiplayer-progression-deeds" role="tabpanel">
+                <MultiplayerDeedsPanel now={now} player={player} onPlayerRefresh={onPlayerRefresh} />
               </div>
             )}
 

@@ -25,6 +25,11 @@ import {
   shouldSpawnFirstBannerBoss,
 } from './multiplayerFirstBanner';
 import { getActiveDrownedMoonwellBoss } from './multiplayerDrownedMoonwell';
+import { getActiveMoonwellSideBoss } from './multiplayerMoonwellSides';
+import { getActiveBrokenCrownBoss } from './multiplayerBrokenCrown';
+import { getActiveGlassRoadBoss } from './multiplayerGlassRoad';
+import { getActiveCandleKeyBoss } from './multiplayerCandleKey';
+import { getActiveLadyInGlassBoss } from './multiplayerLadyInGlass';
 import { getMultiplayerRegionalThreat } from './multiplayerEngagement';
 import { getRegionalThreatBossEnemyId } from './multiplayerRegionalThreat';
 
@@ -833,7 +838,7 @@ const ENEMY_SPAWN_REGIONS: EnemySpawnRegion[] = [
     minY: 3,
     maxX: 30,
     maxY: 28,
-    levels: [1, 1, 2, 2, 3, 3, 4, 5],
+    levels: [1, 1, 2, 2, 3, 4, 5],
   },
   {
     id: 'moonfen-crossroads',
@@ -841,7 +846,7 @@ const ENEMY_SPAWN_REGIONS: EnemySpawnRegion[] = [
     minY: 8,
     maxX: 55,
     maxY: 38,
-    levels: [4, 5, 6, 6, 7, 8, 9, 10],
+    levels: [4, 5, 6, 7, 8, 9, 10],
   },
   {
     id: 'eastern-blackwater',
@@ -849,7 +854,7 @@ const ENEMY_SPAWN_REGIONS: EnemySpawnRegion[] = [
     minY: 2,
     maxX: 82,
     maxY: 32,
-    levels: [8, 9, 10, 11, 12, 13, 14, 15],
+    levels: [8, 9, 10, 11, 12, 13, 14],
   },
   {
     id: 'eclipse-marches',
@@ -857,7 +862,7 @@ const ENEMY_SPAWN_REGIONS: EnemySpawnRegion[] = [
     minY: 28,
     maxX: 82,
     maxY: 46,
-    levels: [12, 13, 14, 15, 15, 15],
+    levels: [12, 13, 14, 15, 15],
   },
 ];
 
@@ -935,7 +940,7 @@ function isTooCloseToOccupied(x: number, y: number, occupied: Set<string>, minDi
   return false;
 }
 
-function findWorldEnemyHome(region: EnemySpawnRegion, seed: number, occupied: Set<string>, minDistance = 4): BoardCell {
+function findWorldEnemyHome(region: EnemySpawnRegion, seed: number, occupied: Set<string>, minDistance = 5): BoardCell {
   for (let attempt = 0; attempt < 90; attempt += 1) {
     const width = region.maxX - region.minX + 1;
     const height = region.maxY - region.minY + 1;
@@ -962,7 +967,7 @@ function getWorldEnemyPatrolPosition(
   seed: number,
   now: number,
   occupied: Set<string>,
-  minDistance = 2
+  minDistance = 3
 ): BoardCell {
   const step = Math.floor(now / WORLD_ENEMY_MOVE_STEP_MS);
   const directions = [
@@ -1266,6 +1271,123 @@ function getDrownedMoonwellStoryBoss(
     lootMultiplier: definition.lootMultiplier,
     requiredPlayerLevel: definition.level,
   };
+}
+
+function spawnNamedStoryBossNearPoi(
+  definition: {
+    enemyId: string;
+    bossId: string;
+    level: number;
+    regionId: string;
+    storyLabel: string;
+    lootMultiplier: number;
+    poiName: string;
+  },
+  user: User | null,
+  now: number,
+  occupied: Set<string>,
+  defeatedEnemyIds: Set<string>,
+  poiFallback: { x: number; y: number },
+): WorldEnemy | null {
+  if (defeatedEnemyIds.has(definition.enemyId)) return null;
+  const profile = getBossProfileById(definition.bossId);
+  if (!profile) return null;
+
+  const poi = getStaticPOIs().find(candidate => candidate.name === definition.poiName);
+  const centerX = poi ? poi.x + 4 : poiFallback.x;
+  const centerY = poi ? poi.y + 4 : poiFallback.y;
+  const region: EnemySpawnRegion = {
+    id: definition.regionId,
+    minX: clamp(centerX - 5, 1, MAP_CONFIG.width - 2),
+    minY: clamp(centerY - 5, 1, MAP_CONFIG.height - 2),
+    maxX: clamp(centerX + 5, 1, MAP_CONFIG.width - 2),
+    maxY: clamp(centerY + 5, 1, MAP_CONFIG.height - 2),
+    levels: [definition.level],
+  };
+  const seed = Math.abs(hashText(`${definition.enemyId}-${user?.username || 'commander'}`));
+  const home = findWorldEnemyHome(region, seed, occupied, 3);
+  const minions = profile.minionTemplates.map((templateId, index) => (
+    makeMinionStack(templateId, `${definition.enemyId}-${index}`, true)
+  ));
+
+  return {
+    id: definition.enemyId,
+    bossId: profile.id,
+    name: profile.name,
+    subtitle: profile.subtitle,
+    story: profile.story,
+    intro: profile.intro,
+    artworkPath: profile.assetPath,
+    x: home.x,
+    y: home.y,
+    homeX: home.x,
+    homeY: home.y,
+    level: definition.level,
+    modelNumber: profile.modelNumber,
+    personality: 'boss',
+    minions,
+    spawnedAt: now,
+    spawnRegionId: definition.regionId,
+    spawnKind: 'story-boss',
+    storyLabel: definition.storyLabel,
+    lootMultiplier: definition.lootMultiplier,
+    requiredPlayerLevel: definition.level,
+  };
+}
+
+function getMoonwellSideStoryBoss(
+  user: User | null,
+  now: number,
+  occupied: Set<string>,
+  defeatedEnemyIds: Set<string>,
+): WorldEnemy | null {
+  const definition = getActiveMoonwellSideBoss(user);
+  if (!definition) return null;
+  return spawnNamedStoryBossNearPoi(definition, user, now, occupied, defeatedEnemyIds, { x: 36, y: 28 });
+}
+
+function getBrokenCrownStoryBoss(
+  user: User | null,
+  now: number,
+  occupied: Set<string>,
+  defeatedEnemyIds: Set<string>,
+): WorldEnemy | null {
+  const definition = getActiveBrokenCrownBoss(user);
+  if (!definition) return null;
+  return spawnNamedStoryBossNearPoi(definition, user, now, occupied, defeatedEnemyIds, { x: 69, y: 35 });
+}
+
+function getGlassRoadStoryBoss(
+  user: User | null,
+  now: number,
+  occupied: Set<string>,
+  defeatedEnemyIds: Set<string>,
+): WorldEnemy | null {
+  const definition = getActiveGlassRoadBoss(user);
+  if (!definition) return null;
+  return spawnNamedStoryBossNearPoi(definition, user, now, occupied, defeatedEnemyIds, { x: 50, y: 17 });
+}
+
+function getCandleKeyStoryBoss(
+  user: User | null,
+  now: number,
+  occupied: Set<string>,
+  defeatedEnemyIds: Set<string>,
+): WorldEnemy | null {
+  const definition = getActiveCandleKeyBoss(user);
+  if (!definition) return null;
+  return spawnNamedStoryBossNearPoi(definition, user, now, occupied, defeatedEnemyIds, { x: 69, y: 35 });
+}
+
+function getLadyInGlassStoryBoss(
+  user: User | null,
+  now: number,
+  occupied: Set<string>,
+  defeatedEnemyIds: Set<string>,
+): WorldEnemy | null {
+  const definition = getActiveLadyInGlassBoss(user);
+  if (!definition) return null;
+  return spawnNamedStoryBossNearPoi(definition, user, now, occupied, defeatedEnemyIds, { x: 72, y: 30 });
 }
 
 function getRegionalThreatBoss(
@@ -1602,10 +1724,20 @@ export function getNpcEnemiesForUser(user: User | null, now = Date.now()): World
     const activeBoss = getHourlyWorldBoss(user, now, occupied, defeatedEnemyIds);
     const storyBoss = getFirstBannerStoryBoss(user, now, occupied, defeatedEnemyIds);
     const moonwellBoss = getDrownedMoonwellStoryBoss(user, now, occupied, defeatedEnemyIds);
+    const moonwellSideBoss = getMoonwellSideStoryBoss(user, now, occupied, defeatedEnemyIds);
+    const brokenCrownBoss = getBrokenCrownStoryBoss(user, now, occupied, defeatedEnemyIds);
+    const glassRoadBoss = getGlassRoadStoryBoss(user, now, occupied, defeatedEnemyIds);
+    const candleKeyBoss = getCandleKeyStoryBoss(user, now, occupied, defeatedEnemyIds);
+    const ladyInGlassBoss = getLadyInGlassStoryBoss(user, now, occupied, defeatedEnemyIds);
     const regionalThreatBoss = getRegionalThreatBoss(user, now, occupied, defeatedEnemyIds);
     return [
       ...(storyBoss ? [storyBoss] : []),
       ...(moonwellBoss ? [moonwellBoss] : []),
+      ...(moonwellSideBoss ? [moonwellSideBoss] : []),
+      ...(brokenCrownBoss ? [brokenCrownBoss] : []),
+      ...(glassRoadBoss ? [glassRoadBoss] : []),
+      ...(candleKeyBoss ? [candleKeyBoss] : []),
+      ...(ladyInGlassBoss ? [ladyInGlassBoss] : []),
       ...(regionalThreatBoss ? [regionalThreatBoss] : []),
       ...(activeBoss ? [activeBoss] : []),
       ...threatEnemies,
@@ -1624,8 +1756,8 @@ export function getNpcEnemiesForUser(user: User | null, now = Date.now()): World
       const id = `enemy-${cycle}-nearby-${user.username}-${index}-${archetype.id}`;
       if (defeatedEnemyIds.has(id)) return;
 
-      const home = findWorldEnemyHome(nearbyRegion, seed, homeOccupied, 3);
-      const patrol = getWorldEnemyPatrolPosition(home, nearbyRegion, seed + 211, spawnedAt, patrolOccupied, 2);
+      const home = findWorldEnemyHome(nearbyRegion, seed, homeOccupied, 4);
+      const patrol = getWorldEnemyPatrolPosition(home, nearbyRegion, seed + 211, spawnedAt, patrolOccupied, 3);
 
       enemies.push(makeWorldEnemyFromArchetype({
         id,
@@ -1655,8 +1787,8 @@ export function getNpcEnemiesForUser(user: User | null, now = Date.now()): World
       const id = `enemy-${cycle}-${region.id}-${slotIndex}-${archetype.id}`;
       if (defeatedEnemyIds.has(id)) return;
 
-      const home = findWorldEnemyHome(region, seed, homeOccupied, regionIndex >= 2 ? 4 : 5);
-      const patrol = getWorldEnemyPatrolPosition(home, region, seed + 101, spawnedAt, patrolOccupied, 2);
+      const home = findWorldEnemyHome(region, seed, homeOccupied, regionIndex >= 2 ? 5 : 6);
+      const patrol = getWorldEnemyPatrolPosition(home, region, seed + 101, spawnedAt, patrolOccupied, 3);
 
       enemies.push(makeWorldEnemyFromArchetype({
         id,
@@ -1679,11 +1811,21 @@ export function getNpcEnemiesForUser(user: User | null, now = Date.now()): World
   const activeBoss = getHourlyWorldBoss(user, now, patrolOccupied, defeatedEnemyIds);
   const storyBoss = getFirstBannerStoryBoss(user, now, patrolOccupied, defeatedEnemyIds);
   const moonwellBoss = getDrownedMoonwellStoryBoss(user, now, patrolOccupied, defeatedEnemyIds);
+  const moonwellSideBoss = getMoonwellSideStoryBoss(user, now, patrolOccupied, defeatedEnemyIds);
+  const brokenCrownBoss = getBrokenCrownStoryBoss(user, now, patrolOccupied, defeatedEnemyIds);
+  const glassRoadBoss = getGlassRoadStoryBoss(user, now, patrolOccupied, defeatedEnemyIds);
+  const candleKeyBoss = getCandleKeyStoryBoss(user, now, patrolOccupied, defeatedEnemyIds);
+  const ladyInGlassBoss = getLadyInGlassStoryBoss(user, now, patrolOccupied, defeatedEnemyIds);
   const regionalThreatBoss = getRegionalThreatBoss(user, now, patrolOccupied, defeatedEnemyIds);
   const threatEnemies = applyRegionalThreatComposition(user, generatedEnemies, now);
   return [
     ...(storyBoss ? [storyBoss] : []),
     ...(moonwellBoss ? [moonwellBoss] : []),
+    ...(moonwellSideBoss ? [moonwellSideBoss] : []),
+    ...(brokenCrownBoss ? [brokenCrownBoss] : []),
+    ...(glassRoadBoss ? [glassRoadBoss] : []),
+    ...(candleKeyBoss ? [candleKeyBoss] : []),
+    ...(ladyInGlassBoss ? [ladyInGlassBoss] : []),
     ...(regionalThreatBoss ? [regionalThreatBoss] : []),
     ...(activeBoss ? [activeBoss] : []),
     ...threatEnemies,

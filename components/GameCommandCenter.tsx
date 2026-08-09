@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { getActiveGearSetSummaries } from '@/lib/gearSets';
+import { formatEquipmentQualityLabel } from '@/lib/gearProgression';
 import { getPlayerModelPath } from '@/lib/assetLoader';
 import { BATTLE_SPELLS, type BattleSpell } from '@/lib/battle';
 import { DailyRunModal, getSavedDailyRunSummary } from './RoguelikeRunModal';
@@ -90,6 +91,7 @@ import {
   skipMultiplayerOnboarding,
   toggleMinionFielded,
   touchCurrentMultiplayerEngagement,
+  consumeCurrentMultiplayerSocialPing,
   unequipItem,
   upgradeInventoryCapacity,
   activateInventoryItem,
@@ -249,6 +251,7 @@ function EquipmentGearPopover({
       <div className={`run-gear-tip-title ${rarityClasses(item.rarity)}`}>{item.name}</div>
       <div className="run-gear-tip-meta">
         {item.slot.replace('-', ' ')} · {item.rarity}
+        {formatEquipmentQualityLabel(item) ? ` · ${formatEquipmentQualityLabel(item)}` : ''}
       </div>
 
       {statRows.length > 0 ? (
@@ -661,6 +664,10 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
     if (engagement?.pendingBriefing) {
       setMultiplayerProgressionTab('orders');
       setShowMultiplayerProgression(true);
+    }
+    if (consumeCurrentMultiplayerSocialPing()) {
+      setNotice('A friend or party ally is on the road. Open Social to invite or rejoin them.');
+      setMultiplayerProgressionTab('orders');
     }
     setUser(getCurrentUser());
   }, [engagementDayKey, showRandomRun]);
@@ -2423,8 +2430,8 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
                 <div key={slot} className={`equipment-paperdoll-slot equipment-slot-${slot} ui-card rounded p-2`}>
                   <div className="ui-faint text-[10px] font-bold uppercase">{slot.replace('-', ' ')}</div>
                   {item ? (
-                    <div className="mt-1 flex items-center gap-2">
-                      <span className="ui-icon-frame relative h-12 w-12 shrink-0 overflow-hidden rounded">
+                    <div className={`mt-1 flex items-center gap-2 ${item.isLucky ? 'equipment-lucky-row' : ''}`}>
+                      <span className={`ui-icon-frame relative h-12 w-12 shrink-0 overflow-hidden rounded ${item.isLucky ? 'equipment-lucky-frame' : ''}`}>
                         <Image
                           src={getEquipmentIconPath(item)}
                           alt={item.name}
@@ -2436,6 +2443,11 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
                       </span>
                       <div className="min-w-0">
                         <div className={`rounded px-2 py-1 text-xs font-bold ${rarityClasses(item.rarity)}`}>{item.name}</div>
+                        {formatEquipmentQualityLabel(item) && (
+                          <div className={`mt-1 text-[10px] font-black uppercase ${item.isLucky ? 'equipment-lucky-quality' : 'ui-faint'}`}>
+                            {formatEquipmentQualityLabel(item)}
+                          </div>
+                        )}
                         <button onClick={() => handleUnequip(slot)} className="mt-2 text-xs font-bold text-red-300 hover:text-red-100">Unequip</button>
                       </div>
                     </div>
@@ -2519,10 +2531,10 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
                   <button
                     type="button"
                     onClick={() => handleEquip(item.id)}
-                    className={`command-icon-tile command-icon-tile-external-tip rounded border ${rarityClasses(item.rarity)}`}
+                    className={`command-icon-tile command-icon-tile-external-tip rounded border ${rarityClasses(item.rarity)} ${item.isLucky ? 'equipment-lucky-row' : ''}`}
                     aria-label={`Equip ${item.name}`}
                   >
-                    <span className="command-icon-image overflow-hidden rounded">
+                    <span className={`command-icon-image overflow-hidden rounded ${item.isLucky ? 'equipment-lucky-frame' : ''}`}>
                       <Image
                         src={getEquipmentIconPath(item)}
                         alt=""

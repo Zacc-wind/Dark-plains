@@ -42,6 +42,12 @@
 - Unified multiplayer content, level progression, non-expiring Chronicle, and singleplayer discovery planning lives in `docs/progression-content-roadmap.md`.
 - Known rough edges: enemy commander spell-to-player-turn sequencing still needs natural-fight QA, run reward/shop/omen animations still need pacing review across a full run, and Thorn Ward still uses the Warding Prayer spell icon until a unique icon is generated.
 
+## Status Audit - 2026-08-09
+
+- Confirmed polish track (Phase 10B) is complete through Moonwell sides and Broken Crown 11–15.
+- Follow-on content: Glass Road 16–20, Chronicle 40 ranks, and Blackwater/Eclipse boards to eight contracts each are shipped.
+- Remaining non-deployment work: combat polish and parked systems (seasonal PVP, combat-action DB streaming, guild goals, bespoke art). Faction reputation, Chronicle archive, and Deeds tab are shipped.
+
 ## Current Polish Sprint
 - [x] Shrink cursor fog reveal radius by about 50% so map discovery feels tighter.
 - [x] Scale fog/player glow reveal with zoom so close zoom keeps characters readable.
@@ -60,6 +66,13 @@
 - [x] Add animation feedback for travel start, travel cancel, quest accept, shop purchase, blacksmith upgrade, and spell equip.
 - [x] Reduce nested borders in command panels and replace repeated boxed rows with cleaner grouped lists.
 - [x] Add a short first-session onboarding sequence that points to Daily Run, first town board, and first nearby enemy.
+
+## Map And Visual Clean (confirmed 2026-08-09)
+- [x] Campfire ground/marker pass; particles stay High-only.
+- [x] Density rebalance in `mapData` / `battle` (thin center; camps off mid-road; enemy spacing).
+- [x] Dedicated dungeon map markers instead of tinted XP icons.
+- [x] Zoomed-out label budget and softer quest bangs.
+- [x] Battle deployed-unit shadow/frame consistency (no full sprite regen).
 
 ## Phase 1: Combat Rules
 - [x] Commander is the player king on the battlefield.

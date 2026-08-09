@@ -62,6 +62,18 @@ export interface ReturningPlayerBriefingState {
   createdAt: number;
 }
 
+export interface MultiplayerInboxMail {
+  id: string;
+  createdAt: number;
+  title: string;
+  body: string;
+  rewardGold: number;
+  rewardExp: number;
+  rewardItemId?: string;
+  rewardItemQuantity?: number;
+  claimed: boolean;
+}
+
 export interface MultiplayerEngagementState {
   version: number;
   dateKey: string;
@@ -78,6 +90,37 @@ export interface MultiplayerEngagementState {
   returnDays: string[];
   lastSeenAt?: number;
   pendingBriefing?: ReturningPlayerBriefingState;
+  inboxMails: MultiplayerInboxMail[];
+  claimedInboxIds: string[];
+  dailyClaimStreak: number;
+  lastDailyClaimDateKey?: string;
+  bannerHuntClaimedWeekKey?: string;
+  lastSocialPingAt?: number;
+}
+
+export interface MultiplayerDailyStreakView {
+  streak: number;
+  maxStreak: number;
+  bonusPercent: number;
+}
+
+export interface MultiplayerReturnCtaView {
+  kind: 'inbox' | 'story' | 'order' | 'oath' | 'hunt';
+  title: string;
+  detail: string;
+}
+
+export interface MultiplayerBannerHuntView {
+  id: string;
+  title: string;
+  description: string;
+  targetInspect: number;
+  targetWins: number;
+  inspectProgress: number;
+  winProgress: number;
+  complete: boolean;
+  claimed: boolean;
+  cosmeticLabel: string;
 }
 
 export interface MultiplayerContractView {
@@ -148,9 +191,14 @@ interface MultiplayerContractTemplate {
 const DAY_MS = 24 * 60 * 60 * 1000;
 const EVENT_RETENTION_MS = 15 * DAY_MS;
 const RETURN_DAY_RETENTION_MS = 30 * DAY_MS;
-export const MULTIPLAYER_ENGAGEMENT_VERSION = 4;
+const INBOX_RETENTION_MS = 30 * DAY_MS;
+export const MULTIPLAYER_ENGAGEMENT_VERSION = 6;
 export const MULTIPLAYER_RESTED_JOB_BONUS_PERCENT = 25;
 export const MULTIPLAYER_MAX_RESTED_JOB_CHARGES = 3;
+export const MULTIPLAYER_INBOX_ABSENCE_MS = DAY_MS;
+export const MULTIPLAYER_DAILY_STREAK_CAP = 7;
+export const MULTIPLAYER_DAILY_STREAK_BONUS_PERCENT_PER_DAY = 3;
+export const MULTIPLAYER_SOCIAL_PING_COOLDOWN_MS = 12 * 60 * 60 * 1000;
 const VALID_EVENT_KINDS = new Set<MultiplayerEngagementEventKind>([
   'job-started',
   'job-completed',
@@ -418,6 +466,35 @@ export function normalizeMultiplayerEngagementState(
         createdAt: state.pendingBriefing.createdAt,
       }
     : undefined;
+  const claimedInboxIds = Array.from(new Set((state?.claimedInboxIds || []).filter(id => typeof id === 'string')))
+    .slice(-40);
+  const inboxMails = (Array.isArray(state?.inboxMails) ? state.inboxMails : [])
+    .filter((mail): mail is MultiplayerInboxMail => Boolean(
+      mail
+      && typeof mail === 'object'
+      && typeof mail.id === 'string'
+      && mail.id.trim()
+      && Number.isFinite(mail.createdAt)
+      && mail.createdAt >= now - INBOX_RETENTION_MS,
+    ))
+    .map(mail => ({
+      id: mail.id.trim().slice(0, 120),
+      createdAt: Number(mail.createdAt),
+      title: typeof mail.title === 'string' && mail.title.trim() ? mail.title.trim().slice(0, 80) : 'Road Packet',
+      body: typeof mail.body === 'string' && mail.body.trim()
+        ? mail.body.trim().slice(0, 240)
+        : 'A courier left supplies for your return.',
+      rewardGold: Math.max(0, Math.floor(Number(mail.rewardGold) || 0)),
+      rewardExp: Math.max(0, Math.floor(Number(mail.rewardExp) || 0)),
+      ...(typeof mail.rewardItemId === 'string' && mail.rewardItemId.trim()
+        ? { rewardItemId: mail.rewardItemId.trim().slice(0, 80) }
+        : {}),
+      ...(Number.isFinite(mail.rewardItemQuantity) && Number(mail.rewardItemQuantity) > 0
+        ? { rewardItemQuantity: Math.max(1, Math.floor(Number(mail.rewardItemQuantity))) }
+        : {}),
+      claimed: Boolean(mail.claimed) || claimedInboxIds.includes(mail.id.trim()),
+    }))
+    .slice(-12);
 
   return {
     version: MULTIPLAYER_ENGAGEMENT_VERSION,
@@ -448,6 +525,20 @@ export function normalizeMultiplayerEngagementState(
     returnDays,
     lastSeenAt: Number.isFinite(state?.lastSeenAt) ? state?.lastSeenAt : undefined,
     pendingBriefing,
+    inboxMails,
+    claimedInboxIds,
+    dailyClaimStreak: Math.min(
+      MULTIPLAYER_DAILY_STREAK_CAP,
+      Math.max(0, Math.floor(Number(state?.dailyClaimStreak) || 0)),
+    ),
+    lastDailyClaimDateKey: typeof state?.lastDailyClaimDateKey === 'string'
+      && dateKeyToStart(state.lastDailyClaimDateKey) >= now - RETURN_DAY_RETENTION_MS
+      ? state.lastDailyClaimDateKey
+      : undefined,
+    bannerHuntClaimedWeekKey: typeof state?.bannerHuntClaimedWeekKey === 'string'
+      ? state.bannerHuntClaimedWeekKey
+      : undefined,
+    lastSocialPingAt: Number.isFinite(state?.lastSocialPingAt) ? Number(state?.lastSocialPingAt) : undefined,
   };
 }
 
@@ -533,6 +624,113 @@ export function rerollMultiplayerDailyContract(
   };
 }
 
+export function getMultiplayerDailyStreakView(
+  state: Partial<MultiplayerEngagementState> | null | undefined,
+  username: string,
+  now = Date.now(),
+): MultiplayerDailyStreakView {
+  const normalized = normalizeMultiplayerEngagementState(state, username, now);
+  const streak = normalized.dailyClaimStreak;
+  const yesterday = shiftDateKey(normalized.dateKey, -1);
+  const activeStreak = normalized.lastDailyClaimDateKey === normalized.dateKey
+    || normalized.lastDailyClaimDateKey === yesterday
+    ? streak
+    : 0;
+  const bonusPercent = Math.max(0, (Math.min(MULTIPLAYER_DAILY_STREAK_CAP, activeStreak) - 1))
+    * MULTIPLAYER_DAILY_STREAK_BONUS_PERCENT_PER_DAY;
+  return {
+    streak: activeStreak,
+    maxStreak: MULTIPLAYER_DAILY_STREAK_CAP,
+    bonusPercent: Math.max(0, bonusPercent),
+  };
+}
+
+export function applyDailyClaimStreak(
+  state: MultiplayerEngagementState,
+  now = Date.now(),
+): MultiplayerEngagementState {
+  const today = state.dateKey;
+  if (state.lastDailyClaimDateKey === today) return state;
+  const yesterday = shiftDateKey(today, -1);
+  const nextStreak = state.lastDailyClaimDateKey === yesterday
+    ? Math.min(MULTIPLAYER_DAILY_STREAK_CAP, Math.max(1, state.dailyClaimStreak) + 1)
+    : 1;
+  return {
+    ...state,
+    dailyClaimStreak: nextStreak,
+    lastDailyClaimDateKey: today,
+  };
+}
+
+export function getMultiplayerBannerHunt(
+  state: Partial<MultiplayerEngagementState> | null | undefined,
+  username: string,
+  now = Date.now(),
+): MultiplayerBannerHuntView {
+  const normalized = normalizeMultiplayerEngagementState(state, username, now);
+  const weekStart = dateKeyToStart(normalized.weekKey);
+  const weeklyEvents = normalized.events.filter(event => event.occurredAt >= weekStart);
+  const inspectProgress = weeklyEvents.filter(event => event.kind === 'enemy-inspected').length;
+  const winProgress = weeklyEvents.filter(event => event.kind === 'battle-result-claimed').length;
+  const variants = [
+    { title: 'Banner Hunt: Road Wardens', description: 'Scout one foe and claim one battle report for the week.', cosmeticLabel: 'Road Warden Crest' },
+    { title: 'Banner Hunt: Ash Patrol', description: 'Inspect a threat and finish one genuine fight this week.', cosmeticLabel: 'Ash Patrol Pennant' },
+    { title: 'Banner Hunt: Candle Vigil', description: 'Mark one enemy and close one battle report before the week ends.', cosmeticLabel: 'Candle Vigil Ribbon' },
+  ];
+  const variant = variants[hashText(normalized.weekKey) % variants.length];
+  const targetInspect = 1;
+  const targetWins = 1;
+  return {
+    id: `${normalized.weekKey}:banner-hunt`,
+    ...variant,
+    targetInspect,
+    targetWins,
+    inspectProgress: Math.min(targetInspect, inspectProgress),
+    winProgress: Math.min(targetWins, winProgress),
+    complete: inspectProgress >= targetInspect && winProgress >= targetWins,
+    claimed: normalized.bannerHuntClaimedWeekKey === normalized.weekKey,
+    cosmeticLabel: variant.cosmeticLabel,
+  };
+}
+
+export function claimMultiplayerBannerHunt(
+  state: Partial<MultiplayerEngagementState> | null | undefined,
+  username: string,
+  now = Date.now(),
+): { success: boolean; state: MultiplayerEngagementState; hunt: MultiplayerBannerHuntView; error?: string } {
+  const normalized = normalizeMultiplayerEngagementState(state, username, now);
+  const hunt = getMultiplayerBannerHunt(normalized, username, now);
+  if (hunt.claimed) return { success: false, state: normalized, hunt, error: 'Banner Hunt already claimed this week.' };
+  if (!hunt.complete) return { success: false, state: normalized, hunt, error: 'Banner Hunt is not complete.' };
+  return {
+    success: true,
+    hunt,
+    state: normalizeMultiplayerEngagementState({
+      ...normalized,
+      bannerHuntClaimedWeekKey: normalized.weekKey,
+    }, username, now),
+  };
+}
+
+export function shouldShowMultiplayerSocialPing(
+  state: Partial<MultiplayerEngagementState> | null | undefined,
+  username: string,
+  now = Date.now(),
+): boolean {
+  const normalized = normalizeMultiplayerEngagementState(state, username, now);
+  if (!normalized.lastSocialPingAt) return true;
+  return now - normalized.lastSocialPingAt >= MULTIPLAYER_SOCIAL_PING_COOLDOWN_MS;
+}
+
+export function markMultiplayerSocialPingShown(
+  state: Partial<MultiplayerEngagementState> | null | undefined,
+  username: string,
+  now = Date.now(),
+): MultiplayerEngagementState {
+  const normalized = normalizeMultiplayerEngagementState(state, username, now);
+  return { ...normalized, lastSocialPingAt: now };
+}
+
 export function claimMultiplayerDailyContract(
   state: Partial<MultiplayerEngagementState> | null | undefined,
   username: string,
@@ -545,14 +743,16 @@ export function claimMultiplayerDailyContract(
   if (contract.claimed) return { success: false, state: normalized, contract, error: 'Daily contract already claimed.' };
   if (!contract.complete) return { success: false, state: normalized, contract, error: 'Daily contract is not complete.' };
 
+  const withClaim = normalizeMultiplayerEngagementState({
+    ...normalized,
+    claimedContractIds: [...normalized.claimedContractIds, contract.id],
+    telemetry: { ...normalized.telemetry, dailyClaims: normalized.telemetry.dailyClaims + 1 },
+  }, username, now);
+
   return {
     success: true,
     contract,
-    state: normalizeMultiplayerEngagementState({
-      ...normalized,
-      claimedContractIds: [...normalized.claimedContractIds, contract.id],
-      telemetry: { ...normalized.telemetry, dailyClaims: normalized.telemetry.dailyClaims + 1 },
-    }, username, now),
+    state: applyDailyClaimStreak(withClaim, now),
   };
 }
 
@@ -610,6 +810,67 @@ export function claimMultiplayerWeeklyOath(
   };
 }
 
+function buildReturnInboxMail(dateKey: string, now: number, msAway: number): MultiplayerInboxMail {
+  const daysAway = Math.max(1, Math.floor(msAway / DAY_MS));
+  const rewardGold = 18 + Math.min(42, daysAway * 6);
+  const rewardExp = 12 + Math.min(28, daysAway * 4);
+  return {
+    id: `inbox:${dateKey}:return`,
+    createdAt: now,
+    title: 'Courier Packet',
+    body: daysAway === 1
+      ? 'A road courier left a sealed kit for your return to the banners.'
+      : `After ${daysAway} days away, a courier left a sealed kit for your return.`,
+    rewardGold,
+    rewardExp,
+    rewardItemId: 'red-mercy-draught',
+    rewardItemQuantity: 1,
+    claimed: false,
+  };
+}
+
+export function getMultiplayerInboxMails(
+  state: Partial<MultiplayerEngagementState> | null | undefined,
+  username: string,
+  now = Date.now(),
+): MultiplayerInboxMail[] {
+  return normalizeMultiplayerEngagementState(state, username, now).inboxMails;
+}
+
+export function getMultiplayerPendingInboxMails(
+  state: Partial<MultiplayerEngagementState> | null | undefined,
+  username: string,
+  now = Date.now(),
+): MultiplayerInboxMail[] {
+  return getMultiplayerInboxMails(state, username, now).filter(mail => !mail.claimed);
+}
+
+export function claimMultiplayerInboxMail(
+  state: Partial<MultiplayerEngagementState> | null | undefined,
+  username: string,
+  mailId: string,
+  now = Date.now(),
+): { success: boolean; state: MultiplayerEngagementState; mail?: MultiplayerInboxMail; error?: string } {
+  const normalized = normalizeMultiplayerEngagementState(state, username, now);
+  const mail = normalized.inboxMails.find(item => item.id === mailId);
+  if (!mail) return { success: false, state: normalized, error: 'Inbox packet was not found.' };
+  if (mail.claimed || normalized.claimedInboxIds.includes(mail.id)) {
+    return { success: false, state: normalized, mail, error: 'Inbox packet already claimed.' };
+  }
+
+  return {
+    success: true,
+    mail: { ...mail, claimed: true },
+    state: normalizeMultiplayerEngagementState({
+      ...normalized,
+      claimedInboxIds: [...normalized.claimedInboxIds, mail.id],
+      inboxMails: normalized.inboxMails.map(item => (
+        item.id === mail.id ? { ...item, claimed: true } : item
+      )),
+    }, username, now),
+  };
+}
+
 export function touchMultiplayerEngagement(
   state: Partial<MultiplayerEngagementState> | null | undefined,
   username: string,
@@ -629,12 +890,26 @@ export function touchMultiplayerEngagement(
     ? Math.min(MULTIPLAYER_MAX_RESTED_JOB_CHARGES, Math.max(1, Math.ceil(daysAway / 2)))
     : normalized.restedJobCharges;
 
+  const msAway = Number.isFinite(normalized.lastSeenAt)
+    ? Math.max(0, now - Number(normalized.lastSeenAt))
+    : 0;
+  const inboxId = `inbox:${today}:return`;
+  const shouldCreateInbox = Boolean(
+    normalized.lastSeenAt
+    && msAway >= MULTIPLAYER_INBOX_ABSENCE_MS
+    && !normalized.claimedInboxIds.includes(inboxId)
+    && !normalized.inboxMails.some(mail => mail.id === inboxId),
+  );
+
   return normalizeMultiplayerEngagementState({
     ...normalized,
     returnDays: [...normalized.returnDays, today],
     lastSeenAt: now,
     pendingBriefing: shouldBrief ? { daysAway, createdAt: now } : normalized.pendingBriefing,
     restedJobCharges: Math.max(normalized.restedJobCharges, restedCharges),
+    inboxMails: shouldCreateInbox
+      ? [...normalized.inboxMails, buildReturnInboxMail(today, now, msAway)]
+      : normalized.inboxMails,
     telemetry: shouldBrief
       ? { ...normalized.telemetry, briefingsShown: normalized.telemetry.briefingsShown + 1 }
       : normalized.telemetry,
@@ -678,7 +953,12 @@ export function getMultiplayerEngagementClaimableCount(
   const daily = getMultiplayerDailyContracts(state, username, now)
     .filter(contract => contract.complete && !contract.claimed).length;
   const weekly = getMultiplayerWeeklyOath(state, username, now);
-  return daily + (weekly.complete && !weekly.claimed ? 1 : 0);
+  const inbox = getMultiplayerPendingInboxMails(state, username, now).length;
+  const hunt = getMultiplayerBannerHunt(state, username, now);
+  return daily
+    + (weekly.complete && !weekly.claimed ? 1 : 0)
+    + inbox
+    + (hunt.complete && !hunt.claimed ? 1 : 0);
 }
 
 export function getMultiplayerFirstCompletionBonuses(

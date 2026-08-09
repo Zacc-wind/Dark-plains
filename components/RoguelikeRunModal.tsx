@@ -38,6 +38,8 @@ import {
   RUN_MAX_EQUIPMENT_BAG,
   unequipRunItem,
 } from '@/lib/runEquipment';
+import { formatEquipmentQualityLabel } from '@/lib/gearProgression';
+import { playGameSound } from '@/lib/sound';
 import { ASSET_PATHS } from '@/lib/assetLoader';
 import {
   ActivityEntry,
@@ -4245,11 +4247,11 @@ function RunGearPanel({
                 const slotButton = (
                   <button
                     type="button"
-                    className={`run-gear-square rounded border ${runEquipmentRarityClass(item.rarity)}`}
+                    className={`run-gear-square rounded border ${runEquipmentRarityClass(item.rarity)} ${item.isLucky ? 'equipment-lucky-row' : ''}`}
                     onClick={() => onUnequip(slot)}
                     aria-label={`Unequip ${item.name}`}
                   >
-                    <span className="run-gear-square-icon relative overflow-hidden">
+                    <span className={`run-gear-square-icon relative overflow-hidden ${item.isLucky ? 'equipment-lucky-frame' : ''}`}>
                       <Image
                         src={getRunEquipmentIconPath(item)}
                         alt=""
@@ -4313,12 +4315,12 @@ function RunGearPanel({
             >
               <button
                 type="button"
-                className={`run-gear-square run-gear-satchel-item rounded border ${runEquipmentRarityClass(item.rarity)}`}
+                className={`run-gear-square run-gear-satchel-item rounded border ${runEquipmentRarityClass(item.rarity)} ${item.isLucky ? 'equipment-lucky-row' : ''}`}
                 style={{ width: 'var(--run-gear-satchel-cell)', height: 'var(--run-gear-satchel-cell)' }}
                 onClick={() => onEquip(item.id)}
                 aria-label={`Equip ${item.name}`}
               >
-                <span className="run-gear-square-icon relative overflow-hidden">
+                <span className={`run-gear-square-icon relative overflow-hidden ${item.isLucky ? 'equipment-lucky-frame' : ''}`}>
                   <Image
                     src={getRunEquipmentIconPath(item)}
                     alt=""
@@ -4354,6 +4356,7 @@ function RunEquipmentTooltip({
       <div className={`run-gear-tip-title ${runEquipmentRarityClass(item.rarity)}`}>{item.name}</div>
       <div className="run-gear-tip-meta">
         {RUN_EQUIPMENT_SLOT_LABELS[item.slot]} · {formatEquipmentRarityLabel(item.rarity)}
+        {formatEquipmentQualityLabel(item) ? ` · ${formatEquipmentQualityLabel(item)}` : ''}
       </div>
 
       {statRows.length > 0 ? (
