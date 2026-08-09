@@ -503,6 +503,34 @@ textarea {
   animation: singleplayer-tutorial-dialog-in 980ms cubic-bezier(0.14, 0.84, 0.18, 1) 180ms both;
 }
 
+.story-dialog-panel .arcane-label {
+  color: rgba(236, 208, 150, 0.95);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.78);
+}
+
+.story-dialog-panel .ui-muted,
+.story-dialog-panel .ui-faint,
+.story-dialog-panel .story-dialog-copy {
+  color: rgba(232, 219, 190, 0.92);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.72);
+}
+
+.story-dialog-panel .story-dialog-choice .story-dialog-choice-copy,
+.story-dialog-panel .story-dialog-choice .story-dialog-choice-label,
+.story-dialog-panel .story-dialog-choice .story-dialog-choice-tone {
+  text-shadow: none;
+}
+
+.story-dialog-panel .story-dialog-choice .story-dialog-choice-copy {
+  color: rgba(212, 212, 216, 0.82);
+}
+
+.story-dialog-panel .story-dialog-objective .ui-muted,
+.story-dialog-panel .story-dialog-objective .ui-faint {
+  color: var(--ui-muted);
+  text-shadow: none;
+}
+
 .story-dialog-panel-glow {
   position: absolute;
   inset: 0;
@@ -811,6 +839,18 @@ textarea {
     linear-gradient(90deg, rgba(244, 221, 176, 0.08), transparent 42%),
     radial-gradient(circle at 22% 18%, rgba(244, 221, 176, 0.16), transparent 26rem);
   opacity: 0.72;
+}
+
+/* SP tutorial parchment body: readable muted/arcane; leave fantasy-heading. */
+.singleplayer-tutorial-dialog .cinematic-scroll-content .arcane-label {
+  color: rgba(236, 208, 150, 0.95);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.78);
+}
+
+.singleplayer-tutorial-dialog .cinematic-scroll-content .ui-muted,
+.singleplayer-tutorial-dialog .cinematic-scroll-content .ui-faint {
+  color: rgba(232, 219, 190, 0.92);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.72);
 }
 
 .singleplayer-tutorial-hint {
@@ -2183,6 +2223,21 @@ button.vine-frame::before,
   text-shadow: 0 0 10px rgba(76, 167, 223, 0.28);
 }
 
+/* Surgical parchment contrast: HUD only. Do not remint fantasy titles. */
+.game-hud-scroll .hud-xp-value {
+  color: #14365f;
+  text-shadow:
+    0 1px 0 rgba(255, 248, 231, 0.35),
+    0 1px 2px rgba(0, 0, 0, 0.55);
+}
+
+.game-hud-scroll .arcane-label {
+  color: #5c4218;
+  text-shadow:
+    0 1px 0 rgba(255, 248, 231, 0.28),
+    0 1px 2px rgba(0, 0, 0, 0.55);
+}
+
 .hud-avatar-button.hud-commander-chip,
 .hud-avatar-button.hud-commander-chip:hover,
 .hud-avatar-button.hud-commander-chip:focus-visible {
@@ -2273,7 +2328,7 @@ button.vine-frame::before,
 .hud-stat-tone-gold { color: #fde68a; }
 .hud-stat-tone-blue { color: #93c5fd; }
 .hud-stat-tone-teal { color: #a7f3d0; }
-.hud-stat-tone-violet { color: #d8b4fe; }
+.hud-stat-tone-violet { color: #f3e8ff; }
 
 .hud-stat-chip-bar {
   position: absolute;
@@ -5318,6 +5373,17 @@ button.vine-frame::before,
 
 .travel-confirm-card {
   animation: command-panel-in 180ms ease-out;
+}
+
+.travel-confirm-card .cinematic-scroll-content .arcane-label {
+  color: rgba(236, 208, 150, 0.95);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.78);
+}
+
+.travel-confirm-card .cinematic-scroll-content .ui-muted,
+.travel-confirm-card .cinematic-scroll-content .ui-faint {
+  color: rgba(232, 219, 190, 0.92);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.72);
 }
 
 .world-popup-layer {
@@ -22197,8 +22263,8 @@ button.vine-frame::before,
 
 .main-quest-tracker-content .ui-faint,
 .main-quest-tracker-content .ui-muted {
-  color: rgba(232, 219, 190, 0.82);
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
+  color: rgba(232, 219, 190, 0.9);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.72);
 }
 
 .main-quest-tracker-content .ui-accent {
@@ -23265,10 +23331,11 @@ button.vine-frame::before,
 
 .multiplayer-tutorial-kicker {
   margin: 0;
-  color: rgba(247, 214, 148, 0.78);
+  color: rgba(236, 208, 150, 0.95);
   font-size: 0.62rem;
   font-weight: 900;
   text-transform: uppercase;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.78);
 }
 
 .multiplayer-tutorial-title {
@@ -23276,14 +23343,16 @@ button.vine-frame::before,
   color: #fff8e7;
   font-size: 1.12rem;
   line-height: 1.05;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.82);
 }
 
 .multiplayer-tutorial-copy {
   margin: 0.35rem 0 0;
-  color: rgba(241, 234, 218, 0.8);
+  color: rgba(232, 219, 190, 0.92);
   font-size: 0.72rem;
   font-weight: 700;
   line-height: 1.38;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.72);
 }
 
 .multiplayer-tutorial-ack {
@@ -23370,6 +23439,39 @@ body.multiplayer-progression-open {
 .multiplayer-progression-shell {
   background:
     linear-gradient(180deg, rgba(21, 24, 24, 0.985), rgba(7, 9, 11, 0.995));
+}
+
+/* Campaign parchment: strengthen muted/arcane only. Leave fantasy-heading alone. */
+.multiplayer-progression-shell .cinematic-scroll-content .arcane-label {
+  color: rgba(236, 208, 150, 0.95);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.78);
+}
+
+.multiplayer-progression-shell .cinematic-scroll-content .ui-muted,
+.multiplayer-progression-shell .cinematic-scroll-content .ui-faint {
+  color: rgba(232, 219, 190, 0.9);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.72);
+}
+
+/* Dark nested cards keep pale-on-dark (do not inherit parchment ink). */
+.multiplayer-progression-shell .cinematic-scroll-content .ui-card .arcane-label {
+  color: var(--ui-accent);
+  text-shadow: 0 0 10px rgba(255, 236, 196, 0.2);
+}
+
+.multiplayer-progression-shell .cinematic-scroll-content .ui-card .ui-muted {
+  color: var(--ui-muted);
+  text-shadow: none;
+}
+
+.multiplayer-progression-shell .cinematic-scroll-content .ui-card .ui-faint {
+  color: var(--ui-faint);
+  text-shadow: none;
+}
+
+/* Dark tab strip stays pale-on-dark (override parchment muted if inherited). */
+.multiplayer-progression-tabs .multiplayer-progression-tab {
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.75);
 }
 
 .multiplayer-progression-header {
