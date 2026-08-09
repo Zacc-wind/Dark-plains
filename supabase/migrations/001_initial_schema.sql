@@ -246,8 +246,9 @@ create policy "content entries are readable"
   on public.content_entries for select
   using (enabled = true);
 
--- Leaderboard views
-create or replace view public.leaderboard_power as
+-- Leaderboard views (security_invoker so caller RLS applies)
+create or replace view public.leaderboard_power
+with (security_invoker = true) as
 select
   p.username,
   ps.level,
@@ -259,7 +260,8 @@ select
 from public.player_states ps
 join public.profiles p on p.id = ps.user_id;
 
-create or replace view public.leaderboard_daily as
+create or replace view public.leaderboard_daily
+with (security_invoker = true) as
 select
   p.username,
   count(*)::int as completions,

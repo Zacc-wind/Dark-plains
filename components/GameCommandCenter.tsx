@@ -7,7 +7,7 @@ import { useRouter } from 'next/navigation';
 import { getActiveGearSetSummaries } from '@/lib/gearSets';
 import { getPlayerModelPath } from '@/lib/assetLoader';
 import { BATTLE_SPELLS, type BattleSpell } from '@/lib/battle';
-import { DailyRunModal, getSavedDailyRunSummary, MpDailyDungeonModal } from './RoguelikeRunModal';
+import { DailyRunModal, getSavedDailyRunSummary } from './RoguelikeRunModal';
 import MultiplayerHubModal from './MultiplayerHubModal';
 import PveHubModal from './PveHubModal';
 import ChatLiveFeed from './ChatLiveFeed';
@@ -101,10 +101,6 @@ import {
 } from '@/lib/socialChatClient';
 import { emitCompletionNotice, type CompletionRewardLine } from '@/lib/completionEvents';
 import { emitFxEvent } from '@/lib/fxEvents';
-import {
-  getMpDailyDungeonChallenge,
-  hasCompletedMpDailyDungeonToday,
-} from '@/lib/mpDailyDungeon';
 import { getActivePveSpawnCount } from '@/lib/worldPveIntel';
 import {
   getMusicVolumePercent,
@@ -537,7 +533,6 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
   const [isChatDockOpen, setIsChatDockOpen] = useState(false);
   const [showMultiplayerHub, setShowMultiplayerHub] = useState(false);
   const [showPveHub, setShowPveHub] = useState(false);
-  const [showMpDailyRun, setShowMpDailyRun] = useState(false);
   const [showMultiplayerProgression, setShowMultiplayerProgression] = useState(false);
   const [multiplayerProgressionTab, setMultiplayerProgressionTab] = useState<MultiplayerProgressionTab>('orders');
   const [isMapActionRailCompact, setIsMapActionRailCompact] = useState(true);
@@ -856,6 +851,10 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
     playGameSound(result.success ? 'social.accept' : 'social.decline', { throttleMs: 120 });
     setTemporaryNotice(result.message || result.error || (result.success ? 'Trade action complete.' : 'Trade action failed.'));
     setUser(getCurrentUser());
+  };
+
+  const runTradeAction = async (action: () => Promise<{ success: boolean; message?: string; error?: string }>) => {
+    applyTradeResult(await action());
   };
 
   const openActiveTrade = () => {
@@ -1307,10 +1306,6 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
           <PveHubModal
             isOpen={showPveHub}
             onClose={() => setShowPveHub(false)}
-          />
-          <MpDailyDungeonModal
-            isOpen={showMpDailyRun}
-            onClose={() => setShowMpDailyRun(false)}
           />
         </>
       )}
@@ -1964,7 +1959,7 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
                 </button>
                 <button
                   type="button"
-                  onClick={() => applyTradeResult(cancelPlayerTradeSession(activeTradeSession.id))}
+                  onClick={() => void runTradeAction(() => cancelPlayerTradeSession(activeTradeSession.id))}
                   className="ui-button-danger rounded px-3 py-2 text-xs font-black"
                 >
                   Cancel
@@ -2101,7 +2096,7 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
                       </button>
                       <button
                         type="button"
-                        onClick={() => applyTradeResult(requestPlayerTrade(candidate.username))}
+                        onClick={() => void runTradeAction(() => requestPlayerTrade(candidate.username))}
                         disabled={!tradingUnlock.unlocked || (candidate.stats?.level || 1) < tradingUnlock.minLevel || Boolean(activeTradeSession)}
                         className="ui-button rounded px-2 py-2 text-[10px] font-black disabled:opacity-35"
                       >
@@ -2193,8 +2188,6 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
   }
 
   function renderOverview() {
-    const mpDailyChallenge = getMpDailyDungeonChallenge(Date.now());
-    const completedMpDailyToday = hasCompletedMpDailyDungeonToday(player, Date.now());
     const trackedCityQuest = (player.cityQuests || [])
       .map(progress => {
         const template = getCityQuestTemplate(progress.questId);
@@ -2206,29 +2199,6 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
 
     return (
       <div className="overview-dashboard-grid overview-dashboard-modern">
-        <section className="ui-card rounded border p-4">
-          <SectionTitle title="Daily Gauntlet" action={completedMpDailyToday ? 'Done' : 'PVE'} />
-          <div className="fantasy-heading truncate text-xl">{mpDailyChallenge.name}</div>
-          <p className="ui-muted mt-1 text-sm font-bold">{mpDailyChallenge.subtitle}</p>
-          <div className="ui-faint mt-3 grid grid-cols-2 gap-2 text-xs font-bold">
-            <span>{mpDailyChallenge.battleCount} fights</span>
-            <span>Boss: {mpDailyChallenge.bossName}</span>
-            <span>{mpDailyChallenge.rewardGold} gold</span>
-            <span>{mpDailyChallenge.rewardRareGems} gems</span>
-          </div>
-          <button
-            type="button"
-            disabled={completedMpDailyToday}
-            onClick={() => {
-              emitFxEvent({ type: 'daily', tone: 'violet', intensity: 0.85 });
-              setShowMpDailyRun(true);
-            }}
-            className="ui-button-primary mt-4 w-full rounded px-3 py-2.5 text-sm font-black disabled:opacity-40"
-          >
-            {completedMpDailyToday ? 'Completed Today' : 'Enter Daily Gauntlet'}
-          </button>
-        </section>
-
         <section className="ui-card rounded border p-4">
           <SectionTitle title="Work" action={`${activeJobs.length}/4`} />
           {!player.traveling && activeJobs.length === 0 ? (

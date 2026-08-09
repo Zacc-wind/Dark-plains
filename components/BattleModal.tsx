@@ -96,6 +96,13 @@ import {
   readCombatIndicatorMode,
   readCombatSpeedSetting,
 } from '@/lib/combatSettings';
+import {
+  GRAPHICS_QUALITY_EVENT_NAME,
+  getBattleTickMs,
+  readGraphicsQualitySetting,
+  shouldEnableBattleBackdropBlur,
+  shouldEnableCombatThreeFx,
+} from '@/lib/graphicsSettings';
 import { emitFxEvent, type FxEventType } from '@/lib/fxEvents';
 import { readGameJson } from '@/lib/gameStore';
 import { playGameSound, preloadGameSounds, type GameSoundId } from '@/lib/sound';
@@ -424,6 +431,7 @@ export default function BattleModal({
   const [pendingMoveUndo, setPendingMoveUndo] = useState<BattleState | null>(null);
   const [confirmMoveEnabled] = useState(() => readGameJson(CONFIRM_MOVE_SETTING_KEY, false));
   const [indicatorMode] = useState(() => readCombatIndicatorMode());
+  const [graphicsQuality, setGraphicsQuality] = useState(() => readGraphicsQualitySetting());
   const [combatTutorialIntroDismissed, setCombatTutorialIntroDismissed] = useState(false);
   const [combatTutorialUnitWaitSeen, setCombatTutorialUnitWaitSeen] = useState(false);
   const [combatTutorialHealerBlessingSeen, setCombatTutorialHealerBlessingSeen] = useState(false);
@@ -494,13 +502,30 @@ export default function BattleModal({
   }, [battle, onBattleStateChange]);
 
   useEffect(() => {
+    const syncGraphics = () => setGraphicsQuality(readGraphicsQualitySetting());
+    window.addEventListener(GRAPHICS_QUALITY_EVENT_NAME, syncGraphics);
+    return () => window.removeEventListener(GRAPHICS_QUALITY_EVENT_NAME, syncGraphics);
+  }, []);
+
+  useEffect(() => {
     preloadGameSounds(BATTLE_PRELOAD_SOUND_IDS);
   }, []);
 
   useEffect(() => {
-    const tickMs = battle?.status === 'active' ? 50 : 1000;
-    const interval = window.setInterval(() => setNow(Date.now()), tickMs);
-    return () => window.clearInterval(interval);
+    let tickMs = getBattleTickMs(readGraphicsQualitySetting(), battle?.status === 'active');
+    let interval = window.setInterval(() => setNow(Date.now()), tickMs);
+
+    const resync = () => {
+      window.clearInterval(interval);
+      tickMs = getBattleTickMs(readGraphicsQualitySetting(), battle?.status === 'active');
+      interval = window.setInterval(() => setNow(Date.now()), tickMs);
+    };
+
+    window.addEventListener(GRAPHICS_QUALITY_EVENT_NAME, resync);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener(GRAPHICS_QUALITY_EVENT_NAME, resync);
+    };
   }, [battle?.status]);
 
   useEffect(() => () => {
@@ -1819,8 +1844,10 @@ export default function BattleModal({
   const hoveredThreatUnit = hoveredCell ? getUnitAt(battle, hoveredCell.x, hoveredCell.y) : undefined;
   const hoveredEnemyUnit = hoveredThreatUnit?.side === 'enemy' && hoveredThreatUnit.currentHealth > 0 ? hoveredThreatUnit : undefined;
 
+  const battleBackdropBlur = shouldEnableBattleBackdropBlur(graphicsQuality);
+
   return (
-    <div className="battle-modal-layer fixed inset-0 z-[70] overflow-hidden bg-black/78 p-1 backdrop-blur-sm">
+    <div className={`battle-modal-layer fixed inset-0 z-[70] overflow-hidden bg-black/85 p-1 ${battleBackdropBlur ? 'backdrop-blur-sm' : ''}`}>
       {tutorialStep && onTutorialContinue && onTutorialSkip && (tutorialStep.id !== 'combat' || !combatTutorialIntroDismissed) && (
         <SingleplayerTutorialOverlay
           step={tutorialStep}
@@ -2192,7 +2219,9 @@ export default function BattleModal({
                   active={unitMoveTransit.unit.id === battle.activeUnitId}
                 />
               )}
-              <CombatThreeFxLayer battle={battle} />
+              {shouldEnableCombatThreeFx(graphicsQuality) ? (
+                <CombatThreeFxLayer battle={battle} />
+              ) : null}
               {bossLastStandCue && (
                 <BattleBossLastStandOverlay cue={bossLastStandCue} />
               )}

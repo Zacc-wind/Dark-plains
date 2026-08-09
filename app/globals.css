@@ -2135,9 +2135,8 @@ button.vine-frame::before,
 }
 
 .game-hud-scroll > .cinematic-scroll-content {
-  background:
-    linear-gradient(90deg, rgba(8, 8, 9, 0), rgba(17, 13, 12, 0.76) 50%, rgba(8, 8, 9, 0.9));
-  box-shadow: inset 0 0 28px rgba(0, 0, 0, 0.34);
+  background: transparent;
+  box-shadow: none;
 }
 
 .game-hud button,
@@ -2372,6 +2371,26 @@ button.vine-frame::before,
   opacity: 0.38;
 }
 
+.graphics-low .map-fog-layer,
+.graphics-low .three-fx-layer,
+.graphics-low .combat-three-fx-layer {
+  display: none;
+}
+
+.graphics-low .battle-piece-body-idle,
+.graphics-low .battle-piece-body-idle-alert {
+  animation: none !important;
+}
+
+.graphics-medium .three-fx-layer {
+  opacity: 0.72;
+}
+
+.battle-open .map-fog-layer,
+.battle-open .three-fx-layer {
+  visibility: hidden;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .map-fog-layer,
   .three-fx-layer,
@@ -2390,15 +2409,18 @@ button.vine-frame::before,
   .run-omen-stage,
   .run-omen-channeling,
   .run-omen-reveal,
-  .run-omen-dice-cinematic,
-  .run-omen-dice,
-  .run-omen-dice-veil,
-  .run-omen-dice-glow,
-  .run-omen-dice-sparkles,
-  .run-omen-sigil-icon-dice,
-  .run-omen-sigil-ring-outer,
-  .run-omen-sigil-ring-inner,
-  .run-omen-sigil-icon,
+  .run-omen-rite-cinematic,
+  .run-omen-rite-veil,
+  .run-omen-rite-smoke,
+  .run-omen-rite-ember,
+  .run-omen-rite-flame,
+  .run-omen-rite-well-ripple,
+  .run-omen-rite-well-sigil,
+  .run-omen-rite-well-eye,
+  .run-omen-rite-well-water,
+  .run-omen-well-badge,
+  .run-omen-well-badge-water,
+  .run-omen-well-badge-sigil,
   .run-omen-channel-copy,
   .run-omen-channel-status,
   .poi-modal-layer::before,
@@ -3972,7 +3994,7 @@ button.vine-frame::before,
 }
 
 .overview-dashboard-modern {
-  grid-template-columns: minmax(0, 0.95fr) minmax(0, 0.95fr) minmax(0, 1.2fr);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr);
   align-items: stretch;
   min-height: min(30rem, calc(100dvh - 17rem));
 }
@@ -4079,12 +4101,10 @@ button.vine-frame::before,
 }
 
 .main-quest-tracker {
-  background:
-    radial-gradient(circle at 18% 12%, rgba(234, 220, 154, 0.14), transparent 42%),
-    linear-gradient(180deg, rgba(13, 10, 13, 0.96), rgba(6, 6, 8, 0.92));
-  border-color: rgba(250, 239, 211, 0.28);
-  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.5), inset 0 0 24px rgba(244, 221, 176, 0.04);
-  backdrop-filter: blur(12px) saturate(125%) brightness(1.08);
+  background: transparent !important;
+  border-color: transparent;
+  box-shadow: none;
+  backdrop-filter: none !important;
   animation: command-panel-in 180ms ease-out;
 }
 
@@ -5277,14 +5297,14 @@ button.vine-frame::before,
 }
 
 .first-step-row {
-  background: rgba(5, 8, 9, 0.58);
-  box-shadow: inset 0 0 0 1px rgba(232, 217, 184, 0.08);
+  background: rgba(48, 28, 18, 0.18);
+  box-shadow: inset 0 0 0 1px rgba(232, 217, 184, 0.16);
   transition: background 160ms ease, box-shadow 160ms ease, transform 160ms ease;
 }
 
 .first-step-row:hover {
-  background: rgba(31, 20, 22, 0.72);
-  box-shadow: inset 0 0 0 1px rgba(232, 217, 184, 0.22), 0 0 18px rgba(244, 221, 176, 0.06);
+  background: rgba(72, 38, 28, 0.28);
+  box-shadow: inset 0 0 0 1px rgba(232, 217, 184, 0.28), 0 0 18px rgba(244, 221, 176, 0.06);
   transform: translateY(-1px);
 }
 
@@ -5319,32 +5339,23 @@ button.vine-frame::before,
 
 .main-quest-tracker.command-panel.vine-frame {
   z-index: 40;
-  background:
-    linear-gradient(180deg, rgba(28, 25, 22, 0.92), rgba(9, 11, 11, 0.84)),
-    radial-gradient(circle at 16% 6%, rgba(244, 221, 176, 0.18), transparent 42%),
-    radial-gradient(circle at 88% 0%, rgba(125, 211, 252, 0.1), transparent 34%) !important;
-  border-color: rgba(250, 239, 211, 0.38);
-  box-shadow:
-    0 18px 44px rgba(0, 0, 0, 0.48),
-    0 0 0 1px rgba(255, 248, 231, 0.06),
-    inset 0 1px 0 rgba(255, 255, 255, 0.08),
-    inset 0 0 28px rgba(244, 221, 176, 0.055);
-  backdrop-filter: blur(10px) saturate(132%) brightness(1.18);
+  background: transparent !important;
+  border-color: transparent;
+  box-shadow: none;
+  backdrop-filter: none !important;
 }
 
 .main-quest-tracker .main-quest-action {
-  border-color: rgba(250, 239, 211, 0.18);
-  background:
-    linear-gradient(180deg, rgba(18, 22, 22, 0.82), rgba(4, 7, 7, 0.68)),
-    radial-gradient(circle at 10% 6%, rgba(244, 221, 176, 0.08), transparent 34%);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(250, 239, 211, 0.24);
+  background: rgba(48, 28, 18, 0.2);
+  box-shadow: inset 0 0 0 1px rgba(255, 248, 231, 0.04);
+  color: #fff4dc;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.72);
 }
 
 .main-quest-tracker .main-quest-action:hover:not(:disabled) {
-  border-color: rgba(250, 239, 211, 0.32);
-  background:
-    linear-gradient(180deg, rgba(31, 27, 25, 0.88), rgba(7, 10, 10, 0.76)),
-    radial-gradient(circle at 10% 6%, rgba(244, 221, 176, 0.12), transparent 38%);
+  border-color: rgba(250, 239, 211, 0.38);
+  background: rgba(72, 38, 28, 0.28);
 }
 
 .main-quest-reopen {
@@ -8216,8 +8227,10 @@ button.vine-frame::before,
   animation: run-outcome-burst-in 320ms ease-out both;
   border-radius: 0.55rem;
   background:
-    radial-gradient(circle at 50% 24%, rgba(91, 33, 182, 0.16), transparent 46%),
-    linear-gradient(180deg, rgba(8, 6, 14, 0.82), rgba(2, 3, 5, 0.9)),
+    radial-gradient(ellipse at 50% 78%, rgba(90, 28, 12, 0.28), transparent 48%),
+    radial-gradient(circle at 18% 12%, rgba(180, 90, 28, 0.1), transparent 34%),
+    radial-gradient(circle at 84% 18%, rgba(120, 40, 18, 0.08), transparent 36%),
+    linear-gradient(180deg, rgba(6, 4, 3, 0.88), rgba(2, 2, 3, 0.94)),
     var(--run-bg-harbor);
   background-position: center;
   background-size: cover;
@@ -8229,136 +8242,274 @@ button.vine-frame::before,
   isolation: isolate;
 }
 
-.run-omen-dice-cinematic {
+.run-omen-rite-cinematic {
   position: absolute;
-  inset: -8%;
+  inset: -6%;
   z-index: 0;
   pointer-events: none;
   overflow: hidden;
 }
 
-.run-omen-dice-veil {
+.run-omen-rite-veil {
   position: absolute;
   inset: 0;
   background:
-    radial-gradient(circle at 50% 42%, rgba(91, 33, 182, 0.24), transparent 48%),
-    radial-gradient(circle at 18% 18%, rgba(244, 221, 176, 0.08), transparent 34%),
-    radial-gradient(circle at 82% 78%, rgba(125, 211, 252, 0.08), transparent 36%),
-    linear-gradient(180deg, rgba(4, 3, 8, 0.42), rgba(2, 2, 4, 0.72));
-  animation: run-omen-dice-veil-pulse 3.2s ease-in-out infinite;
+    radial-gradient(ellipse at 50% 70%, rgba(120, 36, 14, 0.22), transparent 46%),
+    radial-gradient(circle at 12% 18%, rgba(244, 180, 96, 0.07), transparent 32%),
+    radial-gradient(circle at 88% 22%, rgba(180, 60, 30, 0.06), transparent 34%),
+    linear-gradient(180deg, rgba(3, 2, 2, 0.35), rgba(1, 1, 2, 0.78));
+  animation: run-omen-rite-veil-breathe 3.6s ease-in-out infinite;
 }
 
-.run-omen-dice-glow {
+.run-omen-rite-smoke {
   position: absolute;
-  left: 50%;
-  top: 46%;
-  width: min(72vw, 34rem);
-  height: min(72vw, 34rem);
+  bottom: 18%;
+  width: min(42vw, 18rem);
+  height: min(54vw, 22rem);
   border-radius: 50%;
-  transform: translate(-50%, -50%);
-  background: radial-gradient(circle, rgba(196, 181, 253, 0.22), transparent 68%);
-  filter: blur(8px);
-  animation: run-omen-dice-glow-pulse 2.8s ease-in-out infinite;
+  filter: blur(28px);
+  opacity: 0.35;
+  background: radial-gradient(ellipse at 50% 80%, rgba(80, 70, 60, 0.55), transparent 70%);
+  animation: run-omen-rite-smoke-rise 5.8s ease-in-out infinite;
 }
 
-.run-omen-dice {
-  position: absolute;
-  display: block;
-  filter:
-    drop-shadow(0 0 28px rgba(196, 181, 253, 0.28))
-    drop-shadow(0 24px 48px rgba(0, 0, 0, 0.72));
-}
-
-.run-omen-dice-art {
-  image-rendering: auto;
-  -webkit-backface-visibility: hidden;
-  backface-visibility: hidden;
-}
-
-.run-omen-dice-1 {
-  left: 50%;
-  top: 44%;
-  width: min(58vw, 26rem);
-  height: min(58vw, 26rem);
-  transform: translate(-50%, -50%);
-  animation: run-omen-dice-tumble-main 1.15s cubic-bezier(0.34, 1.2, 0.42, 1) infinite;
-}
-
-.run-omen-dice-2 {
+.run-omen-rite-smoke-a {
   left: 8%;
-  top: 10%;
-  width: min(34vw, 14rem);
-  height: min(34vw, 14rem);
-  opacity: 0.72;
-  animation: run-omen-dice-tumble-a 1.45s cubic-bezier(0.34, 1.1, 0.42, 1) infinite;
+  animation-delay: 0s;
 }
 
-.run-omen-dice-3 {
+.run-omen-rite-smoke-b {
   right: 6%;
-  bottom: 8%;
-  width: min(30vw, 12.5rem);
-  height: min(30vw, 12.5rem);
-  opacity: 0.68;
-  animation: run-omen-dice-tumble-b 1.32s cubic-bezier(0.34, 1.15, 0.42, 1) infinite;
+  width: min(36vw, 15rem);
+  opacity: 0.28;
+  animation-delay: -2.4s;
+  animation-duration: 6.4s;
 }
 
-.run-omen-dice-sparkles {
+.run-omen-rite-embers {
   position: absolute;
   inset: 0;
-  opacity: 0.55;
+}
+
+.run-omen-rite-ember {
+  position: absolute;
+  bottom: 22%;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: rgba(255, 186, 92, 0.9);
+  box-shadow: 0 0 8px rgba(255, 140, 40, 0.8);
+  animation: run-omen-rite-ember-rise 3.8s ease-in infinite;
+}
+
+.run-omen-rite-ember[data-i='0'] { left: 14%; animation-delay: 0s; }
+.run-omen-rite-ember[data-i='1'] { left: 22%; animation-delay: 0.4s; width: 2px; height: 2px; }
+.run-omen-rite-ember[data-i='2'] { left: 31%; animation-delay: 1.1s; }
+.run-omen-rite-ember[data-i='3'] { left: 44%; animation-delay: 0.7s; width: 2px; height: 2px; }
+.run-omen-rite-ember[data-i='4'] { left: 52%; animation-delay: 1.6s; }
+.run-omen-rite-ember[data-i='5'] { left: 61%; animation-delay: 0.2s; width: 2px; height: 2px; }
+.run-omen-rite-ember[data-i='6'] { left: 72%; animation-delay: 1.3s; }
+.run-omen-rite-ember[data-i='7'] { left: 81%; animation-delay: 0.9s; width: 2px; height: 2px; }
+.run-omen-rite-ember[data-i='8'] { left: 88%; animation-delay: 1.9s; }
+
+.run-omen-rite-candle {
+  position: absolute;
+  bottom: 28%;
+  width: 0.55rem;
+  height: 4.2rem;
+  border-radius: 0.15rem 0.15rem 0.08rem 0.08rem;
   background:
-    radial-gradient(circle at 22% 28%, rgba(253, 230, 138, 0.85) 0 1.5px, transparent 2px),
-    radial-gradient(circle at 68% 18%, rgba(186, 230, 253, 0.75) 0 1px, transparent 1.5px),
-    radial-gradient(circle at 74% 72%, rgba(244, 221, 176, 0.8) 0 1.5px, transparent 2px),
-    radial-gradient(circle at 34% 78%, rgba(224, 242, 254, 0.7) 0 1px, transparent 1.5px),
-    radial-gradient(circle at 86% 46%, rgba(167, 139, 250, 0.65) 0 1px, transparent 1.5px);
-  animation: run-omen-dice-sparkle-shift 4.2s ease-in-out infinite;
+    linear-gradient(90deg, rgba(40, 28, 18, 0.95), rgba(90, 70, 42, 0.95) 45%, rgba(36, 24, 14, 0.95));
+  box-shadow: 0 0 24px rgba(180, 70, 20, 0.18);
 }
 
-.run-omen-dice-cinematic-reroll .run-omen-dice-1 {
-  animation: run-omen-dice-tumble-reroll-main 0.42s cubic-bezier(0.2, 0.95, 0.25, 1) infinite;
+.run-omen-rite-candle-left {
+  left: 16%;
+  transform: rotate(-4deg);
 }
 
-.run-omen-dice-cinematic-reroll .run-omen-dice-2 {
-  animation: run-omen-dice-tumble-reroll-a 0.52s cubic-bezier(0.2, 0.95, 0.25, 1) infinite;
+.run-omen-rite-candle-right {
+  right: 16%;
+  transform: rotate(5deg);
+  height: 3.6rem;
 }
 
-.run-omen-dice-cinematic-reroll .run-omen-dice-3 {
-  animation: run-omen-dice-tumble-reroll-b 0.48s cubic-bezier(0.2, 0.95, 0.25, 1) infinite;
+.run-omen-rite-flame {
+  position: absolute;
+  left: 50%;
+  bottom: 100%;
+  width: 0.85rem;
+  height: 1.35rem;
+  margin-left: -0.42rem;
+  border-radius: 50% 50% 45% 45%;
+  background:
+    radial-gradient(circle at 50% 70%, rgba(255, 250, 220, 0.95), transparent 42%),
+    radial-gradient(ellipse at 50% 40%, rgba(255, 170, 60, 0.95), rgba(180, 40, 10, 0.15) 70%, transparent 78%);
+  filter: blur(0.3px);
+  box-shadow:
+    0 0 18px rgba(255, 140, 40, 0.7),
+    0 0 36px rgba(180, 50, 10, 0.35);
+  animation: run-omen-rite-flame-flicker 0.9s ease-in-out infinite;
+  transform-origin: 50% 100%;
 }
 
-.run-omen-dice-cinematic-reroll .run-omen-dice-veil {
-  animation: run-omen-dice-veil-reroll 1.4s ease-in-out infinite;
+.run-omen-rite-candle-right .run-omen-rite-flame {
+  animation-delay: -0.35s;
+  height: 1.15rem;
+}
+
+.run-omen-rite-well {
+  position: absolute;
+  left: 50%;
+  top: 58%;
+  width: min(72vw, 28rem);
+  height: min(38vw, 14.5rem);
+  transform: translate(-50%, -50%);
+}
+
+.run-omen-rite-well-rim,
+.run-omen-rite-well-water,
+.run-omen-rite-well-ripple,
+.run-omen-rite-well-sigil,
+.run-omen-rite-well-eye {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+}
+
+.run-omen-rite-well-rim {
+  border: 1px solid rgba(196, 160, 100, 0.28);
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.55),
+    inset 0 0 28px rgba(0, 0, 0, 0.65),
+    0 0 42px rgba(120, 40, 12, 0.22);
+}
+
+.run-omen-rite-well-water {
+  inset: 6%;
+  background:
+    radial-gradient(ellipse at 42% 28%, rgba(90, 20, 18, 0.45), transparent 42%),
+    radial-gradient(ellipse at 58% 62%, rgba(20, 40, 48, 0.35), transparent 48%),
+    radial-gradient(ellipse at 50% 50%, rgba(4, 6, 8, 0.98), rgba(1, 1, 2, 1));
+  box-shadow:
+    inset 0 8px 24px rgba(255, 180, 80, 0.06),
+    inset 0 -18px 36px rgba(0, 0, 0, 0.85);
+  animation: run-omen-rite-water-shift 4.2s ease-in-out infinite;
+}
+
+.run-omen-rite-well-ripple {
+  inset: 18%;
+  border: 1px solid rgba(196, 160, 100, 0.22);
+  opacity: 0;
+  animation: run-omen-rite-ripple 3.4s ease-out infinite;
+}
+
+.run-omen-rite-well-ripple-b {
+  animation-delay: 1.7s;
+}
+
+.run-omen-rite-well-sigil {
+  inset: 24%;
+  border: 1px dashed rgba(220, 170, 90, 0.28);
+  background:
+    conic-gradient(from 0deg, transparent 0 12%, rgba(180, 50, 30, 0.12) 12% 14%, transparent 14% 37%, rgba(196, 160, 100, 0.1) 37% 39%, transparent 39% 62%, rgba(180, 50, 30, 0.12) 62% 64%, transparent 64% 87%, rgba(196, 160, 100, 0.1) 87% 89%, transparent 89% 100%);
+  box-shadow: inset 0 0 24px rgba(0, 0, 0, 0.55);
+  animation: run-omen-rite-sigil-turn 9s linear infinite;
+}
+
+.run-omen-rite-well-eye {
+  inset: 38% 42%;
+  border-radius: 50%;
+  background:
+    radial-gradient(ellipse at 50% 45%, rgba(255, 220, 160, 0.55), transparent 42%),
+    radial-gradient(ellipse at 50% 50%, rgba(140, 18, 12, 0.85), rgba(20, 4, 4, 0.2) 70%, transparent 72%);
+  box-shadow: 0 0 18px rgba(180, 40, 20, 0.45);
+  animation: run-omen-rite-eye-blink 4.8s ease-in-out infinite;
+}
+
+.run-omen-rite-cinematic-reroll .run-omen-rite-veil {
+  animation: run-omen-rite-veil-churn 1.2s ease-in-out infinite;
+}
+
+.run-omen-rite-cinematic-reroll .run-omen-rite-well-water {
+  animation: run-omen-rite-water-churn 0.7s ease-in-out infinite;
+}
+
+.run-omen-rite-cinematic-reroll .run-omen-rite-well-ripple {
+  animation-duration: 1.1s;
+}
+
+.run-omen-rite-cinematic-reroll .run-omen-rite-well-sigil {
+  animation-duration: 1.4s;
+}
+
+.run-omen-rite-cinematic-reroll .run-omen-rite-well-eye {
+  animation: run-omen-rite-eye-blink 0.9s ease-in-out infinite;
+}
+
+.run-omen-rite-cinematic-reroll .run-omen-rite-flame {
+  animation-duration: 0.35s;
 }
 
 .run-omen-channeling-overlay {
   position: relative;
   z-index: 2;
-  border-color: rgba(196, 181, 253, 0.28);
+  border-color: rgba(196, 160, 100, 0.28);
   background:
-    radial-gradient(circle at 50% 0%, rgba(196, 181, 253, 0.12), transparent 42%),
-    linear-gradient(180deg, rgba(8, 6, 14, 0.72), rgba(2, 3, 5, 0.82));
+    radial-gradient(circle at 50% 0%, rgba(180, 70, 28, 0.1), transparent 42%),
+    linear-gradient(180deg, rgba(10, 7, 5, 0.74), rgba(2, 2, 3, 0.84));
   backdrop-filter: blur(2px);
   box-shadow:
-    inset 0 0 48px rgba(91, 33, 182, 0.1),
+    inset 0 0 48px rgba(90, 28, 12, 0.12),
     0 18px 42px rgba(0, 0, 0, 0.48);
 }
 
-.run-omen-sigil-wrap-dice {
-  width: clamp(8.5rem, 18vw, 11rem);
-  height: clamp(8.5rem, 18vw, 11rem);
+.run-omen-well-badge {
+  position: relative;
+  width: clamp(5.5rem, 14vw, 7.25rem);
+  height: clamp(3.2rem, 8vw, 4.1rem);
+  margin-inline: auto;
 }
 
-.run-omen-sigil-icon-dice {
-  inset: 1.15rem;
-  border-color: rgba(196, 181, 253, 0.48);
+.run-omen-well-badge-rim,
+.run-omen-well-badge-water,
+.run-omen-well-badge-sigil {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+}
+
+.run-omen-well-badge-rim {
+  border: 1px solid rgba(196, 160, 100, 0.36);
+  box-shadow: 0 0 24px rgba(120, 40, 12, 0.28);
+}
+
+.run-omen-well-badge-water {
+  inset: 8%;
   background:
-    radial-gradient(circle at 50% 38%, rgba(196, 181, 253, 0.28), transparent 58%),
-    rgba(0, 0, 0, 0.5);
-  box-shadow:
-    0 0 36px rgba(139, 92, 246, 0.28),
-    inset 0 0 24px rgba(255, 255, 255, 0.04);
-  animation: run-omen-sigil-dice-spin 1.1s cubic-bezier(0.34, 1.15, 0.42, 1) infinite;
+    radial-gradient(ellipse at 45% 30%, rgba(120, 30, 20, 0.45), transparent 48%),
+    radial-gradient(ellipse at 50% 50%, rgba(4, 5, 7, 0.98), #000);
+  animation: run-omen-rite-water-shift 3.2s ease-in-out infinite;
+}
+
+.run-omen-well-badge-sigil {
+  inset: 28%;
+  border: 1px dashed rgba(220, 170, 90, 0.4);
+  animation: run-omen-rite-sigil-turn 6s linear infinite;
+}
+
+.run-omen-well-badge-reroll .run-omen-well-badge-water {
+  animation: run-omen-rite-water-churn 0.65s ease-in-out infinite;
+}
+
+.run-omen-well-badge-reroll .run-omen-well-badge-sigil {
+  animation-duration: 1.2s;
+}
+
+.graphics-low .run-omen-rite-smoke,
+.graphics-low .run-omen-rite-embers,
+.graphics-low .run-omen-rite-well-ripple {
+  display: none;
 }
 
 .run-omen-panel {
@@ -8738,139 +8889,129 @@ button.vine-frame::before,
   }
 }
 
-@keyframes run-omen-dice-veil-pulse {
+@keyframes run-omen-rite-veil-breathe {
   0%,
   100% {
-    opacity: 0.82;
+    opacity: 0.85;
   }
   50% {
     opacity: 1;
   }
 }
 
-@keyframes run-omen-dice-veil-reroll {
+@keyframes run-omen-rite-veil-churn {
   0%,
   100% {
-    opacity: 0.7;
-    filter: brightness(0.96);
-  }
-  50% {
-    opacity: 1;
-    filter: brightness(1.12);
-  }
-}
-
-@keyframes run-omen-dice-glow-pulse {
-  0%,
-  100% {
-    opacity: 0.55;
-    transform: translate(-50%, -50%) scale(0.94);
-  }
-  50% {
-    opacity: 0.95;
-    transform: translate(-50%, -50%) scale(1.08);
-  }
-}
-
-@keyframes run-omen-dice-sparkle-shift {
-  0%,
-  100% {
-    opacity: 0.35;
-    transform: scale(0.98) rotate(0deg);
-  }
-  50% {
     opacity: 0.75;
-    transform: scale(1.03) rotate(6deg);
+    filter: brightness(0.92) saturate(1.1);
+  }
+  50% {
+    opacity: 1;
+    filter: brightness(1.15) saturate(1.35);
   }
 }
 
-@keyframes run-omen-dice-tumble-main {
-  0% {
-    transform: translate(-50%, -50%) rotateX(0deg) rotateY(0deg) rotateZ(0deg) scale(0.88);
-  }
-  25% {
-    transform: translate(-50%, -58%) rotateX(28deg) rotateY(-34deg) rotateZ(18deg) scale(1.02);
+@keyframes run-omen-rite-smoke-rise {
+  0%,
+  100% {
+    transform: translateY(8%) scale(0.92);
+    opacity: 0.22;
   }
   50% {
-    transform: translate(-50%, -50%) rotateX(-18deg) rotateY(42deg) rotateZ(-22deg) scale(1.08);
-  }
-  75% {
-    transform: translate(-50%, -44%) rotateX(22deg) rotateY(-18deg) rotateZ(14deg) scale(0.98);
-  }
-  100% {
-    transform: translate(-50%, -50%) rotateX(0deg) rotateY(0deg) rotateZ(0deg) scale(0.88);
+    transform: translateY(-12%) scale(1.08);
+    opacity: 0.4;
   }
 }
 
-@keyframes run-omen-dice-tumble-a {
+@keyframes run-omen-rite-ember-rise {
   0% {
-    transform: rotate(0deg) translateY(0) scale(0.9);
+    transform: translateY(0) scale(1);
+    opacity: 0;
   }
-  50% {
-    transform: rotate(180deg) translateY(-12px) scale(1.05);
+  15% {
+    opacity: 0.95;
   }
   100% {
-    transform: rotate(360deg) translateY(0) scale(0.9);
+    transform: translateY(-14rem) scale(0.4);
+    opacity: 0;
   }
 }
 
-@keyframes run-omen-dice-tumble-b {
-  0% {
-    transform: rotate(0deg) translateY(0) scale(0.86);
-  }
-  50% {
-    transform: rotate(-160deg) translateY(10px) scale(1.02);
-  }
+@keyframes run-omen-rite-flame-flicker {
+  0%,
   100% {
-    transform: rotate(-320deg) translateY(0) scale(0.86);
+    transform: scaleY(1) scaleX(1) rotate(-2deg);
+    filter: brightness(1);
+  }
+  40% {
+    transform: scaleY(1.12) scaleX(0.88) rotate(3deg);
+    filter: brightness(1.18);
+  }
+  70% {
+    transform: scaleY(0.92) scaleX(1.08) rotate(-1deg);
+    filter: brightness(0.92);
   }
 }
 
-@keyframes run-omen-dice-tumble-reroll-main {
-  0% {
-    transform: translate(-50%, -50%) rotate(-24deg) scale(0.82);
+@keyframes run-omen-rite-water-shift {
+  0%,
+  100% {
+    filter: brightness(1) hue-rotate(0deg);
+    transform: scale(1);
   }
   50% {
-    transform: translate(-50%, -56%) rotate(28deg) scale(1.14);
-  }
-  100% {
-    transform: translate(-50%, -50%) rotate(-24deg) scale(0.82);
+    filter: brightness(1.12) hue-rotate(-4deg);
+    transform: scale(1.02);
   }
 }
 
-@keyframes run-omen-dice-tumble-reroll-a {
-  0% {
-    transform: rotate(0deg) scale(0.8);
+@keyframes run-omen-rite-water-churn {
+  0%,
+  100% {
+    transform: scale(1) rotate(0deg);
+    filter: brightness(1.05) contrast(1.1);
   }
   50% {
-    transform: rotate(220deg) scale(1.08);
-  }
-  100% {
-    transform: rotate(360deg) scale(0.8);
+    transform: scale(1.06) rotate(-1.5deg);
+    filter: brightness(1.25) contrast(1.2);
   }
 }
 
-@keyframes run-omen-dice-tumble-reroll-b {
+@keyframes run-omen-rite-ripple {
   0% {
-    transform: rotate(0deg) scale(0.78);
+    transform: scale(0.72);
+    opacity: 0.55;
   }
-  50% {
-    transform: rotate(-200deg) scale(1.06);
+  70% {
+    opacity: 0.18;
   }
   100% {
-    transform: rotate(-360deg) scale(0.78);
+    transform: scale(1.35);
+    opacity: 0;
   }
 }
 
-@keyframes run-omen-sigil-dice-spin {
-  0% {
-    transform: rotate(-18deg) scale(0.94);
+@keyframes run-omen-rite-sigil-turn {
+  from {
+    transform: rotate(0deg);
   }
-  50% {
-    transform: rotate(16deg) scale(1.06);
+  to {
+    transform: rotate(360deg);
   }
+}
+
+@keyframes run-omen-rite-eye-blink {
+  0%,
+  38%,
+  48%,
   100% {
-    transform: rotate(-18deg) scale(0.94);
+    transform: scaleY(1);
+    opacity: 0.85;
+  }
+  42%,
+  44% {
+    transform: scaleY(0.12);
+    opacity: 0.35;
   }
 }
 
@@ -10801,6 +10942,11 @@ button.vine-frame::before,
 
 .completion-overlay {
   animation: completion-overlay-in 260ms ease-out;
+}
+
+.completion-skip-hint {
+  opacity: 0.78;
+  pointer-events: none;
 }
 
 .completion-overlay-reveal {
@@ -22001,6 +22147,10 @@ button.vine-frame::before,
 .main-quest-tracker {
   max-height: calc(100dvh - 7rem);
   backdrop-filter: none !important;
+  background: transparent !important;
+  box-shadow:
+    0 34px 90px rgba(0, 0, 0, 0.82),
+    0 0 42px rgba(181, 122, 58, 0.1) !important;
 }
 
 .main-quest-tracker-content {
@@ -22008,6 +22158,31 @@ button.vine-frame::before,
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-width: none;
+  background: transparent !important;
+  box-shadow: none !important;
+  color: #f6ebcf;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.72);
+}
+
+.main-quest-tracker-content .arcane-label {
+  color: rgba(236, 208, 150, 0.92);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.78);
+}
+
+.main-quest-tracker-content .fantasy-heading {
+  color: #fff6df;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.82);
+}
+
+.main-quest-tracker-content .ui-faint,
+.main-quest-tracker-content .ui-muted {
+  color: rgba(232, 219, 190, 0.82);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
+}
+
+.main-quest-tracker-content .ui-accent {
+  color: #f0c56a;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.75);
 }
 
 .main-quest-tracker-content::-webkit-scrollbar {
@@ -22018,25 +22193,27 @@ button.vine-frame::before,
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.3rem;
-  border: 1px solid rgba(224, 198, 145, 0.14);
+  border: 1px solid rgba(224, 198, 145, 0.28);
   border-radius: 0.42rem;
-  background: rgba(0, 0, 0, 0.24);
+  background: rgba(48, 28, 18, 0.28);
   padding: 0.25rem;
+  box-shadow: inset 0 0 0 1px rgba(255, 236, 196, 0.04);
 }
 
 .main-quest-tab {
   min-height: 2rem;
   border: 1px solid transparent;
   border-radius: 0.32rem;
-  color: rgba(218, 205, 180, 0.64);
+  color: rgba(236, 220, 186, 0.78);
   font-size: 0.65rem;
   font-weight: 900;
   text-transform: uppercase;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
 }
 
 .main-quest-tab-active {
-  border-color: rgba(229, 197, 132, 0.34);
-  background: linear-gradient(180deg, rgba(107, 32, 39, 0.72), rgba(23, 12, 14, 0.82));
+  border-color: rgba(229, 197, 132, 0.42);
+  background: linear-gradient(180deg, rgba(122, 42, 48, 0.55), rgba(48, 22, 24, 0.42));
   color: #fff1d1;
 }
 
@@ -22050,10 +22227,11 @@ button.vine-frame::before,
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 0.65rem;
   align-items: center;
-  border: 1px solid rgba(224, 198, 145, 0.13);
+  border: 1px solid rgba(224, 198, 145, 0.22);
   border-radius: 0.42rem;
-  background: linear-gradient(180deg, rgba(19, 16, 15, 0.88), rgba(5, 6, 7, 0.84));
+  background: rgba(42, 24, 16, 0.22);
   padding: 0.62rem 0.65rem;
+  box-shadow: inset 0 0 0 1px rgba(255, 236, 196, 0.03);
 }
 
 .main-quest-daily-row-claimed {
@@ -22067,19 +22245,20 @@ button.vine-frame::before,
 }
 
 .main-quest-daily-copy strong {
-  color: rgba(249, 238, 215, 0.94);
+  color: #fff4dc;
   font-size: 0.72rem;
   line-height: 1.15;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.75);
 }
 
 .main-quest-daily-copy span {
-  color: rgba(216, 207, 191, 0.68);
+  color: rgba(232, 219, 190, 0.84);
   font-size: 0.62rem;
   line-height: 1.25;
 }
 
 .main-quest-daily-copy small {
-  color: rgba(218, 178, 103, 0.75);
+  color: rgba(232, 188, 108, 0.9);
   font-size: 0.56rem;
   font-weight: 900;
   text-transform: uppercase;
@@ -22095,7 +22274,7 @@ button.vine-frame::before,
 
 .main-quest-daily-action > span,
 .main-quest-daily-action > b {
-  color: rgba(226, 205, 164, 0.75);
+  color: rgba(236, 214, 168, 0.88);
   font-size: 0.58rem;
   font-weight: 900;
   text-transform: uppercase;
@@ -22103,9 +22282,9 @@ button.vine-frame::before,
 
 .main-quest-daily-action button {
   min-height: 1.8rem;
-  border: 1px solid rgba(230, 195, 123, 0.3);
+  border: 1px solid rgba(230, 195, 123, 0.38);
   border-radius: 0.32rem;
-  background: linear-gradient(180deg, rgba(112, 31, 40, 0.84), rgba(35, 13, 17, 0.9));
+  background: linear-gradient(180deg, rgba(122, 42, 48, 0.62), rgba(48, 18, 22, 0.55));
   color: #fff0ce;
   padding: 0.25rem 0.45rem;
   font-size: 0.58rem;
@@ -22434,13 +22613,12 @@ button.vine-frame::before,
 .cinematic-scroll-shell-surface > .cinematic-scroll-content {
   min-height: 0;
   overflow: hidden;
-  background:
-    radial-gradient(circle at 50% 0%, rgba(116, 69, 42, 0.18), transparent 42%),
-    rgba(10, 8, 8, 0.79);
+  background: transparent;
+  box-shadow: none;
 }
 
 .main-quest-tracker-content {
-  background: rgba(11, 9, 9, 0.8);
+  background: transparent;
 }
 
 .main-quest-order-row {
@@ -22451,10 +22629,11 @@ button.vine-frame::before,
   justify-content: space-between;
   gap: 0.75rem;
   padding: 0.35rem 0.2rem;
-  color: rgba(239, 232, 218, 0.84);
+  color: rgba(248, 238, 214, 0.92);
   font-size: 0.7rem;
   font-weight: 800;
   text-align: left;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.72);
 }
 
 .main-quest-order-row > span {
@@ -22466,7 +22645,7 @@ button.vine-frame::before,
 
 .main-quest-order-row > strong {
   flex-shrink: 0;
-  color: rgba(247, 214, 148, 0.88);
+  color: rgba(247, 214, 148, 0.95);
   font-size: 0.64rem;
 }
 
@@ -22479,16 +22658,17 @@ button.vine-frame::before,
   z-index: 1;
   min-width: 0;
   min-height: 0;
-  background:
-    radial-gradient(circle at 50% 10%, rgba(115, 75, 42, 0.13), transparent 48%),
-    rgba(12, 9, 9, 0.66);
-  box-shadow: inset 0 0 46px rgba(0, 0, 0, 0.2);
+  /* Let the nine-slice scroll parchment show through; avoid flat dark slabs. */
+  background: transparent;
+  box-shadow: none;
+  color: #f6ebcf;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.65);
 }
 
 .cinematic-scroll-content > .panel-header,
 .cinematic-scroll-shell .panel-header {
-  background: rgba(13, 9, 8, 0.26);
-  border-color: rgba(239, 216, 171, 0.18);
+  background: rgba(48, 28, 18, 0.22);
+  border-color: rgba(239, 216, 171, 0.22);
 }
 
 @keyframes cinematic-scroll-unfurl {
@@ -24082,7 +24262,7 @@ body.multiplayer-progression-open {
   border: 1px solid rgba(231, 198, 132, 0.42);
   border-radius: 50%;
   background:
-    radial-gradient(circle at 50% 43%, rgba(102, 49, 33, 0.78), rgba(14, 10, 10, 0.95) 66%),
+    radial-gradient(circle at 50% 40%, rgba(102, 49, 33, 0.72), rgba(14, 10, 10, 0.96) 68%),
     #090707;
   box-shadow:
     inset 0 0 0 3px rgba(39, 24, 18, 0.82),
@@ -24101,14 +24281,26 @@ body.multiplayer-progression-open {
     0 9px 28px rgba(0, 0, 0, 0.74);
 }
 
+.bard-music-art-wrap {
+  position: absolute;
+  inset: 3px;
+  overflow: hidden;
+  border-radius: 50%;
+  pointer-events: none;
+}
+
 .bard-music-art {
   position: absolute;
-  inset: -0.68rem;
-  width: calc(100% + 1.36rem);
-  height: calc(100% + 1.36rem);
-  object-fit: contain;
-  pointer-events: none;
-  filter: drop-shadow(0 5px 5px rgba(0, 0, 0, 0.68));
+  inset: 0;
+  width: 100% !important;
+  height: 100% !important;
+  max-width: none;
+  object-fit: cover;
+  /* Source PNG sits the bard left; pin face + lute into the circle center. */
+  object-position: 34% 14%;
+  transform: scale(1.22);
+  transform-origin: 34% 18%;
+  filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.72));
 }
 
 .bard-music-note {

@@ -11,6 +11,12 @@ import {
   writeCombatSpeedSetting,
 } from '@/lib/combatSettings';
 import {
+  GRAPHICS_QUALITY_OPTIONS,
+  GraphicsQuality,
+  readGraphicsQualitySetting,
+  writeGraphicsQualitySetting,
+} from '@/lib/graphicsSettings';
+import {
   getMusicVolumePercent,
   isMusicMuted,
   setMusicMuted,
@@ -87,6 +93,7 @@ export default function GameSettingsPanel({ showRunTutorial = false, compact = f
   const [musicMuted, setMusicMutedState] = useState(() => isMusicMuted());
   const [combatSpeed, setCombatSpeed] = useState<CombatSpeed>(() => readCombatSpeedSetting());
   const [combatIndicatorMode, setCombatIndicatorMode] = useState<CombatIndicatorMode>(() => readCombatIndicatorMode());
+  const [graphicsQuality, setGraphicsQuality] = useState<GraphicsQuality>(() => readGraphicsQualitySetting());
   const [runTutorialEnabled, setRunTutorialEnabled] = useState(() => readSingleplayerRunTutorialEnabled());
   const [runTutorialProgress, setRunTutorialProgress] = useState(() => readSingleplayerRunTutorialProgress(getCurrentUser()?.username));
 
@@ -97,6 +104,7 @@ export default function GameSettingsPanel({ showRunTutorial = false, compact = f
       setMusicMutedState(isMusicMuted());
       setCombatSpeed(readCombatSpeedSetting());
       setCombatIndicatorMode(readCombatIndicatorMode());
+      setGraphicsQuality(readGraphicsQualitySetting());
       setRunTutorialEnabled(readSingleplayerRunTutorialEnabled());
       setRunTutorialProgress(readSingleplayerRunTutorialProgress(getCurrentUser()?.username));
     };
@@ -110,11 +118,34 @@ export default function GameSettingsPanel({ showRunTutorial = false, compact = f
   }, []);
 
   const activeSpeedLabel = COMBAT_SPEED_OPTIONS.find(option => option.id === combatSpeed)?.label || 'Normal';
+  const activeGraphicsLabel = GRAPHICS_QUALITY_OPTIONS.find(option => option.id === graphicsQuality)?.label || 'Medium';
   const musicStatusLabel = musicMuted ? 'Muted' : `${musicVolume}%`;
   const rootClass = compact ? 'game-settings-panel game-settings-panel-compact' : 'game-settings-panel game-settings-panel-full';
 
   return (
     <div className={rootClass}>
+      <section className="ui-card settings-block rounded border p-3">
+        <SectionTitle title="Graphics" action={activeGraphicsLabel} />
+        <div className="settings-speed-grid settings-speed-grid-compact">
+          {GRAPHICS_QUALITY_OPTIONS.map(option => (
+            <button
+              key={option.id}
+              type="button"
+              onClick={() => {
+                setGraphicsQuality(option.id);
+                writeGraphicsQualitySetting(option.id);
+                playGameSound('ui.toggle', { throttleMs: 100 });
+              }}
+              className={`settings-speed-option rounded border px-3 py-2 text-left ${graphicsQuality === option.id ? 'settings-speed-option-active' : ''}`}
+              aria-pressed={graphicsQuality === option.id}
+            >
+              <span className="settings-option-label">{option.label}</span>
+              {!compact ? <span className="settings-option-hint">{option.detail}</span> : null}
+            </button>
+          ))}
+        </div>
+      </section>
+
       <section className="ui-card settings-block settings-block-audio rounded border p-3">
         <SectionTitle title="Audio" action={`FX ${effectsVolume}%`} />
         <div className="settings-block-body">

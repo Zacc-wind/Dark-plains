@@ -95,7 +95,6 @@ import { readGameJson, removeGameStorageItem, writeGameJson } from '@/lib/gameSt
 import { generateLootEquipment } from '@/lib/lootTables';
 import {
   getMpDailyDungeonChallenge,
-  hasCompletedMpDailyDungeonToday,
   recordMpDailyDungeonCompletion,
   type MpDailyDungeonChallenge,
 } from '@/lib/mpDailyDungeon';
@@ -1439,40 +1438,6 @@ export function EncounterRunModal({ enemy, currentUser, onClose }: EncounterRunM
   const [session, setSession] = useState<RunSession | null>(() => currentUser ? createEncounterSession(currentUser, enemy) : null);
 
   if (!session) return null;
-
-  return (
-    <RunController
-      session={session}
-      setSession={setSession}
-      onClose={onClose}
-    />
-  );
-}
-
-interface MpDailyDungeonModalProps {
-  isOpen: boolean;
-  onClose: () => void;
-}
-
-export function MpDailyDungeonModal({ isOpen, onClose }: MpDailyDungeonModalProps) {
-  const [session, setSession] = useState<RunSession | null>(null);
-  const user = getCurrentUser();
-  const username = user?.username;
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      const currentUser = getCurrentUser();
-      if (!isOpen || !currentUser || hasCompletedMpDailyDungeonToday(currentUser)) {
-        setSession(null);
-        return;
-      }
-      setSession(createMpDailySession(currentUser, getMpDailyDungeonChallenge()));
-    }, 0);
-
-    return () => window.clearTimeout(timer);
-  }, [isOpen, username]);
-
-  if (!isOpen || !session) return null;
 
   return (
     <RunController
@@ -3340,24 +3305,31 @@ function getOmenOutcomePresentation(outcome: Pick<OmenOutcome, 'tone' | 'title'>
   }
 }
 
-function OmenDiceCinematic({ phase }: { phase: 'channel' | 'reroll' }) {
+function OmenRiteCinematic({ phase }: { phase: 'channel' | 'reroll' }) {
   return (
-    <div className={`run-omen-dice-cinematic run-omen-dice-cinematic-${phase}`} aria-hidden>
-      <span className="run-omen-dice-veil" />
-      <span className="run-omen-dice-glow" />
-      {[1, 2, 3].map(index => (
-        <span key={index} className={`run-omen-dice run-omen-dice-${index}`}>
-          <Image
-            src={RANDOM_REWARD_ANIMATION_ICON}
-            alt=""
-            fill
-            sizes="512px"
-            className="run-omen-dice-art object-contain"
-            unoptimized
-          />
-        </span>
-      ))}
-      <span className="run-omen-dice-sparkles" />
+    <div className={`run-omen-rite-cinematic run-omen-rite-cinematic-${phase}`} aria-hidden>
+      <span className="run-omen-rite-veil" />
+      <span className="run-omen-rite-smoke run-omen-rite-smoke-a" />
+      <span className="run-omen-rite-smoke run-omen-rite-smoke-b" />
+      <span className="run-omen-rite-embers">
+        {Array.from({ length: 9 }, (_, index) => (
+          <span key={index} className="run-omen-rite-ember" data-i={index} />
+        ))}
+      </span>
+      <span className="run-omen-rite-candle run-omen-rite-candle-left">
+        <span className="run-omen-rite-flame" />
+      </span>
+      <span className="run-omen-rite-candle run-omen-rite-candle-right">
+        <span className="run-omen-rite-flame" />
+      </span>
+      <span className="run-omen-rite-well">
+        <span className="run-omen-rite-well-rim" />
+        <span className="run-omen-rite-well-water" />
+        <span className="run-omen-rite-well-ripple run-omen-rite-well-ripple-a" />
+        <span className="run-omen-rite-well-ripple run-omen-rite-well-ripple-b" />
+        <span className="run-omen-rite-well-sigil" />
+        <span className="run-omen-rite-well-eye" />
+      </span>
     </div>
   );
 }
@@ -3386,7 +3358,8 @@ function OmenPanel({
     if (rerollsRemaining <= 0 || stage === 'rerolling') return;
     if (rerollTimerRef.current) window.clearTimeout(rerollTimerRef.current);
     setRevealState({ key: revealKey, stage: 'rerolling' });
-    emitFxEvent({ type: 'spell', tone: 'violet', intensity: 0.62 });
+    emitFxEvent({ type: 'spell', tone: 'gold', intensity: 0.58 });
+    playGameSound('combat.spellCast', { throttleMs: 120, volumeScale: 0.35 });
     rerollTimerRef.current = window.setTimeout(() => {
       rerollTimerRef.current = null;
       onReroll();
@@ -3409,6 +3382,7 @@ function OmenPanel({
         tone: outcome.tone === 'curse' ? 'red' : outcome.tone === 'gold' ? 'gold' : 'violet',
         intensity: 0.72,
       });
+      playGameSound('combat.blessing', { throttleMs: 160, volumeScale: 0.55 });
     }, delay);
 
     return () => window.clearTimeout(timer);
@@ -3421,29 +3395,20 @@ function OmenPanel({
   if (stage === 'channeling') {
     return (
       <div className="run-omen-stage run-omen-stage-channeling flex min-h-[28rem] items-center justify-center overflow-hidden p-4">
-        <OmenDiceCinematic phase="channel" />
+        <OmenRiteCinematic phase="channel" />
         <section className="run-omen-panel run-omen-channeling run-omen-channeling-overlay w-full max-w-2xl rounded border p-6 text-center sm:p-8">
-          <div className="run-omen-sigil-wrap run-omen-sigil-wrap-dice mx-auto mb-5">
-            <span className="run-omen-sigil-ring run-omen-sigil-ring-outer" aria-hidden="true" />
-            <span className="run-omen-sigil-ring run-omen-sigil-ring-inner" aria-hidden="true" />
-            <span className="run-omen-sigil-icon run-omen-sigil-icon-dice relative mx-auto block overflow-hidden rounded-full border">
-              <Image
-                src={RANDOM_REWARD_ANIMATION_ICON}
-                alt=""
-                fill
-                sizes="160px"
-                className="run-omen-dice-art object-contain p-3"
-                unoptimized
-              />
-            </span>
+          <div className="run-omen-well-badge mx-auto mb-5" aria-hidden="true">
+            <span className="run-omen-well-badge-rim" />
+            <span className="run-omen-well-badge-water" />
+            <span className="run-omen-well-badge-sigil" />
           </div>
-          <div className="arcane-label">Omen</div>
+          <div className="arcane-label">Black Water Rite</div>
           <h3 className="fantasy-heading mt-1 text-3xl sm:text-4xl">{node?.label || 'Dark Pool'}</h3>
           <p className="run-omen-channel-copy ui-muted mx-auto mt-3 max-w-md text-sm font-bold leading-relaxed">
-            {node?.description || 'The chamber hums as fate gathers around your warband.'}
+            {node?.description || 'Candle smoke thickens over the pool as the road chooses what to show you.'}
           </p>
-          <p className="run-omen-channel-status mt-6 text-xs font-black uppercase tracking-[0.24em] text-violet-100/80">
-            Reading the omen
+          <p className="run-omen-channel-status mt-6 text-xs font-black uppercase tracking-[0.24em] text-amber-100/80">
+            The water is answering
           </p>
         </section>
       </div>
@@ -3453,29 +3418,20 @@ function OmenPanel({
   if (stage === 'rerolling') {
     return (
       <div className="run-omen-stage run-omen-stage-rerolling flex min-h-[28rem] items-center justify-center overflow-hidden p-4">
-        <OmenDiceCinematic phase="reroll" />
+        <OmenRiteCinematic phase="reroll" />
         <section className="run-omen-panel run-omen-rerolling run-omen-channeling-overlay w-full max-w-2xl rounded border p-6 text-center sm:p-8">
-          <div className="run-omen-reroll-orbit mx-auto mb-5">
-            <span className="run-omen-reroll-ring run-omen-reroll-ring-outer" aria-hidden="true" />
-            <span className="run-omen-reroll-ring run-omen-reroll-ring-inner" aria-hidden="true" />
-            <span className="run-omen-sigil-icon run-omen-sigil-icon-dice relative mx-auto block overflow-hidden rounded-full border">
-              <Image
-                src={RANDOM_REWARD_ANIMATION_ICON}
-                alt=""
-                fill
-                sizes="160px"
-                className="run-omen-dice-art object-contain p-3"
-                unoptimized
-              />
-            </span>
+          <div className="run-omen-well-badge run-omen-well-badge-reroll mx-auto mb-5" aria-hidden="true">
+            <span className="run-omen-well-badge-rim" />
+            <span className="run-omen-well-badge-water" />
+            <span className="run-omen-well-badge-sigil" />
           </div>
-          <div className="arcane-label">Omen Reroll</div>
-          <h3 className="fantasy-heading mt-1 text-4xl">Fate Turns</h3>
+          <div className="arcane-label">Rite Disturbed</div>
+          <h3 className="fantasy-heading mt-1 text-4xl">The Sign Breaks</h3>
           <p className="run-omen-channel-copy ui-muted mx-auto mt-3 max-w-md text-sm font-bold leading-relaxed">
-            The sign breaks apart before another omen gathers.
+            The reflection tears apart. New shapes gather under the candlelight.
           </p>
-          <p className="run-omen-channel-status mt-6 text-xs font-black uppercase tracking-[0.24em] text-violet-100/80">
-            Shaking the bones
+          <p className="run-omen-channel-status mt-6 text-xs font-black uppercase tracking-[0.24em] text-amber-100/80">
+            Stirring the black water
           </p>
         </section>
       </div>
@@ -3523,7 +3479,7 @@ function OmenPanel({
               disabled={rerollsRemaining <= 0}
               className="ui-button rounded px-5 py-4 text-sm font-black disabled:cursor-not-allowed disabled:opacity-40"
             >
-              Reroll Omen {rerollsRemaining}
+              Stir Again {rerollsRemaining}
             </button>
             <button
               type="button"
@@ -4986,7 +4942,7 @@ function createRandomRunChallenge(user?: User, setup?: Partial<SingleplayerRunSe
     bossArtworkPath: finalBoss.assetPath,
     bossModelNumber: finalBoss.modelNumber,
     weeklyRewardName: 'Run Progression',
-    weeklyRewardDescription: 'Permanent run XP and rare spell unlock chances.',
+    weeklyRewardDescription: 'Permanent run XP plus discovery unlocks for future singleplayer runs.',
     weeklyRewardItemId: undefined,
   };
 }
@@ -5196,61 +5152,6 @@ function createEncounterSession(user: User, enemy: WorldEnemy): RunSession {
     pendingPositiveOmen: false,
     pendingRunCelebrations: [],
     notice: `${enemy.name} waits at the end of this road.`,
-    ...createEmptyRunEquipmentState(),
-  };
-}
-
-function createMpDailySession(user: User, challenge: MpDailyDungeonChallenge): RunSession {
-  const rosterUnits = createRosterRunUnits(user, 'loaned-mp-daily');
-  const startingStacks = rosterUnits.length > 0 ? rosterUnits : createLoanedStarterUnits('loaned-mp-daily');
-
-  const startLevel = Math.max(1, (user.stats.level || 1) + challenge.enemyLevelOffset - 2);
-  const nodes = createScaledRunNodes({
-    idPrefix: `mp-daily-${challenge.date}`,
-    battleCount: challenge.battleCount,
-    startLevel,
-    bossLevel: Math.max(startLevel + 2, (user.stats.level || 1) + challenge.enemyLevelOffset),
-    bossName: challenge.bossName,
-    bossSubtitle: challenge.bossSubtitle,
-    bossId: challenge.bossId,
-    theme: 'road',
-    labelOffset: challenge.battleCount,
-    includeShops: false,
-    includeEvents: challenge.battleCount >= 5,
-  });
-  const spellIds = (user.equippedSpellIds || ['arcane-bolt', 'sanctified-mend', 'ember-dart', 'warding-prayer']).slice(0, 4);
-
-  return {
-    id: `mp-daily-run-${challenge.date}-${Date.now()}`,
-    mode: 'mpDaily',
-    title: challenge.name,
-    phase: 'map',
-    stats: cloneRunStats(user.stats),
-    commanderModel: (user.selectedModel || 3) as PlayerModelNumber,
-    minions: startingStacks,
-    draftChoices: [],
-    wins: 0,
-    targetBattles: nodes.filter(node => ['battle', 'elite', 'boss'].includes(node.type)).length,
-    runGold: 35,
-    activeEnemy: null,
-    formation: makeRosterPresetFormation(startingStacks),
-    spellIds,
-    knownSpellIds: getRunStartingKnownSpellIds(spellIds, user),
-    rewardChoices: [],
-    rewardDestination: null,
-    nodes,
-    currentNodeIndex: 0,
-    battleReports: [],
-    outcome: null,
-    mpDailyChallenge: challenge,
-    shopOffers: {},
-    shopRerollsRemaining: RUN_SHOP_REROLL_COUNT,
-    blessingRerollsRemaining: RUN_BLESSING_REROLL_COUNT,
-    omenRerollsRemaining: RUN_OMEN_REROLL_COUNT,
-    pendingPositiveOmen: false,
-    pendingRunCelebrations: [],
-    startedAt: Date.now(),
-    notice: `${challenge.subtitle}. One clear per day.`,
     ...createEmptyRunEquipmentState(),
   };
 }
@@ -7360,6 +7261,131 @@ function buildRangedDoctrineOmen(session: RunSession): OmenOutcome {
   };
 }
 
+function rollBossRouteSignatureOmen(session: RunSession, roll: number, deepRoad: boolean): OmenOutcome | null {
+  if (isWorldMapRun(session)) return null;
+  if (roll < 0.36 || roll >= 0.44) return null;
+
+  const bossId = session.dailyChallenge?.bossId;
+  if (!bossId) return null;
+  const gold = getScaledRunOmenGold(session, deepRoad ? 50 : 38);
+
+  switch (bossId) {
+    case 'mother-cindervein':
+      return {
+        id: 'omen-cinder-tithe',
+        title: 'Cinder Tithe',
+        flavor: 'Candle soot writes your name in the ash and burns a little of the road away.',
+        detail: hasWoundedRunMinions(session)
+          ? 'Living minions recover 14 health. +1 Spell Power for this run.'
+          : `Gain ${gold} run gold and +1 Spell Power for this run.`,
+        tone: 'blessing',
+        apply: current => {
+          const withSpell = makeStatBuff('omen-cinder-tithe', 'Cinder Tithe', '+1 Spell Power from Cindervein candles.', { spellPower: 1 }).apply(current);
+          return hasWoundedRunMinions(withSpell)
+            ? healLivingRunMinions(withSpell, 14, 'Cinder Tithe restored the wounded.')
+            : { ...withSpell, runGold: withSpell.runGold + gold, notice: 'Cinder Tithe added run gold and spell power.' };
+        },
+      };
+    case 'ser-kael-duskplate':
+      return {
+        id: 'omen-blue-oath-cache',
+        title: 'Blue Oath Cache',
+        flavor: 'Cold steel coins spill from a moon-washed coffer beside the road.',
+        detail: `Gain ${gold} run gold and +1 shop reroll.`,
+        tone: 'gold',
+        apply: current => ({
+          ...current,
+          runGold: current.runGold + gold,
+          shopRerollsRemaining: (current.shopRerollsRemaining ?? RUN_SHOP_REROLL_COUNT) + 1,
+          notice: 'Blue Oath Cache added gold and a shop reroll.',
+        }),
+      };
+    case 'prior-moon-voss':
+      return {
+        id: 'omen-moon-reading',
+        title: 'Moon Reading',
+        flavor: 'Broken water shows three futures; one of them settles into your staff.',
+        detail: '+2 Spell Power for this run.',
+        tone: 'blessing',
+        apply: current => makeStatBuff('omen-moon-reading', 'Moon Reading', '+2 Spell Power from Moon Voss.', { spellPower: 2 }).apply(current),
+      };
+    case 'key-saint-ardan':
+      return {
+        id: 'omen-gate-toll-purse',
+        title: 'Gate Toll Purse',
+        flavor: 'The sealed gate opens a finger-width and a merchant purse falls through.',
+        detail: `Gain ${Math.round(gold * 1.25)} run gold.`,
+        tone: 'gold',
+        apply: current => ({ ...current, runGold: current.runGold + Math.round(gold * 1.25) }),
+      };
+    case 'blackroot-vessel':
+      if (getAliveRunUnitIndexes(session).length >= 2 && Math.random() < 0.45) {
+        return {
+          id: 'omen-root-hunger',
+          title: 'Root Hunger',
+          flavor: 'Roots drink from a living boot and leave bitter strength in the soil.',
+          detail: 'One living minion is wounded. +2 Army Power for this run.',
+          tone: 'curse',
+          apply: current => {
+            const aliveIndexes = getAliveRunUnitIndexes(current);
+            const chosenIndex = shuffle(aliveIndexes)[0];
+            const wounded = typeof chosenIndex === 'number' ? woundSpecificMinion(current, chosenIndex) : current;
+            return {
+              ...wounded,
+              stats: {
+                ...wounded.stats,
+                armyPower: wounded.stats.armyPower + 2,
+              },
+              notice: 'Root Hunger claimed a fighter and left +2 Army Power.',
+            };
+          },
+        };
+      }
+      return {
+        id: 'omen-root-sap',
+        title: 'Root Sap',
+        flavor: 'Black sap hardens over armor like a second bark.',
+        detail: '+2 Defensive Power for this run.',
+        tone: 'ward',
+        apply: current => makeStatBuff('omen-root-sap', 'Root Sap', '+2 Defensive Power from Blackroot.', { defensivePower: 2 }).apply(current),
+      };
+    case 'lady-mirror-veyra':
+      return {
+        id: 'omen-mirror-step',
+        title: 'Mirror Step',
+        flavor: 'Your banner appears one tile ahead of itself, then snaps back into place.',
+        detail: '+1 Army Power and +1 Spell Power for this run.',
+        tone: 'blessing',
+        apply: current => makeStatBuff('omen-mirror-step', 'Mirror Step', '+1 Army and Spell Power from Veyra.', { armyPower: 1, spellPower: 1 }).apply(current),
+      };
+    case 'scarlet-matron-yvane':
+      return {
+        id: 'omen-scarlet-thread',
+        title: 'Scarlet Thread',
+        flavor: 'A red thread winds through the ranks and pulls every heartbeat into one tempo.',
+        detail: '+2 Army Power for this run.',
+        tone: 'blessing',
+        apply: current => makeStatBuff('omen-scarlet-thread', 'Scarlet Thread', '+2 Army Power from Yvane.', { armyPower: 2 }).apply(current),
+      };
+    case 'emperor-grave-aurel':
+      return {
+        id: 'omen-imperial-wake',
+        title: 'Imperial Wake',
+        flavor: 'Grave bells answer from a road that has not yet been walked.',
+        detail: '+1 to Army, Defense, Morale, and Spell Power for this run.',
+        tone: 'blessing',
+        apply: current => makeStatBuff(
+          'omen-imperial-wake',
+          'Imperial Wake',
+          '+1 to all commander powers from the emperor\'s wake.',
+          { armyPower: 1, defensivePower: 1, morale: 1, spellPower: 1 },
+        ).apply(current),
+      };
+    default:
+      return null;
+  }
+}
+
 function rollSpecialDungeonEventOutcome(session: RunSession, roll: number, deepRoad: boolean): OmenOutcome | null {
   if (roll >= 0.2 && roll < 0.28 && getAliveRunUnitIndexes(session).length >= 2) {
     return {
@@ -7371,6 +7397,9 @@ function rollSpecialDungeonEventOutcome(session: RunSession, roll: number, deepR
       apply: applyBloodCovenantOmen,
     };
   }
+
+  const bossRouteOmen = rollBossRouteSignatureOmen(session, roll, deepRoad);
+  if (bossRouteOmen) return bossRouteOmen;
 
   if (roll >= 0.48 && roll < 0.56) return buildClassDoctrineOmen(session);
 
@@ -8150,6 +8179,11 @@ function buildRandomRunCompletionSummary(session: RunSession, completedAt: numbe
       .filter(template => template.tier === 'tier3')
       .map(template => template.name)
   ));
+  const unlockedSpellNames = Array.from(new Set(
+    (session.discoverySpellIds || [])
+      .map(spellId => BATTLE_SPELLS.find(spell => spell.id === spellId)?.name)
+      .filter((name): name is string => Boolean(name))
+  ));
 
   return {
     aliveCount,
@@ -8177,7 +8211,7 @@ function buildRandomRunCompletionSummary(session: RunSession, completedAt: numbe
       shopBuys: session.shopBuyHistory || [],
       shopGoldSpent: session.shopGoldSpent || 0,
       omens: session.omenHistory || [],
-      unlockedSpellNames: [],
+      unlockedSpellNames,
       temporarySpellIds: session.temporarySpellIds || [],
       unitTemplateIds,
       unitClassIds,

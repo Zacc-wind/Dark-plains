@@ -274,13 +274,14 @@ export default function PveHubModal({ isOpen, onClose }: PveHubModalProps) {
       disabled,
       onClick: () => {
         if (disabled) return;
-        const result = ensureCurrentCoopRaidSession(entry.id);
-        if (!result.success) {
-          setNotice(result.error || 'Could not prepare this raid.');
-          return;
-        }
-        setNotice(null);
-        onClose();
+        void ensureCurrentCoopRaidSession(entry.id).then(result => {
+          if (!result.success) {
+            setNotice(result.error || 'Could not prepare this raid.');
+            return;
+          }
+          setNotice(null);
+          onClose();
+        });
       },
     };
   };

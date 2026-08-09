@@ -3,6 +3,15 @@
 import { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import { FX_EVENT_NAME, type FxEvent, type FxEventType, type FxTone } from '@/lib/fxEvents';
+import {
+  GRAPHICS_QUALITY_EVENT_NAME,
+  getFxQualityScale,
+  isHeavyUiOverlayOpen,
+  readGraphicsQualitySetting,
+  shouldEnableAmbientFx,
+  shouldEnableFxBursts,
+  type GraphicsQuality,
+} from '@/lib/graphicsSettings';
 
 interface RuntimeBurst {
   points: THREE.Points<THREE.BufferGeometry, THREE.PointsMaterial>;
@@ -68,46 +77,53 @@ function getBurstCount(type: FxEventType, intensity = 1): number {
   return Math.round(base * Math.max(0.45, Math.min(1.65, intensity)));
 }
 
-function getFxRenderQuality(width: number, height: number): FxRenderQuality {
+function getFxRenderQuality(width: number, height: number, quality: GraphicsQuality): FxRenderQuality {
   const area = width * height;
   const deviceRatio = window.devicePixelRatio || 1;
+  const qualityScale = getFxQualityScale(quality);
+  const ambientEnabled = shouldEnableAmbientFx(quality);
 
+  let base: FxRenderQuality;
   if (area >= 7_000_000) {
-    return {
+    base = {
       renderScale: 0.48,
       pixelRatio: 1,
       ambientCount: 34,
       burstScale: 0.46,
       ringSegments: 32,
     };
-  }
-
-  if (area >= 3_600_000) {
-    return {
+  } else if (area >= 3_600_000) {
+    base = {
       renderScale: 0.64,
       pixelRatio: Math.min(deviceRatio, 1.05),
       ambientCount: 52,
       burstScale: 0.66,
       ringSegments: 40,
     };
-  }
-
-  if (area >= 2_400_000) {
-    return {
+  } else if (area >= 2_400_000) {
+    base = {
       renderScale: 0.82,
       pixelRatio: Math.min(deviceRatio, 1.15),
       ambientCount: 68,
       burstScale: 0.82,
       ringSegments: 48,
     };
+  } else {
+    base = {
+      renderScale: 1,
+      pixelRatio: Math.min(deviceRatio, 1.35),
+      ambientCount: 85,
+      burstScale: 1,
+      ringSegments: 64,
+    };
   }
 
   return {
-    renderScale: 1,
-    pixelRatio: Math.min(deviceRatio, 1.35),
-    ambientCount: 85,
-    burstScale: 1,
-    ringSegments: 64,
+    renderScale: Math.max(0.4, base.renderScale * qualityScale.renderScale),
+    pixelRatio: Math.min(base.pixelRatio, qualityScale.pixelRatioCap),
+    ambientCount: ambientEnabled ? Math.max(0, Math.round(base.ambientCount * qualityScale.ambientCountScale)) : 0,
+    burstScale: base.burstScale * qualityScale.burstScale,
+    ringSegments: quality === 'high' ? base.ringSegments : Math.min(base.ringSegments, 32),
   };
 }
 
@@ -152,16 +168,22 @@ export default function ThreeFxOverlay() {
   const mountRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     const mount = mountRef.current;
-    if (!mount || reducedMotion) return undefined;
+    if (!mount) return undefined;
 
+    let disposed = false;
+    let graphicsQuality: GraphicsQuality = readGraphicsQualitySetting();
     let width = Math.ceil(window.visualViewport?.width || window.innerWidth || 1);
     let height = Math.ceil(window.visualViewport?.height || window.innerHeight || 1);
-    let renderQuality = getFxRenderQuality(width, height);
+    let renderQuality = getFxRenderQuality(width, height, graphicsQuality);
     let animationFrame = 0;
     let lastTime = performance.now();
     const bursts: RuntimeBurst[] = [];
+
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (reducedMotion || (!shouldEnableFxBursts(graphicsQuality) && !shouldEnableAmbientFx(graphicsQuality))) {
+      return undefined;
+    }
 
     const scene = new THREE.Scene();
     const camera = new THREE.OrthographicCamera(0, 0, 0, 0, -10, 10);
@@ -171,7 +193,7 @@ export default function ThreeFxOverlay() {
     const renderer = new THREE.WebGLRenderer({
       alpha: true,
       antialias: false,
-      powerPreference: 'high-performance',
+      powerPreference: graphicsQuality === 'high' ? 'high-performance' : 'low-power',
     });
     renderer.setClearColor(0x000000, 0);
     renderer.setPixelRatio(renderQuality.pixelRatio);
@@ -186,8 +208,8 @@ export default function ThreeFxOverlay() {
     mount.appendChild(renderer.domElement);
 
     const ambientCount = renderQuality.ambientCount;
-    const ambientPositions = new Float32Array(ambientCount * 3);
-    const ambientColors = new Float32Array(ambientCount * 3);
+    const ambientPositions = new Float32Array(Math.max(1, ambientCount) * 3);
+    const ambientColors = new Float32Array(Math.max(1, ambientCount) * 3);
     for (let index = 0; index < ambientCount; index += 1) {
       ambientPositions[index * 3] = (Math.random() - 0.5) * width;
       ambientPositions[index * 3 + 1] = (Math.random() - 0.5) * height;
@@ -204,15 +226,17 @@ export default function ThreeFxOverlay() {
     const ambientMaterial = new THREE.PointsMaterial({
       size: 1.9,
       transparent: true,
-      opacity: 0.28,
+      opacity: ambientCount > 0 ? 0.28 : 0,
       vertexColors: true,
       depthWrite: false,
       blending: THREE.AdditiveBlending,
     });
     const ambientPoints = new THREE.Points(ambientGeometry, ambientMaterial);
+    ambientPoints.visible = ambientCount > 0;
     scene.add(ambientPoints);
 
     const spawnBurst = (event: FxEvent) => {
+      if (!shouldEnableFxBursts(graphicsQuality)) return;
       const tone = getTone(event);
       const color = TONE_COLORS[tone];
       const count = Math.max(4, Math.round(getBurstCount(event.type, event.intensity) * renderQuality.burstScale));
@@ -285,6 +309,7 @@ export default function ThreeFxOverlay() {
         ringScale,
         ring,
       });
+      requestAnimate();
     };
 
     const handleFxEvent = (event: Event) => {
@@ -296,7 +321,7 @@ export default function ThreeFxOverlay() {
     const handleResize = () => {
       width = Math.ceil(window.visualViewport?.width || window.innerWidth || 1);
       height = Math.ceil(window.visualViewport?.height || window.innerHeight || 1);
-      renderQuality = getFxRenderQuality(width, height);
+      renderQuality = getFxRenderQuality(width, height, graphicsQuality);
       renderer.setPixelRatio(renderQuality.pixelRatio);
       renderer.setSize(
         Math.max(1, Math.floor(width * renderQuality.renderScale)),
@@ -305,28 +330,42 @@ export default function ThreeFxOverlay() {
       );
       setCameraSize(camera, width, height);
 
-      const positions = ambientGeometry.getAttribute('position') as THREE.BufferAttribute;
-      for (let index = 0; index < ambientCount; index += 1) {
-        positions.setXYZ(index, (Math.random() - 0.5) * width, (Math.random() - 0.5) * height, 0);
+      if (ambientCount > 0) {
+        const positions = ambientGeometry.getAttribute('position') as THREE.BufferAttribute;
+        for (let index = 0; index < ambientCount; index += 1) {
+          positions.setXYZ(index, (Math.random() - 0.5) * width, (Math.random() - 0.5) * height, 0);
+        }
+        positions.needsUpdate = true;
       }
-      positions.needsUpdate = true;
     };
 
+    const shouldAnimate = () => (
+      !disposed
+      && !isHeavyUiOverlayOpen()
+      && !document.hidden
+      && (bursts.length > 0 || ambientCount > 0)
+    );
+
     const animate = (time: number) => {
+      animationFrame = 0;
+      if (!shouldAnimate()) return;
+
       const delta = Math.min(0.04, (time - lastTime) / 1000);
       lastTime = time;
 
-      const ambientAttribute = ambientGeometry.getAttribute('position') as THREE.BufferAttribute;
-      for (let index = 0; index < ambientCount; index += 1) {
-        const nextY = ambientAttribute.getY(index) + delta * (6 + (index % 5));
-        const nextX = ambientAttribute.getX(index) + Math.sin(time * 0.0003 + index) * delta * 4;
-        ambientAttribute.setXY(
-          index,
-          nextX > width / 2 ? -width / 2 : nextX < -width / 2 ? width / 2 : nextX,
-          nextY > height / 2 ? -height / 2 : nextY
-        );
+      if (ambientCount > 0) {
+        const ambientAttribute = ambientGeometry.getAttribute('position') as THREE.BufferAttribute;
+        for (let index = 0; index < ambientCount; index += 1) {
+          const nextY = ambientAttribute.getY(index) + delta * (6 + (index % 5));
+          const nextX = ambientAttribute.getX(index) + Math.sin(time * 0.0003 + index) * delta * 4;
+          ambientAttribute.setXY(
+            index,
+            nextX > width / 2 ? -width / 2 : nextX < -width / 2 ? width / 2 : nextX,
+            nextY > height / 2 ? -height / 2 : nextY
+          );
+        }
+        ambientAttribute.needsUpdate = true;
       }
-      ambientAttribute.needsUpdate = true;
 
       for (let burstIndex = bursts.length - 1; burstIndex >= 0; burstIndex -= 1) {
         const burst = bursts[burstIndex];
@@ -358,18 +397,69 @@ export default function ThreeFxOverlay() {
       }
 
       renderer.render(scene, camera);
+      if (shouldAnimate()) {
+        animationFrame = window.requestAnimationFrame(animate);
+      }
+    };
+
+    const requestAnimate = () => {
+      if (animationFrame || !shouldAnimate()) return;
+      lastTime = performance.now();
       animationFrame = window.requestAnimationFrame(animate);
     };
 
+    const pauseOrResume = () => {
+      if (!shouldAnimate()) {
+        if (animationFrame) {
+          window.cancelAnimationFrame(animationFrame);
+          animationFrame = 0;
+        }
+        return;
+      }
+      requestAnimate();
+    };
+
+    const handleQualityChange = () => {
+      graphicsQuality = readGraphicsQualitySetting();
+      if (!shouldEnableFxBursts(graphicsQuality) && !shouldEnableAmbientFx(graphicsQuality)) {
+        bursts.forEach(burst => disposeBurst(scene, burst));
+        bursts.length = 0;
+        if (animationFrame) {
+          window.cancelAnimationFrame(animationFrame);
+          animationFrame = 0;
+        }
+        renderer.domElement.style.visibility = 'hidden';
+        return;
+      }
+      renderer.domElement.style.visibility = 'visible';
+      renderQuality = getFxRenderQuality(width, height, graphicsQuality);
+      ambientPoints.visible = shouldEnableAmbientFx(graphicsQuality) && ambientCount > 0;
+      ambientMaterial.opacity = ambientPoints.visible ? 0.28 : 0;
+      handleResize();
+      pauseOrResume();
+    };
+
+    const overlayObserver = new MutationObserver(pauseOrResume);
+    overlayObserver.observe(document.body, {
+      attributes: true,
+      attributeFilter: ['class'],
+    });
+
     window.addEventListener(FX_EVENT_NAME, handleFxEvent);
+    window.addEventListener(GRAPHICS_QUALITY_EVENT_NAME, handleQualityChange);
     window.addEventListener('resize', handleResize);
+    window.addEventListener('visibilitychange', pauseOrResume);
     window.visualViewport?.addEventListener('resize', handleResize);
-    animationFrame = window.requestAnimationFrame(animate);
+    requestAnimate();
 
     return () => {
+      disposed = true;
+      overlayObserver.disconnect();
       window.cancelAnimationFrame(animationFrame);
       window.removeEventListener(FX_EVENT_NAME, handleFxEvent);
+      window.removeEventListener(GRAPHICS_QUALITY_EVENT_NAME, handleQualityChange);
       window.removeEventListener('resize', handleResize);
+      window.removeEventListener('visibilitychange', pauseOrResume);
       window.visualViewport?.removeEventListener('resize', handleResize);
       bursts.forEach(burst => disposeBurst(scene, burst));
       ambientGeometry.dispose();

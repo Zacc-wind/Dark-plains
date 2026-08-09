@@ -123,7 +123,9 @@ export default function BardMusicControls() {
         aria-label={open ? 'Close music controls' : 'Open music controls'}
         title="Music controls"
       >
-        <Image src="/assets/ui/bard.png" alt="" width={96} height={96} priority className="bard-music-art" />
+        <span className="bard-music-art-wrap" aria-hidden>
+          <Image src="/assets/ui/bard.png" alt="" width={96} height={96} priority className="bard-music-art" />
+        </span>
         <span className="bard-music-note" aria-hidden>&#9835;</span>
       </button>
     </div>

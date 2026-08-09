@@ -22,6 +22,12 @@ import {
   type CoopRaidSession,
   type CoopRaidSessionResult,
 } from './coopRaidSessions';
+import {
+  createOnlineCoopRaidSession,
+  fetchOnlineCoopRaidSessions,
+  shouldUseOnlineCoopRaidClient,
+  updateOnlineCoopRaidSession,
+} from './coopRaidOnlineClient';
 import { readGameJson, writeGameJson } from './gameStore';
 
 const COOP_RAID_SESSIONS_KEY = 'pirate_game_coop_raid_sessions';
@@ -32,6 +38,15 @@ function emitSessionUpdated(session: CoopRaidSession): void {
   window.dispatchEvent(new CustomEvent(COOP_RAID_SESSION_UPDATED_EVENT, {
     detail: { sessionId: session.id, version: session.version },
   }));
+}
+
+function onlineError(error: unknown, fallback: string): CoopRaidSessionResult {
+  const conflict = error as Error & { session?: CoopRaidSession; conflict?: boolean };
+  if (conflict?.conflict && conflict.session) {
+    saveCoopRaidSession(conflict.session);
+    return { success: false, session: conflict.session, error: conflict.message || fallback };
+  }
+  return { success: false, error: error instanceof Error ? error.message : fallback };
 }
 
 export function getCoopRaidSessions(now = Date.now()): CoopRaidSession[] {
@@ -65,10 +80,22 @@ export function getCurrentCoopRaidSession(
     ));
 }
 
-export function ensureCurrentCoopRaidSession(
+export async function syncOnlineCoopRaidSessions(now = Date.now()): Promise<void> {
+  if (!shouldUseOnlineCoopRaidClient()) return;
+  try {
+    const sessions = await fetchOnlineCoopRaidSessions();
+    sessions.forEach(session => {
+      saveCoopRaidSession(session, now);
+    });
+  } catch {
+    // Keep local cache if sync fails.
+  }
+}
+
+export async function ensureCurrentCoopRaidSession(
   bossId: string,
   now = Date.now(),
-): CoopRaidSessionResult {
+): Promise<CoopRaidSessionResult> {
   const current = getCurrentUser();
   if (!current) return { success: false, error: 'Login required.' };
   const party = getSocialState(current).party;
@@ -112,6 +139,19 @@ export function ensureCurrentCoopRaidSession(
   const ally = members.find(member => member.username.toLowerCase() !== party.leaderUsername.toLowerCase());
   if (!host || !ally) return { success: false, error: 'Both party profiles are required to prepare the raid.' };
 
+  if (shouldUseOnlineCoopRaidClient()) {
+    try {
+      const payload = await createOnlineCoopRaidSession(bossId, ally.username);
+      return {
+        success: true,
+        session: saveCoopRaidSession(payload.session, now),
+        duplicate: payload.duplicate,
+      };
+    } catch (error) {
+      return onlineError(error, 'Failed to create online raid session.');
+    }
+  }
+
   const boss = getActiveCoopBosses(host, now).find(candidate => candidate.id === bossId);
   if (!boss) return { success: false, error: 'That co-op incursion is no longer active.' };
   const created = createCoopRaidSession(party, host, ally, boss, now);
@@ -132,16 +172,35 @@ function requireCurrentActor(username: string): { allowed: true } | { allowed: f
   return { allowed: true };
 }
 
-export function confirmCurrentCoopRaidFormation(
+export async function confirmCurrentCoopRaidFormation(
   sessionId: string,
   username: string,
   placements: Record<string, { x: number; y: number }>,
   equippedSpellIds: string[],
   expectedVersion: number,
   now = Date.now(),
-): CoopRaidSessionResult {
+): Promise<CoopRaidSessionResult> {
   const actor = requireCurrentActor(username);
   if (!actor.allowed) return { success: false, error: actor.error };
+
+  if (shouldUseOnlineCoopRaidClient()) {
+    try {
+      const payload = await updateOnlineCoopRaidSession(sessionId, {
+        action: 'confirm_formation',
+        expectedVersion,
+        placements,
+        equippedSpellIds,
+      });
+      return {
+        success: true,
+        session: saveCoopRaidSession(payload.session, now),
+        duplicate: payload.duplicate,
+      };
+    } catch (error) {
+      return onlineError(error, 'Failed to confirm raid formation.');
+    }
+  }
+
   const session = getStoredSession(sessionId, now);
   if (!session) return { success: false, error: 'Raid session was not found.' };
   const result = confirmCoopRaidFormation(
@@ -162,6 +221,7 @@ export function applyCurrentCoopRaidAction(
   expectedVersion: number,
   now = Date.now(),
 ): CoopRaidSessionResult {
+  // Combat action streaming stays local for this slice.
   const actor = requireCurrentActor(action.actorUsername);
   if (!actor.allowed) return { success: false, error: actor.error };
   const session = getStoredSession(sessionId, now);
@@ -171,14 +231,31 @@ export function applyCurrentCoopRaidAction(
   return { ...result, session: saveCoopRaidSession(result.session, now) };
 }
 
-export function abandonCurrentCoopRaidSession(
+export async function abandonCurrentCoopRaidSession(
   sessionId: string,
   username: string,
   expectedVersion: number,
   now = Date.now(),
-): CoopRaidSessionResult {
+): Promise<CoopRaidSessionResult> {
   const actor = requireCurrentActor(username);
   if (!actor.allowed) return { success: false, error: actor.error };
+
+  if (shouldUseOnlineCoopRaidClient()) {
+    try {
+      const payload = await updateOnlineCoopRaidSession(sessionId, {
+        action: 'abandon',
+        expectedVersion,
+      });
+      return {
+        success: true,
+        session: saveCoopRaidSession(payload.session, now),
+        duplicate: payload.duplicate,
+      };
+    } catch (error) {
+      return onlineError(error, 'Failed to abandon raid.');
+    }
+  }
+
   const session = getStoredSession(sessionId, now);
   if (!session) return { success: false, error: 'Raid session was not found.' };
   const result = abandonCoopRaidSession(session, username, expectedVersion, now);
@@ -186,12 +263,12 @@ export function abandonCurrentCoopRaidSession(
   return { ...result, session: saveCoopRaidSession(result.session, now) };
 }
 
-export function settleCurrentCoopRaidSession(
+export async function settleCurrentCoopRaidSession(
   sessionId: string,
   username: string,
   expectedVersion: number,
   now = Date.now(),
-): CoopRaidSessionResult {
+): Promise<CoopRaidSessionResult> {
   const actor = requireCurrentActor(username);
   if (!actor.allowed) return { success: false, error: actor.error };
   const session = getStoredSession(sessionId, now);
@@ -215,6 +292,27 @@ export function settleCurrentCoopRaidSession(
     );
     if (!grant.success) return { success: false, session, error: grant.error || 'Could not grant raid rewards.' };
     equipmentName = grant.equipmentName;
+  }
+
+  if (shouldUseOnlineCoopRaidClient()) {
+    try {
+      const payload = await updateOnlineCoopRaidSession(sessionId, {
+        action: 'settle',
+        expectedVersion,
+        ...(equipmentName ? { equipmentName } : {}),
+      });
+      return {
+        success: true,
+        session: saveCoopRaidSession(payload.session, now),
+        duplicate: payload.duplicate,
+      };
+    } catch (error) {
+      const marked = markCoopRaidClaimed(session, username, expectedVersion, equipmentName, now);
+      if (marked.success && marked.session) {
+        return { ...marked, session: saveCoopRaidSession(marked.session, now) };
+      }
+      return onlineError(error, 'Failed to settle online raid.');
+    }
   }
 
   const marked = markCoopRaidClaimed(session, username, expectedVersion, equipmentName, now);

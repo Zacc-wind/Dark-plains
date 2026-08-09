@@ -151,6 +151,23 @@ function hasDefeatedBoss(state: DailyRunState, bossId: string): boolean {
   return state.history.some(entry => entry.bossesDefeated?.includes(bossName));
 }
 
+/** Modifiers that raise enemy level or route length — not pure player buffs. */
+const HARD_CHALLENGE_MODIFIER_IDS = new Set([
+  'iron-road',
+  'blood-moon',
+  'deadwind-vow',
+  'black-banner',
+  'moonwell-rites',
+]);
+
+function hasHardChallengeBossClear(state: DailyRunState, bossId: string): boolean {
+  const bossName = getBossName(bossId);
+  return state.history.some(entry =>
+    Boolean(entry.bossesDefeated?.includes(bossName))
+    && (entry.challengeModifierIds || []).some(id => HARD_CHALLENGE_MODIFIER_IDS.has(id))
+  );
+}
+
 function hasFlawlessBoss(state: DailyRunState, bossId: string): boolean {
   const bossName = getBossName(bossId);
   return state.history.some(entry => entry.flawlessBossNames?.includes(bossName));
@@ -278,7 +295,7 @@ export const RUN_DISCOVERY_CATALOG: RunDiscoveryDefinition[] = [
   unitDefinition({ contentId: 'fallen', name: 'Fallen Wing Knight', description: 'Defeat Key-Saint Ardan.', assetName: 'fallen.png', sourceType: 'boss', sourceId: 'key-saint-ardan', tier: 'tier3', classId: 'knight', isEarned: state => hasDefeatedBoss(state, 'key-saint-ardan'), progress: state => state.runLevel < 8 ? `Lv ${state.runLevel}/8` : hasDefeatedBoss(state, 'key-saint-ardan') ? 'Defeated' : 'Boss undefeated' }),
   unitDefinition({ contentId: 'mercenary', name: 'Grave Mercenary', description: 'Defeat Emperor Grave-Aurel.', assetName: 'mercenary.png', sourceType: 'boss', sourceId: 'emperor-grave-aurel', tier: 'tier3', classId: 'knight', isEarned: state => hasDefeatedBoss(state, 'emperor-grave-aurel'), progress: state => state.runLevel < 8 ? `Lv ${state.runLevel}/8` : hasDefeatedBoss(state, 'emperor-grave-aurel') ? 'Defeated' : 'Boss undefeated' }),
   unitDefinition({ contentId: 'crow', name: 'Crowblade Assassin', description: 'Defeat Scarlet Matron Yvane.', assetName: 'crow.png', sourceType: 'boss', sourceId: 'scarlet-matron-yvane', tier: 'tier3', classId: 'knight', isEarned: state => hasDefeatedBoss(state, 'scarlet-matron-yvane'), progress: state => state.runLevel < 8 ? `Lv ${state.runLevel}/8` : hasDefeatedBoss(state, 'scarlet-matron-yvane') ? 'Defeated' : 'Boss undefeated' }),
-  unitDefinition({ contentId: 'templar-paragon', name: 'Templar Paragon', description: 'Defeat Mother Cindervein under a challenge modifier.', assetName: 'templar-paragon.png', sourceType: 'boss', sourceId: 'mother-cindervein-challenge', tier: 'tier3', classId: 'templar', isEarned: state => state.history.some(entry => Boolean(entry.challengeModifierIds?.length) && entry.bossesDefeated?.includes(getBossName('mother-cindervein'))), progress: state => state.runLevel < 8 ? `Lv ${state.runLevel}/8` : state.history.some(entry => Boolean(entry.challengeModifierIds?.length) && entry.bossesDefeated?.includes(getBossName('mother-cindervein'))) ? 'Defeated' : 'Challenge clear required' }),
+  unitDefinition({ contentId: 'templar-paragon', name: 'Templar Paragon', description: 'Defeat Mother Cindervein under a hard challenge modifier (Iron Road, Blood Moon, Deadwind Vow, Black Banner, or Moonwell Rites).', assetName: 'templar-paragon.png', sourceType: 'boss', sourceId: 'mother-cindervein-challenge', tier: 'tier3', classId: 'templar', isEarned: state => hasHardChallengeBossClear(state, 'mother-cindervein'), progress: state => state.runLevel < 8 ? `Lv ${state.runLevel}/8` : hasHardChallengeBossClear(state, 'mother-cindervein') ? 'Defeated' : 'Hard challenge clear required' }),
   unitDefinition({ contentId: 'priest-high-priest', name: 'High Priest', description: 'Defeat Prior Moon Voss without losing a deployed unit.', assetName: 'priest-high-priest.png', sourceType: 'boss', sourceId: 'prior-moon-voss-flawless', tier: 'tier3', classId: 'priest', isEarned: state => hasFlawlessBoss(state, 'prior-moon-voss'), progress: state => state.runLevel < 8 ? `Lv ${state.runLevel}/8` : hasFlawlessBoss(state, 'prior-moon-voss') ? 'Flawless' : 'Flawless boss win required' }),
 ];
 

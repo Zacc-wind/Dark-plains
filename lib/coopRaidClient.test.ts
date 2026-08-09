@@ -84,15 +84,15 @@ beforeEach(() => {
 });
 
 describe('co-op raid client persistence', () => {
-  it('creates a party raid, recovers it after reload, and blocks a second victory claim', () => {
+  it('creates a party raid, recovers it after reload, and blocks a second victory claim', async () => {
     prepareDuo();
     const current = getCurrentUser()!;
     const boss = getActiveCoopBosses(current, NOW)[0];
-    const created = ensureCurrentCoopRaidSession(boss.id, NOW);
+    const created = await ensureCurrentCoopRaidSession(boss.id, NOW);
     expect(created.success).toBe(true);
     expect(created.duplicate).not.toBe(true);
     expect(getCurrentCoopRaidSession(current.username, NOW)?.id).toBe(created.session?.id);
-    expect(confirmCurrentCoopRaidFormation(
+    expect(await confirmCurrentCoopRaidFormation(
       created.session!.id,
       created.session!.allyUsername,
       created.session!.allyFormation.placements,
@@ -120,17 +120,17 @@ describe('co-op raid client persistence', () => {
     saveCoopRaidSession(completed, NOW + 2_000);
 
     expect(getCurrentCoopRaidSession(current.username, NOW + 2_000)).toBeUndefined();
-    expect(ensureCurrentCoopRaidSession(boss.id, NOW + 2_000)).toMatchObject({
+    expect(await ensureCurrentCoopRaidSession(boss.id, NOW + 2_000)).toMatchObject({
       success: false,
       error: 'You already cleared and claimed this incursion.',
     });
   });
 
-  it('allows the leader to retry after both defeat reports are closed', () => {
+  it('allows the leader to retry after both defeat reports are closed', async () => {
     prepareDuo();
     const current = getCurrentUser()!;
     const boss = getActiveCoopBosses(current, NOW)[0];
-    const created = ensureCurrentCoopRaidSession(boss.id, NOW).session!;
+    const created = (await ensureCurrentCoopRaidSession(boss.id, NOW)).session!;
     const emptyReward = { gold: 0, exp: 0, rareGems: 0, equipmentRarity: 'epic' as const };
     const defeated: CoopRaidSession = {
       ...created,
@@ -149,7 +149,7 @@ describe('co-op raid client persistence', () => {
     };
     saveCoopRaidSession(defeated, NOW + 2_000);
 
-    const retried = ensureCurrentCoopRaidSession(boss.id, NOW + 3_000);
+    const retried = await ensureCurrentCoopRaidSession(boss.id, NOW + 3_000);
     expect(retried.success).toBe(true);
     expect(retried.duplicate).not.toBe(true);
     expect(retried.session?.phase).toBe('formation');

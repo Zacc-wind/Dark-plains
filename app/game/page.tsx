@@ -18,6 +18,7 @@ import MultiplayerTutorialSpotlight from '@/components/MultiplayerTutorialSpotli
 import PvpDuelSessionOverlay from '@/components/PvpDuelSessionOverlay';
 import CoopRaidSessionOverlay from '@/components/CoopRaidSessionOverlay';
 import { writeGameMode } from '@/lib/gameMode';
+import { applyGraphicsQualityToDocument } from '@/lib/graphicsSettings';
 import BardMusicControls from '@/components/BardMusicControls';
 
 export default function GamePage() {
@@ -25,6 +26,10 @@ export default function GamePage() {
   const [authChecked, setAuthChecked] = useState(false);
   const [hasUser, setHasUser] = useState(false);
   const [showAvatar, setShowAvatar] = useState(false);
+
+  useEffect(() => {
+    applyGraphicsQualityToDocument();
+  }, []);
 
   useEffect(() => {
     let cancelled = false;

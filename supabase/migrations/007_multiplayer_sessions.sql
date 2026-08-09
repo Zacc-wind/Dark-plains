@@ -160,9 +160,9 @@ as $$
   );
 $$;
 
-revoke all on function public.is_party_participant(uuid, uuid) from public;
+revoke all on function public.is_party_participant(uuid, uuid) from public, anon;
 grant execute on function public.is_party_participant(uuid, uuid) to authenticated;
-revoke all on function public.is_coop_raid_participant(text, uuid) from public;
+revoke all on function public.is_coop_raid_participant(text, uuid) from public, anon;
 grant execute on function public.is_coop_raid_participant(text, uuid) to authenticated;
 
 alter table public.trade_sessions enable row level security;

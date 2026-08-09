@@ -1,7 +1,5 @@
 'use client';
 
-'use client';
-
 import Image from 'next/image';
 import { useCallback, useEffect, useState } from 'react';
 import { getPlayerModelPath } from '@/lib/assetLoader';
@@ -13,6 +11,7 @@ import {
   COOP_RAID_SESSION_UPDATED_EVENT,
   getCurrentCoopRaidSession,
   settleCurrentCoopRaidSession,
+  syncOnlineCoopRaidSessions,
 } from '@/lib/coopRaidClient';
 import {
   getCoopRaidFormation,
@@ -68,6 +67,7 @@ export default function CoopRaidSessionOverlay() {
   const [spellDraft, setSpellDraft] = useState<{ sessionId: string; spellIds: string[] } | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [confirmAbandon, setConfirmAbandon] = useState(false);
+  const [busy, setBusy] = useState(false);
 
   const refresh = useCallback(() => {
     const user = getCurrentUser();
@@ -76,10 +76,12 @@ export default function CoopRaidSessionOverlay() {
       setSession(null);
       return;
     }
-    const next = getCurrentCoopRaidSession(user.username);
-    setSession(current => (
-      current?.id === next?.id && current?.version === next?.version ? current : next || null
-    ));
+    void syncOnlineCoopRaidSessions().then(() => {
+      const next = getCurrentCoopRaidSession(user.username);
+      setSession(current => (
+        current?.id === next?.id && current?.version === next?.version ? current : next || null
+      ));
+    });
   }, []);
 
   useEffect(() => {
@@ -127,15 +129,17 @@ export default function CoopRaidSessionOverlay() {
   }, [session, username]);
 
   const abandon = () => {
-    if (!session || !username) return;
-    const result = abandonCurrentCoopRaidSession(session.id, username, session.version);
-    if (!result.success) {
-      setNotice(result.error || 'Could not abandon the raid.');
+    if (!session || !username || busy) return;
+    setBusy(true);
+    void abandonCurrentCoopRaidSession(session.id, username, session.version).then(result => {
+      if (!result.success) {
+        setNotice(result.error || 'Could not abandon the raid.');
+        setConfirmAbandon(false);
+        return;
+      }
+      setSession(result.session?.phase === 'completed' ? result.session : null);
       setConfirmAbandon(false);
-      return;
-    }
-    setSession(result.session?.phase === 'completed' ? result.session : null);
-    setConfirmAbandon(false);
+    }).finally(() => setBusy(false));
   };
 
   if (!session || !snapshot || !savedFormation || session.phase === 'expired' || session.phase === 'abandoned') {
@@ -159,19 +163,22 @@ export default function CoopRaidSessionOverlay() {
           onChangeFormation={placements => setFormationDraft({ sessionId: session.id, placements })}
           onChangeSpellIds={nextSpellIds => setSpellDraft({ sessionId: session.id, spellIds: nextSpellIds })}
           onStart={() => {
-            const result = confirmCurrentCoopRaidFormation(
+            if (busy) return;
+            setBusy(true);
+            void confirmCurrentCoopRaidFormation(
               session.id,
               username,
               currentFormation,
               currentSpellIds,
               session.version,
-            );
-            if (!result.success || !result.session) {
-              setNotice(result.error || 'Could not confirm raid formation.');
-              return;
-            }
-            setSession(result.session);
-            setNotice('Raid formation confirmed.');
+            ).then(result => {
+              if (!result.success || !result.session) {
+                setNotice(result.error || 'Could not confirm raid formation.');
+                return;
+              }
+              setSession(result.session);
+              setNotice('Raid formation confirmed.');
+            }).finally(() => setBusy(false));
           }}
           onBack={() => setConfirmAbandon(true)}
         />
@@ -271,16 +278,20 @@ export default function CoopRaidSessionOverlay() {
           )}
           <button
             type="button"
+            disabled={busy}
             onClick={() => {
-              const settled = settleCurrentCoopRaidSession(session.id, username, session.version);
-              if (!settled.success) {
-                setNotice(settled.error || 'Could not settle the raid result.');
-                return;
-              }
-              setSession(null);
-              setCurrentUser(getCurrentUser());
+              if (busy) return;
+              setBusy(true);
+              void settleCurrentCoopRaidSession(session.id, username, session.version).then(settled => {
+                if (!settled.success) {
+                  setNotice(settled.error || 'Could not settle the raid result.');
+                  return;
+                }
+                setSession(null);
+                setCurrentUser(getCurrentUser());
+              }).finally(() => setBusy(false));
             }}
-            className="ui-button-primary mt-6 rounded px-6 py-3 text-sm font-black"
+            className="ui-button-primary mt-6 rounded px-6 py-3 text-sm font-black disabled:opacity-40"
           >
             {won ? 'Claim Raid Loot' : 'Close Raid Report'}
           </button>

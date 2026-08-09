@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { getCurrentUser, getDailyRunState, logout } from '@/lib/auth';
 import { writeGameMode } from '@/lib/gameMode';
+import { applyGraphicsQualityToDocument } from '@/lib/graphicsSettings';
 import { emitFxEvent } from '@/lib/fxEvents';
 import { playGameSound } from '@/lib/sound';
 import BackgroundMusic from '@/components/BackgroundMusic';
@@ -27,6 +28,7 @@ export default function SingleplayerHub() {
 
   useEffect(() => {
     writeGameMode('singleplayer');
+    applyGraphicsQualityToDocument();
   }, []);
 
   useEffect(() => {

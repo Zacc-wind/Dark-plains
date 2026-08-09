@@ -74,6 +74,14 @@ import {
   getNextMultiplayerUnlockDialogue,
   type MultiplayerUnlockDialogueId,
 } from '@/lib/multiplayerUnlockDialogue';
+import {
+  GRAPHICS_QUALITY_EVENT_NAME,
+  getMapAnimIntervalMs,
+  getMapImageSmoothingQuality,
+  isHeavyUiOverlayOpen,
+  readGraphicsQualitySetting,
+  shouldDrawCampfireParticles,
+} from '@/lib/graphicsSettings';
 
 // POI image mapping
 const POI_IMAGE_PATHS: Record<POIType, string> = {
@@ -193,6 +201,7 @@ function drawCampfireEmberParticles(
   now: number,
   pulse: number
 ): void {
+  if (!shouldDrawCampfireParticles()) return;
   const seedBase = centerX * 0.17 + centerY * 0.23;
   const particleCount = 4;
 
@@ -1241,16 +1250,32 @@ export default function MapRenderer({
 
     let frameId = 0;
     let lastTick = 0;
+    let animIntervalMs = getMapAnimIntervalMs(readGraphicsQualitySetting());
+
+    const syncInterval = () => {
+      animIntervalMs = getMapAnimIntervalMs(readGraphicsQualitySetting());
+    };
+
     const loop = (timestamp: number) => {
-      if (timestamp - lastTick >= 33) {
+      if (
+        !document.hidden
+        && !isHeavyUiOverlayOpen()
+        && timestamp - lastTick >= animIntervalMs
+      ) {
         lastTick = timestamp;
         setMapAnimNow(Date.now());
       }
       frameId = window.requestAnimationFrame(loop);
     };
 
+    window.addEventListener(GRAPHICS_QUALITY_EVENT_NAME, syncInterval);
+    window.addEventListener('visibilitychange', syncInterval);
     frameId = window.requestAnimationFrame(loop);
-    return () => window.cancelAnimationFrame(frameId);
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      window.removeEventListener(GRAPHICS_QUALITY_EVENT_NAME, syncInterval);
+      window.removeEventListener('visibilitychange', syncInterval);
+    };
   }, [assetsLoaded]);
 
   // Handle window resize for fullscreen
@@ -1476,7 +1501,7 @@ export default function MapRenderer({
     ctx.fillStyle = '#000000';
     ctx.fillRect(0, 0, actualWidth, actualHeight);
     ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = 'high';
+    ctx.imageSmoothingQuality = getMapImageSmoothingQuality(readGraphicsQualitySetting());
 
     const tileSize = scaledTileSize;
     const mapWidth = MAP_CONFIG.width * tileSize;

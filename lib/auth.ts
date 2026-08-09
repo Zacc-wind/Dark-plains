@@ -89,6 +89,12 @@ import {
   type TradeSession,
 } from './tradeSessions';
 import {
+  createOnlineTradeSession,
+  shouldUseOnlineTradeClient,
+  updateOnlineTradeSession,
+  type TradeParticipantStatePayload,
+} from './tradeSessionClient';
+import {
   claimMultiplayerDailyContract as claimMultiplayerDailyContractState,
   claimMultiplayerFirstCompletionBonus as claimMultiplayerFirstCompletionBonusState,
   claimMultiplayerRegionalThreat as claimMultiplayerRegionalThreatState,
@@ -3118,6 +3124,88 @@ export interface PlayerTradeActionResult {
   completed?: boolean;
 }
 
+function shouldRouteTradeOnline(): boolean {
+  return shouldUseOnlineTradeClient();
+}
+
+function applyMirroredTradeSession(
+  session: TradeSession,
+  options?: {
+    socialRequest?: SocialRequestRecord;
+    participants?: TradeParticipantStatePayload[];
+    respondRequestId?: string;
+    respondStatus?: 'accepted' | 'declined';
+    cancelRequestSessionId?: string;
+    now?: number;
+  },
+): void {
+  const current = getCurrentUser();
+  if (!current) return;
+  const now = options?.now ?? Date.now();
+  let users = getUsers();
+  users = upsertTradeSessionForUsers(users, session);
+
+  if (options?.socialRequest) {
+    users = upsertSocialRequestForUsers(users, options.socialRequest);
+  }
+
+  if (options?.respondRequestId && options.respondStatus) {
+    const currentIndex = findUserIndex(users, current.username);
+    const request = currentIndex >= 0
+      ? (getSocialState(users[currentIndex]).requests || []).find(candidate => candidate.id === options.respondRequestId)
+      : undefined;
+    if (request) {
+      users = respondToSocialRequestForUsers(users, request, options.respondStatus, now);
+    }
+  }
+
+  if (options?.cancelRequestSessionId) {
+    const currentIndex = findUserIndex(users, current.username);
+    const request = currentIndex >= 0
+      ? (getSocialState(users[currentIndex]).requests || []).find(candidate => (
+        candidate.kind === 'trade'
+        && candidate.payload?.tradeSessionId === options.cancelRequestSessionId
+        && candidate.status === 'pending'
+      ))
+      : undefined;
+    if (request) {
+      users = setSocialRequestStatusForUsers(users, request.id, 'cancelled', now);
+    }
+  }
+
+  if (options?.participants?.length) {
+    users = users.map(user => {
+      const patch = options.participants!.find(
+        participant => normalizeUsername(participant.username) === normalizeUsername(user.username),
+      );
+      if (!patch) return user;
+      return {
+        ...user,
+        gold: patch.gold,
+        inventory: patch.inventory,
+        equipment: patch.equipment,
+      };
+    });
+  }
+
+  persistUsersWithCurrent(users, current.username);
+}
+
+function onlineTradeError(
+  error: unknown,
+  fallback: string,
+): PlayerTradeActionResult {
+  const conflict = error as Error & { session?: TradeSession; conflict?: boolean };
+  if (conflict?.conflict && conflict.session) {
+    applyMirroredTradeSession(conflict.session);
+    return { success: false, error: conflict.message || fallback, session: conflict.session };
+  }
+  return {
+    success: false,
+    error: error instanceof Error ? error.message : fallback,
+  };
+}
+
 function isTradeOfferEmpty(offer: TradeOffer): boolean {
   return offer.gold <= 0 && offer.items.length === 0 && offer.equipmentIds.length === 0;
 }
@@ -3177,7 +3265,7 @@ function getTradeSessionFromUser(user: User, sessionId: string, now = Date.now()
     .find(session => session.id === sessionId && getTradeSessionSide(session, user.username));
 }
 
-export function requestPlayerTrade(targetUsername: string, now = Date.now()): PlayerTradeActionResult {
+export async function requestPlayerTrade(targetUsername: string, now = Date.now()): Promise<PlayerTradeActionResult> {
   const current = getCurrentUser();
   if (!current) return { success: false, error: 'Login required.' };
   const unlock = requireMultiplayerUnlock('trading', current);
@@ -3199,6 +3287,24 @@ export function requestPlayerTrade(targetUsername: string, now = Date.now()): Pl
   if (currentSession) return { success: false, error: 'Finish or cancel your current trade first.' };
   if (targetSession) return { success: false, error: `${target.username} is already handling another trade.` };
 
+  if (shouldRouteTradeOnline()) {
+    try {
+      const session = await createOnlineTradeSession(target.username);
+      const request = createSocialRequest({
+        kind: 'trade',
+        senderUsername: current.username,
+        receiverUsername: target.username,
+        payload: { tradeSessionId: session.id },
+        now,
+        ttlMs: TRADE_REQUEST_TTL_MS,
+      });
+      applyMirroredTradeSession(session, { socialRequest: request, now });
+      return { success: true, message: `Trade request sent to ${target.username}.`, session };
+    } catch (error) {
+      return onlineTradeError(error, 'Failed to create trade session.');
+    }
+  }
+
   const session = createTradeSession(current.username, target.username, now);
   const request = createSocialRequest({
     kind: 'trade',
@@ -3214,7 +3320,7 @@ export function requestPlayerTrade(targetUsername: string, now = Date.now()): Pl
   return { success: true, message: `Trade request sent to ${target.username}.`, session };
 }
 
-export function acceptPlayerTradeRequest(requestId: string, now = Date.now()): PlayerTradeActionResult {
+export async function acceptPlayerTradeRequest(requestId: string, now = Date.now()): Promise<PlayerTradeActionResult> {
   const current = getCurrentUser();
   if (!current) return { success: false, error: 'Login required.' };
   const unlock = requireMultiplayerUnlock('trading', current);
@@ -3229,6 +3335,24 @@ export function acceptPlayerTradeRequest(requestId: string, now = Date.now()): P
 
   const session = getTradeSessionFromUser(users[currentIndex], request.payload.tradeSessionId, now);
   if (!session) return { success: false, error: 'Trade session not found.' };
+
+  if (shouldRouteTradeOnline()) {
+    try {
+      const payload = await updateOnlineTradeSession(session.id, {
+        action: 'accept',
+        expectedVersion: session.version,
+      });
+      applyMirroredTradeSession(payload.session, {
+        respondRequestId: requestId,
+        respondStatus: 'accepted',
+        now,
+      });
+      return { success: true, message: `Trade opened with ${request.senderUsername}.`, session: payload.session };
+    } catch (error) {
+      return onlineTradeError(error, 'Failed to accept trade request.');
+    }
+  }
+
   const activation = activateTradeSessionState(session, current.username, now);
   if (!activation.success) return { success: false, error: activation.error, session: activation.session };
 
@@ -3238,7 +3362,7 @@ export function acceptPlayerTradeRequest(requestId: string, now = Date.now()): P
   return { success: true, message: `Trade opened with ${request.senderUsername}.`, session: activation.session };
 }
 
-export function declinePlayerTradeRequest(requestId: string, now = Date.now()): PlayerTradeActionResult {
+export async function declinePlayerTradeRequest(requestId: string, now = Date.now()): Promise<PlayerTradeActionResult> {
   const current = getCurrentUser();
   if (!current) return { success: false, error: 'Login required.' };
   const users = reconcileExpiredSocialRequests(getUsers(), now);
@@ -3250,6 +3374,23 @@ export function declinePlayerTradeRequest(requestId: string, now = Date.now()): 
   const session = getTradeSessionFromUser(users[currentIndex], request.payload.tradeSessionId, now);
   if (!session) return { success: false, error: 'Trade session not found.' };
 
+  if (shouldRouteTradeOnline()) {
+    try {
+      const payload = await updateOnlineTradeSession(session.id, {
+        action: 'decline',
+        expectedVersion: session.version,
+      });
+      applyMirroredTradeSession(payload.session, {
+        respondRequestId: requestId,
+        respondStatus: 'declined',
+        now,
+      });
+      return { success: true, message: 'Trade request declined.', session: payload.session };
+    } catch (error) {
+      return onlineTradeError(error, 'Failed to decline trade request.');
+    }
+  }
+
   const cancelled = setTradeSessionStatus(session, 'cancelled', now, current.username);
   let nextUsers = respondToSocialRequestForUsers(users, request, 'declined', now);
   nextUsers = upsertTradeSessionForUsers(nextUsers, cancelled);
@@ -3257,7 +3398,7 @@ export function declinePlayerTradeRequest(requestId: string, now = Date.now()): 
   return { success: true, message: 'Trade request declined.', session: cancelled };
 }
 
-export function cancelPlayerTradeSession(sessionId: string, now = Date.now()): PlayerTradeActionResult {
+export async function cancelPlayerTradeSession(sessionId: string, now = Date.now()): Promise<PlayerTradeActionResult> {
   const current = getCurrentUser();
   if (!current) return { success: false, error: 'Login required.' };
   const users = reconcileExpiredSocialRequests(getUsers(), now);
@@ -3266,6 +3407,22 @@ export function cancelPlayerTradeSession(sessionId: string, now = Date.now()): P
   const session = getTradeSessionFromUser(users[currentIndex], sessionId, now);
   if (!session || !['pending', 'active'].includes(session.status)) {
     return { success: false, error: 'Trade session is no longer active.' };
+  }
+
+  if (shouldRouteTradeOnline()) {
+    try {
+      const payload = await updateOnlineTradeSession(session.id, {
+        action: 'cancel',
+        expectedVersion: session.version,
+      });
+      applyMirroredTradeSession(payload.session, {
+        cancelRequestSessionId: session.id,
+        now,
+      });
+      return { success: true, message: 'Trade cancelled.', session: payload.session };
+    } catch (error) {
+      return onlineTradeError(error, 'Failed to cancel trade.');
+    }
   }
 
   const cancelled = setTradeSessionStatus(session, 'cancelled', now, current.username);
@@ -3278,12 +3435,12 @@ export function cancelPlayerTradeSession(sessionId: string, now = Date.now()): P
   return { success: true, message: 'Trade cancelled.', session: cancelled };
 }
 
-export function updateCurrentPlayerTradeOffer(
+export async function updateCurrentPlayerTradeOffer(
   sessionId: string,
   offer: Partial<TradeOffer>,
   expectedVersion?: number,
   now = Date.now(),
-): PlayerTradeActionResult {
+): Promise<PlayerTradeActionResult> {
   const current = getCurrentUser();
   if (!current) return { success: false, error: 'Login required.' };
   const users = reconcileExpiredSocialRequests(getUsers(), now);
@@ -3293,6 +3450,20 @@ export function updateCurrentPlayerTradeOffer(
   if (!session) return { success: false, error: 'Trade session not found.' };
   if (expectedVersion !== undefined && session.version !== expectedVersion) {
     return { success: false, error: 'Trade changed. Review the latest offers before editing.', session };
+  }
+
+  if (shouldRouteTradeOnline()) {
+    try {
+      const payload = await updateOnlineTradeSession(session.id, {
+        action: 'update_offer',
+        expectedVersion: expectedVersion ?? session.version,
+        offer,
+      });
+      applyMirroredTradeSession(payload.session, { now });
+      return { success: true, message: 'Trade offer updated.', session: payload.session };
+    } catch (error) {
+      return onlineTradeError(error, 'Failed to update trade offer.');
+    }
   }
 
   const update = updateTradeSessionOfferState(session, current.username, offer, now);
@@ -3306,12 +3477,12 @@ export function updateCurrentPlayerTradeOffer(
   return { success: true, message: 'Trade offer updated.', session: update.session };
 }
 
-export function setCurrentPlayerTradeLock(
+export async function setCurrentPlayerTradeLock(
   sessionId: string,
   locked: boolean,
   expectedVersion?: number,
   now = Date.now(),
-): PlayerTradeActionResult {
+): Promise<PlayerTradeActionResult> {
   const current = getCurrentUser();
   if (!current) return { success: false, error: 'Login required.' };
   const users = reconcileExpiredSocialRequests(getUsers(), now);
@@ -3328,6 +3499,20 @@ export function setCurrentPlayerTradeLock(
     if (validationError) return { success: false, error: validationError, session };
   }
 
+  if (shouldRouteTradeOnline()) {
+    try {
+      const payload = await updateOnlineTradeSession(session.id, {
+        action: 'set_lock',
+        expectedVersion: expectedVersion ?? session.version,
+        locked,
+      });
+      applyMirroredTradeSession(payload.session, { now });
+      return { success: true, message: locked ? 'Offer locked.' : 'Offer unlocked.', session: payload.session };
+    } catch (error) {
+      return onlineTradeError(error, 'Failed to update trade lock.');
+    }
+  }
+
   const update = setTradeSessionLockState(session, current.username, locked, now);
   if (!update.success) return { success: false, error: update.error, session: update.session };
   const nextUsers = upsertTradeSessionForUsers(users, update.session);
@@ -3335,11 +3520,11 @@ export function setCurrentPlayerTradeLock(
   return { success: true, message: locked ? 'Offer locked.' : 'Offer unlocked.', session: update.session };
 }
 
-export function confirmCurrentPlayerTrade(
+export async function confirmCurrentPlayerTrade(
   sessionId: string,
   expectedVersion?: number,
   now = Date.now(),
-): PlayerTradeActionResult {
+): Promise<PlayerTradeActionResult> {
   const current = getCurrentUser();
   if (!current) return { success: false, error: 'Login required.' };
   const users = reconcileExpiredSocialRequests(getUsers(), now);
@@ -3349,6 +3534,36 @@ export function confirmCurrentPlayerTrade(
   if (!session) return { success: false, error: 'Trade session not found.' };
   if (expectedVersion !== undefined && session.version !== expectedVersion) {
     return { success: false, error: 'Trade changed. Review the latest offers before confirming.', session };
+  }
+
+  if (shouldRouteTradeOnline()) {
+    try {
+      const payload = await updateOnlineTradeSession(session.id, {
+        action: 'confirm',
+        expectedVersion: expectedVersion ?? session.version,
+      });
+      applyMirroredTradeSession(payload.session, {
+        participants: payload.participants,
+        now,
+      });
+      if (payload.completed || payload.duplicate) {
+        return {
+          success: true,
+          completed: true,
+          message: payload.duplicate
+            ? 'Trade already completed.'
+            : 'Trade completed and recorded for both commanders.',
+          session: payload.session,
+        };
+      }
+      return {
+        success: true,
+        message: 'Trade confirmed. Waiting for the other commander.',
+        session: payload.session,
+      };
+    } catch (error) {
+      return onlineTradeError(error, 'Failed to confirm trade.');
+    }
   }
 
   const confirmation = confirmTradeSessionState(session, current.username, now);

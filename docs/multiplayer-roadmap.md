@@ -126,7 +126,10 @@ Turn the current shared world-map prototype into a real multiplayer layer withou
 - [x] Mirror friends, parties, chat, challenges, trades, duel sessions, and co-op dungeon sessions in the database plan and migration `007_multiplayer_sessions.sql`.
 - [x] Add optimistic-lock version fields to trade, duel, and dungeon session tables.
 - [x] Add participant-only RLS reads and reserve multiplayer session writes for trusted server handlers.
-- [ ] Add server-side validation for trade completion and combat actions before deployment.
+- [x] Add server-side validation for trade completion and combat actions before deployment.
+  Trade completion validation and optimistic-version settlement are live via `/api/trade/sessions` PATCH when Supabase admin is configured.
+  Duel formation/cancel/forfeit/settle transport is live via `/api/pvp/duels` (combat action streaming still local).
+  Co-op raid formation/abandon/settle transport is live via `/api/coop/raids` (combat action streaming still local).
 
 ## Phase 9: Progression Gates And Unlock Communication
 - [x] Define one shared unlock registry consumed by HUD buttons, modal guards, API routes, and tutorial copy.
@@ -182,7 +185,11 @@ Turn the current shared world-map prototype into a real multiplayer layer withou
 5. [x] Pilot the free Black Pike Ledger Chronicle using only implemented and validated activities.
 6. [x] Complete local multiplayer sessions: duel ownership/synchronization and duo raid readiness, formation, combat, recovery, abandon, and settlement are implemented.
 7. [x] Finish the concise town-service pass and verify the new scroll-shell composition at all target viewports.
-8. [ ] Move duel, trade, and co-op session transport and validation to Supabase.
+8. [~] Move duel, trade, and co-op session transport and validation to Supabase.
+   Trade, duel, and co-op raid session create/list/patch transport are live; combat action streaming for duel and raid remains local.
+   Trade sessions: GET/POST/PATCH + client cutover with local fallback.
+   Duel sessions: GET/POST/PATCH for create/formation/cancel/forfeit/settle; combat actions still local.
+   Co-op raid sessions: GET/POST/PATCH for create/formation/abandon/settle + claim dual-write; combat actions still local.
 9. [x] Ship the playable levels 6-10 Drowned Moonwell core with exact story encounters, response choices, Moonbridge contracts, and Dungeon Tier II gating.
 10. [ ] Complete its two side-story chains, bespoke enemy/item art, reputation prerequisites, and visible post-chapter world response.
 11. [ ] Produce levels 11-30 as complete five-level content bands, one chapter at a time.

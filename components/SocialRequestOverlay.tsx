@@ -86,29 +86,34 @@ export default function SocialRequestOverlay() {
   const remainingPercent = Math.min(100, (remaining / Math.max(1, incoming.expiresAt - incoming.createdAt)) * 100);
   const dismiss = () => setDismissedIds(ids => ids.includes(incoming.id) ? ids : [...ids, incoming.id]);
 
-  const handleResponse = (response: 'accept' | 'decline') => {
+  const handleResponse = async (response: 'accept' | 'decline') => {
     if (busy) return;
     setBusy(true);
     setNotice('');
-    const result = incoming.kind === 'party'
-      ? response === 'accept' ? acceptPartyInvite(incoming.id) : declinePartyInvite(incoming.id)
-      : response === 'accept' ? acceptPlayerTradeRequest(incoming.id) : declinePlayerTradeRequest(incoming.id);
-    if (result.success) {
-      if (incoming.kind === 'party') {
-        recordCurrentMultiplayerEngagementEvent({
-          id: `party-action:${incoming.id}:${response}`,
-          kind: 'party-action',
-          contextId: 'social-request',
-          targetId: incoming.senderUsername,
-        });
+    try {
+      const result = incoming.kind === 'party'
+        ? response === 'accept' ? acceptPartyInvite(incoming.id) : declinePartyInvite(incoming.id)
+        : response === 'accept'
+          ? await acceptPlayerTradeRequest(incoming.id)
+          : await declinePlayerTradeRequest(incoming.id);
+      if (result.success) {
+        if (incoming.kind === 'party') {
+          recordCurrentMultiplayerEngagementEvent({
+            id: `party-action:${incoming.id}:${response}`,
+            kind: 'party-action',
+            contextId: 'social-request',
+            targetId: incoming.senderUsername,
+          });
+        }
+        playGameSound(response === 'accept' ? 'social.accept' : 'social.decline', { throttleMs: 120 });
+        setDismissedIds(ids => ids.includes(incoming.id) ? ids : [...ids, incoming.id]);
+        setRevision(value => value + 1);
+      } else {
+        setNotice(result.error || 'Could not answer request.');
       }
-      playGameSound(response === 'accept' ? 'social.accept' : 'social.decline', { throttleMs: 120 });
-      setDismissedIds(ids => ids.includes(incoming.id) ? ids : [...ids, incoming.id]);
-      setRevision(value => value + 1);
-    } else {
-      setNotice(result.error || 'Could not answer request.');
+    } finally {
+      setBusy(false);
     }
-    setBusy(false);
   };
 
   return (
@@ -167,7 +172,7 @@ export default function SocialRequestOverlay() {
               <button
                 type="button"
                 disabled={busy}
-                onClick={() => handleResponse('decline')}
+                onClick={() => void handleResponse('decline')}
                 className="ui-button-danger rounded px-4 py-3 text-sm font-black disabled:opacity-40"
               >
                 Decline
@@ -175,7 +180,7 @@ export default function SocialRequestOverlay() {
               <button
                 type="button"
                 disabled={busy}
-                onClick={() => handleResponse('accept')}
+                onClick={() => void handleResponse('accept')}
                 className="ui-button-primary rounded px-4 py-3 text-sm font-black disabled:opacity-40"
               >
                 {incoming.kind === 'party' ? 'Join Party' : 'Open Trade'}

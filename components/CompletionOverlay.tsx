@@ -45,9 +45,11 @@ export default function CompletionOverlay() {
   const seenRef = useRef<Set<string>>(new Set());
   const timerRef = useRef<number | null>(null);
   const startNoticeRef = useRef<(notice: CompletionNotice) => void>(() => {});
+  const phaseRef = useRef<CompletionPhase>('burst');
 
   const advanceNoticeQueue = useCallback(() => {
     if (timerRef.current) window.clearTimeout(timerRef.current);
+    timerRef.current = null;
     const next = queueRef.current.shift();
     if (next) {
       startNoticeRef.current(next);
@@ -59,6 +61,13 @@ export default function CompletionOverlay() {
     notifyCompletionOverlayState('idle');
   }, []);
 
+  const skipBurstToReport = useCallback(() => {
+    if (timerRef.current) window.clearTimeout(timerRef.current);
+    timerRef.current = null;
+    phaseRef.current = 'report';
+    setPhase('report');
+  }, []);
+
   const startNotice = useCallback((notice: CompletionNotice) => {
     seenRef.current.add(notice.id);
     emitCompletionFx(notice);
@@ -67,14 +76,18 @@ export default function CompletionOverlay() {
     setActiveNotice(notice);
 
     if (timerRef.current) window.clearTimeout(timerRef.current);
+    timerRef.current = null;
 
     if (notice.skipBurst || notice.skipReport) {
+      phaseRef.current = 'report';
       setPhase('report');
       return;
     }
 
+    phaseRef.current = 'burst';
     setPhase('burst');
     timerRef.current = window.setTimeout(() => {
+      phaseRef.current = 'report';
       setPhase('report');
     }, COMPLETION_BURST_DURATION_MS);
   }, []);
@@ -86,6 +99,10 @@ export default function CompletionOverlay() {
   useEffect(() => {
     activeRef.current = activeNotice;
   }, [activeNotice]);
+
+  useEffect(() => {
+    phaseRef.current = phase;
+  }, [phase]);
 
   useEffect(() => {
     const unsubscribe = subscribeCompletionNotices((notice) => {
@@ -112,9 +129,32 @@ export default function CompletionOverlay() {
     notifyCompletionOverlayState('idle');
   }, []);
 
-  const closeNotice = () => {
+  const closeNotice = useCallback(() => {
     advanceNoticeQueue();
-  };
+  }, [advanceNoticeQueue]);
+
+  const handleSkipOrAdvance = useCallback(() => {
+    if (!activeRef.current) return;
+    if (phaseRef.current === 'burst') {
+      skipBurstToReport();
+      return;
+    }
+    closeNotice();
+  }, [closeNotice, skipBurstToReport]);
+
+  useEffect(() => {
+    if (!activeNotice) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' || event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        handleSkipOrAdvance();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [activeNotice, handleSkipOrAdvance]);
 
   if (!activeNotice) return null;
 
@@ -136,9 +176,16 @@ export default function CompletionOverlay() {
       : hasCustomArtwork
         ? 'completion-avatar-item-art'
         : 'player-model-art';
+  const queuedCount = queueRef.current.length;
 
   return (
-    <div className={`completion-overlay fixed inset-0 z-[95] flex items-center justify-center p-4 text-zinc-100 ${isUnitRecruitReveal || isGearReveal ? 'completion-overlay-reveal' : 'bg-black/20 backdrop-blur-[2px]'}`}>
+    <div
+      className={`completion-overlay fixed inset-0 z-[95] flex cursor-pointer items-center justify-center p-4 text-zinc-100 ${isUnitRecruitReveal || isGearReveal ? 'completion-overlay-reveal' : 'bg-black/20 backdrop-blur-[2px]'}`}
+      onClick={handleSkipOrAdvance}
+      role="dialog"
+      aria-modal="true"
+      aria-label={phase === 'burst' ? `${activeNotice.title}. Click to continue.` : activeNotice.title}
+    >
       {phase === 'burst' ? (
         <div className={`completion-burst ${victoryTone ? 'completion-burst-victory' : 'completion-burst-defeat'} text-center`}>
           <div className={`completion-avatar-wrap relative mx-auto mb-5 h-44 w-44 sm:h-56 sm:w-56 ${activeNotice.kind === 'defeat' ? 'completion-avatar-wrap-defeat' : ''} ${plainArtwork ? 'completion-avatar-wrap-plain' : ''}`}>
@@ -154,12 +201,18 @@ export default function CompletionOverlay() {
           </div>
           <div className="arcane-label">{activeNotice.kicker || 'Report'}</div>
           <div className="fantasy-heading text-5xl sm:text-7xl">{activeNotice.title}</div>
+          <div className="completion-skip-hint ui-muted mt-5 text-xs font-black uppercase tracking-[0.18em]">
+            Click to continue{queuedCount > 0 ? ` · ${queuedCount} more waiting` : ''}
+          </div>
         </div>
       ) : isUnitRecruitReveal ? (
-        <section className="completion-recruit-panel command-panel vine-frame w-full max-w-4xl rounded border p-5 sm:p-6">
+        <section
+          className="completion-recruit-panel command-panel vine-frame w-full max-w-4xl rounded border p-5 sm:p-6"
+          onClick={event => event.stopPropagation()}
+        >
           <div className="completion-recruit-top flex items-start justify-between gap-3">
             <div className="arcane-label">{activeNotice.kicker || 'Joined the Team'}</div>
-            <button onClick={closeNotice} className="ui-button-primary shrink-0 rounded px-4 py-2 text-xs font-black">
+            <button type="button" onClick={closeNotice} className="ui-button-primary shrink-0 rounded px-4 py-2 text-xs font-black">
               Continue
             </button>
           </div>
@@ -208,12 +261,18 @@ export default function CompletionOverlay() {
               ))}
             </div>
           )}
+          <div className="completion-skip-hint ui-muted mt-4 text-center text-[10px] font-black uppercase tracking-[0.16em]">
+            Click outside or press Continue{queuedCount > 0 ? ` · ${queuedCount} more waiting` : ''}
+          </div>
         </section>
       ) : isGearReveal ? (
-        <section className={`completion-gear-panel command-panel vine-frame w-full max-w-xl rounded border p-5 sm:p-6 ${gearRarityClass}`}>
+        <section
+          className={`completion-gear-panel command-panel vine-frame w-full max-w-xl rounded border p-5 sm:p-6 ${gearRarityClass}`}
+          onClick={event => event.stopPropagation()}
+        >
           <div className="completion-gear-top flex items-start justify-between gap-3">
             <div className="arcane-label">{activeNotice.kicker || 'Run Satchel'}</div>
-            <button onClick={closeNotice} className="ui-button-primary shrink-0 rounded px-4 py-2 text-xs font-black">
+            <button type="button" onClick={closeNotice} className="ui-button-primary shrink-0 rounded px-4 py-2 text-xs font-black">
               Continue
             </button>
           </div>
@@ -265,9 +324,18 @@ export default function CompletionOverlay() {
               ))}
             </div>
           )}
+          <div className="completion-skip-hint ui-muted mt-4 text-center text-[10px] font-black uppercase tracking-[0.16em]">
+            Click outside or press Continue{queuedCount > 0 ? ` · ${queuedCount} more waiting` : ''}
+          </div>
         </section>
       ) : (
-        <section className={`completion-report command-panel vine-frame w-full max-w-2xl rounded border p-5 ${victoryTone ? 'completion-report-victory' : 'completion-report-defeat'}`}>
+        <section
+          className={`completion-report command-panel vine-frame w-full max-w-2xl cursor-pointer rounded border p-5 ${victoryTone ? 'completion-report-victory' : 'completion-report-defeat'}`}
+          onClick={event => {
+            event.stopPropagation();
+            closeNotice();
+          }}
+        >
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div className="flex min-w-0 flex-1 items-start gap-4">
               {showReportArtwork && (
@@ -290,7 +358,14 @@ export default function CompletionOverlay() {
                 )}
               </div>
             </div>
-            <button onClick={closeNotice} className="ui-button-primary rounded px-4 py-2 text-xs font-black">
+            <button
+              type="button"
+              onClick={event => {
+                event.stopPropagation();
+                closeNotice();
+              }}
+              className="ui-button-primary rounded px-4 py-2 text-xs font-black"
+            >
               Continue
             </button>
           </div>
@@ -305,6 +380,9 @@ export default function CompletionOverlay() {
               ))}
             </div>
           )}
+          <div className="completion-skip-hint ui-muted mt-4 text-center text-[10px] font-black uppercase tracking-[0.16em]">
+            Click anywhere to continue{queuedCount > 0 ? ` · ${queuedCount} more waiting` : ''}
+          </div>
         </section>
       )}
     </div>

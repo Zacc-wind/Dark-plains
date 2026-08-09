@@ -222,11 +222,19 @@ export default function TradeSessionOverlay() {
     }
   };
 
+  const runTradeAction = async (action: () => Promise<PlayerTradeActionResult>) => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      applyResult(await action());
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const updateOffer = (nextOffer: TradeOffer) => {
     if (busy || ownLocked) return;
-    setBusy(true);
-    applyResult(updateCurrentPlayerTradeOffer(activeSession.id, nextOffer, activeSession.version));
-    setBusy(false);
+    void runTradeAction(() => updateCurrentPlayerTradeOffer(activeSession.id, nextOffer, activeSession.version));
   };
 
   const updateItemQuantity = (itemId: string, quantity: number) => {
@@ -267,7 +275,7 @@ export default function TradeSessionOverlay() {
             <button
               type="button"
               disabled={busy}
-              onClick={() => applyResult(cancelPlayerTradeSession(activeSession.id))}
+              onClick={() => void runTradeAction(() => cancelPlayerTradeSession(activeSession.id))}
               className="ui-button-danger rounded px-3 py-2 text-xs font-black disabled:opacity-40"
             >
               Cancel Trade
@@ -367,7 +375,7 @@ export default function TradeSessionOverlay() {
           <button
             type="button"
             disabled={busy || ownAccepted}
-            onClick={() => applyResult(setCurrentPlayerTradeLock(activeSession.id, !ownLocked, activeSession.version))}
+            onClick={() => void runTradeAction(() => setCurrentPlayerTradeLock(activeSession.id, !ownLocked, activeSession.version))}
             className="ui-button rounded px-4 py-2 text-xs font-black disabled:opacity-35"
           >
             {ownLocked ? 'Unlock Offer' : 'Lock Offer'}
@@ -375,7 +383,7 @@ export default function TradeSessionOverlay() {
           <button
             type="button"
             disabled={busy || !ownLocked || !otherLocked || ownAccepted}
-            onClick={() => applyResult(confirmCurrentPlayerTrade(activeSession.id, activeSession.version))}
+            onClick={() => void runTradeAction(() => confirmCurrentPlayerTrade(activeSession.id, activeSession.version))}
             className="ui-button-primary rounded px-4 py-2 text-xs font-black disabled:opacity-35"
           >
             {ownAccepted ? 'Confirmed' : otherLocked ? 'Final Confirm' : 'Awaiting Locks'}

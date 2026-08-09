@@ -67,6 +67,10 @@ function getUnlockedSpellNames(state: DailyRunState): Set<string> {
   return names;
 }
 
+function discoveryHasSpell(state: DailyRunState, spellId: string): boolean {
+  return Boolean(state.discovery?.unlockedSpellIds?.includes(spellId));
+}
+
 function historyHasRouteKeyword(state: DailyRunState, keyword: string): boolean {
   const needle = keyword.toLowerCase();
   return state.history.some(entry =>
@@ -221,34 +225,34 @@ const STATIC_MILESTONE_BASE: Array<Omit<RunMilestoneDefinition, 'tier'>> = [
   {
     id: 'spell-arcane-bolt',
     category: 'spell',
-    title: 'Arcane Bolt',
-    description: 'Permanently unlock Arcane Bolt from a run reward.',
-    iconPath: '/assets/spells/arcane-bolt.png',
-    rewardHint: 'Spell unlock milestone.',
+    title: 'Judgement',
+    description: 'Permanently unlock Judgement by defeating any run boss.',
+    iconPath: '/assets/spells/judgement.png',
+    rewardHint: 'Discovery spell milestone.',
   },
   {
     id: 'spell-frost-lance',
     category: 'spell',
     title: 'Frost Lance',
-    description: 'Permanently unlock Frost Lance from a run reward.',
+    description: 'Permanently unlock Frost Lance by defeating Mother Cindervein.',
     iconPath: '/assets/spells/frost-lance.png',
-    rewardHint: 'Spell unlock milestone.',
+    rewardHint: 'Discovery spell milestone.',
   },
   {
     id: 'spell-sanctified-mend',
     category: 'spell',
-    title: 'Sanctified Mend',
-    description: 'Permanently unlock Sanctified Mend from a run reward.',
-    iconPath: '/assets/spells/sanctified-mend.png',
-    rewardHint: 'Spell unlock milestone.',
+    title: 'Iron Benediction',
+    description: 'Permanently unlock Iron Benediction by clearing a run without losing a unit.',
+    iconPath: '/assets/spells/iron-benediction.png',
+    rewardHint: 'Discovery spell milestone.',
   },
   {
     id: 'spell-blood-star',
     category: 'spell',
     title: 'Blood Star',
-    description: 'Permanently unlock Blood Star from a run reward.',
+    description: 'Permanently unlock Blood Star by defeating Scarlet Matron Yvane.',
     iconPath: '/assets/spells/blood-star.png',
-    rewardHint: 'Spell unlock milestone.',
+    rewardHint: 'Discovery spell milestone.',
   },
   {
     id: 'meta-run-level-3',
@@ -404,13 +408,13 @@ function isMilestoneUnlocked(state: DailyRunState, milestone: RunMilestoneDefini
     case 'army-tier-three-recruit':
       return historyHasTierThreeUnit(state);
     case 'spell-arcane-bolt':
-      return unlockedSpells.has('Arcane Bolt');
+      return discoveryHasSpell(state, 'judgement') || unlockedSpells.has('Judgement') || unlockedSpells.has('Arcane Bolt');
     case 'spell-frost-lance':
-      return unlockedSpells.has('Frost Lance');
+      return discoveryHasSpell(state, 'frost-lance') || unlockedSpells.has('Frost Lance');
     case 'spell-sanctified-mend':
-      return unlockedSpells.has('Sanctified Mend');
+      return discoveryHasSpell(state, 'iron-benediction') || unlockedSpells.has('Iron Benediction') || unlockedSpells.has('Sanctified Mend');
     case 'spell-blood-star':
-      return unlockedSpells.has('Blood Star');
+      return discoveryHasSpell(state, 'blood-star') || unlockedSpells.has('Blood Star');
     case 'meta-run-level-3':
       return state.runLevel >= 3;
     case 'meta-run-level-5':

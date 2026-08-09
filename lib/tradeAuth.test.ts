@@ -55,12 +55,13 @@ function prepareCurrentPlayer(level: number, updates: Parameters<typeof updateCu
 beforeEach(() => {
   storage.clear();
   vi.stubGlobal('window', { localStorage: storage });
+  vi.stubEnv('VITEST', 'true');
   vi.useFakeTimers();
   vi.setSystemTime(new Date('2026-07-20T12:00:00Z'));
 });
 
 describe('player trade auth integration', () => {
-  it('validates and atomically transfers both offers after two confirmations', () => {
+  it('validates and atomically transfers both offers after two confirmations', async () => {
     expect(register('TradeLeader', 'test-password').success).toBe(true);
     expect(register('TradePartner', 'test-password').success).toBe(true);
 
@@ -77,15 +78,15 @@ describe('player trade auth integration', () => {
     });
 
     expect(login('TradeLeader', 'test-password').success).toBe(true);
-    expect(requestPlayerTrade('TradePartner')).toMatchObject({ success: true });
+    expect(await requestPlayerTrade('TradePartner')).toMatchObject({ success: true });
 
     expect(login('TradePartner', 'test-password').success).toBe(true);
     const request = getIncomingSocialRequests().find(candidate => candidate.kind === 'trade');
     expect(request).toBeDefined();
-    expect(acceptPlayerTradeRequest(request!.id)).toMatchObject({ success: true });
+    expect(await acceptPlayerTradeRequest(request!.id)).toMatchObject({ success: true });
     let session = getCurrentPlayerTradeSession();
     expect(session?.status).toBe('active');
-    const receiverUpdate = updateCurrentPlayerTradeOffer(session!.id, {
+    const receiverUpdate = await updateCurrentPlayerTradeOffer(session!.id, {
       gold: 30,
       items: [{ itemId: 'red-mercy-draught', quantity: 1 }],
     }, session!.version);
@@ -93,33 +94,33 @@ describe('player trade auth integration', () => {
 
     expect(login('TradeLeader', 'test-password').success).toBe(true);
     session = getCurrentPlayerTradeSession();
-    expect(updateCurrentPlayerTradeOffer(session!.id, {
+    expect(await updateCurrentPlayerTradeOffer(session!.id, {
       gold: 20,
       items: [{ itemId: 'candle-key-fragment', quantity: 1 }],
     }, session!.version)).toMatchObject({ success: false, error: 'Quest items cannot be traded.' });
-    const initiatorUpdate = updateCurrentPlayerTradeOffer(session!.id, {
+    const initiatorUpdate = await updateCurrentPlayerTradeOffer(session!.id, {
       gold: 20,
       items: [{ itemId: 'black-amber', quantity: 2 }],
       equipmentIds: [TEST_GEAR.id],
     }, session!.version);
     expect(initiatorUpdate.success).toBe(true);
-    expect(updateCurrentPlayerTradeOffer(session!.id, { gold: 1 }, session!.version)).toMatchObject({
+    expect(await updateCurrentPlayerTradeOffer(session!.id, { gold: 1 }, session!.version)).toMatchObject({
       success: false,
       error: 'Trade changed. Review the latest offers before editing.',
     });
-    expect(setCurrentPlayerTradeLock(session!.id, true, initiatorUpdate.session!.version).success).toBe(true);
+    expect((await setCurrentPlayerTradeLock(session!.id, true, initiatorUpdate.session!.version)).success).toBe(true);
 
     expect(login('TradePartner', 'test-password').success).toBe(true);
     session = getCurrentPlayerTradeSession();
-    expect(setCurrentPlayerTradeLock(session!.id, true, session!.version).success).toBe(true);
+    expect((await setCurrentPlayerTradeLock(session!.id, true, session!.version)).success).toBe(true);
     session = getCurrentPlayerTradeSession();
-    const partnerConfirmation = confirmCurrentPlayerTrade(session!.id, session!.version);
+    const partnerConfirmation = await confirmCurrentPlayerTrade(session!.id, session!.version);
     expect(partnerConfirmation.success).toBe(true);
     expect(partnerConfirmation.completed).not.toBe(true);
 
     expect(login('TradeLeader', 'test-password').success).toBe(true);
     session = getCurrentPlayerTradeSession();
-    expect(confirmCurrentPlayerTrade(session!.id, session!.version)).toMatchObject({ success: true, completed: true });
+    expect(await confirmCurrentPlayerTrade(session!.id, session!.version)).toMatchObject({ success: true, completed: true });
     expect(getCurrentPlayerTradeSession()).toBeUndefined();
 
     const users = getUsers();

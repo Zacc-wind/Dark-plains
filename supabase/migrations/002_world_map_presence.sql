@@ -1,6 +1,7 @@
 -- World map presence: let signed-in players see each other on the shared map.
 
-create or replace view public.world_map_players as
+create or replace view public.world_map_players
+with (security_invoker = true) as
 select
   p.id as user_id,
   p.username,

@@ -4,6 +4,11 @@ import { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import type { BattleLogEntry, BattleLogStyle, BattleState, BattleUnit } from '@/lib/battle';
 import { isStatusEffectTickLogEntry, pickFreshPresentationLogEntry } from '@/lib/battle';
+import {
+  GRAPHICS_QUALITY_EVENT_NAME,
+  readGraphicsQualitySetting,
+  shouldEnableCombatThreeFx,
+} from '@/lib/graphicsSettings';
 
 interface CombatThreeFxLayerProps {
   battle: BattleState;
@@ -630,11 +635,21 @@ export default function CombatThreeFxLayer({ battle }: CombatThreeFxLayerProps) 
     const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     const mount = mountRef.current;
     if (!mount || reducedMotion) return undefined;
+    if (!shouldEnableCombatThreeFx(readGraphicsQualitySetting())) return undefined;
 
     const runtime = createRuntime(mount);
     runtimeRef.current = runtime;
 
+    const handleQualityChange = () => {
+      if (!shouldEnableCombatThreeFx(readGraphicsQualitySetting())) {
+        runtime.dispose();
+        runtimeRef.current = null;
+      }
+    };
+    window.addEventListener(GRAPHICS_QUALITY_EVENT_NAME, handleQualityChange);
+
     return () => {
+      window.removeEventListener(GRAPHICS_QUALITY_EVENT_NAME, handleQualityChange);
       runtime.dispose();
       runtimeRef.current = null;
     };

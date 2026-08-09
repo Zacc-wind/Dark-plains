@@ -19,6 +19,7 @@ import {
   getPvpDuelSessions,
   PVP_DUEL_SESSION_UPDATED_EVENT,
   settleCurrentPvpDuelSession,
+  syncOnlinePvpDuelSessions,
 } from '@/lib/pvpDuelClient';
 import {
   getPvpDuelSide,
@@ -31,7 +32,8 @@ import BattleModal, {
 import CinematicScrollShell from './CinematicScrollShell';
 import FormationPanel from './FormationPanel';
 
-function findOrCreateCurrentSession(username: string, now = Date.now()): PvpDuelSession | undefined {
+async function findOrCreateCurrentSession(username: string, now = Date.now()): Promise<PvpDuelSession | undefined> {
+  await syncOnlinePvpDuelSessions(now);
   const current = getCurrentPvpDuelSession(username, now);
   if (current) return current;
 
@@ -43,7 +45,7 @@ function findOrCreateCurrentSession(username: string, now = Date.now()): PvpDuel
       .some(participant => participant.toLowerCase() === username.toLowerCase())
   ));
   if (!readyChallenge) return undefined;
-  return ensurePvpDuelSession(readyChallenge, now).session;
+  return (await ensurePvpDuelSession(readyChallenge, now)).session;
 }
 
 export default function PvpDuelSessionOverlay() {
@@ -51,6 +53,7 @@ export default function PvpDuelSessionOverlay() {
   const [formation, setFormation] = useState<Record<string, { x: number; y: number }> | null>(null);
   const [spellIds, setSpellIds] = useState<string[] | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
   const user = getCurrentUser();
   const username = user?.username || '';
 
@@ -59,10 +62,11 @@ export default function PvpDuelSessionOverlay() {
       setSession(null);
       return;
     }
-    const next = findOrCreateCurrentSession(username);
-    setSession(current => (
-      current?.id === next?.id && current?.version === next?.version ? current : next || null
-    ));
+    void findOrCreateCurrentSession(username).then(next => {
+      setSession(current => (
+        current?.id === next?.id && current?.version === next?.version ? current : next || null
+      ));
+    });
   }, [username]);
 
   useEffect(() => {
@@ -126,29 +130,35 @@ export default function PvpDuelSessionOverlay() {
           stacks={snapshot.minions}
           formation={currentFormation}
           spellIds={currentSpellIds}
-        knownSpellIds={snapshot.knownSpellIds}
-        organizedRoster
+          knownSpellIds={snapshot.knownSpellIds}
+          organizedRoster
           onChangeFormation={setFormation}
           onChangeSpellIds={setSpellIds}
           onStart={() => {
-            const result = confirmCurrentPvpDuelFormation(
+            if (busy) return;
+            setBusy(true);
+            void confirmCurrentPvpDuelFormation(
               session.id,
               username,
               currentFormation,
               currentSpellIds,
               session.version,
-            );
-            if (!result.success || !result.session) {
-              setNotice(result.error || 'Could not confirm duel formation.');
-              return;
-            }
-            setSession(result.session);
-            setNotice('Formation confirmed.');
+            ).then(result => {
+              if (!result.success || !result.session) {
+                setNotice(result.error || 'Could not confirm duel formation.');
+                return;
+              }
+              setSession(result.session);
+              setNotice('Formation confirmed.');
+            }).finally(() => setBusy(false));
           }}
           onBack={() => {
-            const result = cancelCurrentPvpDuelSession(session.id, username, session.version);
-            if (result.success) setSession(null);
-            else setNotice(result.error || 'Could not leave the duel.');
+            if (busy) return;
+            setBusy(true);
+            void cancelCurrentPvpDuelSession(session.id, username, session.version).then(result => {
+              if (result.success) setSession(null);
+              else setNotice(result.error || 'Could not leave the duel.');
+            }).finally(() => setBusy(false));
           }}
         />
         {notice && (
@@ -172,12 +182,16 @@ export default function PvpDuelSessionOverlay() {
             </p>
             <button
               type="button"
+              disabled={busy}
               onClick={() => {
-                const result = cancelCurrentPvpDuelSession(session.id, username, session.version);
-                if (result.success) setSession(null);
-                else setNotice(result.error || 'Could not cancel the duel.');
+                if (busy) return;
+                setBusy(true);
+                void cancelCurrentPvpDuelSession(session.id, username, session.version).then(result => {
+                  if (result.success) setSession(null);
+                  else setNotice(result.error || 'Could not cancel the duel.');
+                }).finally(() => setBusy(false));
               }}
-              className="ui-button mt-6 rounded px-5 py-3 text-sm font-black"
+              className="ui-button mt-6 rounded px-5 py-3 text-sm font-black disabled:opacity-40"
             >
               Cancel Duel
             </button>
@@ -198,9 +212,12 @@ export default function PvpDuelSessionOverlay() {
         persistentResults={false}
         onBattleAction={handleBattleAction}
         onRetreatRequest={() => {
-          const result = forfeitCurrentPvpDuelSession(session.id, username, session.version);
-          if (result.success && result.session) setSession(result.session);
-          else setNotice(result.error || 'Could not forfeit the duel.');
+          if (busy) return;
+          setBusy(true);
+          void forfeitCurrentPvpDuelSession(session.id, username, session.version).then(result => {
+            if (result.success && result.session) setSession(result.session);
+            else setNotice(result.error || 'Could not forfeit the duel.');
+          }).finally(() => setBusy(false));
         }}
         onClose={() => undefined}
       />
@@ -221,15 +238,19 @@ export default function PvpDuelSessionOverlay() {
           <button
             type="button"
             data-multiplayer-tutorial-anchor="battle-result-claim"
+            disabled={busy}
             onClick={() => {
-              const settled = settleCurrentPvpDuelSession(session.id);
-              if (!settled.success) {
-                setNotice(settled.error || 'Could not claim the duel result.');
-                return;
-              }
-              setSession(null);
+              if (busy) return;
+              setBusy(true);
+              void settleCurrentPvpDuelSession(session.id).then(settled => {
+                if (!settled.success) {
+                  setNotice(settled.error || 'Could not claim the duel result.');
+                  return;
+                }
+                setSession(null);
+              }).finally(() => setBusy(false));
             }}
-            className="ui-button-primary mt-6 rounded px-6 py-3 text-sm font-black"
+            className="ui-button-primary mt-6 rounded px-6 py-3 text-sm font-black disabled:opacity-40"
           >
             Claim Duel Result
           </button>
