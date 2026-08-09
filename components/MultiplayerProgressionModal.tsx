@@ -156,7 +156,7 @@ export default function MultiplayerProgressionModal({
   return (
     <>
       <div
-        className="multiplayer-progression-overlay fixed inset-0 z-[115] flex items-center justify-center bg-black/80 p-3 text-zinc-100 sm:p-5"
+        className="multiplayer-progression-overlay fixed inset-0 z-[115] flex items-center justify-center bg-black/80 p-3 sm:p-5"
         role="presentation"
         onMouseDown={event => {
           if (event.target === event.currentTarget) onClose();

@@ -5,9 +5,12 @@ import * as THREE from 'three';
 import { MAP_FOG_EVENT_NAME, MAP_FOG_MAX_CAMPFIRES, type MapFogState } from '@/lib/mapFogEvents';
 import {
   GRAPHICS_QUALITY_EVENT_NAME,
+  getMapFogFrameStride,
   getMapFogPixelRatioCap,
+  getMapFogRenderScale,
   isHeavyUiOverlayOpen,
   readGraphicsQualitySetting,
+  shouldAnimateMapFogGrain,
   shouldEnableMapFog,
   type GraphicsQuality,
 } from '@/lib/graphicsSettings';
@@ -36,6 +39,7 @@ export default function MapFogOverlay() {
     let width = Math.ceil(window.visualViewport?.width || window.innerWidth || 1);
     let height = Math.ceil(window.visualViewport?.height || window.innerHeight || 1);
     let animationFrame = 0;
+    let frameCounter = 0;
     let lastTime = performance.now();
     let pointerTarget: { x: number; y: number } | null = null;
     let playerTarget: { x: number; y: number } | null = null;
@@ -53,6 +57,19 @@ export default function MapFogOverlay() {
     const pointerLight = new THREE.Vector2(0, 0);
     const playerLight = new THREE.Vector2(0, 0);
     const campfireLights = Array.from({ length: MAP_FOG_MAX_CAMPFIRES }, () => new THREE.Vector2(0, 0));
+
+    const applyRendererSize = () => {
+      if (!renderer || !camera || !uniforms || !fogPlane) return;
+      const renderScale = getMapFogRenderScale(quality, width, height);
+      const renderWidth = Math.max(1, Math.floor(width * renderScale));
+      const renderHeight = Math.max(1, Math.floor(height * renderScale));
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, getMapFogPixelRatioCap(quality)));
+      renderer.setSize(renderWidth, renderHeight, false);
+      setCameraSize(camera, width, height);
+      (uniforms.uResolution.value as THREE.Vector2).set(width, height);
+      fogPlane.geometry.dispose();
+      fogPlane.geometry = new THREE.PlaneGeometry(width, height);
+    };
 
     const teardownRenderer = () => {
       if (animationFrame) {
@@ -88,8 +105,6 @@ export default function MapFogOverlay() {
         powerPreference: quality === 'high' ? 'high-performance' : 'low-power',
       });
       renderer.setClearColor(0x000000, 0);
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, getMapFogPixelRatioCap(quality)));
-      renderer.setSize(width, height, false);
       renderer.domElement.className = 'map-fog-canvas';
       mount.appendChild(renderer.domElement);
 
@@ -105,6 +120,7 @@ export default function MapFogOverlay() {
         uCampfireCount: { value: 0 },
         uTime: { value: 0 },
         uZoom: { value: 1 },
+        uAnimateGrain: { value: shouldAnimateMapFogGrain(quality) ? 1 : 0 },
       };
 
       const geometry = new THREE.PlaneGeometry(width, height);
@@ -136,6 +152,7 @@ export default function MapFogOverlay() {
           uniform int uCampfireCount;
           uniform float uTime;
           uniform float uZoom;
+          uniform float uAnimateGrain;
 
           float radial(vec2 point, float radius, float feather) {
             float distanceToPoint = distance(vWorld, point);
@@ -158,13 +175,17 @@ export default function MapFogOverlay() {
 
             for (int i = 0; i < 8; i++) {
               if (i >= uCampfireCount) break;
-              float pulse = 0.9 + 0.1 * sin(uTime * 1.4 + float(i) * 1.9);
+              float pulse = uAnimateGrain > 0.5
+                ? 0.9 + 0.1 * sin(uTime * 1.4 + float(i) * 1.9)
+                : 0.95;
               float spot = radial(uCampfires[i], 62.0 * zoomGlow, 88.0 * zoomGlow);
               reveal += spot * 0.18 * pulse;
               warmGlow += spot * 0.24 * pulse;
             }
 
-            float grain = sin((vWorld.x + uTime * 11.0) * 0.018) * sin((vWorld.y - uTime * 7.0) * 0.022);
+            float grain = uAnimateGrain > 0.5
+              ? sin((vWorld.x + uTime * 11.0) * 0.018) * sin((vWorld.y - uTime * 7.0) * 0.022)
+              : 0.0;
             float edge = smoothstep(0.48, 1.0, distance(vWorld / max(uResolution.x, uResolution.y), vec2(0.0)));
             float alpha = clamp(veil + edge * 0.08 + grain * 0.018 - reveal, 0.04, 0.56);
             vec3 fogColor = mix(vec3(0.015, 0.018, 0.018), vec3(0.0, 0.0, 0.0), 0.62);
@@ -177,6 +198,7 @@ export default function MapFogOverlay() {
 
       fogPlane = new THREE.Mesh(geometry, material);
       scene.add(fogPlane);
+      applyRendererSize();
       return true;
     };
 
@@ -197,7 +219,11 @@ export default function MapFogOverlay() {
 
       const delta = Math.min(0.04, (time - lastTime) / 1000);
       lastTime = time;
-      (uniforms.uTime.value as number) = time * 0.001;
+      const animateGrain = shouldAnimateMapFogGrain(quality);
+      uniforms.uAnimateGrain.value = animateGrain ? 1 : 0;
+      if (animateGrain) {
+        (uniforms.uTime.value as number) = time * 0.001;
+      }
       (uniforms.uZoom.value as number) += (zoomTarget - (uniforms.uZoom.value as number)) * (1 - Math.pow(0.04, delta));
 
       if (pointerTarget) {
@@ -246,7 +272,11 @@ export default function MapFogOverlay() {
         campfireLights[index].copy(screenToWorld(target, width, height));
       }
 
-      renderer.render(scene, camera);
+      frameCounter += 1;
+      const stride = Math.max(1, getMapFogFrameStride(quality));
+      if (frameCounter % stride === 0) {
+        renderer.render(scene, camera);
+      }
       animationFrame = window.requestAnimationFrame(animate);
     };
 
@@ -285,13 +315,7 @@ export default function MapFogOverlay() {
     const handleResize = () => {
       width = Math.ceil(window.visualViewport?.width || window.innerWidth || 1);
       height = Math.ceil(window.visualViewport?.height || window.innerHeight || 1);
-      if (!renderer || !camera || !uniforms || !fogPlane) return;
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, getMapFogPixelRatioCap(quality)));
-      renderer.setSize(width, height, false);
-      setCameraSize(camera, width, height);
-      (uniforms.uResolution.value as THREE.Vector2).set(width, height);
-      fogPlane.geometry.dispose();
-      fogPlane.geometry = new THREE.PlaneGeometry(width, height);
+      applyRendererSize();
     };
 
     const handleQualityChange = () => {

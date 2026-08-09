@@ -83,7 +83,7 @@ export default function StoryDialogOverlay({
   const npcImagePath = sequence.npcAssetPath || getPlayerModelPath(sequence.npcModelNumber || 4);
   const overlay = (
     <div
-      className="story-dialog-layer fixed inset-0 z-[125] flex items-end justify-center p-3 text-zinc-100 sm:p-5"
+      className="story-dialog-layer fixed inset-0 z-[125] flex items-end justify-center p-3 sm:p-5"
       role="dialog"
       aria-modal="true"
       aria-label={sequence.kicker}

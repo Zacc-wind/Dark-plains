@@ -77,10 +77,13 @@ import {
 import {
   GRAPHICS_QUALITY_EVENT_NAME,
   getMapAnimIntervalMs,
+  getMapCanvasRenderSize,
   getMapImageSmoothingQuality,
   isHeavyUiOverlayOpen,
   readGraphicsQualitySetting,
   shouldDrawCampfireParticles,
+  shouldDrawMapShadows,
+  shouldDrawRichMapMarkers,
 } from '@/lib/graphicsSettings';
 
 // POI image mapping
@@ -252,6 +255,7 @@ const MIN_PLAYABLE_MAP_ZOOM = 1.62;
 const MAP_ZOOM_OUT_RANGE_FACTOR = 0.5;
 const ZOOM_STEP = 0.14;
 const DIRECT_TRAVEL_RENDER_INTERVAL_MS = 1000 / 15;
+const MAP_FOG_POINTER_EMIT_MS = 40;
 const MAP_REVEAL_RADIUS = 105;
 const MAP_PLAYER_REVEAL_RADIUS = 70;
 const MAIN_QUEST_TRACKER_HIDDEN_KEY = 'wizardy_main_quest_tracker_hidden';
@@ -503,8 +507,10 @@ function drawMapLabel(
   ctx.fillStyle = color;
   ctx.font = `bold ${fontSize}px serif`;
   ctx.textAlign = 'center';
-  ctx.shadowColor = 'rgba(0, 0, 0, 0.9)';
-  ctx.shadowBlur = 4;
+  if (shouldDrawMapShadows()) {
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.9)';
+    ctx.shadowBlur = 4;
+  }
   ctx.fillText(text, x, y);
   ctx.restore();
 }
@@ -527,12 +533,51 @@ function drawGroundShadow(
   radiusX: number,
   radiusY: number
 ): void {
+  if (!shouldDrawMapShadows()) return;
   ctx.save();
   ctx.fillStyle = 'rgba(0, 0, 0, 0.34)';
   ctx.beginPath();
   ctx.ellipse(centerX, centerY, radiusX, radiusY, 0, 0, Math.PI * 2);
   ctx.fill();
   ctx.restore();
+}
+
+function drawVisibleWorldMap(
+  ctx: CanvasRenderingContext2D,
+  worldMap: HTMLImageElement,
+  cameraX: number,
+  cameraY: number,
+  viewportWidth: number,
+  viewportHeight: number,
+  zoom: number,
+): void {
+  const baseWidth = MAP_CONFIG.width * MAP_CONFIG.tileSize;
+  const baseHeight = MAP_CONFIG.height * MAP_CONFIG.tileSize;
+  const safeZoom = Math.max(0.01, zoom);
+  let sx = cameraX / safeZoom;
+  let sy = cameraY / safeZoom;
+  let sw = viewportWidth / safeZoom;
+  let sh = viewportHeight / safeZoom;
+
+  if (sx < 0) {
+    const clipped = -sx;
+    sx = 0;
+    sw -= clipped;
+  }
+  if (sy < 0) {
+    const clipped = -sy;
+    sy = 0;
+    sh -= clipped;
+  }
+  if (sx + sw > baseWidth) sw = baseWidth - sx;
+  if (sy + sh > baseHeight) sh = baseHeight - sy;
+  if (sw <= 0 || sh <= 0) return;
+
+  const dx = (sx * safeZoom) - cameraX;
+  const dy = (sy * safeZoom) - cameraY;
+  const dw = sw * safeZoom;
+  const dh = sh * safeZoom;
+  ctx.drawImage(worldMap, sx, sy, sw, sh, dx, dy, dw, dh);
 }
 
 function drawJobPoiSkyBackdrop(
@@ -707,7 +752,7 @@ function drawCircularLandmarkMarker(
   if (image) {
     const imageSize = radius * 2.05;
     ctx.save();
-    if (!hovered && idleImageFilter) {
+    if (!hovered && idleImageFilter && shouldDrawRichMapMarkers()) {
       ctx.filter = idleImageFilter;
     }
     ctx.drawImage(image, centerX - imageSize / 2, centerY - imageSize / 2, imageSize, imageSize);
@@ -738,8 +783,10 @@ function drawCircularLandmarkMarker(
     ctx.fillStyle = labelColor;
     ctx.font = `bold ${hovered ? 10 : 9}px serif`;
     ctx.textAlign = 'center';
-    ctx.shadowColor = 'rgba(0, 0, 0, 0.9)';
-    ctx.shadowBlur = 3;
+    if (shouldDrawMapShadows()) {
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.9)';
+      ctx.shadowBlur = 3;
+    }
     ctx.fillText(label, centerX, centerY + radius + 9);
     ctx.restore();
   }
@@ -845,23 +892,29 @@ function drawCampfireMarker(
   const fogHaloAlpha = (0.018 + pulse * 0.012) * (0.9 + flicker * 0.08);
 
   drawCampfireGroundPad(ctx, centerX, centerY, size);
-  drawMapGlowPool(ctx, {
-    centerX,
-    centerY: centerY + size * 0.04,
-    radiusX: size * 1.05,
-    radiusY: size * 0.82,
-    innerRgb: '255, 124, 42',
-    outerRgb: '168, 52, 18',
-    alpha: fogHaloAlpha,
-  });
-  drawCampfireGroundGlow(ctx, centerX, centerY, size, poolAlpha);
-  drawCampfireGroundGlow(ctx, centerX, centerY, size, poolAlpha * 0.42);
+  if (shouldDrawRichMapMarkers()) {
+    drawMapGlowPool(ctx, {
+      centerX,
+      centerY: centerY + size * 0.04,
+      radiusX: size * 1.05,
+      radiusY: size * 0.82,
+      innerRgb: '255, 124, 42',
+      outerRgb: '168, 52, 18',
+      alpha: fogHaloAlpha,
+    });
+    drawCampfireGroundGlow(ctx, centerX, centerY, size, poolAlpha);
+    drawCampfireGroundGlow(ctx, centerX, centerY, size, poolAlpha * 0.42);
+  } else {
+    drawCampfireGroundGlow(ctx, centerX, centerY, size, poolAlpha * 0.7);
+  }
 
   if (image) {
     ctx.save();
-    ctx.shadowColor = 'rgba(0, 0, 0, 0.45)';
-    ctx.shadowBlur = hovered ? 6 : 3;
-    ctx.shadowOffsetY = 1;
+    if (shouldDrawMapShadows()) {
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.45)';
+      ctx.shadowBlur = hovered ? 6 : 3;
+      ctx.shadowOffsetY = 1;
+    }
     ctx.drawImage(
       image,
       centerX - size / 2,
@@ -899,22 +952,25 @@ function drawJobPoiMarker(
   const diskRadius = radius * 0.88;
   const glow = JOB_POI_GLOW_TONES[poiType] ?? DEFAULT_JOB_POI_GLOW;
   const sky = JOB_POI_SKY_TONES[poiType] ?? DEFAULT_JOB_POI_SKY;
-  const poolAlpha = hovered ? 0.2 : 0.08 + pulse * 0.06;
-  const glowStrength = hovered ? 0.62 : 0.26 + pulse * 0.14;
+  const rich = shouldDrawRichMapMarkers();
+  const poolAlpha = hovered ? 0.2 : rich ? 0.08 + pulse * 0.06 : 0.1;
+  const glowStrength = hovered ? 0.62 : rich ? 0.26 + pulse * 0.14 : 0.3;
 
   drawGroundShadow(ctx, centerX, centerY + diskRadius * 0.66, diskRadius * 0.72, diskRadius * 0.2);
 
-  ctx.save();
-  drawMapGlowPool(ctx, {
-    centerX,
-    centerY: centerY + radius * 0.02,
-    radiusX: diskRadius * 1.08,
-    radiusY: diskRadius * 0.96,
-    innerRgb: glow.inner,
-    outerRgb: glow.outer,
-    alpha: poolAlpha,
-  });
-  ctx.restore();
+  if (rich || hovered) {
+    ctx.save();
+    drawMapGlowPool(ctx, {
+      centerX,
+      centerY: centerY + radius * 0.02,
+      radiusX: diskRadius * 1.08,
+      radiusY: diskRadius * 0.96,
+      innerRgb: glow.inner,
+      outerRgb: glow.outer,
+      alpha: poolAlpha,
+    });
+    ctx.restore();
+  }
 
   drawJobPoiDisk(ctx, centerX, centerY, diskRadius, hovered, sky, glow.ring);
 
@@ -932,12 +988,16 @@ function drawJobPoiMarker(
   if (image) {
     const imageSize = clipRadius * 2 * imageZoom;
     ctx.save();
-    ctx.shadowColor = glow.shadow.replace(/[\d.]+\)$/, `${glowStrength})`);
-    ctx.shadowBlur = hovered ? 10 : 4 + pulse * 4;
-    ctx.globalAlpha = hovered ? 0.99 : 0.97;
-    ctx.filter = hovered
-      ? 'brightness(1.06) saturate(1.05)'
-      : `brightness(${0.99 + pulse * 0.02}) saturate(${0.96 + pulse * 0.03})`;
+    if (rich || hovered) {
+      ctx.shadowColor = glow.shadow.replace(/[\d.]+\)$/, `${glowStrength})`);
+      ctx.shadowBlur = hovered ? 10 : rich ? 4 + pulse * 4 : 0;
+      ctx.globalAlpha = hovered ? 0.99 : 0.97;
+      if (rich) {
+        ctx.filter = hovered
+          ? 'brightness(1.06) saturate(1.05)'
+          : `brightness(${0.99 + pulse * 0.02}) saturate(${0.96 + pulse * 0.03})`;
+      }
+    }
     ctx.drawImage(
       image,
       centerX - imageSize / 2,
@@ -1008,8 +1068,8 @@ function drawCharacterSprite(
 
     ctx.save();
     ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = 'high';
-    if (hovered) {
+    ctx.imageSmoothingQuality = getMapImageSmoothingQuality();
+    if (hovered && shouldDrawRichMapMarkers()) {
       ctx.filter = 'brightness(1.06) contrast(1.04)';
     }
     ctx.drawImage(image, drawX, drawY, drawSize, drawSize);
@@ -1028,8 +1088,10 @@ function drawCharacterSprite(
     ctx.globalAlpha = 0.82;
     ctx.strokeStyle = frameColor;
     ctx.lineWidth = Math.max(1.5, drawSize * 0.045);
-    ctx.shadowColor = frameColor;
-    ctx.shadowBlur = Math.max(5, drawSize * 0.18);
+    if (shouldDrawMapShadows()) {
+      ctx.shadowColor = frameColor;
+      ctx.shadowBlur = Math.max(5, drawSize * 0.18);
+    }
     ctx.beginPath();
     ctx.arc(centerX, centerY, drawSize * 0.44, 0, Math.PI * 2);
     ctx.stroke();
@@ -1096,8 +1158,10 @@ function drawTravelPathPreview(
   ctx.save();
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
-  ctx.shadowColor = shadow;
-  ctx.shadowBlur = Math.max(8, tileSize * 0.22);
+  if (shouldDrawMapShadows()) {
+    ctx.shadowColor = shadow;
+    ctx.shadowBlur = Math.max(8, tileSize * 0.22);
+  }
   strokePath();
   ctx.strokeStyle = glow;
   ctx.lineWidth = Math.max(6, tileSize * 0.12);
@@ -1111,7 +1175,9 @@ function drawTravelPathPreview(
   ctx.stroke();
   ctx.setLineDash([]);
 
-  ctx.shadowBlur = Math.max(10, tileSize * 0.18);
+  if (shouldDrawMapShadows()) {
+    ctx.shadowBlur = Math.max(10, tileSize * 0.18);
+  }
   ctx.strokeStyle = primary;
   ctx.lineWidth = Math.max(1.5, tileSize * 0.035);
   ctx.beginPath();
@@ -1151,7 +1217,9 @@ export default function MapRenderer({
   const [hoveredEnemy, setHoveredEnemy] = useState<WorldEnemy | null>(null);
   const [hoveredDungeon, setHoveredDungeon] = useState<WorldDungeon | null>(null);
   const [hoveredQuestNpc, setHoveredQuestNpc] = useState<QuestNpc | null>(null);
-  const [cursorScreen, setCursorScreen] = useState<{ x: number; y: number } | null>(null);
+  const cursorScreenRef = useRef<{ x: number; y: number } | null>(null);
+  const lastFogPointerEmitRef = useRef(0);
+  const [graphicsRevision, setGraphicsRevision] = useState(0);
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
   const [dimensionsReady, setDimensionsReady] = useState(false);
   const [assetsLoaded, setAssetsLoaded] = useState(false);
@@ -1393,6 +1461,12 @@ export default function MapRenderer({
     };
   }, []);
 
+  useEffect(() => {
+    const handleQualityChange = () => setGraphicsRevision(current => current + 1);
+    window.addEventListener(GRAPHICS_QUALITY_EVENT_NAME, handleQualityChange);
+    return () => window.removeEventListener(GRAPHICS_QUALITY_EVENT_NAME, handleQualityChange);
+  }, []);
+
   const actualWidth = viewportWidth || dimensions.width;
   const actualHeight = viewportHeight || dimensions.height;
   const viewportReady = Boolean(viewportWidth && viewportHeight) || dimensionsReady;
@@ -1498,14 +1572,14 @@ export default function MapRenderer({
       });
 
     emitMapFogState({
-      pointer: cursorScreen,
+      pointer: cursorScreenRef.current,
       player: playerPoint,
       campfires,
       width: actualWidth,
       height: actualHeight,
       zoom: effectiveZoom,
     });
-  }, [actualHeight, actualWidth, cameraX, cameraY, cursorScreen, effectiveZoom, poisData, renderedUserPosition, scaledTileSize]);
+  }, [actualHeight, actualWidth, cameraX, cameraY, effectiveZoom, mapAnimNow, poisData, renderedUserPosition, scaledTileSize]);
 
   const clampZoom = (value: number) => Math.max(minMapZoom, Math.min(MAX_MAP_ZOOM, Number(value.toFixed(2))));
 
@@ -1592,15 +1666,24 @@ export default function MapRenderer({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // Clear canvas
+    const graphicsQuality = readGraphicsQualitySetting();
+    const renderSize = getMapCanvasRenderSize(actualWidth, actualHeight, graphicsQuality);
+    if (canvas.width !== renderSize.width || canvas.height !== renderSize.height) {
+      canvas.width = renderSize.width;
+      canvas.height = renderSize.height;
+    }
+    ctx.setTransform(renderSize.scale, 0, 0, renderSize.scale, 0, 0);
+
+    // Clear canvas in CSS-pixel space
     ctx.fillStyle = '#000000';
     ctx.fillRect(0, 0, actualWidth, actualHeight);
     ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = getMapImageSmoothingQuality(readGraphicsQualitySetting());
+    ctx.imageSmoothingQuality = getMapImageSmoothingQuality(graphicsQuality);
 
     const tileSize = scaledTileSize;
     const mapWidth = MAP_CONFIG.width * tileSize;
     const mapHeight = MAP_CONFIG.height * tileSize;
+    const cursorScreen = cursorScreenRef.current;
     const playerRevealPoint = renderedUserPosition
       ? {
           x: renderedUserPosition.x * tileSize - cameraX + tileSize / 2,
@@ -1610,7 +1693,7 @@ export default function MapRenderer({
 
     const worldMap = AssetLoader.getImage(ASSET_PATHS.map.world);
     if (worldMap) {
-      ctx.drawImage(worldMap, -cameraX, -cameraY, mapWidth, mapHeight);
+      drawVisibleWorldMap(ctx, worldMap, cameraX, cameraY, actualWidth, actualHeight, effectiveZoom);
     } else {
       ctx.fillStyle = '#182216';
       ctx.fillRect(-cameraX, -cameraY, mapWidth, mapHeight);
@@ -1760,8 +1843,10 @@ export default function MapRenderer({
           ctx.fillStyle = '#f5d0fe';
           ctx.font = 'bold 9px sans-serif';
           ctx.textAlign = 'center';
-          ctx.shadowColor = 'rgba(0, 0, 0, 0.85)';
-          ctx.shadowBlur = 3;
+          if (shouldDrawMapShadows()) {
+            ctx.shadowColor = 'rgba(0, 0, 0, 0.85)';
+            ctx.shadowBlur = 3;
+          }
           ctx.fillText(`Lv ${dungeon.level}`, dungeonCenterX, dungeonCenterY - dungeonSize * 0.58);
           ctx.restore();
         }
@@ -1911,7 +1996,7 @@ export default function MapRenderer({
     });
 
     ctx.shadowBlur = 0;
-  }, [cameraX, cameraY, actualWidth, actualHeight, hoveredPOI, hoveredEnemy, hoveredDungeon, hoveredQuestNpc, cursorScreen, currentUser, renderedUserPosition, pendingTravel, otherPlayers, assetsLoaded, worldEnemies, worldDungeons, visibleQuestNpcs, poisData, scaledTileSize, effectiveZoom, worldNow, mapAnimNow]);
+  }, [cameraX, cameraY, actualWidth, actualHeight, hoveredPOI, hoveredEnemy, hoveredDungeon, hoveredQuestNpc, currentUser, renderedUserPosition, pendingTravel, otherPlayers, assetsLoaded, worldEnemies, worldDungeons, visibleQuestNpcs, poisData, scaledTileSize, effectiveZoom, worldNow, mapAnimNow, graphicsRevision]);
 
   // Mouse drag handlers
   const handleMouseDown = (e: React.MouseEvent) => {
@@ -1928,18 +2013,39 @@ export default function MapRenderer({
     const rect = canvas.getBoundingClientRect();
     const screenX = e.clientX - rect.left;
     const screenY = e.clientY - rect.top;
-    setCursorScreen({ x: screenX, y: screenY });
-    const mouseX = screenX + cameraX;
-    const mouseY = screenY + cameraY;
+    cursorScreenRef.current = { x: screenX, y: screenY };
+    const now = performance.now();
     const tileSize = scaledTileSize;
-    const tileX = Math.floor(mouseX / tileSize);
-    const tileY = Math.floor(mouseY / tileSize);
     const playerRevealPoint = renderedUserPosition
       ? {
           x: renderedUserPosition.x * tileSize - cameraX + tileSize / 2,
           y: renderedUserPosition.y * tileSize - cameraY + tileSize / 2,
         }
       : null;
+    if (now - lastFogPointerEmitRef.current >= MAP_FOG_POINTER_EMIT_MS) {
+      lastFogPointerEmitRef.current = now;
+      const campfires = poisData
+        .filter(poi => poi.type === POIType.CAMPFIRE)
+        .map(poi => {
+          const footprint = getPoiFootprint(poi);
+          return {
+            x: poi.x * scaledTileSize - cameraX + (footprint.width * scaledTileSize) / 2,
+            y: poi.y * scaledTileSize - cameraY + (footprint.height * scaledTileSize) / 2,
+          };
+        });
+      emitMapFogState({
+        pointer: cursorScreenRef.current,
+        player: playerRevealPoint,
+        campfires,
+        width: actualWidth,
+        height: actualHeight,
+        zoom: effectiveZoom,
+      });
+    }
+    const mouseX = screenX + cameraX;
+    const mouseY = screenY + cameraY;
+    const tileX = Math.floor(mouseX / tileSize);
+    const tileY = Math.floor(mouseY / tileSize);
     const revealedEnemies = worldEnemies.filter(enemy => isEnemyRevealedOnScreen(
       enemy,
       cameraX,
@@ -2028,7 +2134,29 @@ export default function MapRenderer({
     setHoveredEnemy(null);
     setHoveredDungeon(null);
     setHoveredQuestNpc(null);
-    setCursorScreen(null);
+    cursorScreenRef.current = null;
+    lastFogPointerEmitRef.current = 0;
+    emitMapFogState({
+      pointer: null,
+      player: renderedUserPosition
+        ? {
+            x: renderedUserPosition.x * scaledTileSize - cameraX + scaledTileSize / 2,
+            y: renderedUserPosition.y * scaledTileSize - cameraY + scaledTileSize / 2,
+          }
+        : null,
+      campfires: poisData
+        .filter(poi => poi.type === POIType.CAMPFIRE)
+        .map(poi => {
+          const footprint = getPoiFootprint(poi);
+          return {
+            x: poi.x * scaledTileSize - cameraX + (footprint.width * scaledTileSize) / 2,
+            y: poi.y * scaledTileSize - cameraY + (footprint.height * scaledTileSize) / 2,
+          };
+        }),
+      width: actualWidth,
+      height: actualHeight,
+      zoom: effectiveZoom,
+    });
     hasDraggedRef.current = false;
   };
 
@@ -2296,8 +2424,6 @@ export default function MapRenderer({
     <div ref={containerRef} className="game-map-shell">
       <canvas
         ref={canvasRef}
-        width={actualWidth}
-        height={actualHeight}
         className="game-map-canvas cursor-grab active:cursor-grabbing"
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
