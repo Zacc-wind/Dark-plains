@@ -64,7 +64,7 @@ export default function SingleplayerTutorialOverlay({
 
   const overlay = (
     <div
-      className="singleplayer-tutorial-layer fixed inset-0 z-[120] flex items-end justify-center p-3 sm:p-5"
+      className="singleplayer-tutorial-layer fixed inset-0 z-[120] flex items-end justify-center p-3 text-zinc-100 sm:p-5"
       data-step-id={step.id}
       role="dialog"
       aria-modal="true"

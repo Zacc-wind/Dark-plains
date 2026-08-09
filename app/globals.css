@@ -511,14 +511,12 @@ textarea {
   pointer-events: none;
 }
 
-.story-dialog-copy {
-  animation: story-dialog-copy-in 360ms ease-out both;
-  color: var(--ui-muted);
-}
-
 .story-dialog-hint {
   letter-spacing: 0;
-  color: var(--ui-faint);
+}
+
+.story-dialog-copy {
+  animation: story-dialog-copy-in 360ms ease-out both;
 }
 
 .story-dialog-choices {
@@ -2181,8 +2179,8 @@ button.vine-frame::before,
   font-size: 0.62rem;
   font-weight: 900;
   letter-spacing: 0.02em;
-  color: #1d4f7a;
-  text-shadow: none;
+  color: #9be7ff;
+  text-shadow: 0 0 10px rgba(76, 167, 223, 0.28);
 }
 
 .hud-avatar-button.hud-commander-chip,
@@ -2257,26 +2255,25 @@ button.vine-frame::before,
   min-width: 0;
 }
 
-.hud-stat-tone-red { color: #fecaca; }
-.hud-stat-tone-gold { color: #fde68a; }
-.hud-stat-tone-blue { color: #bfdbfe; }
-.hud-stat-tone-teal { color: #a7f3d0; }
-.hud-stat-tone-violet { color: #f3e8ff; }
-
 .hud-stat-chip-label {
   font-size: 0.58rem;
   font-weight: 900;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: rgba(244, 232, 208, 0.92);
+  color: rgba(212, 200, 180, 0.78);
 }
 
 .hud-stat-chip-value {
   font-size: 0.82rem;
   font-weight: 900;
   line-height: 1;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55);
 }
+
+.hud-stat-tone-red { color: #fca5a5; }
+.hud-stat-tone-gold { color: #fde68a; }
+.hud-stat-tone-blue { color: #93c5fd; }
+.hud-stat-tone-teal { color: #a7f3d0; }
+.hud-stat-tone-violet { color: #d8b4fe; }
 
 .hud-stat-chip-bar {
   position: absolute;
@@ -22184,29 +22181,29 @@ button.vine-frame::before,
   scrollbar-width: none;
   background: transparent !important;
   box-shadow: none !important;
-  color: var(--ui-text);
-  text-shadow: none;
+  color: #f6ebcf;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.72);
 }
 
 .main-quest-tracker-content .arcane-label {
-  color: var(--ui-accent);
-  text-shadow: none;
+  color: rgba(236, 208, 150, 0.92);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.78);
 }
 
 .main-quest-tracker-content .fantasy-heading {
-  color: var(--ui-title);
-  text-shadow: none;
+  color: #fff6df;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.82);
 }
 
 .main-quest-tracker-content .ui-faint,
 .main-quest-tracker-content .ui-muted {
-  color: var(--ui-muted);
-  text-shadow: none;
+  color: rgba(232, 219, 190, 0.82);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
 }
 
 .main-quest-tracker-content .ui-accent {
-  color: var(--ui-accent);
-  text-shadow: none;
+  color: #f0c56a;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.75);
 }
 
 .main-quest-tracker-content::-webkit-scrollbar {
@@ -22653,11 +22650,11 @@ button.vine-frame::before,
   justify-content: space-between;
   gap: 0.75rem;
   padding: 0.35rem 0.2rem;
-  color: var(--ui-text);
+  color: rgba(248, 238, 214, 0.92);
   font-size: 0.7rem;
   font-weight: 800;
   text-align: left;
-  text-shadow: none;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.72);
 }
 
 .main-quest-order-row > span {
@@ -22669,12 +22666,12 @@ button.vine-frame::before,
 
 .main-quest-order-row > strong {
   flex-shrink: 0;
-  color: var(--ui-accent);
+  color: rgba(247, 214, 148, 0.95);
   font-size: 0.64rem;
 }
 
 .main-quest-order-row:hover {
-  color: var(--ui-title);
+  color: #fff8e7;
 }
 
 .cinematic-scroll-content {
@@ -22685,102 +22682,8 @@ button.vine-frame::before,
   /* Let the nine-slice scroll parchment show through; avoid flat dark slabs. */
   background: transparent;
   box-shadow: none;
-  /* Ink-on-parchment defaults. Dark nested panels remint pale tokens below. */
-  --ui-text: #1f160e;
-  --ui-muted: #4a3724;
-  --ui-faint: #5a4530;
-  --ui-accent: #6b4a1c;
-  --ui-title: #1a120c;
-  --ui-gold: #7a5a18;
-  color: var(--ui-text);
-  text-shadow: none;
-}
-
-.cinematic-scroll-content .fantasy-heading,
-.cinematic-scroll-content .arcane-title {
-  color: var(--ui-title);
-  text-shadow: none;
-}
-
-.cinematic-scroll-content .arcane-label {
-  color: var(--ui-accent);
-  text-shadow: none;
-}
-
-.cinematic-scroll-content .ui-muted {
-  color: var(--ui-muted);
-}
-
-.cinematic-scroll-content .ui-faint {
-  color: var(--ui-faint);
-}
-
-.cinematic-scroll-content .ui-accent {
-  color: var(--ui-accent);
-}
-
-.cinematic-scroll-content .ui-gold {
-  color: var(--ui-gold);
-}
-
-/* Tailwind zinc utilities were authored for dark panels; bind them to local tokens. */
-.cinematic-scroll-content :is(.text-zinc-50, .text-zinc-100, .text-zinc-200, .text-zinc-300, .text-white) {
-  color: var(--ui-text);
-}
-
-/* Dark insets keep pale text while living on parchment scrolls. */
-.cinematic-scroll-content :is(
-  .ui-card,
-  .ui-button,
-  .ui-button-primary,
-  .ui-button-danger,
-  .ui-pill,
-  .ui-notice,
-  .ui-empty,
-  .hud-stat-chip,
-  .multiplayer-progression-tabs,
-  .multiplayer-progression-level,
-  .multiplayer-contract-card,
-  .multiplayer-briefing-grid > div,
-  .multiplayer-weekly-oath,
-  .multiplayer-return-day,
-  .multiplayer-chronicle-rank,
-  .multiplayer-reputation-card,
-  .multiplayer-deed-row,
-  .multiplayer-reputation-tier,
-  .multiplayer-next-unlock,
-  .story-dialog-choice,
-  .story-dialog-objective,
-  .command-center-nav,
-  .command-center-content .ui-card,
-  .main-quest-tabs,
-  .main-quest-daily-row,
-  .town-service-menu,
-  .town-service-panel,
-  .town-modal-header,
-  .pvp-hub-shell .ui-card,
-  .pve-hub-shell .ui-card
-) {
-  --ui-text: #f0eadf;
-  --ui-muted: #d4c8b4;
-  --ui-faint: #b9aa96;
-  --ui-accent: #e6d2a6;
-  --ui-title: #fff8e7;
-  --ui-gold: #eadc9a;
-}
-
-.cinematic-scroll-content .ui-button,
-.cinematic-scroll-content .ui-button-primary,
-.cinematic-scroll-content .ui-button-danger {
-  color: var(--ui-text);
-}
-
-.cinematic-scroll-content .ui-button-primary {
-  color: #fff7e6;
-}
-
-.cinematic-scroll-content .ui-button-danger {
-  color: #ffffff;
+  color: #f6ebcf;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.65);
 }
 
 .cinematic-scroll-content > .panel-header,
@@ -23362,7 +23265,7 @@ button.vine-frame::before,
 
 .multiplayer-tutorial-kicker {
   margin: 0;
-  color: var(--ui-accent);
+  color: rgba(247, 214, 148, 0.78);
   font-size: 0.62rem;
   font-weight: 900;
   text-transform: uppercase;
@@ -23370,14 +23273,14 @@ button.vine-frame::before,
 
 .multiplayer-tutorial-title {
   margin: 0.15rem 0 0;
-  color: var(--ui-title);
+  color: #fff8e7;
   font-size: 1.12rem;
   line-height: 1.05;
 }
 
 .multiplayer-tutorial-copy {
   margin: 0.35rem 0 0;
-  color: var(--ui-muted);
+  color: rgba(241, 234, 218, 0.8);
   font-size: 0.72rem;
   font-weight: 700;
   line-height: 1.38;
@@ -23537,7 +23440,7 @@ body.multiplayer-progression-open {
 
 .multiplayer-current-objective-progress strong {
   display: block;
-  color: var(--ui-accent);
+  color: rgba(239, 213, 158, 0.96);
   font-family: Georgia, serif;
   font-size: 1.7rem;
 }
@@ -23956,11 +23859,11 @@ body.multiplayer-progression-open {
 .multiplayer-chronicle-pane:hover,
 .multiplayer-chronicle-pane:focus-visible,
 .multiplayer-chronicle-pane.is-active {
-  color: var(--ui-title);
+  color: rgba(239, 213, 158, 0.96);
 }
 
 .multiplayer-chronicle-pane.is-active::after {
-  background: rgba(107, 74, 28, 0.72);
+  background: rgba(231, 194, 111, 0.72);
 }
 
 .multiplayer-reputation-list,
@@ -24073,7 +23976,7 @@ body.multiplayer-progression-open {
 }
 
 .multiplayer-chronicle-rank-summary strong {
-  color: var(--ui-accent);
+  color: rgba(239, 213, 158, 0.96);
   font-family: Georgia, serif;
   font-size: 1.9rem;
 }
@@ -24087,7 +23990,7 @@ body.multiplayer-progression-open {
 
 .multiplayer-chronicle-rank-summary em {
   margin-top: 0.35rem;
-  color: #1f6b4a;
+  color: rgba(145, 225, 195, 0.96);
   font-size: 0.67rem;
   font-style: normal;
   font-weight: 900;

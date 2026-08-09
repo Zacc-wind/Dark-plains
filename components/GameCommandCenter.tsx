@@ -1143,7 +1143,7 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
 
   return (
     <>
-      <header className="game-hud fixed left-0 right-0 top-0 z-30 min-h-[5.35rem]">
+      <header className="game-hud fixed left-0 right-0 top-0 z-30 min-h-[5.35rem] text-zinc-100">
         <CinematicScrollShell
           variant="hud"
           className="game-hud-scroll mx-auto h-full w-[min(92rem,calc(100vw-1rem))]"
