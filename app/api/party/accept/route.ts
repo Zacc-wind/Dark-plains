@@ -10,17 +10,13 @@ import {
 } from '@/lib/partySessionDb';
 import { multiplayerUnlockForbiddenResponse } from '@/lib/multiplayerUnlockGate';
 import { isSupabaseConfigured } from '@/lib/supabase/config';
+import { getAuthenticatedUserId } from '@/lib/supabase/requireAuth';
 import { createClient } from '@/lib/supabase/server';
 
 export const dynamic = 'force-dynamic';
 
 type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
 
-async function getAuthenticatedUserId(supabase: SupabaseServerClient): Promise<string | null> {
-  const { data: { user }, error } = await supabase.auth.getUser();
-  if (error || !user) return null;
-  return user.id;
-}
 
 async function getPlayerLevel(supabase: SupabaseServerClient, userId: string): Promise<number> {
   const { data, error } = await supabase

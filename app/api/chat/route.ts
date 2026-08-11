@@ -1,4 +1,5 @@
 import { isSupabaseConfigured } from '@/lib/supabase/config';
+import { getAuthenticatedUser } from '@/lib/supabase/requireAuth';
 import { createClient } from '@/lib/supabase/server';
 
 export const dynamic = 'force-dynamic';
@@ -35,8 +36,8 @@ export async function GET() {
   }
 
   const supabase = await createClient();
-  const { data: { user }, error: authError } = await supabase.auth.getUser();
-  if (authError || !user) {
+  const user = await getAuthenticatedUser(supabase);
+  if (!user) {
     return Response.json({ ok: false, error: 'Not authenticated.' }, { status: 401 });
   }
 
@@ -81,8 +82,8 @@ export async function POST(request: Request) {
   }
 
   const supabase = await createClient();
-  const { data: { user }, error: authError } = await supabase.auth.getUser();
-  if (authError || !user) {
+  const user = await getAuthenticatedUser(supabase);
+  if (!user) {
     return Response.json({ ok: false, error: 'Not authenticated.' }, { status: 401 });
   }
 

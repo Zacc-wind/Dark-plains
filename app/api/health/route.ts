@@ -1,7 +1,7 @@
 import { apiOk } from '@/lib/apiResponses';
 import { isSupabaseAdminConfigured } from '@/lib/supabase/admin';
+import { getAuthMode, isSupabaseConfigured } from '@/lib/supabase/config';
 import { createClient } from '@/lib/supabase/server';
-import { isSupabaseConfigured } from '@/lib/supabase/config';
 
 export const dynamic = 'force-dynamic';
 
@@ -10,6 +10,7 @@ export async function GET() {
     return apiOk({
       status: 'ready',
       storage: 'local-prototype',
+      authMode: getAuthMode(),
       databaseConnected: false,
     });
   }
@@ -23,6 +24,7 @@ export async function GET() {
     return apiOk({
       status: 'ready',
       storage: 'supabase',
+      authMode: getAuthMode(),
       databaseConnected,
       schemaReady: databaseConnected,
       registrationReady,
@@ -36,6 +38,7 @@ export async function GET() {
     return apiOk({
       status: 'ready',
       storage: 'supabase',
+      authMode: getAuthMode(),
       databaseConnected: false,
       schemaReady: false,
       hint: 'Supabase env vars are set, but the server client failed to connect.',

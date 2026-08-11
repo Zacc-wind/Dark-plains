@@ -2,7 +2,7 @@ import { getCurrentUser, type User } from '@/lib/auth';
 import { applyRemoteAccountTutorials, readRemoteTutorialsFromGameSessions } from '@/lib/accountTutorial';
 import { writeGameJson, removeGameStorageItem } from '@/lib/gameStore';
 import { createClient } from '@/lib/supabase/client';
-import { isSupabaseConfigured } from '@/lib/supabase/config';
+import { getAuthMode, isSupabaseConfigured, type AuthMode } from '@/lib/supabase/config';
 import {
   fetchRemotePlayer,
   playerStateRowToUser,
@@ -13,8 +13,17 @@ import { isValidGameUsername, usernameToAuthEmail } from '@/lib/supabase/usernam
 const CURRENT_USER_KEY = 'pirate_game_current_user';
 let playerPersistenceQueue: Promise<void> = Promise.resolve();
 
+/**
+ * Dual-path gate used by login/register UI and logout/persist.
+ * When true: Supabase Auth (`signInWithPassword` / `/api/auth/register`).
+ * When false: local `lib/auth` plaintext passwords for vitest and keyless local dev.
+ */
 export function isSupabaseAuthEnabled(): boolean {
   return isSupabaseConfigured();
+}
+
+export function getClientAuthMode(): AuthMode {
+  return getAuthMode();
 }
 
 export async function registerWithSupabase(

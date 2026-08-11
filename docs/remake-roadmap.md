@@ -310,11 +310,12 @@
 - [x] Add a storage adapter boundary so gameplay systems stop calling `localStorage` directly.
 - [x] Add first Next.js API route contracts for player state, leaderboards, reports, daily runs, and PVP challenges.
 - [x] Extend the database schema plan for spell loadouts, gear socket bonuses, friends, parties, and chat.
-- [ ] Wire API routes to managed auth and database-backed state.
-- [ ] Move accounts from prototype local passwords to managed auth.
+- [x] Dual-path managed auth cutover slice: when Supabase env keys are set, login/register use Supabase Auth; vitest/keyless local keeps prototype passwords. Auth-gated party/raid/trade/PVP/chat/`/api/me` routes share `createClient().auth.getUser()` via `lib/supabase/requireAuth.ts`. See managed-auth checklist in `docs/database-deployment-plan.md`.
+- [ ] Finish managed auth cutover: production fail-closed without keys, password recovery UX, and stop treating local passwords as a deployable mode.
+- [ ] Wire remaining mutating API routes to database-backed authoritative state (beyond session handlers already online).
+- [ ] Move client `player_states` persistence off direct browser writes onto trusted server routes.
 - [ ] Apply the checked-in Supabase Postgres migrations, RLS policies, and leaderboard views to staging and validate them with two authenticated accounts.
 - [ ] Move editable content tables into the database after mechanics stabilize.
-
 ## Phase 12: Dark Gothic UI Polish
 - [x] Add a close/minimize control for the right command UI.
 - [x] Make the command rail compact instead of large label-heavy buttons.

@@ -1,10 +1,23 @@
 import { createAdminClient } from '@/lib/supabase/admin';
+import { isSupabaseConfigured } from '@/lib/supabase/config';
+import { getAuthenticatedUser } from '@/lib/supabase/requireAuth';
 import { createClient } from '@/lib/supabase/server';
 import { isValidGameUsername, usernameToAuthEmail } from '@/lib/supabase/username';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(request: Request) {
+  if (!isSupabaseConfigured()) {
+    return Response.json(
+      {
+        ok: false,
+        error: 'Supabase Auth is not configured. Use local prototype register without online keys.',
+        deploymentMode: 'local-prototype',
+      },
+      { status: 501 },
+    );
+  }
+
   let body: { username?: string; password?: string };
   try {
     body = await request.json();
@@ -35,6 +48,7 @@ export async function POST(request: Request) {
       {
         ok: false,
         error: 'Server registration is not configured. Add SUPABASE_SERVICE_ROLE_KEY to the deployment.',
+        deploymentMode: 'database',
       },
       { status: 503 },
     );
@@ -52,6 +66,8 @@ export async function POST(request: Request) {
     return Response.json({ ok: false, error: 'Username already taken.' }, { status: 409 });
   }
 
+  // Username is display identity for handle_new_user (raw_user_meta_data).
+  // Do not use user_metadata for authorization decisions.
   const { error: createError } = await admin.auth.admin.createUser({
     email,
     password,
@@ -78,5 +94,13 @@ export async function POST(request: Request) {
     );
   }
 
-  return Response.json({ ok: true });
+  const sessionUser = await getAuthenticatedUser(supabase);
+  if (!sessionUser) {
+    return Response.json(
+      { ok: false, error: 'Account created, but session validation failed. Try logging in.' },
+      { status: 500 },
+    );
+  }
+
+  return Response.json({ ok: true, deploymentMode: 'database' });
 }

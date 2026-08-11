@@ -12,6 +12,7 @@ import { createCoopRaidSession } from '@/lib/coopRaidSessions';
 import { multiplayerUnlockForbiddenResponse } from '@/lib/multiplayerUnlockGate';
 import { requireMultiplayerUnlock } from '@/lib/multiplayerUnlocks';
 import { isSupabaseConfigured } from '@/lib/supabase/config';
+import { getAuthenticatedUserId } from '@/lib/supabase/requireAuth';
 import { createClient } from '@/lib/supabase/server';
 
 export const dynamic = 'force-dynamic';
@@ -35,11 +36,6 @@ interface PlayerStateRow {
   equipped_spell_ids: string[] | null;
 }
 
-async function getAuthenticatedUserId(supabase: SupabaseServerClient): Promise<string | null> {
-  const { data: { user }, error } = await supabase.auth.getUser();
-  if (error || !user) return null;
-  return user.id;
-}
 
 async function getPlayerLevel(supabase: SupabaseServerClient, userId: string): Promise<number> {
   const { data, error } = await supabase

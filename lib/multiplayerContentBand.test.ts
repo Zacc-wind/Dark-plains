@@ -69,9 +69,36 @@ describe('levels 6-10 content band', () => {
     ]));
   });
 
-  it('defers Harborview and Riverside consolidation above eight contracts', () => {
-    expect(CITY_QUESTS.filter(quest => quest.town === 'Harborview').length).toBeGreaterThan(8);
-    expect(CITY_QUESTS.filter(quest => quest.town === 'Riverside').length).toBeGreaterThan(8);
+  it('keeps Harborview and Riverside boards at eight contracts', () => {
+    const harborview = CITY_QUESTS.filter(quest => quest.town === 'Harborview');
+    const riverside = CITY_QUESTS.filter(quest => quest.town === 'Riverside');
+    const harborTypes = new Set(harborview.map(quest => quest.requirement.type));
+    const riverTypes = new Set(riverside.map(quest => quest.requirement.type));
+
+    expect(harborview).toHaveLength(8);
+    expect(riverside).toHaveLength(8);
+    expect(harborTypes.size).toBeGreaterThanOrEqual(6);
+    expect(riverTypes.size).toBeGreaterThanOrEqual(6);
+    expect(harborview.map(quest => quest.id)).toEqual([
+      'hv-candle-watch',
+      'hv-salt-vigil',
+      'hv-blackwater-nets',
+      'hv-hospitaller-round',
+      'hv-violet-tithe',
+      'hv-drowned-catechism',
+      'hv-starless-writ',
+      'hv-harbor-marshal',
+    ]);
+    expect(riverside.map(quest => quest.id)).toEqual([
+      'rs-bridge-bells',
+      'rs-ancestor-masks',
+      'rs-bitter-beans',
+      'rs-violet-current',
+      'rs-stone-hermit',
+      'rs-bell-tower-keys',
+      'rs-black-lotus',
+      'rs-riverside-marshal',
+    ]);
   });
 
   it('uses real thirty-minute thresholds for long city work', () => {

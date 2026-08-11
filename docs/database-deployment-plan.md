@@ -53,6 +53,7 @@ Checked-in migration status:
 - `008_singleplayer_progression.sql` adds normalized singleplayer achievement/discovery mirrors, offer guarantees, legacy backfill, indexes, triggers, and owner-scoped RLS. **Hosted status (2026-08-11):** applied (`singleplayer_achievement_unlocks` / discovery tables live).
 - `009_chat_history_retention.sql` adds the global/party history index and a security-definer pruning trigger that keeps only the latest 50 messages per channel or party. **Hosted status (2026-08-11):** applied.
 - `011_party_invites_and_realtime.sql` adds `party_invites` (RLS read for participants; admin writes) and publishes `coop_raid_sessions`, `coop_raid_actions`, and `party_invites` to `supabase_realtime`. **Hosted status (2026-08-11):** applied.
+- `012_coop_dungeon_sessions.sql` adds `coop_dungeon_sessions` (duo dungeon route rows with seed, chambers jsonb, optimistic version, participant SELECT RLS, client writes revoked) and publishes the table to `supabase_realtime`. **Hosted status (2026-08-11):** applied.
 - Session tables are readable only by their participants. Trade, duel, co-op action, and co-op claim mutations remain server-only until the route handlers validate inventory ownership, expected revisions, legal combat actions, expiration, and rewards.
 - Multiplayer story response ids, tones, and timestamps remain inside the existing `player_states.story_quests` JSON payload, so the authored-choice work requires no additional schema migration.
 - These files are local source of truth but have not yet been applied to or validated against the hosted project.
@@ -259,6 +260,24 @@ create table coop_raid_claims (
   primary key (session_id, user_id)
 );
 
+create table coop_dungeon_sessions (
+  id text primary key,
+  party_id uuid references parties(id) on delete set null,
+  host_id uuid not null references profiles(id) on delete cascade,
+  ally_id uuid not null references profiles(id) on delete cascade,
+  dungeon_id text not null,
+  seed text not null,
+  phase text not null check (phase in ('lobby', 'chamber', 'complete', 'abandoned')),
+  version bigint not null default 1,
+  chambers jsonb not null default '[]'::jsonb,
+  current_chamber_index integer not null default 0,
+  combat_snapshot jsonb,
+  result jsonb,
+  expires_at timestamptz not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 create table chat_messages (
   id uuid primary key default gen_random_uuid(),
   channel text not null,
@@ -345,3 +364,27 @@ Today these boards read local browser users. After Phase 2, the UI can call `/ap
 - Row Level Security should allow users to read public leaderboard/profile fields, but only update their own player state.
 - Co-op session RLS should allow reads only to the host and ally; all combat and reward mutations should go through validated server handlers.
 - Admin-editable content should be protected by an admin role, not client-side checks.
+
+## Managed Auth Cutover (current slice)
+
+Dual-path auth is live; this is not a full rewrite.
+
+### Done
+
+- Login/register UI (`app/page.tsx`) chooses path via `isSupabaseAuthEnabled()`:
+  - **Configured** (`NEXT_PUBLIC_SUPABASE_URL` + publishable/anon key): `loginWithSupabase` / `registerWithSupabase` → Supabase Auth cookies.
+  - **Not configured** (vitest / keyless local): `lib/auth` plaintext local passwords + `localStorage`.
+- Registration online path: `POST /api/auth/register` (service role creates user, cookie client signs in, `getAuthenticatedUser` validates session).
+- Login online path: browser `signInWithPassword` with username→synthetic email (`lib/supabase/username.ts`).
+- Middleware (`middleware.ts` → `lib/supabase/middleware.ts`) refreshes the Auth session with `getUser()` when configured; no-ops when not.
+- Auth-gated APIs (party, co-op raid, co-op dungeon, trade, PVP duel/challenge, chat, `/api/me`, world players, singleplayer achievements) resolve identity through shared `getAuthenticatedUser` / `getAuthenticatedUserId` (`lib/supabase/requireAuth.ts`), which always call `createClient().auth.getUser()` — never `getSession()` for authorization.
+- `/api/health` reports `authMode`: `supabase` | `local-prototype`.
+
+### Still open
+
+- [ ] Turn off local-password path in production builds (fail closed when keys missing on deployed hosts).
+- [ ] Stop client-side `player_states` writes as the primary save path; move mutations through trusted API routes (`PATCH /api/me/state` and feature endpoints).
+- [ ] Migrate any remaining local-only multiplayer helpers that still assume `lib/auth` users when online sessions are required.
+- [ ] Production password reset / account recovery UX (synthetic emails complicate mailbox delivery).
+- [ ] Optional: store display username in `app_metadata` for ops; keep authorization on `auth.uid()` + `profiles`, never `user_metadata` claims.
+- [ ] Apply remaining hosted migrations and validate two authenticated accounts against party/raid/trade RLS + handlers.

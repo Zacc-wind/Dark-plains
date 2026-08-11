@@ -1,6 +1,7 @@
 import { apiNotConfigured, apiOk } from '@/lib/apiResponses';
 import type { Equipment, InventoryItem } from '@/lib/auth';
 import { requireMultiplayerUnlock } from '@/lib/multiplayerUnlocks';
+import { getAuthenticatedUserId } from '@/lib/supabase/requireAuth';
 import { createClient } from '@/lib/supabase/server';
 import {
   getTradeSessionAdminClient,
@@ -52,11 +53,6 @@ interface PlayerStateTradeRow {
   activity_log: unknown[] | null;
 }
 
-async function getAuthenticatedUserId(supabase: SupabaseServerClient): Promise<string | null> {
-  const { data: { user }, error } = await supabase.auth.getUser();
-  if (error || !user) return null;
-  return user.id;
-}
 
 async function getProfileMap(
   supabase: SupabaseServerClient,

@@ -89,11 +89,15 @@ export default function AuthPage() {
         {!isLogin ? (
           <p className="arcane-label mb-6 text-center">Create your account</p>
         ) : null}
-        {!onlineAuth ? (
+        {onlineAuth ? (
+          <p className="ui-faint mb-6 text-center text-[11px] font-bold">
+            Online account — Supabase Auth session.
+          </p>
+        ) : (
           <p className="ui-faint mb-6 text-center text-[11px] font-bold">
             Local prototype — saves stay in this browser only.
           </p>
-        ) : null}
+        )}
 
         <form onSubmit={handleSubmit} className="space-y-6">
           <div>

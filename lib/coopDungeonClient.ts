@@ -17,6 +17,12 @@ import {
   type CoopDungeonSession,
   type CoopDungeonSessionResult,
 } from './coopDungeonSessions';
+import {
+  createOnlineCoopDungeonSession,
+  fetchOnlineCoopDungeonSessions,
+  shouldUseOnlineCoopDungeonClient,
+  updateOnlineCoopDungeonSession,
+} from './coopDungeonOnlineClient';
 import { readGameJson, writeGameJson } from './gameStore';
 import { getMultiplayerUnlockStatus } from './multiplayerUnlocks';
 import { getActiveDungeons, type WorldDungeon } from './worldEvents';
@@ -84,6 +90,15 @@ function emitSessionUpdated(session: CoopDungeonSession): void {
   }));
 }
 
+function onlineError(error: unknown, fallback: string): CoopDungeonSessionResult {
+  const conflict = error as Error & { session?: CoopDungeonSession; conflict?: boolean };
+  if (conflict?.conflict && conflict.session) {
+    saveCoopDungeonSession(conflict.session);
+    return { success: false, session: conflict.session, error: conflict.message || fallback };
+  }
+  return { success: false, error: error instanceof Error ? error.message : fallback };
+}
+
 export function getCoopDungeonSessions(now = Date.now()): CoopDungeonSession[] {
   return normalizeCoopDungeonSessions(
     readGameJson<CoopDungeonSession[]>(COOP_DUNGEON_SESSIONS_KEY, []),
@@ -115,6 +130,18 @@ export function getCurrentCoopDungeonSession(
   return sessions.find(session => session.phase === 'chamber')
     || sessions.find(session => session.phase === 'lobby')
     || sessions.find(session => session.phase === 'complete');
+}
+
+export async function syncOnlineCoopDungeonSessions(now = Date.now()): Promise<void> {
+  if (!shouldUseOnlineCoopDungeonClient()) return;
+  try {
+    const sessions = await fetchOnlineCoopDungeonSessions();
+    sessions.forEach(session => {
+      saveCoopDungeonSession(session, now);
+    });
+  } catch {
+    // Keep local cache if sync fails.
+  }
 }
 
 function getStoredSession(sessionId: string, now: number): CoopDungeonSession | undefined {
@@ -182,6 +209,19 @@ export async function ensureCurrentCoopDungeonSession(
     return { success: false, error: 'Both party profiles are required to open the route.' };
   }
 
+  if (shouldUseOnlineCoopDungeonClient()) {
+    try {
+      const payload = await createOnlineCoopDungeonSession(dungeonId, ally.username);
+      return {
+        success: true,
+        session: saveCoopDungeonSession(payload.session, now),
+        duplicate: payload.duplicate,
+      };
+    } catch (error) {
+      return onlineError(error, 'Failed to create online dungeon session.');
+    }
+  }
+
   const dungeon = resolveDungeon(dungeonId, host, now);
   if (!dungeon) {
     return { success: false, error: 'No active dungeon is available for a duo route.' };
@@ -197,6 +237,22 @@ export async function startCurrentCoopDungeonChamber(
   expectedVersion: number,
   now = Date.now(),
 ): Promise<CoopDungeonSessionResult> {
+  if (shouldUseOnlineCoopDungeonClient()) {
+    try {
+      const payload = await updateOnlineCoopDungeonSession(sessionId, {
+        action: 'start_chamber',
+        expectedVersion,
+      });
+      return {
+        success: true,
+        session: saveCoopDungeonSession(payload.session, now),
+        duplicate: payload.duplicate,
+      };
+    } catch (error) {
+      return onlineError(error, 'Failed to start dungeon chamber.');
+    }
+  }
+
   const session = getStoredSession(sessionId, now);
   if (!session) return { success: false, error: 'Dungeon session was not found.' };
   const result = startCoopDungeonChamber(session, expectedVersion, now);
@@ -228,6 +284,22 @@ export async function abandonCurrentCoopDungeonSession(
 ): Promise<CoopDungeonSessionResult> {
   const actor = requireCurrentActor(username);
   if (!actor.allowed) return { success: false, error: actor.error };
+
+  if (shouldUseOnlineCoopDungeonClient()) {
+    try {
+      const payload = await updateOnlineCoopDungeonSession(sessionId, {
+        action: 'abandon',
+        expectedVersion,
+      });
+      return {
+        success: true,
+        session: saveCoopDungeonSession(payload.session, now),
+        duplicate: payload.duplicate,
+      };
+    } catch (error) {
+      return onlineError(error, 'Failed to abandon dungeon route.');
+    }
+  }
 
   const session = getStoredSession(sessionId, now);
   if (!session) return { success: false, error: 'Dungeon session was not found.' };

@@ -101,9 +101,6 @@ function getCityQuestRequirementText(quest: {
 
   switch (requirement.type) {
     case 'complete_jobs':
-      if (quest.id === 'hv-pilgrim-scrip') {
-        return `Complete ${requirement.count} Harborview road job${requirement.count === 1 ? '' : 's'}.`;
-      }
       return `Complete ${requirement.count} ${quest.town || 'local'} job${requirement.count === 1 ? '' : 's'}.`;
     case 'complete_timed_jobs':
       return `Complete ${requirement.count} ${quest.town || 'local'} job${requirement.count === 1 ? '' : 's'} lasting ${Math.round((requirement.minDuration || 0) / 60000)}+ minutes.`;

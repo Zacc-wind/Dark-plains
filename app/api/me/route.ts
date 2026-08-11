@@ -1,7 +1,8 @@
 import { apiOk } from '@/lib/apiResponses';
-import { playerStateRowToUser } from '@/lib/supabase/playerRepository';
-import { createClient } from '@/lib/supabase/server';
 import { isSupabaseConfigured } from '@/lib/supabase/config';
+import { playerStateRowToUser } from '@/lib/supabase/playerRepository';
+import { getAuthenticatedUser } from '@/lib/supabase/requireAuth';
+import { createClient } from '@/lib/supabase/server';
 
 export const dynamic = 'force-dynamic';
 
@@ -15,9 +16,9 @@ export async function GET() {
   }
 
   const supabase = await createClient();
-  const { data: { user }, error: authError } = await supabase.auth.getUser();
+  const user = await getAuthenticatedUser(supabase);
 
-  if (authError || !user) {
+  if (!user) {
     return Response.json({
       ok: false,
       error: 'Not authenticated.',

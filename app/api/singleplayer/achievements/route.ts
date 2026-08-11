@@ -8,6 +8,7 @@ import {
 } from '@/lib/runMilestones';
 import { isSupabaseConfigured } from '@/lib/supabase/config';
 import { playerStateRowToUser } from '@/lib/supabase/playerRepository';
+import { getAuthenticatedUser } from '@/lib/supabase/requireAuth';
 import { createClient } from '@/lib/supabase/server';
 
 export const dynamic = 'force-dynamic';
@@ -16,8 +17,8 @@ export async function GET() {
   if (!isSupabaseConfigured()) return apiNotConfigured('Singleplayer achievement API');
 
   const supabase = await createClient();
-  const { data: { user }, error: authError } = await supabase.auth.getUser();
-  if (authError || !user) {
+  const user = await getAuthenticatedUser(supabase);
+  if (!user) {
     return Response.json({ ok: false, error: 'Not authenticated.', deploymentMode: 'database' }, { status: 401 });
   }
 

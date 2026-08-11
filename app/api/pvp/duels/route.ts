@@ -2,6 +2,7 @@ import { apiNotConfigured, apiOk } from '@/lib/apiResponses';
 import type { CharacterStats, MinionStack, User } from '@/lib/auth';
 import { requireMultiplayerUnlock } from '@/lib/multiplayerUnlocks';
 import { isSupabaseConfigured } from '@/lib/supabase/config';
+import { getAuthenticatedUserId } from '@/lib/supabase/requireAuth';
 import { createClient } from '@/lib/supabase/server';
 import {
   getPvpDuelSessionAdminClient,
@@ -44,11 +45,6 @@ interface ChallengeRow {
   ready_at: string | null;
 }
 
-async function getAuthenticatedUserId(supabase: SupabaseServerClient): Promise<string | null> {
-  const { data: { user }, error } = await supabase.auth.getUser();
-  if (error || !user) return null;
-  return user.id;
-}
 
 async function getPlayerLevel(supabase: SupabaseServerClient, userId: string): Promise<number> {
   const { data, error } = await supabase

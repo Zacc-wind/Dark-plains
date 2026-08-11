@@ -16,7 +16,7 @@ Turn the current shared world-map prototype into a real multiplayer layer withou
 - [x] The Black Pike Ledger Chronicle provides 40 permanent free-track ranks driven by capped, genuine multiplayer action receipts. Glass Road Memorial archive progresses at half Renown after the Glass Road seal; seasonal featured rotation remains later.
 - [x] Player-vs-player combat has a versioned local two-player duel session with captured rosters, formation readiness, ownership-checked actions, timeout passing, and idempotent rating settlement. Session create/list/patch transport is live via `/api/pvp/duels`; combat action streaming is live via `/api/pvp/duels/[id]/actions` writing versioned `combat_snapshot` (no `duel_actions` table — action-log inserts remain raid-only).
 - [x] Cooperative raids now have a complete local-authoritative session: PVE launch/resume, two independent formations, readiness, synchronized combat and AI actions, four boss phases, abandon handling, recovery, and duplicate-safe per-player settlement. Session create/list/patch transport is live via `/api/coop/raids`; combat action streaming foundation is live via `/api/coop/raids/[id]/actions`.
-- [x] Duo `CoopDungeonSession` foundation: 3-chamber route stub from active world dungeons, localStorage client, PVE hub "Duo Dungeon Route" entry, chamber combat via `createCoopBattleState` (full route length/loot still later).
+- [x] Duo `CoopDungeonSession` foundation: 3-chamber route stub from active world dungeons, localStorage client with online fallback via `/api/coop/dungeons` when Supabase admin is configured (migration `012_coop_dungeon_sessions.sql`), PVE hub "Duo Dungeon Route" entry, chamber combat via `createCoopBattleState` (full route length/loot still later).
 - [x] PVE intel exposes two deterministic co-op boss incursions per five-hour cycle without routing them through the solo encounter flow.
 - [x] The playable Drowned Moonwell core spans levels 6-10 with nine ordered quests, eight Moonbridge contracts, a named Blackroot elite, Mother Cindervein, exact encounter receipts, and an authored return to Naima.
 
@@ -82,7 +82,7 @@ Turn the current shared world-map prototype into a real multiplayer layer withou
 - [x] Replace local co-op session transport with database subscriptions and server-authoritative action validation.
   Session create/list/patch plus combat action POST (`/api/coop/raids/[id]/actions`) and optional realtime UPDATE subscribe are live; duo map-entry gating remains.
 - [ ] Add map interaction only after party readiness can prevent the old solo encounter path from opening a raid.
-- [x] Add the longer `CoopDungeonSession` foundation: party id, members, dungeon id, shared seed, three-chamber route stub, lobby/chamber/complete/abandoned phases (localStorage client + PVE hub entry; full length/loot still later).
+- [x] Add the longer `CoopDungeonSession` foundation: party id, members, dungeon id, shared seed, three-chamber route stub, lobby/chamber/complete/abandoned phases (localStorage client + `/api/coop/dungeons` persistence foundation via migration `012`; full length/loot still later).
 - [ ] Dungeon levels scale from 1 to 15, with longer routes as level rises.
 - [ ] Level 1 dungeons should be about 4-10 fights; high-level dungeons can reach around 30 fights with multiple bosses.
 - [ ] Consider four-player veteran dungeons only after the duo raid is reliable; do not make the first session solve both scales.
@@ -133,6 +133,7 @@ Turn the current shared world-map prototype into a real multiplayer layer withou
   Duel formation/cancel/forfeit/settle transport is live via `/api/pvp/duels`; combat action streaming is live via `/api/pvp/duels/[id]/actions` with versioned `combat_snapshot` updates (no separate action-log table).
   Co-op raid formation/abandon/settle transport is live via `/api/coop/raids`; combat action streaming foundation is live via `/api/coop/raids/[id]/actions` with `coop_raid_actions` inserts + versioned session updates.
   Party invite/accept/decline persistence is live via `/api/party/*` + `party_invites` (migration `011_party_invites_and_realtime.sql`).
+  Duo dungeon create/list/patch foundation is live via `/api/coop/dungeons` + `coop_dungeon_sessions` (migration `012_coop_dungeon_sessions.sql`); chamber combat action streaming remains local until a later actions route.
 
 ## Phase 9: Progression Gates And Unlock Communication
 - [x] Define one shared unlock registry consumed by HUD buttons, modal guards, API routes, and tutorial copy.
