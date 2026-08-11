@@ -7,8 +7,8 @@ export const GRAPHICS_QUALITY_EVENT_NAME = 'wizardy-graphics-quality-changed';
 
 export const GRAPHICS_QUALITY_OPTIONS: Array<{ id: GraphicsQuality; label: string; detail: string }> = [
   { id: 'low', label: 'Low', detail: 'Best for integrated graphics — no fog, capped map resolution, ambient FX off' },
-  { id: 'medium', label: 'Medium', detail: 'Downscaled fog and map resolution with reduced particle density' },
-  { id: 'high', label: 'High', detail: 'Full map fog, ambient FX, and combat particles (still capped at 4K)' },
+  { id: 'medium', label: 'Medium', detail: 'Sharp map at 1080p, light fog downscale, reduced particle density' },
+  { id: 'high', label: 'High', detail: 'Full map fog, ambient FX, and combat particles (soft-capped on 4K)' },
 ];
 
 /** Soft fill-rate clamps for large monitors (matches FX overlay area thresholds). */
@@ -16,6 +16,13 @@ export const GRAPHICS_LARGE_VIEWPORT_AREA = 3_600_000;
 export const GRAPHICS_HUGE_VIEWPORT_AREA = 7_000_000;
 
 export const MAP_CANVAS_MAX_EDGE: Record<GraphicsQuality, number> = {
+  low: 1280,
+  medium: 1920,
+  high: 2560,
+};
+
+/** Soft floors when viewport area is huge (4K); large (1440p) keeps quality edges. */
+export const MAP_CANVAS_HUGE_MAX_EDGE: Record<GraphicsQuality, number> = {
   low: 1280,
   medium: 1600,
   high: 1920,
@@ -112,8 +119,8 @@ export function getBattleTickMs(quality: GraphicsQuality = readGraphicsQualitySe
 
 export function getMapFogPixelRatioCap(quality: GraphicsQuality = readGraphicsQualitySetting()): number {
   if (quality === 'low') return 1;
-  if (quality === 'medium') return 1;
-  return 1.25;
+  if (quality === 'medium') return 1.25;
+  return 1.5;
 }
 
 export function getMapCanvasMaxEdge(
@@ -123,10 +130,9 @@ export function getMapCanvasMaxEdge(
 ): number {
   let maxEdge = MAP_CANVAS_MAX_EDGE[quality];
   const area = Math.max(0, cssWidth) * Math.max(0, cssHeight);
+  // 1440p-class viewports keep quality edges so High stays sharp; only 4K soft-caps.
   if (area >= GRAPHICS_HUGE_VIEWPORT_AREA) {
-    maxEdge = Math.min(maxEdge, MAP_CANVAS_MAX_EDGE.low);
-  } else if (area >= GRAPHICS_LARGE_VIEWPORT_AREA) {
-    maxEdge = Math.min(maxEdge, MAP_CANVAS_MAX_EDGE.medium);
+    maxEdge = Math.min(maxEdge, MAP_CANVAS_HUGE_MAX_EDGE[quality]);
   }
   return maxEdge;
 }
@@ -153,7 +159,7 @@ export function getMapFogRenderScale(
   cssHeight = 0,
 ): number {
   if (quality === 'low') return 0;
-  let scale = quality === 'medium' ? 0.55 : 0.75;
+  let scale = quality === 'medium' ? 0.8 : 1;
   const area = Math.max(0, cssWidth) * Math.max(0, cssHeight);
   if (area >= GRAPHICS_HUGE_VIEWPORT_AREA) {
     scale *= 0.72;

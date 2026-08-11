@@ -1677,7 +1677,8 @@ export default function MapRenderer({
     // Clear canvas in CSS-pixel space
     ctx.fillStyle = '#000000';
     ctx.fillRect(0, 0, actualWidth, actualHeight);
-    ctx.imageSmoothingEnabled = true;
+    // Avoid double-softening when buffer already matches CSS size.
+    ctx.imageSmoothingEnabled = renderSize.scale < 1;
     ctx.imageSmoothingQuality = getMapImageSmoothingQuality(graphicsQuality);
 
     const tileSize = scaledTileSize;

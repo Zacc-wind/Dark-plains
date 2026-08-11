@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   GRAPHICS_HUGE_VIEWPORT_AREA,
   GRAPHICS_LARGE_VIEWPORT_AREA,
+  MAP_CANVAS_HUGE_MAX_EDGE,
   MAP_CANVAS_MAX_EDGE,
   getBattleTickMs,
   getMapAnimIntervalMs,
@@ -46,24 +47,37 @@ describe('graphicsSettings', () => {
 
   it('caps map canvas resolution by quality and viewport area', () => {
     expect(getMapCanvasMaxEdge('high', 1920, 1080)).toBe(MAP_CANVAS_MAX_EDGE.high);
-    expect(getMapCanvasMaxEdge('high', 2560, 1440)).toBe(MAP_CANVAS_MAX_EDGE.medium);
-    expect(getMapCanvasMaxEdge('high', 3840, 2160)).toBe(MAP_CANVAS_MAX_EDGE.low);
+    expect(getMapCanvasMaxEdge('medium', 1920, 1080)).toBe(MAP_CANVAS_MAX_EDGE.medium);
+    // 1440p keeps quality edges (no soft blur from forced 1600 clamp).
+    expect(getMapCanvasMaxEdge('high', 2560, 1440)).toBe(MAP_CANVAS_MAX_EDGE.high);
+    expect(getMapCanvasMaxEdge('medium', 2560, 1440)).toBe(MAP_CANVAS_MAX_EDGE.medium);
+    expect(getMapCanvasMaxEdge('high', 3840, 2160)).toBe(MAP_CANVAS_HUGE_MAX_EDGE.high);
+    expect(getMapCanvasMaxEdge('medium', 3840, 2160)).toBe(MAP_CANVAS_HUGE_MAX_EDGE.medium);
+    expect(getMapCanvasMaxEdge('low', 3840, 2160)).toBe(MAP_CANVAS_HUGE_MAX_EDGE.low);
 
     const fourK = getMapCanvasRenderSize(3840, 2160, 'high');
     expect(fourK.scale).toBeLessThan(1);
-    expect(Math.max(fourK.width, fourK.height)).toBeLessThanOrEqual(MAP_CANVAS_MAX_EDGE.low);
+    expect(Math.max(fourK.width, fourK.height)).toBeLessThanOrEqual(MAP_CANVAS_HUGE_MAX_EDGE.high);
     expect(fourK.width * fourK.height).toBeLessThan(GRAPHICS_HUGE_VIEWPORT_AREA);
+
+    const fhdMedium = getMapCanvasRenderSize(1920, 1080, 'medium');
+    expect(fhdMedium.scale).toBe(1);
+    expect(fhdMedium.width).toBe(1920);
 
     const desktop = getMapCanvasRenderSize(1600, 900, 'medium');
     expect(desktop.scale).toBe(1);
     expect(desktop.width).toBe(1600);
+
+    const qhdHigh = getMapCanvasRenderSize(2560, 1440, 'high');
+    expect(qhdHigh.scale).toBe(1);
   });
 
   it('downscales fog fill rate on medium and large monitors', () => {
-    expect(getMapFogPixelRatioCap('high')).toBe(1.25);
+    expect(getMapFogPixelRatioCap('medium')).toBe(1.25);
+    expect(getMapFogPixelRatioCap('high')).toBe(1.5);
     expect(getMapFogRenderScale('low')).toBe(0);
-    expect(getMapFogRenderScale('medium', 1920, 1080)).toBeCloseTo(0.55);
-    expect(getMapFogRenderScale('high', 1920, 1080)).toBeCloseTo(0.75);
+    expect(getMapFogRenderScale('medium', 1920, 1080)).toBeCloseTo(0.8);
+    expect(getMapFogRenderScale('high', 1920, 1080)).toBeCloseTo(1);
     expect(getMapFogRenderScale('high', 3840, 2160)).toBeLessThan(getMapFogRenderScale('high', 1920, 1080));
     expect(getMapFogFrameStride('medium')).toBe(2);
     expect(getMapFogFrameStride('high')).toBe(1);
