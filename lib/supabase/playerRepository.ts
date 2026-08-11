@@ -1,5 +1,6 @@
 import type { User } from '@/lib/auth';
 import { createClient } from '@/lib/supabase/client';
+import { shouldFallbackPlayerSyncToDirectWrite } from '@/lib/supabase/playerStateSync';
 
 const remoteWriteQueues = new Map<string, Promise<void>>();
 
@@ -136,40 +137,89 @@ export async function fetchRemotePlayer(userId: string): Promise<{ profile: Prof
   return { profile, state: state as PlayerStateRow };
 }
 
+async function saveRemotePlayerViaApi(user: User, userId: string): Promise<'saved' | 'fallback'> {
+  let response: Response;
+  try {
+    response = await fetch('/api/me', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        userId,
+        player: user,
+      }),
+    });
+  } catch {
+    return 'fallback';
+  }
+
+  if (shouldFallbackPlayerSyncToDirectWrite(response.status)) {
+    return 'fallback';
+  }
+
+  let payload: { ok?: boolean; error?: string } = {};
+  try {
+    payload = await response.json();
+  } catch {
+    if (!response.ok) {
+      throw new Error('Server player sync failed.');
+    }
+    return 'saved';
+  }
+
+  if (!response.ok || payload.ok === false) {
+    throw new Error(payload.error || 'Server player sync failed.');
+  }
+
+  return 'saved';
+}
+
+async function saveRemotePlayerDirect(user: User, userId: string): Promise<void> {
+  const supabase = createClient();
+
+  const { data: existingState, error: readError } = await supabase
+    .from('player_states')
+    .select('game_sessions')
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (readError) throw readError;
+
+  const row = userToPlayerStateRow(user, userId);
+  row.game_sessions = {
+    ...((existingState?.game_sessions as Record<string, unknown> | null) || {}),
+    ...row.game_sessions,
+  };
+
+  const { error: profileError } = await supabase
+    .from('profiles')
+    .update({
+      username: user.username,
+      selected_model: user.selectedModel,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', userId);
+
+  if (profileError) throw profileError;
+
+  const { error: stateError } = await supabase
+    .from('player_states')
+    .upsert(row, { onConflict: 'user_id' });
+
+  if (stateError) throw stateError;
+}
+
+/**
+ * Prefer PATCH /api/me when online. Falls back to direct Supabase upsert on
+ * 501/503/network failure so local/keyless and pre-cutover deploys keep saving.
+ * Client UPDATE on player_states must stay until this path is trusted.
+ */
 export function saveRemotePlayer(user: User, userId: string): Promise<void> {
   return enqueueRemoteWrite(userId, async () => {
-    const supabase = createClient();
-
-    const { data: existingState, error: readError } = await supabase
-      .from('player_states')
-      .select('game_sessions')
-      .eq('user_id', userId)
-      .maybeSingle();
-
-    if (readError) throw readError;
-
-    const row = userToPlayerStateRow(user, userId);
-    row.game_sessions = {
-      ...((existingState?.game_sessions as Record<string, unknown> | null) || {}),
-      ...row.game_sessions,
-    };
-
-    const { error: profileError } = await supabase
-      .from('profiles')
-      .update({
-        username: user.username,
-        selected_model: user.selectedModel,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', userId);
-
-    if (profileError) throw profileError;
-
-    const { error: stateError } = await supabase
-      .from('player_states')
-      .upsert(row, { onConflict: 'user_id' });
-
-    if (stateError) throw stateError;
+    if (typeof fetch === 'function') {
+      const result = await saveRemotePlayerViaApi(user, userId);
+      if (result === 'saved') return;
+    }
+    await saveRemotePlayerDirect(user, userId);
   });
 }
 

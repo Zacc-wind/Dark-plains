@@ -2,6 +2,8 @@
 
 Goal: move the game from browser-only `localStorage` into a deployable online setup where accounts, world state, leaderboards, PVP challenges, reports, quests, shops, and editable content survive across devices.
 
+**Manual dashboard tasks (for you):** see [`docs/supabase-manual-checklist.md`](./supabase-manual-checklist.md) — do in bulk later (Auth URLs, leaked-password toggle, env, smoke tests).
+
 ## Recommended Stack
 
 - Hosting: Vercel for the Next.js app.
@@ -33,14 +35,14 @@ Add Next.js route handlers for game writes so important state changes are server
 Initial endpoints:
 
 - `GET /api/me`
-- `PATCH /api/me/state`
+- `PATCH /api/me` (player sync; docs historically called this `PATCH /api/me/state`)
 - `GET /api/leaderboards`
 - `POST /api/battle-reports`
 - `POST /api/daily-runs/complete`
 - `POST /api/pvp/challenges`
 - `PATCH /api/pvp/challenges/:id`
 
-Current status: route contracts exist in the app, but mutating routes intentionally return `501` until Supabase Auth and the database adapter are connected. This keeps deployment probes explicit instead of accidentally pretending local browser state is global server state.
+Current status: `GET`/`PATCH /api/me` are live when Supabase Auth is configured (`PATCH` authenticates via `getAuthenticatedUser`, lightly validates level/username ownership, upserts `player_states` via admin or user client). `saveRemotePlayer` prefers this API and falls back to direct browser upsert on `501`/`503`/network failure. **Do not revoke client `UPDATE`/`INSERT` on `player_states` until that API path is trusted in production.** Other mutating routes may still return `501` until their adapters are connected.
 
 Avoid trusting client-only rewards. The server should validate daily lockouts, reward claims, battle results, inventory capacity, and PVP confirmation windows.
 
@@ -390,7 +392,7 @@ Dual-path auth is live; this is not a full rewrite.
 ### Still open
 
 - [x] Turn off local-password path in production builds (fail closed when keys missing on deployed hosts).
-- [ ] Stop client-side `player_states` writes as the primary save path; move mutations through trusted API routes (`PATCH /api/me/state` and feature endpoints).
+- [ ] Stop client-side `player_states` writes as the primary save path; first slice is live (`PATCH /api/me` + client prefer-API fallback). Keep direct browser upsert until the server path is trusted, then revoke authenticated `UPDATE`/`INSERT` on `player_states` and finish remaining feature endpoints.
 - [ ] Migrate any remaining local-only multiplayer helpers that still assume `lib/auth` users when online sessions are required.
 - [x] Production password reset / account recovery UX (wire `forgot-password` + `/reset-password`; synthetic emails still need a deliverable Auth email domain for inbox delivery).
 - [ ] Optional: store display username in `app_metadata` for ops; keep authorization on `auth.uid()` + `profiles`, never `user_metadata` claims.
