@@ -1,5 +1,6 @@
 import { apiNotConfigured, apiOk } from '@/lib/apiResponses';
 import { createTradeSession } from '@/lib/tradeSessions';
+import { multiplayerUnlockForbiddenResponse } from '@/lib/multiplayerUnlockGate';
 import { requireMultiplayerUnlock } from '@/lib/multiplayerUnlocks';
 import { isSupabaseConfigured } from '@/lib/supabase/config';
 import { createClient } from '@/lib/supabase/server';
@@ -148,15 +149,13 @@ export async function POST(request: Request) {
     ]);
     const initiatorUnlock = requireMultiplayerUnlock('trading', initiatorLevel);
     if (!initiatorUnlock.allowed) {
-      return Response.json({ ok: false, error: initiatorUnlock.error, deploymentMode: 'database' }, { status: 403 });
+      return multiplayerUnlockForbiddenResponse(initiatorUnlock.error);
     }
     const targetUnlock = requireMultiplayerUnlock('trading', targetLevel);
     if (!targetUnlock.allowed) {
-      return Response.json({
-        ok: false,
-        error: `${targetProfile.username} must unlock trade before accepting offers.`,
-        deploymentMode: 'database',
-      }, { status: 403 });
+      return multiplayerUnlockForbiddenResponse(
+        `${targetProfile.username} must unlock trade before accepting offers.`,
+      );
     }
 
     const { data: openRows, error: openError } = await admin

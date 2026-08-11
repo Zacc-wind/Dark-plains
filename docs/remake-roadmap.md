@@ -279,7 +279,7 @@
 - [x] Add compact party HUD map strip with member status, pending invites, and party chat shortcut.
 - [x] Add a party details popover from the map strip with promote, leave, invite, kick, and party-chat actions.
 - [x] Implement real player-vs-player duel sessions with both sides controlled by humans and opponent commander names shown in combat.
-- [ ] Implement cooperative dungeon sessions for parties: up to 4 commanders, shared 8-unit field cap, owner-based turns, longer routes, hard roads, and multiple bosses.
+- [ ] Implement cooperative dungeon sessions for parties: up to 4 commanders, shared 8-unit field cap, owner-based turns, longer routes, hard roads, and multiple bosses. Duo `CoopDungeonSession` 3-chamber foundation landed (see `docs/multiplayer-roadmap.md` Phase 6).
 - [x] Add `ownerUsername` / team ownership metadata to combat units so players can only control their own commander and units.
 - [x] Extend the database plan and migration chain for challenges, trades, duel sessions, co-op dungeon sessions, party membership, chat, and action receipts.
 

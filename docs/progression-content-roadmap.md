@@ -26,7 +26,8 @@ This document is the execution plan for progression, retention, narrative conten
 - Levels 16-20 now form The Glass Road: Serat and Sable guides, Mirror Road Captain elite, Prior Moon Voss capstone, return seal, and eight Blackwater/Eclipse contracts each.
 - Levels 21-25 now form The Candle Key: Kaito guide, Ser Kael elite, fragment gather, Key-Saint Ardan, and return seal.
 - Levels 26-30 now form The Lady In Glass: Letho guide, Scarlet Matron elite, Lady Mirror-Veyra inspect/defeat, and court seal return.
-- There are 60 city contracts. Harborview and Riverside own 15 each, Moonbridge owns 9, Ashford owns 5, and Blackwater Gate and Eclipse Hold own 8 each. Consolidation toward eight strong contracts for the western towns remains.
+- There are 63 city contracts. Harborview and Riverside own 15 each, Moonbridge owns 9, Ashford owns 8, and Blackwater Gate and Eclipse Hold own 8 each. Harborview/Riverside consolidation toward eight remains deferred.
+- Levels 16-30 now include three later-band side stories (Ash Pilgrim, Forged Writs, Synod Bell) outside Moonwell, with named elites and return NPCs.
 - There are 8 boss profiles, 24 unit templates, and 20 commander spells.
 - Campaign, Level Path, Chronicle, named threat markers, and the quest tracker expose the active chapter, next unlock, exact target, and long-term collection track. Bespoke level 6-10 enemy/item art remains production work.
 
@@ -434,7 +435,7 @@ Do not make every achievement a power grant. Players need goals after the gamepl
 7. `MP-C6 Levels 6-10` - playable core complete: nine Drowned Moonwell quests, nine Moonbridge contracts (including eastern-march preview after seal), Blackroot and Cindervein story encounters, authored tone choices, two side chains (silk + tithe), post-chapter NPC voice, and Dungeon Tier II gating. Bespoke assets remain parked.
 8. `MP-C9 Continuity & Retention` (confirmed 2026-08-09) — complete for the confirmed checklist.
 9. `MP-C7 Public Chronicle`: 40-rank expansion and Glass Road Memorial archive shipped. Featured seasonal rotation remains later.
-10. `MP-C8 Levels 11-30`: complete for all six chapter bands through Lady in Glass 26–30 (named elites/capstones, returns, and dialog). Candle Compact + Blackwater League reputation tracks and the Deeds tab shipped; later-band side stories remain.
+10. `MP-C8 Levels 11-30`: complete for all six chapter bands through Lady in Glass 26–30 (named elites/capstones, returns, and dialog). Candle Compact + Blackwater League reputation tracks and the Deeds tab shipped; three later-band side stories (Ash / Writ / Synod) shipped. Harborview/Riverside contract consolidation remains deferred.
 
 ### Singleplayer Later
 

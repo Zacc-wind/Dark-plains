@@ -9,6 +9,7 @@ import {
   type CoopRaidSessionDbRow,
 } from '@/lib/coopRaidSessionDb';
 import { createCoopRaidSession } from '@/lib/coopRaidSessions';
+import { multiplayerUnlockForbiddenResponse } from '@/lib/multiplayerUnlockGate';
 import { requireMultiplayerUnlock } from '@/lib/multiplayerUnlocks';
 import { isSupabaseConfigured } from '@/lib/supabase/config';
 import { createClient } from '@/lib/supabase/server';
@@ -173,7 +174,7 @@ export async function POST(request: Request) {
   try {
     const unlock = requireMultiplayerUnlock('coop-dungeons', await getPlayerLevel(supabase, userId));
     if (!unlock.allowed) {
-      return Response.json({ ok: false, error: unlock.error, deploymentMode: 'database' }, { status: 403 });
+      return multiplayerUnlockForbiddenResponse(unlock.error);
     }
 
     const { data: hostProfileData, error: hostProfileError } = await admin

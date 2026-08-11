@@ -16029,6 +16029,11 @@ button.vine-frame::before,
   text-shadow: 0 0 12px rgba(255, 248, 231, 0.16);
 }
 
+.random-run-commander-special {
+  color: rgba(245, 201, 103, 0.92);
+  line-height: 1.25;
+}
+
 .run-draft-stage .run-draft-hero {
   padding: 1.35rem;
 }

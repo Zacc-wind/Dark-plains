@@ -38,9 +38,11 @@ import {
 import { isSupabaseConfigured } from '@/lib/supabase/config';
 import { getCachedWorldPlayers, refreshWorldPlayers, worldMapPlayerToUser } from '@/lib/worldPlayers';
 import { BATTLE_SPELLS, WorldEnemy, getBattleRatingPreview, getNpcEnemiesForUser, getPlayerModelAsset } from '@/lib/battle';
+import { canPrepareCoopRaid, ensureCurrentCoopRaidSession } from '@/lib/coopRaidClient';
 import { emitCompletionNotice, type CompletionRewardLine } from '@/lib/completionEvents';
 import { emitFxEvent } from '@/lib/fxEvents';
 import { emitMapFogState } from '@/lib/mapFogEvents';
+import { playGameSound } from '@/lib/sound';
 import { QUEST_NPCS, getAllStoryQuestsSorted, getQuestNpcWorldVoice, type QuestNpc } from '@/lib/questData';
 import { getStoryDialogSequence, type StoryDialogSequence } from '@/lib/storyDialogue';
 import { isDungeonQuestObjective, isPoiQuestObjective, isQuestNpcObjective } from '@/lib/questMarkers';
@@ -488,7 +490,7 @@ function isEnemyRevealedOnScreen(
   playerRevealPoint: { x: number; y: number } | null,
   zoom: number
 ): boolean {
-  if (enemy.spawnKind === 'story-boss' || enemy.spawnKind === 'regional-threat') return true;
+  if (enemy.spawnKind === 'story-boss' || enemy.spawnKind === 'regional-threat' || enemy.spawnKind === 'coop-boss') return true;
   return isScreenPointRevealed(getEnemyScreenCenter(enemy, cameraX, cameraY, tileSize), cursor, playerRevealPoint, zoom);
 }
 
@@ -1243,6 +1245,8 @@ export default function MapRenderer({
   const worldEnemySignatureRef = useRef('');
   const activeBattleEnemyRef = useRef<WorldEnemy | null>(null);
   const selectedDungeonRunRef = useRef<WorldDungeon | null>(null);
+  const lastWalkTileKeyRef = useRef<string | null>(null);
+  const walkStepParityRef = useRef(0);
   const poisData = useMemo(() => getStaticPOIs(), []);
 
   useEffect(() => {
@@ -1367,6 +1371,9 @@ export default function MapRenderer({
           window.dispatchEvent(new Event('wizardy:force-main-screen'));
 
           result.claimed.forEach(claim => {
+            playGameSound('quest.claim', { throttleMs: 180 });
+            if (claim.rewards?.gold) playGameSound('inventory.goldGain', { throttleMs: 180 });
+            if (claim.rewards?.rareGems) playGameSound('inventory.gemGain', { throttleMs: 180 });
             emitCompletionNotice({
               id: claim.id,
               kind: 'quest',
@@ -1397,12 +1404,33 @@ export default function MapRenderer({
         Date.now() >= activeJob.startTime &&
         !activeJob.travelComplete
       );
-      if (!latestUser.traveling && !activeJobTraveling) return;
+      if (!latestUser.traveling && !activeJobTraveling) {
+        lastWalkTileKeyRef.current = null;
+        return;
+      }
 
-      setWorldNow(Date.now());
+      const now = Date.now();
+      setWorldNow(now);
       if (activeJobTraveling) updateJobTravelProgress();
       checkTravelComplete();
-      setCurrentUser(getCurrentUser());
+      const nextUser = getCurrentUser();
+      setCurrentUser(nextUser);
+
+      const position = getRenderedUserPosition(nextUser, now);
+      if (!position) {
+        lastWalkTileKeyRef.current = null;
+        return;
+      }
+
+      const tileKey = `${Math.floor(position.x)},${Math.floor(position.y)}`;
+      if (lastWalkTileKeyRef.current && lastWalkTileKeyRef.current !== tileKey) {
+        walkStepParityRef.current ^= 1;
+        playGameSound(
+          walkStepParityRef.current ? 'world.walkStep1' : 'world.walkStep2',
+          { throttleMs: 90, volumeScale: 0.8 }
+        );
+      }
+      lastWalkTileKeyRef.current = tileKey;
     }, DIRECT_TRAVEL_RENDER_INTERVAL_MS);
 
     return () => window.clearInterval(interval);
@@ -1958,7 +1986,8 @@ export default function MapRenderer({
       const isWorldBoss = enemy.spawnKind === 'world-boss';
       const isStoryBoss = enemy.spawnKind === 'story-boss';
       const isRegionalThreat = enemy.spawnKind === 'regional-threat';
-      const isBossThreat = isWorldBoss || isStoryBoss || isRegionalThreat;
+      const isCoopBoss = enemy.spawnKind === 'coop-boss';
+      const isBossThreat = isWorldBoss || isStoryBoss || isRegionalThreat || isCoopBoss;
       const enemySize = getCharacterSpriteSize(tileSize, effectiveZoom, isBossThreat ? 1.22 : 0.88, isBossThreat ? 36 : 25);
       const enemyImage = AssetLoader.getImage(enemy.artworkPath || getPlayerModelAsset(enemy.modelNumber));
       const enemyRevealed = isEnemyRevealedOnScreen(
@@ -2349,6 +2378,10 @@ export default function MapRenderer({
       return { success: false, error: result.error || 'Could not claim story reward.' };
     }
 
+    playGameSound('quest.claim', { throttleMs: 140 });
+    if (result.rewards?.gold) playGameSound('inventory.goldGain', { throttleMs: 140 });
+    if (result.rewards?.rareGems) playGameSound('inventory.gemGain', { throttleMs: 140 });
+
     emitCompletionNotice({
       id: `main-tracker-story-${questId}-${Date.now()}`,
       kind: 'quest',
@@ -2369,6 +2402,8 @@ export default function MapRenderer({
     if (!result.success) {
       return { success: false, error: result.error || 'Could not claim daily reward.' };
     }
+
+    playGameSound('quest.claim', { throttleMs: 140 });
 
     const rewards: RewardSummary = {
       equipment: result.rewards?.length ? result.rewards : undefined,
@@ -2511,6 +2546,25 @@ export default function MapRenderer({
           onStart={() => {
             if (!currentUser || currentUser.x !== selectedEnemy.x || currentUser.y !== selectedEnemy.y) return;
             if (selectedEnemy.requiredPlayerLevel && currentUser.stats.level < selectedEnemy.requiredPlayerLevel) return;
+            if (selectedEnemy.spawnKind === 'coop-boss') {
+              const prep = canPrepareCoopRaid(currentUser);
+              if (!prep.ok) {
+                window.alert(prep.reason);
+                return;
+              }
+              if (prep.resumeBossId && prep.resumeBossId !== selectedEnemy.id) {
+                window.alert('Finish your current co-op raid before preparing another incursion.');
+                return;
+              }
+              void ensureCurrentCoopRaidSession(selectedEnemy.id).then(result => {
+                if (!result.success) {
+                  window.alert(result.error || 'Could not prepare this raid.');
+                  return;
+                }
+                setSelectedEnemy(null);
+              });
+              return;
+            }
             setActiveBattleEnemy(selectedEnemy);
             setSelectedEnemy(null);
           }}
@@ -3091,6 +3145,9 @@ function QuestNpcModal({ npc, onTravel, onClose }: { npc: QuestNpc; onTravel: ()
     setNotice(result.success ? 'Counsel reward claimed.' : result.error || 'Could not claim counsel.');
     setUser(getCurrentUser());
     if (result.success) {
+      playGameSound('quest.claim', { throttleMs: 140 });
+      if (result.rewards?.gold) playGameSound('inventory.goldGain', { throttleMs: 140 });
+      if (result.rewards?.rareGems) playGameSound('inventory.gemGain', { throttleMs: 140 });
       emitCompletionNotice({
         id: `quest-npc-completion-${npc.id}-${Date.now()}`,
         kind: 'quest',
@@ -3286,6 +3343,11 @@ function EnemyScoutModal({
                   Regional Threat Boss
                 </div>
               )}
+              {enemy.spawnKind === 'coop-boss' && (
+                <div className="ui-rarity-legendary mt-1 inline-flex rounded border px-2 py-1 text-[10px] font-black uppercase">
+                  Duo Raid
+                </div>
+              )}
               <p className="ui-muted mt-1 text-sm font-bold">
                 {enemy.story || preview?.summary || 'Scout data unavailable.'}
               </p>
@@ -3322,7 +3384,9 @@ function EnemyScoutModal({
           <div className="ui-card rounded border p-3">
             <div className="arcane-label">Road Structure</div>
             <p className="ui-muted mt-1 text-xs font-bold">
-              {routeBattles} fight{routeBattles === 1 ? '' : 's'} total. The marked enemy is the final boss; shops and omens may appear between fights on longer roads.
+              {enemy.spawnKind === 'coop-boss'
+                ? 'Duo raid: two commanders confirm formation, then fight a four-phase synchronized boss.'
+                : `${routeBattles} fight${routeBattles === 1 ? '' : 's'} total. The marked enemy is the final boss; shops and omens may appear between fights on longer roads.`}
             </p>
           </div>
 
@@ -3354,10 +3418,10 @@ function EnemyScoutModal({
             {battleLevelLocked
               ? `Battle unlocks at level ${requiredPlayerLevel}`
               : canStart
-                ? 'Start Road'
+                ? (enemy.spawnKind === 'coop-boss' ? 'Prepare Raid' : 'Start Road')
                 : currentUser?.traveling
-                  ? 'Walking to Enemy'
-                  : 'Walk Here'}
+                  ? (enemy.spawnKind === 'coop-boss' ? 'Walking to Raid' : 'Walking to Enemy')
+                  : (enemy.spawnKind === 'coop-boss' ? 'Walk to Raid' : 'Walk Here')}
           </button>
         </div>
       </div>

@@ -8,6 +8,11 @@ import {
   getCoopRaidSessions,
   getCurrentCoopRaidSession,
 } from '@/lib/coopRaidClient';
+import {
+  canPrepareCoopDungeon,
+  ensureCurrentCoopDungeonSession,
+  getCurrentCoopDungeonSession,
+} from '@/lib/coopDungeonClient';
 import { getWorldPveIntel, type PveIntelEntry, type PveRewardLine } from '@/lib/worldPveIntel';
 import { getMultiplayerUnlockStatus } from '@/lib/multiplayerUnlocks';
 import { formatDungeonTier } from '@/lib/worldEvents';
@@ -156,6 +161,10 @@ export default function PveHubModal({ isOpen, onClose }: PveHubModalProps) {
     () => (currentUser ? getCurrentCoopRaidSession(currentUser.username, now) : undefined),
     [currentUser, now],
   );
+  const currentDungeonRoute = useMemo(
+    () => (currentUser ? getCurrentCoopDungeonSession(currentUser.username, now) : undefined),
+    [currentUser, now],
+  );
   const participantRaids = useMemo(() => {
     if (!currentUser) return [];
     const username = currentUser.username.toLowerCase();
@@ -286,6 +295,24 @@ export default function PveHubModal({ isOpen, onClose }: PveHubModalProps) {
     };
   };
 
+  const dungeonRouteReadiness = canPrepareCoopDungeon(currentUser, now);
+  const dungeonRouteDisabled = !dungeonRouteReadiness.ok && !currentDungeonRoute;
+  let dungeonRouteLabel = 'Open Duo Dungeon Route';
+  let dungeonRouteDetail = 'Three shared chambers from the current dungeon cycle.';
+  if (currentDungeonRoute) {
+    dungeonRouteLabel = currentDungeonRoute.phase === 'complete'
+      ? 'View Dungeon Route'
+      : 'Resume Dungeon Route';
+    dungeonRouteDetail = currentDungeonRoute.phase === 'chamber'
+      ? `Fighting chamber ${currentDungeonRoute.currentChamberIndex + 1} of ${currentDungeonRoute.chambers.length}.`
+      : currentDungeonRoute.phase === 'complete'
+        ? 'All three chambers cleared.'
+        : `${currentDungeonRoute.dungeonSnapshot.name} · chamber ${currentDungeonRoute.currentChamberIndex + 1}.`;
+  } else if (!dungeonRouteReadiness.ok) {
+    dungeonRouteLabel = 'Duo Dungeon Locked';
+    dungeonRouteDetail = dungeonRouteReadiness.reason;
+  }
+
   return (
     <div
       className="pve-hub-overlay fixed inset-0 z-[70] flex items-center justify-center bg-black/72 p-4"
@@ -324,6 +351,40 @@ export default function PveHubModal({ isOpen, onClose }: PveHubModalProps) {
               {notice}
             </div>
           )}
+
+          <div className="mb-4 rounded border border-[rgba(226,190,103,0.28)] bg-black/30 px-4 py-3">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="ui-pill rounded border px-2 py-0.5 text-[10px] font-black uppercase text-sky-200">
+                    Duo Dungeon Route
+                  </span>
+                  <span className="ui-faint text-[10px] font-black uppercase">3 chambers · stub</span>
+                </div>
+                <p className="ui-muted mt-2 text-sm font-bold leading-relaxed">{dungeonRouteDetail}</p>
+              </div>
+              <button
+                type="button"
+                disabled={dungeonRouteDisabled}
+                onClick={() => {
+                  if (dungeonRouteDisabled) return;
+                  void ensureCurrentCoopDungeonSession(
+                    currentDungeonRoute?.dungeonId,
+                  ).then(result => {
+                    if (!result.success) {
+                      setNotice(result.error || 'Could not open the dungeon route.');
+                      return;
+                    }
+                    setNotice(null);
+                    onClose();
+                  });
+                }}
+                className="ui-button-primary shrink-0 rounded px-4 py-2.5 text-xs font-black disabled:opacity-40"
+              >
+                {dungeonRouteLabel}
+              </button>
+            </div>
+          </div>
 
           {pveIntel.length === 0 ? (
             <div className="ui-empty rounded border border-dashed px-4 py-8 text-center text-sm font-bold">

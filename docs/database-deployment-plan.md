@@ -50,8 +50,8 @@ Checked-in migration status:
 
 - `001`-`006` create the profile/player-state foundation, world presence, PVP challenge policies, content registry, multiplayer daily records, and enemy-only unit flags.
 - `007_multiplayer_sessions.sql` adds trade, human-duel, and duo-raid sessions with optimistic versions; co-op action receipts and duplicate-proof reward claims; participant-scoped RLS; and the missing friendship, party, and chat policies.
-- `008_singleplayer_progression.sql` adds normalized singleplayer achievement/discovery mirrors, offer guarantees, legacy backfill, indexes, triggers, and owner-scoped RLS. It is prepared but not yet applied to the hosted project.
-- `009_chat_history_retention.sql` adds the global/party history index and a security-definer pruning trigger that keeps only the latest 50 messages per channel or party. It is prepared but not yet applied to the hosted project.
+- `008_singleplayer_progression.sql` adds normalized singleplayer achievement/discovery mirrors, offer guarantees, legacy backfill, indexes, triggers, and owner-scoped RLS. **Hosted status (2026-08-11):** applied (`singleplayer_achievement_unlocks` / discovery tables live).
+- `009_chat_history_retention.sql` adds the global/party history index and a security-definer pruning trigger that keeps only the latest 50 messages per channel or party. **Hosted status (2026-08-11):** applied.
 - Session tables are readable only by their participants. Trade, duel, co-op action, and co-op claim mutations remain server-only until the route handlers validate inventory ownership, expected revisions, legal combat actions, expiration, and rewards.
 - Multiplayer story response ids, tones, and timestamps remain inside the existing `player_states.story_quests` JSON payload, so the authored-choice work requires no additional schema migration.
 - These files are local source of truth but have not yet been applied to or validated against the hosted project.

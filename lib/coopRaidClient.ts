@@ -5,6 +5,7 @@ import {
   getPartyMembers,
   getSocialState,
   recordCoopRaidOutcome,
+  type User,
 } from './auth';
 import {
   getActiveCoopBosses,
@@ -29,9 +30,64 @@ import {
   updateOnlineCoopRaidSession,
 } from './coopRaidOnlineClient';
 import { readGameJson, writeGameJson } from './gameStore';
+import { getMultiplayerUnlockStatus } from './multiplayerUnlocks';
 
 const COOP_RAID_SESSIONS_KEY = 'pirate_game_coop_raid_sessions';
 export const COOP_RAID_SESSION_UPDATED_EVENT = 'pirate-game:coop-raid-session-updated';
+
+export type CanPrepareCoopRaidResult =
+  | { ok: true; resumeBossId?: string }
+  | { ok: false; reason: string };
+
+/**
+ * Map / hub entry guard for co-op raids. Matches PveHubModal readiness:
+ * unlock coop-dungeons, party of exactly 2, and leader prepares — unless
+ * the commander already has a raid session to resume.
+ */
+export function canPrepareCoopRaid(
+  user: User | null,
+  now = Date.now(),
+): CanPrepareCoopRaidResult {
+  if (!user) return { ok: false, reason: 'Login required.' };
+
+  const currentRaid = getCurrentCoopRaidSession(user.username, now);
+  if (currentRaid) {
+    return { ok: true, resumeBossId: currentRaid.bossId };
+  }
+
+  const coopUnlock = getMultiplayerUnlockStatus('coop-dungeons', user);
+  if (!coopUnlock.unlocked) {
+    return {
+      ok: false,
+      reason: `${coopUnlock.title} unlocks at level ${coopUnlock.minLevel}.`,
+    };
+  }
+
+  const party = getSocialState(user).party;
+  if (!party) {
+    return {
+      ok: false,
+      reason: 'Create a party and invite one commander from Chat.',
+    };
+  }
+
+  const partyMembers = getPartyMembers(user);
+  if (partyMembers.length !== 2) {
+    return {
+      ok: false,
+      reason: 'This raid requires exactly two accepted party members.',
+    };
+  }
+
+  if (party.leaderUsername.toLowerCase() !== user.username.toLowerCase()) {
+    return {
+      ok: false,
+      reason: `${party.leaderUsername} must open the raid session.`,
+    };
+  }
+
+  return { ok: true };
+}
 
 function emitSessionUpdated(session: CoopRaidSession): void {
   if (typeof window === 'undefined') return;

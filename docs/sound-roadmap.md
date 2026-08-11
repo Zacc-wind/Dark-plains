@@ -51,9 +51,13 @@ This is the current interaction sound checklist for the game. Starter CC0 files 
 - `lib/sound.ts` provides `playGameSound`, `preloadGameSounds`, and a local master-volume setting for Settings.
 - `components/GameCommandCenter.tsx` delegates UI hover/click sounds for buttons, tabs, open/start actions, buy/sell actions, and claim actions.
 - `components/GameCommandCenter.tsx` includes a Settings tab with master volume, test sound, and combat speed controls.
+- `components/GameCommandCenter.tsx` claim handlers play `quest.claim`, plus `inventory.goldGain` / `inventory.gemGain` when those rewards are present.
+- `components/TownModal.tsx` plays `world.townEnter` / `world.townLeave` on open/close, `inventory.coins` on successful buy, `inventory.goldGain` on successful sells, and claim reward SFX on city contracts.
+- `components/MapRenderer.tsx` plays alternating `world.walkStep1` / `world.walkStep2` while traveling, plus claim gold/gem cues on auto-claim, story tracker claim, and quest NPC counsel claim.
 - `components/BattleModal.tsx` plays log-timed action sounds for strike, spell, healing, focus mana, move, hold, and unit death cues.
 - `components/BattleModal.tsx` now preloads combat sounds and separates release/impact/accent cues so hurt grunts do not dominate weapon attacks.
 - `components/BattleModal.tsx` plays victory and defeat stingers when battle result animations/screens resolve.
+- `components/BattleModal.tsx` plays `combat.bossRoar` for boss round-1 intro and boss victory (stand-in until custom boss stingers exist); non-boss round 1 uses `combat.weaponDraw`.
 - Combat grid cells opt out of generic UI hover/click sounds so they can use tactical action sounds instead.
 - `components/BardMusicControls.tsx` exposes the active background track on multiplayer map, singleplayer hub, and run roads with previous, play/pause, next, and volume controls. `lib/backgroundMusic.ts` now preserves paused tracks and previous-track history.
 
@@ -69,14 +73,14 @@ This is the current interaction sound checklist for the game. Starter CC0 files 
 - `combat/block_guard.ogg` - defend, ward, retaliation blocked or reduced.
 - `combat/retaliation.ogg` - counterattack response.
 - `combat/commander_death.ogg` - commander falls before reaper transition.
-- `combat/boss_intro_stinger.ogg` - two-second boss alert before combat.
-- `combat/boss_defeat_stinger.ogg` - boss defeat.
+- `combat/boss_intro_stinger.ogg` - two-second boss alert before combat. (interim: `combat.bossRoar` on round 1)
+- `combat/boss_defeat_stinger.ogg` - boss defeat. (interim: `combat.bossRoar` + `combat.victory`)
 - `run/node_select.ogg` - choose daily road node.
 - `run/shop_open.ogg` - daily run shop node.
 - `run/omen_reveal.ogg` - omen/event node reveal.
 - `run/map_scroll.ogg` - subtle scroll cue for long daily road map.
-- `shop/buy.ogg` - shop purchase.
-- `shop/sell.ogg` - city shop sell.
+- `shop/buy.ogg` - shop purchase. (interim: `inventory.coins` on town buy)
+- `shop/sell.ogg` - city shop sell. (interim: `inventory.goldGain` on town sell)
 - `inventory/equip.ogg` - equip gear/spell/unit.
 - `inventory/unequip.ogg` - unequip.
 - `army/field_unit.ogg` - place unit in formation.

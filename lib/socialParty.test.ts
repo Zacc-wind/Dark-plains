@@ -49,6 +49,41 @@ beforeEach(() => {
 });
 
 describe('party social request persistence', () => {
+  it('blocks invite and accept until both commanders unlock party', () => {
+    expect(register('LockedLeader', 'test-password').success).toBe(true);
+    expect(register('LockedInvitee', 'test-password').success).toBe(true);
+
+    expect(login('LockedLeader', 'test-password').success).toBe(true);
+    setCurrentPlayerLevel(4);
+    expect(invitePlayerToParty('LockedInvitee')).toEqual({
+      success: false,
+      error: 'Party Creation unlocks at level 5.',
+    });
+
+    setCurrentPlayerLevel(5);
+    expect(login('LockedInvitee', 'test-password').success).toBe(true);
+    setCurrentPlayerLevel(4);
+    expect(login('LockedLeader', 'test-password').success).toBe(true);
+    expect(invitePlayerToParty('LockedInvitee')).toEqual({
+      success: false,
+      error: 'LockedInvitee must reach level 5 before joining a party.',
+    });
+
+    expect(login('LockedInvitee', 'test-password').success).toBe(true);
+    setCurrentPlayerLevel(5);
+    expect(login('LockedLeader', 'test-password').success).toBe(true);
+    expect(invitePlayerToParty('LockedInvitee')).toMatchObject({ success: true });
+
+    expect(login('LockedInvitee', 'test-password').success).toBe(true);
+    setCurrentPlayerLevel(4);
+    const incoming = getIncomingSocialRequests();
+    expect(incoming).toHaveLength(1);
+    expect(acceptPartyInvite(incoming[0].id)).toEqual({
+      success: false,
+      error: 'Party Creation unlocks at level 5.',
+    });
+  });
+
   it('persists a real invite for both players, accepts once, and joins the party', () => {
     expect(register('LeaderMage', 'test-password').success).toBe(true);
     expect(register('InviteeMage', 'test-password').success).toBe(true);

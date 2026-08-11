@@ -10,6 +10,7 @@ import {
 } from './auth';
 import { COOP_BOSS_CYCLE_MS, getActiveCoopBosses } from './battle';
 import {
+  canPrepareCoopRaid,
   ensureCurrentCoopRaidSession,
   confirmCurrentCoopRaidFormation,
   getCurrentCoopRaidSession,
@@ -154,5 +155,77 @@ describe('co-op raid client persistence', () => {
     expect(retried.duplicate).not.toBe(true);
     expect(retried.session?.phase).toBe('formation');
     expect(retried.session?.createdAt).toBe(NOW + 3_000);
+  });
+});
+
+describe('canPrepareCoopRaid', () => {
+  it('blocks when co-op dungeons are locked', () => {
+    expect(register('LockedRaid', 'test-password').success).toBe(true);
+    expect(login('LockedRaid', 'test-password').success).toBe(true);
+    const user = getCurrentUser()!;
+    updateCurrentUser({ stats: { ...user.stats, level: 4 } });
+    expect(canPrepareCoopRaid(getCurrentUser(), NOW)).toMatchObject({
+      ok: false,
+      reason: 'Co-op Dungeons unlocks at level 5.',
+    });
+  });
+
+  it('blocks when no party exists', () => {
+    expect(register('SoloRaid', 'test-password').success).toBe(true);
+    expect(login('SoloRaid', 'test-password').success).toBe(true);
+    prepareCurrentCommander('solo');
+    expect(canPrepareCoopRaid(getCurrentUser(), NOW)).toMatchObject({
+      ok: false,
+      reason: 'Create a party and invite one commander from Chat.',
+    });
+  });
+
+  it('blocks until the duo is accepted, then allows the leader', () => {
+    expect(register('PendingLeader', 'test-password').success).toBe(true);
+    expect(login('PendingLeader', 'test-password').success).toBe(true);
+    prepareCurrentCommander('pending-leader');
+    expect(register('PendingAlly', 'test-password').success).toBe(true);
+    expect(login('PendingAlly', 'test-password').success).toBe(true);
+    prepareCurrentCommander('pending-ally');
+
+    expect(login('PendingLeader', 'test-password').success).toBe(true);
+    expect(invitePlayerToParty('PendingAlly')).toMatchObject({ success: true });
+    expect(canPrepareCoopRaid(getCurrentUser(), NOW)).toMatchObject({
+      ok: false,
+      reason: 'This raid requires exactly two accepted party members.',
+    });
+
+    expect(login('PendingAlly', 'test-password').success).toBe(true);
+    const invitation = getIncomingSocialRequests().find(request => request.kind === 'party');
+    expect(invitation).toBeDefined();
+    expect(acceptPartyInvite(invitation!.id)).toMatchObject({ success: true });
+
+    expect(login('PendingAlly', 'test-password').success).toBe(true);
+    expect(canPrepareCoopRaid(getCurrentUser(), NOW)).toMatchObject({
+      ok: false,
+      reason: 'PendingLeader must open the raid session.',
+    });
+
+    expect(login('PendingLeader', 'test-password').success).toBe(true);
+    expect(canPrepareCoopRaid(getCurrentUser(), NOW)).toEqual({ ok: true });
+  });
+
+  it('allows resume for either party member once a session exists', async () => {
+    prepareDuo();
+    const leader = getCurrentUser()!;
+    const boss = getActiveCoopBosses(leader, NOW)[0];
+    const created = await ensureCurrentCoopRaidSession(boss.id, NOW);
+    expect(created.success).toBe(true);
+
+    expect(canPrepareCoopRaid(getCurrentUser(), NOW)).toEqual({
+      ok: true,
+      resumeBossId: boss.id,
+    });
+
+    expect(login('RaidAlly', 'test-password').success).toBe(true);
+    expect(canPrepareCoopRaid(getCurrentUser(), NOW)).toEqual({
+      ok: true,
+      resumeBossId: boss.id,
+    });
   });
 });

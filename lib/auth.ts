@@ -50,6 +50,10 @@ import {
   normalizePvpRatingState,
   type PvpRatingState,
 } from './pvpRating';
+import {
+  gatePartyInviteUnlocks,
+  multiplayerUnlockActionDenied,
+} from './multiplayerUnlockGate';
 import { requireMultiplayerUnlock } from './multiplayerUnlocks';
 import {
   capCampaignRewardExp,
@@ -881,6 +885,33 @@ export const INVENTORY_ITEM_DEFINITIONS: Record<string, InventoryItemDefinition>
     kind: 'quest',
     rarity: 'rare',
     description: 'A water-swollen ledger seized from Tollroad Goblin Cutters. Star Law needs every funded name inside.',
+    icon: 'magic',
+    imagePath: '/assets/icons/magic.png',
+  },
+  'ash-pilgrim-cinder': {
+    id: 'ash-pilgrim-cinder',
+    name: 'Ash Pilgrim Cinder',
+    kind: 'quest',
+    rarity: 'rare',
+    description: 'A warm cinder taken from the Ash Road Revenant. Ash Hermit Yara uses it to quiet false pilgrim omens.',
+    icon: 'magic',
+    imagePath: '/assets/icons/magic.png',
+  },
+  'forged-mirror-writ': {
+    id: 'forged-mirror-writ',
+    name: 'Forged Mirror Writ',
+    kind: 'quest',
+    rarity: 'rare',
+    description: 'A glass-stamped counterfeit of Blackwater law. Gate Warden Sable needs it burned before the gate learns the false seal.',
+    icon: 'magic',
+    imagePath: '/assets/icons/magic.png',
+  },
+  'cracked-synod-bell': {
+    id: 'cracked-synod-bell',
+    name: 'Cracked Synod Bell',
+    kind: 'quest',
+    rarity: 'rare',
+    description: 'A cracked candle-synod bell recovered from the Reclaimer. Bridge Bell Monks mute it so key fragments stop answering false rings.',
     icon: 'magic',
     imagePath: '/assets/icons/magic.png',
   },
@@ -1780,8 +1811,8 @@ export function getCityQuestStatus(
 export function acceptCityQuest(questId: string, townName: string): { success: boolean; error?: string } {
   const currentUser = getCurrentUser();
   if (!currentUser) return { success: false, error: 'Not logged in.' };
-  const unlock = requireMultiplayerUnlock('city-contracts', currentUser);
-  if (!unlock.allowed) return { success: false, error: unlock.error };
+  const unlockDenied = multiplayerUnlockActionDenied('city-contracts', currentUser);
+  if (unlockDenied) return unlockDenied;
 
   const claimedStoryQuestIds = (currentUser.storyQuests || [])
     .filter(progress => progress.claimed)
@@ -2942,8 +2973,6 @@ export function removeFriend(username: string): { success: boolean; message?: st
 export function invitePlayerToParty(targetUsername: string): { success: boolean; message?: string; error?: string } {
   const current = getCurrentUser();
   if (!current) return { success: false, error: 'Login required.' };
-  const unlock = requireMultiplayerUnlock('party', current);
-  if (!unlock.allowed) return { success: false, error: unlock.error };
 
   const users = reconcileExpiredSocialRequests(getUsers());
   const currentIndex = findUserIndex(users, current.username);
@@ -2951,10 +2980,8 @@ export function invitePlayerToParty(targetUsername: string): { success: boolean;
   if (currentIndex === -1 || targetIndex === -1) return { success: false, error: 'Player not found.' };
 
   const target = users[targetIndex];
-  const targetUnlock = requireMultiplayerUnlock('party', target);
-  if (!targetUnlock.allowed) {
-    return { success: false, error: `${target.username} must reach level 5 before joining a party.` };
-  }
+  const partyUnlock = gatePartyInviteUnlocks(current, target, target.username);
+  if (!partyUnlock.allowed) return { success: false, error: partyUnlock.error };
   if (normalizeUsername(target.username) === normalizeUsername(current.username)) {
     return { success: false, error: 'You are already in your party.' };
   }
@@ -3020,8 +3047,8 @@ export function invitePlayerToParty(targetUsername: string): { success: boolean;
 export function acceptPartyInvite(requestId?: string): { success: boolean; message?: string; error?: string } {
   const current = getCurrentUser();
   if (!current) return { success: false, error: 'Login required.' };
-  const unlock = requireMultiplayerUnlock('party', current);
-  if (!unlock.allowed) return { success: false, error: unlock.error };
+  const unlockDenied = multiplayerUnlockActionDenied('party', current);
+  if (unlockDenied) return unlockDenied;
 
   const users = reconcileExpiredSocialRequests(getUsers());
   const currentIndex = findUserIndex(users, current.username);
@@ -5080,8 +5107,8 @@ export function addEquipmentSocketBonus(equipmentId: string): {
 } {
   const currentUser = getCurrentUser();
   if (!currentUser) return { success: false, error: 'Not logged in.' };
-  const unlock = requireMultiplayerUnlock('gear-upgrades', currentUser);
-  if (!unlock.allowed) return { success: false, error: unlock.error };
+  const unlockDenied = multiplayerUnlockActionDenied('gear-upgrades', currentUser);
+  if (unlockDenied) return unlockDenied;
 
   const equipment = (currentUser.equipment || []).find(item => item.id === equipmentId);
   if (!equipment) return { success: false, error: 'Equipment not found.' };
@@ -5127,8 +5154,8 @@ export function upgradeEquipmentSocketBonus(equipmentId: string, bonusId: string
 } {
   const currentUser = getCurrentUser();
   if (!currentUser) return { success: false, error: 'Not logged in.' };
-  const unlock = requireMultiplayerUnlock('gear-upgrades', currentUser);
-  if (!unlock.allowed) return { success: false, error: unlock.error };
+  const unlockDenied = multiplayerUnlockActionDenied('gear-upgrades', currentUser);
+  if (unlockDenied) return unlockDenied;
 
   const equipment = (currentUser.equipment || []).find(item => item.id === equipmentId);
   if (!equipment) return { success: false, error: 'Equipment not found.' };
@@ -8095,6 +8122,28 @@ export const RANDOM_RUN_BALANCE = {
   currentContentBosses: 8,
   maxBankedCapLevels: 2,
 } as const;
+
+/** Piecewise pressure for B1 soft start → mid check → late payoff (0–1). */
+export function getRandomRunBattlePressure(battleNumber: number, battleCount: number): number {
+  if (battleCount <= 1) return 1;
+  const progress = (battleNumber - 1) / Math.max(1, battleCount - 1);
+  if (progress <= 0.08) return 0.12;
+  if (progress <= 0.35) return 0.28 + progress * 0.35;
+  if (progress <= 0.7) return 0.45 + progress * 0.35;
+  return Math.min(1, 0.72 + progress * 0.28);
+}
+
+export function getRandomRunScaledBattleLevel(playerLevel: number, battleNumber: number, battleCount: number, extra = 0): number {
+  const effectiveLevel = getRandomRunEffectiveLevel(playerLevel);
+  const pressure = getRandomRunBattlePressure(battleNumber, battleCount);
+  const level = 1
+    + Math.round((effectiveLevel - 1) * 0.55)
+    + Math.round((RANDOM_RUN_BALANCE.enemyLevelCap - 1) * pressure * 0.35)
+    + extra
+    + (battleNumber <= 1 ? -1 : 0);
+
+  return Math.max(1, Math.min(RANDOM_RUN_BALANCE.enemyLevelCap, level));
+}
 
 export function getRandomRunEffectiveLevel(level: number): number {
   return Math.max(1, Math.min(RANDOM_RUN_BALANCE.levelCap, Math.floor(toFiniteNumber(level, 1))));

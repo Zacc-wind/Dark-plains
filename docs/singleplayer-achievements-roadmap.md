@@ -45,7 +45,7 @@ Build a dedicated singleplayer progression layer on top of random runs, separate
 
 ## Phase 5 — Reward Hooks
 - [ ] Optional cosmetic titles for commander in run lobby.
-- [ ] Optional run-start blessings unlocked by achievements (small meta bonuses only).
+- [x] Optional run-start blessings unlocked by achievements (small meta bonuses only).
 - [x] Export achievement summary to run completion report screen, including newly completed deeds and total claimable run XP.
 
 ## Phase 5B - Achievement-Driven Discovery
@@ -72,5 +72,5 @@ Build a dedicated singleplayer progression layer on top of random runs, separate
 - [x] Add four run lengths with clear difficulty/reward scaling, including a five-fight quick road, with Long Road gated to run level 5.
 - [x] Give each player-model commander an initial run-only stat passive identity: tank/templar, mage, healer, damage, skirmish, or durable mixed.
 - [x] Add first commander unit-family synergies so commander choices buff matching run units.
-- [ ] Add deeper commander special identities where useful: bleed, movement, sustain, or unique combat triggers.
+- [x] Add deeper commander special identities where useful: bleed, movement, sustain, or unique combat triggers.
 - [x] Add first-run tutorial steps for commander choice, run length, and passive identity once these choices exist.

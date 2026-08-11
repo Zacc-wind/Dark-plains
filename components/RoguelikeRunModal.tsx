@@ -18,6 +18,7 @@ import {
   WorldEnemy,
   getPlayerModelAsset,
   markWorldEnemyDefeated,
+  type BattleCombatTraits,
 } from '@/lib/battle';
 import { emitCompletionNotice, subscribeCompletionOverlayIdle, type CompletionRewardLine } from '@/lib/completionEvents';
 import { emitFxEvent } from '@/lib/fxEvents';
@@ -70,6 +71,7 @@ import {
   getRandomRunEffectiveLevel,
   getRandomRunExpNeeded,
   getRandomRunProgressRatio,
+  getRandomRunScaledBattleLevel,
   isMinionInjured,
   isStandaloneMinionTemplate,
   isStandaloneTier1MinionTemplate,
@@ -108,6 +110,22 @@ import {
   type RunMilestoneView,
 } from '@/lib/runMilestones';
 import {
+  getAvailableRunStartBlessings,
+  getRunStartBlessing,
+  getRunStartBlessingEffects,
+  normalizeRunStartBlessingId,
+  type RunStartBlessingId,
+} from '@/lib/runBlessings';
+import {
+  applyRunCommanderProfileStats,
+  applyRunCommanderUnitBonusToStack,
+  getRunCommanderCombatTraits,
+  getRunCommanderProfile,
+  mergeBattleCombatTraits,
+  pickRunCommanderDraftChoices,
+  type RunCommanderProfile,
+} from '@/lib/runCommanders';
+import {
   getRunDiscoveryViews,
   normalizeRunDiscoveryState,
   RUN_STARTER_SPELL_IDS,
@@ -142,6 +160,7 @@ type RunLengthId = 'quick' | 'short' | 'standard' | 'long';
 interface SingleplayerRunSetup {
   commanderModel: PlayerModelNumber;
   runLength: RunLengthId;
+  blessingId?: RunStartBlessingId;
 }
 
 interface RunLengthOption {
@@ -153,25 +172,6 @@ interface RunLengthOption {
   minRunLevel: number;
   enemyLevelOffset: number;
   rewardMultiplier: number;
-}
-
-interface RunCommanderProfile {
-  model: PlayerModelNumber;
-  label: string;
-  title: string;
-  description: string;
-  passiveName: string;
-  passiveSummary: string;
-  statBonus: Partial<Pick<CharacterStats, 'armyPower' | 'defensivePower' | 'morale' | 'spellPower' | 'maxHealth' | 'health'>>;
-  unitFocus: RunCommanderUnitFocus;
-}
-
-interface RunCommanderUnitFocus {
-  label: string;
-  summary: string;
-  class?: MinionClass;
-  roleKeywords?: string[];
-  statBonus: Partial<Pick<MinionStats, 'attack' | 'defense' | 'magic' | 'healing' | 'health' | 'movement' | 'range'>>;
 }
 
 const DEFAULT_RUN_SETUP: SingleplayerRunSetup = {
@@ -222,103 +222,6 @@ const RUN_LENGTH_OPTIONS: RunLengthOption[] = [
     rewardMultiplier: 1.25,
   },
 ];
-
-const RUN_COMMANDER_PROFILES: RunCommanderProfile[] = [
-  {
-    model: 1,
-    label: 'Templar',
-    title: 'Iron Marshal',
-    description: 'Best for shielded warbands and knight-heavy drafts.',
-    passiveName: 'Shield Oath',
-    passiveSummary: '+1 army ward, +10 commander health, and templars gain ward and health.',
-    statBonus: { defensivePower: 1, maxHealth: 10, health: 10 },
-    unitFocus: {
-      label: 'Templar Line',
-      summary: 'Templars gain +2 ward and +6 health.',
-      class: 'templar',
-      statBonus: { defense: 2, health: 6 },
-    },
-  },
-  {
-    model: 2,
-    label: 'Arcanist',
-    title: 'Moon Arcanist',
-    description: 'Best for spell pressure and commander damage.',
-    passiveName: 'Moon Channel',
-    passiveSummary: '+2 spell power, and wizards gain stronger magic.',
-    statBonus: { spellPower: 2 },
-    unitFocus: {
-      label: 'Wizard Circle',
-      summary: 'Wizards gain +2 magic.',
-      class: 'wizard',
-      statBonus: { magic: 2 },
-    },
-  },
-  {
-    model: 3,
-    label: 'Prior',
-    title: 'Candle Prior',
-    description: 'Best for defensive healer-centered runs.',
-    passiveName: 'Candle Discipline',
-    passiveSummary: '+1 ward, +1 morale, +6 commander health, and priests heal better.',
-    statBonus: { defensivePower: 1, morale: 1, maxHealth: 6, health: 6 },
-    unitFocus: {
-      label: 'Priest Choir',
-      summary: 'Priests gain +2 healing and +4 health.',
-      class: 'priest',
-      statBonus: { healing: 2, health: 4 },
-    },
-  },
-  {
-    model: 4,
-    label: 'Vanguard',
-    title: 'Blood Vanguard',
-    description: 'Best for aggressive melee drafts.',
-    passiveName: 'Red Advance',
-    passiveSummary: '+2 army damage, and knight frontliners hit harder.',
-    statBonus: { armyPower: 2 },
-    unitFocus: {
-      label: 'Knight Charge',
-      summary: 'Knights gain +2 attack.',
-      class: 'knight',
-      statBonus: { attack: 2 },
-    },
-  },
-  {
-    model: 5,
-    label: 'Duelist',
-    title: 'Road Duelist',
-    description: 'Best for fast turns and skirmisher-heavy drafts.',
-    passiveName: 'Quick March',
-    passiveSummary: '+1 morale, +1 army damage, and skirmishers move faster.',
-    statBonus: { morale: 1, armyPower: 1 },
-    unitFocus: {
-      label: 'Skirmisher Steps',
-      summary: 'Assassins and skirmishers gain +1 movement and +1 attack.',
-      roleKeywords: ['assassin', 'skirmisher', 'wing-step'],
-      statBonus: { movement: 1, attack: 1 },
-    },
-  },
-  {
-    model: 6,
-    label: 'Warden',
-    title: 'Grave Warden',
-    description: 'Best for durable mixed warbands.',
-    passiveName: 'Grave Hold',
-    passiveSummary: '+1 damage, +1 ward, +8 commander health, and guards hold longer.',
-    statBonus: { armyPower: 1, defensivePower: 1, maxHealth: 8, health: 8 },
-    unitFocus: {
-      label: 'Grave Guard',
-      summary: 'Guard and tank units gain +1 ward and +5 health.',
-      roleKeywords: ['guard', 'tank', 'fighter'],
-      statBonus: { defense: 1, health: 5 },
-    },
-  },
-];
-
-function pickRunCommanderDraftChoices(count = 4): RunCommanderProfile[] {
-  return shuffle(RUN_COMMANDER_PROFILES).slice(0, Math.min(count, RUN_COMMANDER_PROFILES.length));
-}
 
 interface RunUnit {
   stack: MinionStack;
@@ -408,9 +311,14 @@ interface RunSession {
   commanderModel: PlayerModelNumber;
   commanderPassiveName?: string;
   commanderPassiveSummary?: string;
+  commanderSpecialName?: string;
+  commanderSpecialSummary?: string;
   runLengthId?: RunLengthId;
   runLengthName?: string;
   runLengthRewardMultiplier?: number;
+  startBlessingId?: RunStartBlessingId;
+  startBlessingName?: string;
+  firstBattleMoveBonus?: number;
   minions: RunUnit[];
   draftChoices: MinionTemplate[];
   wins: number;
@@ -1073,7 +981,8 @@ function RandomRunLobby({
 }) {
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [selectedRunLength, setSelectedRunLength] = useState<RunLengthId>('standard');
-  const [setupPicker, setSetupPicker] = useState<'length' | null>(null);
+  const [selectedBlessingId, setSelectedBlessingId] = useState<RunStartBlessingId | null>(null);
+  const [setupPicker, setSetupPicker] = useState<'length' | 'blessing' | null>(null);
   const [commanderDraftChoices, setCommanderDraftChoices] = useState<RunCommanderProfile[] | null>(null);
   const [previewBoss] = useState(() => getRandomLobbyBossPreview());
   const user = getCurrentUser();
@@ -1085,9 +994,18 @@ function RandomRunLobby({
   const permanent = runState.permanentStats;
   const activeRunReady = Boolean(activeSession && !activeSession.rewardClaimed && activeSession.phase !== 'complete');
   const selectedLength = getRunLengthOption(selectedRunLength);
+  const blessingOptions = getAvailableRunStartBlessings(runState);
+  const selectedBlessing = selectedBlessingId
+    ? blessingOptions.find(option => option.id === selectedBlessingId && option.unlocked)
+    : undefined;
+  const unlockedBlessingCount = blessingOptions.filter(option => option.unlocked).length;
   const startCommanderDraftRun = (profile: RunCommanderProfile) => {
     setCommanderDraftChoices(null);
-    onStart({ commanderModel: profile.model, runLength: selectedRunLength });
+    onStart({
+      commanderModel: profile.model,
+      runLength: selectedRunLength,
+      blessingId: selectedBlessing?.id,
+    });
   };
   const upgradeRows = [
     { label: 'Army', value: `+${permanent.armyPower}` },
@@ -1135,7 +1053,7 @@ function RandomRunLobby({
           </button>
             </div>
 
-            <div className={`random-run-setup-summary-cards random-run-setup-summary-cards-single mt-5 ${tutorialStepId === 'run-setup' ? 'random-run-setup-summary-cards-tutorial' : ''}`}>
+            <div className={`random-run-setup-summary-cards mt-5 ${tutorialStepId === 'run-setup' ? 'random-run-setup-summary-cards-tutorial' : ''}`}>
               <button
                 type="button"
                 className="random-run-setup-summary-card"
@@ -1150,6 +1068,33 @@ function RandomRunLobby({
                   <span>{selectedLength.fixedBattles ? `${selectedLength.fixedBattles} fights` : 'Scaled to run level'}</span>
                 </span>
               </button>
+              <button
+                type="button"
+                className="random-run-setup-summary-card"
+                onClick={() => setSetupPicker('blessing')}
+              >
+                <span className="random-run-setup-summary-icon relative overflow-hidden">
+                  <Image
+                    src={selectedBlessing?.iconPath || '/assets/icons/loot-chest.png'}
+                    alt=""
+                    fill
+                    sizes="64px"
+                    className="object-contain p-1"
+                    unoptimized
+                  />
+                </span>
+                <span className="random-run-setup-summary-copy">
+                  <span className="arcane-label">Run Blessing</span>
+                  <strong>{selectedBlessing?.name || 'None'}</strong>
+                  <span>
+                    {selectedBlessing
+                      ? selectedBlessing.description
+                      : unlockedBlessingCount > 0
+                        ? `${unlockedBlessingCount} unlocked`
+                        : 'Earn milestones to unlock'}
+                  </span>
+                </span>
+              </button>
             </div>
           </div>
         </div>
@@ -1160,39 +1105,84 @@ function RandomRunLobby({
               <div className="random-run-setup-picker-head">
                 <div>
                   <span className="arcane-label">Run Setup</span>
-                  <h3 className="fantasy-heading">Choose Road Length</h3>
+                  <h3 className="fantasy-heading">
+                    {setupPicker === 'blessing' ? 'Choose Run Blessing' : 'Choose Road Length'}
+                  </h3>
                 </div>
                 <button type="button" className="ui-button rounded px-3 py-2 text-xs font-black" onClick={() => setSetupPicker(null)}>
                   Close
                 </button>
               </div>
 
-              <div className={`random-run-length-choice-grid ${tutorialStepId === 'run-setup' ? 'random-run-length-choice-row-tutorial' : ''}`}>
-                {RUN_LENGTH_OPTIONS.map(option => {
-                  const selected = option.id === selectedRunLength;
-                  const locked = runState.runLevel < option.minRunLevel;
-                  return (
-                    <button
-                      key={option.id}
-                      type="button"
-                      className={`random-run-length-choice-card ${selected ? 'random-run-length-choice-card-selected' : ''} ${locked ? 'random-run-length-choice-card-locked' : ''}`}
-                      disabled={locked}
-                      aria-disabled={locked}
-                      onClick={() => {
-                        if (locked) return;
-                        setSelectedRunLength(option.id);
-                        setSetupPicker(null);
-                      }}
-                    >
-                      <span className="random-run-length-choice-card-label">{option.label}</span>
-                      <strong>{option.title}</strong>
-                      <span>{option.fixedBattles ? `${option.fixedBattles} fights` : 'Scaled road'}</span>
-                      <em>{locked ? `Unlocks at run Lv ${option.minRunLevel}` : option.rewardMultiplier === 1 ? 'Normal rewards' : `${Math.round(option.rewardMultiplier * 100)}% run rewards`}</em>
-                      <p>{option.description}</p>
-                    </button>
-                  );
-                })}
-              </div>
+              {setupPicker === 'length' ? (
+                <div className={`random-run-length-choice-grid ${tutorialStepId === 'run-setup' ? 'random-run-length-choice-row-tutorial' : ''}`}>
+                  {RUN_LENGTH_OPTIONS.map(option => {
+                    const selected = option.id === selectedRunLength;
+                    const locked = runState.runLevel < option.minRunLevel;
+                    return (
+                      <button
+                        key={option.id}
+                        type="button"
+                        className={`random-run-length-choice-card ${selected ? 'random-run-length-choice-card-selected' : ''} ${locked ? 'random-run-length-choice-card-locked' : ''}`}
+                        disabled={locked}
+                        aria-disabled={locked}
+                        onClick={() => {
+                          if (locked) return;
+                          setSelectedRunLength(option.id);
+                          setSetupPicker(null);
+                        }}
+                      >
+                        <span className="random-run-length-choice-card-label">{option.label}</span>
+                        <strong>{option.title}</strong>
+                        <span>{option.fixedBattles ? `${option.fixedBattles} fights` : 'Scaled road'}</span>
+                        <em>{locked ? `Unlocks at run Lv ${option.minRunLevel}` : option.rewardMultiplier === 1 ? 'Normal rewards' : `${Math.round(option.rewardMultiplier * 100)}% run rewards`}</em>
+                        <p>{option.description}</p>
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="random-run-length-choice-grid">
+                  <button
+                    type="button"
+                    className={`random-run-length-choice-card ${!selectedBlessingId ? 'random-run-length-choice-card-selected' : ''}`}
+                    onClick={() => {
+                      setSelectedBlessingId(null);
+                      setSetupPicker(null);
+                    }}
+                  >
+                    <span className="random-run-length-choice-card-label">Skip</span>
+                    <strong>No Blessing</strong>
+                    <span>Start without a meta bonus</span>
+                    <em>Always available</em>
+                    <p>Milestone blessings are optional. You can still earn unlocks during the run.</p>
+                  </button>
+                  {blessingOptions.map(option => {
+                    const selected = option.id === selectedBlessingId;
+                    const locked = !option.unlocked;
+                    return (
+                      <button
+                        key={option.id}
+                        type="button"
+                        className={`random-run-length-choice-card ${selected ? 'random-run-length-choice-card-selected' : ''} ${locked ? 'random-run-length-choice-card-locked' : ''}`}
+                        disabled={locked}
+                        aria-disabled={locked}
+                        onClick={() => {
+                          if (locked) return;
+                          setSelectedBlessingId(option.id);
+                          setSetupPicker(null);
+                        }}
+                      >
+                        <span className="random-run-length-choice-card-label">Blessing</span>
+                        <strong>{option.name}</strong>
+                        <span>{option.description}</span>
+                        <em>{locked ? option.unlockHint : 'Unlocked'}</em>
+                        <p>{locked ? `Requires: ${option.unlockHint}` : option.description}</p>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -1211,6 +1201,7 @@ function RandomRunLobby({
                     <span>{selectedLength.title}</span>
                     <span>{selectedLength.fixedBattles ? `${selectedLength.fixedBattles} fights` : 'Scaled road'}</span>
                     <span>{Math.round(selectedLength.rewardMultiplier * 100)}% run rewards</span>
+                    <span>{selectedBlessing?.name || 'No blessing'}</span>
                   </div>
                 </div>
 
@@ -1261,6 +1252,11 @@ function RandomRunLobby({
                         <strong className="fantasy-heading block">{profile.title}</strong>
                         <span className="random-run-commander-passive">{profile.passiveName}</span>
                         <span className="ui-muted block text-xs font-bold">{profile.passiveSummary}</span>
+                        {profile.specialSummary ? (
+                          <span className="random-run-commander-special mt-1 block text-xs font-bold">
+                            {profile.specialName}: {profile.specialSummary}
+                          </span>
+                        ) : null}
                         <span className="ui-pill mt-1 inline-flex justify-center rounded border px-2 py-1 text-[10px] font-black uppercase">
                           {profile.unitFocus.summary}
                         </span>
@@ -1437,7 +1433,10 @@ export function DungeonRunModal({ dungeon, currentUser, now, onClose }: DungeonR
 }
 
 export function EncounterRunModal({ enemy, currentUser, onClose }: EncounterRunModalProps) {
-  const [session, setSession] = useState<RunSession | null>(() => currentUser ? createEncounterSession(currentUser, enemy) : null);
+  const [session, setSession] = useState<RunSession | null>(() => {
+    if (!currentUser || enemy.spawnKind === 'coop-boss') return null;
+    return createEncounterSession(currentUser, enemy);
+  });
 
   if (!session) return null;
 
@@ -1945,6 +1944,7 @@ function RunController({
         playerStats={session.stats}
         playerModelNumber={session.commanderModel}
         playerFormation={session.formation}
+        playerCombatTraits={getSessionPlayerCombatTraits(session)}
         availableSpellIds={session.spellIds}
         persistentResults={false}
         contextLabel={getRunBattleContextLabel(session)}
@@ -4691,6 +4691,7 @@ function hydrateRunSession(
   });
   const restoredCommanderProfile = getRunCommanderProfile(restoredSetup.commanderModel);
   const restoredRunLength = getRunLengthOption(restoredSetup.runLength);
+  const restoredBlessing = getRunStartBlessing(storedSession.startBlessingId);
 
   return {
     ...session,
@@ -4699,9 +4700,18 @@ function hydrateRunSession(
     commanderModel: restoredSetup.commanderModel,
     commanderPassiveName: storedSession.commanderPassiveName || restoredCommanderProfile.passiveName,
     commanderPassiveSummary: storedSession.commanderPassiveSummary || restoredCommanderProfile.passiveSummary,
+    commanderSpecialName: storedSession.commanderSpecialName || restoredCommanderProfile.specialName,
+    commanderSpecialSummary: storedSession.commanderSpecialSummary || restoredCommanderProfile.specialSummary,
     runLengthId: restoredSetup.runLength,
     runLengthName: storedSession.runLengthName || restoredRunLength.title,
     runLengthRewardMultiplier: storedSession.runLengthRewardMultiplier || restoredRunLength.rewardMultiplier,
+    startBlessingId: restoredBlessing?.id,
+    startBlessingName: storedSession.startBlessingName || restoredBlessing?.name,
+    firstBattleMoveBonus: typeof storedSession.firstBattleMoveBonus === 'number'
+      ? storedSession.firstBattleMoveBonus
+      : restoredBlessing
+        ? (getRunStartBlessingEffects(restoredBlessing.id).firstBattleMoveBonus || 0)
+        : 0,
     targetBattles: refreshStoredRoad
       ? normalizeRandomRunBattleCount(resolvedChallenge.targetBattles)
       : normalizeRandomRunBattleCount(session.targetBattles),
@@ -4815,10 +4825,6 @@ function getRunLengthOption(runLength: RunLengthId | undefined): RunLengthOption
     || RUN_LENGTH_OPTIONS[0];
 }
 
-function getRunCommanderProfile(model: number | undefined): RunCommanderProfile {
-  return RUN_COMMANDER_PROFILES.find(profile => profile.model === model) || RUN_COMMANDER_PROFILES[2];
-}
-
 function normalizeRunSetup(user?: User | null, setup?: Partial<SingleplayerRunSetup>): SingleplayerRunSetup {
   const commanderModel = [1, 2, 3, 4, 5, 6].includes(setup?.commanderModel || 0)
     ? setup!.commanderModel as PlayerModelNumber
@@ -4829,8 +4835,17 @@ function normalizeRunSetup(user?: User | null, setup?: Partial<SingleplayerRunSe
   const runLength = requestedLength && runState.runLevel >= requestedLength.minRunLevel
     ? requestedLength.id
     : fallbackLength.id;
+  const blessingId = normalizeRunStartBlessingId(runState, setup?.blessingId);
 
-  return { commanderModel, runLength };
+  return { commanderModel, runLength, blessingId };
+}
+
+function getSessionPlayerCombatTraits(session: RunSession): BattleCombatTraits {
+  const profileTraits = getRunCommanderCombatTraits(getRunCommanderProfile(session.commanderModel));
+  const firstBattleTraits: BattleCombatTraits | undefined = session.wins === 0 && (session.firstBattleMoveBonus || 0) > 0
+    ? { moveBonus: session.firstBattleMoveBonus }
+    : undefined;
+  return mergeBattleCombatTraits(profileTraits, firstBattleTraits);
 }
 
 function getRandomRunTargetBattleCount(runLevel: number): number {
@@ -4859,41 +4874,6 @@ function getRunLengthBattleCount(runLevel: number, option: RunLengthOption, targ
   return normalizeRandomRunBattleCount(baseBattleCount + targetBattleBonus);
 }
 
-function applyRunCommanderProfileStats(stats: CharacterStats, profile: RunCommanderProfile): CharacterStats {
-  const maxHealth = stats.maxHealth + (profile.statBonus.maxHealth || 0);
-  return {
-    ...stats,
-    armyPower: stats.armyPower + (profile.statBonus.armyPower || 0),
-    defensivePower: stats.defensivePower + (profile.statBonus.defensivePower || 0),
-    morale: stats.morale + (profile.statBonus.morale || 0),
-    spellPower: stats.spellPower + (profile.statBonus.spellPower || 0),
-    maxHealth,
-    health: Math.min(maxHealth, stats.health + (profile.statBonus.maxHealth || 0) + (profile.statBonus.health || 0)),
-  };
-}
-
-function doesCommanderUnitFocusApply(template: MinionTemplate, focus: RunCommanderUnitFocus): boolean {
-  if (focus.class && template.class === focus.class) return true;
-  if (focus.roleKeywords?.some(keyword => template.role.toLowerCase().includes(keyword))) return true;
-  return false;
-}
-
-function applyRunCommanderUnitBonusToStack(stack: MinionStack, profile: RunCommanderProfile): MinionStack {
-  const template = getMinionTemplate(stack.templateId);
-  if (!template || !doesCommanderUnitFocusApply(template, profile.unitFocus)) {
-    const { runStatBonus: _runStatBonus, runBonusLabel: _runBonusLabel, ...cleanStack } = stack;
-    void _runStatBonus;
-    void _runBonusLabel;
-    return cleanStack;
-  }
-
-  return {
-    ...stack,
-    runStatBonus: profile.unitFocus.statBonus,
-    runBonusLabel: profile.unitFocus.label,
-  };
-}
-
 function applyRunCommanderUnitBonusesToUnits(units: RunUnit[], profile: RunCommanderProfile): RunUnit[] {
   return units.map(unit => ({
     ...unit,
@@ -4903,17 +4883,6 @@ function applyRunCommanderUnitBonusesToUnits(units: RunUnit[], profile: RunComma
 
 function applyRunCommanderUnitBonusForSession(session: RunSession, stack: MinionStack): MinionStack {
   return applyRunCommanderUnitBonusToStack(stack, getRunCommanderProfile(session.commanderModel));
-}
-
-function getRandomRunScaledBattleLevel(playerLevel: number, battleNumber: number, battleCount: number, extra = 0): number {
-  const effectiveLevel = getRandomRunEffectiveLevel(playerLevel);
-  const progress = battleCount <= 1 ? 1 : (battleNumber - 1) / Math.max(1, battleCount - 1);
-  const level = 1
-    + Math.round((effectiveLevel - 1) * 0.55)
-    + Math.round((RANDOM_RUN_BALANCE.enemyLevelCap - 1) * progress * 0.35)
-    + extra;
-
-  return clamp(level, 1, RANDOM_RUN_BALANCE.enemyLevelCap);
 }
 
 function createRandomRunChallenge(user?: User, setup?: Partial<SingleplayerRunSetup>): DailyRunChallenge {
@@ -4988,24 +4957,40 @@ function createDailySession(user: User, dailyChallenge = createRandomRunChalleng
   const initialDiscoveryOfferIds = discovery.pendingOffers
     .filter(offer => offer.kind === 'unit' && draftChoices.some(choice => choice.templateId === offer.contentId))
     .map(offer => offer.id);
+  const startBlessing = getRunStartBlessing(runSetup.blessingId);
+  const blessingEffects = startBlessing ? getRunStartBlessingEffects(startBlessing.id) : {};
+  const challengeStats = applyDailyChallengeStats(cloneRunStats(runStats), dailyChallenge);
+  const blessedMaxHealth = challengeStats.maxHealth + (blessingEffects.commanderHealth || 0);
+  const blessedStats: CharacterStats = {
+    ...challengeStats,
+    armyPower: challengeStats.armyPower + (blessingEffects.armyPower || 0),
+    defensivePower: challengeStats.defensivePower + (blessingEffects.defensivePower || 0),
+    maxHealth: blessedMaxHealth,
+    health: Math.min(blessedMaxHealth, challengeStats.health + (blessingEffects.commanderHealth || 0)),
+  };
 
   return {
     id: `random-run-${Date.now()}-${Math.random().toString(16).slice(2)}`,
     mode: 'daily',
     title: dailyChallenge.name,
     phase: 'draft',
-    stats: applyDailyChallengeStats(cloneRunStats(runStats), dailyChallenge),
+    stats: blessedStats,
     commanderModel: runSetup.commanderModel,
     commanderPassiveName: commanderProfile.passiveName,
     commanderPassiveSummary: commanderProfile.passiveSummary,
+    commanderSpecialName: commanderProfile.specialName,
+    commanderSpecialSummary: commanderProfile.specialSummary,
     runLengthId: runSetup.runLength,
     runLengthName: runLength.title,
     runLengthRewardMultiplier: runLength.rewardMultiplier,
+    startBlessingId: startBlessing?.id,
+    startBlessingName: startBlessing?.name,
+    firstBattleMoveBonus: blessingEffects.firstBattleMoveBonus || 0,
     minions: [],
     draftChoices,
     wins: 0,
     targetBattles: normalizeRandomRunBattleCount(dailyChallenge.targetBattles),
-    runGold: 0,
+    runGold: blessingEffects.runGold || 0,
     activeEnemy: null,
     formation: {},
     spellIds,
@@ -5020,7 +5005,7 @@ function createDailySession(user: User, dailyChallenge = createRandomRunChalleng
     shopOffers: {},
     shopRerollsRemaining: RUN_SHOP_REROLL_COUNT + progressionUnlocks.shopRerollBonus,
     blessingRerollsRemaining: RUN_BLESSING_REROLL_COUNT,
-    omenRerollsRemaining: RUN_OMEN_REROLL_COUNT + progressionUnlocks.omenRerollBonus,
+    omenRerollsRemaining: RUN_OMEN_REROLL_COUNT + progressionUnlocks.omenRerollBonus + (blessingEffects.omenRerollBonus || 0),
     pendingPositiveOmen: false,
     pendingRunCelebrations: [],
     startedAt: Date.now(),
@@ -5121,6 +5106,9 @@ function createDungeonSession(user: User, dungeon: WorldDungeon): RunSession {
 }
 
 function createEncounterSession(user: User, enemy: WorldEnemy): RunSession {
+  if (enemy.spawnKind === 'coop-boss') {
+    throw new Error('Co-op raid bosses cannot start as solo encounter roads. Prepare the duo raid instead.');
+  }
   const startingStacks = createRosterRunUnits(user, `loaned-encounter-${enemy.id}`);
   const nodes = createEncounterRunNodes(enemy);
   const spellIds = (user.equippedSpellIds || ['arcane-bolt', 'sanctified-mend', 'ember-dart', 'warding-prayer']).slice(0, 4);

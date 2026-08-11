@@ -953,6 +953,8 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
       return;
     }
 
+    playGameSound('quest.claim', { throttleMs: 140 });
+
     const rewardNames = [
       ...(result.rewards || []).map(item => item.name),
       ...(result.minions || []).map(minion => {
@@ -985,6 +987,10 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
       return;
     }
 
+    playGameSound('quest.claim', { throttleMs: 140 });
+    if (result.rewards?.gold) playGameSound('inventory.goldGain', { throttleMs: 140 });
+    if (result.rewards?.rareGems) playGameSound('inventory.gemGain', { throttleMs: 140 });
+
     setTemporaryNotice('City contract claimed.');
     emitCompletionNotice({
       id: `city-quest-completion-${questId}-${Date.now()}`,
@@ -1005,6 +1011,10 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
       setTemporaryNotice(result.error || 'Could not claim story reward.');
       return;
     }
+
+    playGameSound('quest.claim', { throttleMs: 140 });
+    if (result.rewards?.gold) playGameSound('inventory.goldGain', { throttleMs: 140 });
+    if (result.rewards?.rareGems) playGameSound('inventory.gemGain', { throttleMs: 140 });
 
     const spellNames = (result.rewards?.spellIds || [])
       .map(spellId => BATTLE_SPELLS.find(spell => spell.id === spellId)?.name)

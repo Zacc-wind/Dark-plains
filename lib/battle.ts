@@ -26,6 +26,7 @@ import {
 } from './multiplayerFirstBanner';
 import { getActiveDrownedMoonwellBoss } from './multiplayerDrownedMoonwell';
 import { getActiveMoonwellSideBoss } from './multiplayerMoonwellSides';
+import { getActiveLaterBandSideBoss } from './multiplayerLaterBandSides';
 import { getActiveBrokenCrownBoss } from './multiplayerBrokenCrown';
 import { getActiveGlassRoadBoss } from './multiplayerGlassRoad';
 import { getActiveCandleKeyBoss } from './multiplayerCandleKey';
@@ -130,6 +131,12 @@ export interface BattleRatingPreview {
   enemyUnits: number;
 }
 
+export interface BattleCombatTraits {
+  bleedOnHit?: boolean;
+  sustainHealOnKill?: number;
+  moveBonus?: number;
+}
+
 export interface BattleUnit {
   id: string;
   side: BattleSide;
@@ -158,6 +165,7 @@ export interface BattleUnit {
   healsReceived?: number;
   supportAbilityUsed?: boolean;
   statusEffects?: BattleUnitStatusEffects;
+  combatTraits?: BattleCombatTraits;
   slowDebuff?: {
     movementPenalty: number;
     speedPenalty: number;
@@ -307,6 +315,7 @@ export interface CreateNpcBattleOptions {
   playerModelNumber?: number;
   suppressRecruitOffer?: boolean;
   playerFormation?: Record<string, BoardCell>;
+  playerCombatTraits?: BattleCombatTraits;
 }
 
 export interface CreatePvpBattleOptions {
@@ -1089,10 +1098,18 @@ function makeWorldEnemyFromArchetype({
   maxMinions?: number;
 }): WorldEnemy {
   const minionCount = clamp(2 + Math.floor(level / 4), 1, maxMinions);
+  const allowedTemplates = archetype.templates.filter((templateId) => {
+    const tier = getMinionTemplate(templateId)?.tier;
+    if (!tier) return true;
+    if (level <= 3) return tier === 'tier1';
+    if (level <= 5) return tier === 'tier1' || tier === 'tier2';
+    return true;
+  });
+  const templatePool = allowedTemplates.length > 0 ? allowedTemplates : archetype.templates;
   const minions = Array.from({ length: minionCount }, (_, index) => {
     const templateSeed = seed + index * 41;
-    const templateId = archetype.templates[
-      (index + Math.floor(seededRoll(templateSeed) * archetype.templates.length)) % archetype.templates.length
+    const templateId = templatePool[
+      (index + Math.floor(seededRoll(templateSeed) * templatePool.length)) % templatePool.length
     ];
     return makeMinionStack(templateId, `${id}-${index}`, true);
   });
@@ -1344,6 +1361,24 @@ function getMoonwellSideStoryBoss(
   const definition = getActiveMoonwellSideBoss(user);
   if (!definition) return null;
   return spawnNamedStoryBossNearPoi(definition, user, now, occupied, defeatedEnemyIds, { x: 36, y: 28 });
+}
+
+function getLaterBandSideStoryBoss(
+  user: User | null,
+  now: number,
+  occupied: Set<string>,
+  defeatedEnemyIds: Set<string>,
+): WorldEnemy | null {
+  const definition = getActiveLaterBandSideBoss(user);
+  if (!definition) return null;
+  return spawnNamedStoryBossNearPoi(
+    definition,
+    user,
+    now,
+    occupied,
+    defeatedEnemyIds,
+    definition.poiFallback,
+  );
 }
 
 function getBrokenCrownStoryBoss(
@@ -1725,21 +1760,25 @@ export function getNpcEnemiesForUser(user: User | null, now = Date.now()): World
     const storyBoss = getFirstBannerStoryBoss(user, now, occupied, defeatedEnemyIds);
     const moonwellBoss = getDrownedMoonwellStoryBoss(user, now, occupied, defeatedEnemyIds);
     const moonwellSideBoss = getMoonwellSideStoryBoss(user, now, occupied, defeatedEnemyIds);
+    const laterBandSideBoss = getLaterBandSideStoryBoss(user, now, occupied, defeatedEnemyIds);
     const brokenCrownBoss = getBrokenCrownStoryBoss(user, now, occupied, defeatedEnemyIds);
     const glassRoadBoss = getGlassRoadStoryBoss(user, now, occupied, defeatedEnemyIds);
     const candleKeyBoss = getCandleKeyStoryBoss(user, now, occupied, defeatedEnemyIds);
     const ladyInGlassBoss = getLadyInGlassStoryBoss(user, now, occupied, defeatedEnemyIds);
     const regionalThreatBoss = getRegionalThreatBoss(user, now, occupied, defeatedEnemyIds);
+    const coopBosses = getActiveCoopBosses(user, now);
     return [
       ...(storyBoss ? [storyBoss] : []),
       ...(moonwellBoss ? [moonwellBoss] : []),
       ...(moonwellSideBoss ? [moonwellSideBoss] : []),
+      ...(laterBandSideBoss ? [laterBandSideBoss] : []),
       ...(brokenCrownBoss ? [brokenCrownBoss] : []),
       ...(glassRoadBoss ? [glassRoadBoss] : []),
       ...(candleKeyBoss ? [candleKeyBoss] : []),
       ...(ladyInGlassBoss ? [ladyInGlassBoss] : []),
       ...(regionalThreatBoss ? [regionalThreatBoss] : []),
       ...(activeBoss ? [activeBoss] : []),
+      ...coopBosses,
       ...threatEnemies,
     ];
   }
@@ -1812,29 +1851,43 @@ export function getNpcEnemiesForUser(user: User | null, now = Date.now()): World
   const storyBoss = getFirstBannerStoryBoss(user, now, patrolOccupied, defeatedEnemyIds);
   const moonwellBoss = getDrownedMoonwellStoryBoss(user, now, patrolOccupied, defeatedEnemyIds);
   const moonwellSideBoss = getMoonwellSideStoryBoss(user, now, patrolOccupied, defeatedEnemyIds);
+  const laterBandSideBoss = getLaterBandSideStoryBoss(user, now, patrolOccupied, defeatedEnemyIds);
   const brokenCrownBoss = getBrokenCrownStoryBoss(user, now, patrolOccupied, defeatedEnemyIds);
   const glassRoadBoss = getGlassRoadStoryBoss(user, now, patrolOccupied, defeatedEnemyIds);
   const candleKeyBoss = getCandleKeyStoryBoss(user, now, patrolOccupied, defeatedEnemyIds);
   const ladyInGlassBoss = getLadyInGlassStoryBoss(user, now, patrolOccupied, defeatedEnemyIds);
   const regionalThreatBoss = getRegionalThreatBoss(user, now, patrolOccupied, defeatedEnemyIds);
   const threatEnemies = applyRegionalThreatComposition(user, generatedEnemies, now);
+  const coopBosses = getActiveCoopBosses(user, now);
   return [
     ...(storyBoss ? [storyBoss] : []),
     ...(moonwellBoss ? [moonwellBoss] : []),
     ...(moonwellSideBoss ? [moonwellSideBoss] : []),
+    ...(laterBandSideBoss ? [laterBandSideBoss] : []),
     ...(brokenCrownBoss ? [brokenCrownBoss] : []),
     ...(glassRoadBoss ? [glassRoadBoss] : []),
     ...(candleKeyBoss ? [candleKeyBoss] : []),
     ...(ladyInGlassBoss ? [ladyInGlassBoss] : []),
     ...(regionalThreatBoss ? [regionalThreatBoss] : []),
     ...(activeBoss ? [activeBoss] : []),
+    ...coopBosses,
     ...threatEnemies,
   ];
 }
 
-function makeCommanderUnit(side: BattleSide, name: string, modelNumber: number, stats: CharacterStats, x: number, y: number, assetPath?: string): BattleUnit {
+function makeCommanderUnit(
+  side: BattleSide,
+  name: string,
+  modelNumber: number,
+  stats: CharacterStats,
+  x: number,
+  y: number,
+  assetPath?: string,
+  combatTraits?: BattleCombatTraits,
+): BattleUnit {
   const modifiers = getBattleModifiers(stats);
   const maxHealth = stats.maxHealth + stats.level * 7 + modifiers.defensivePower;
+  const moveBonus = Math.max(0, Math.floor(combatTraits?.moveBonus || 0));
 
   return {
     id: `${side}-commander`,
@@ -1851,10 +1904,11 @@ function makeCommanderUnit(side: BattleSide, name: string, modelNumber: number, 
     magic: modifiers.spellPower,
     healing: 0,
     speed: 5 + Math.floor(modifiers.morale / 2),
-    movement: clamp(2 + Math.floor(modifiers.morale / 8), 2, 4),
+    movement: clamp(2 + Math.floor(modifiers.morale / 8) + moveBonus, 2, 5),
     range: 1,
     x,
     y,
+    ...(combatTraits ? { combatTraits } : {}),
   };
 }
 
@@ -1906,13 +1960,14 @@ function makeMinionUnit(stack: MinionStack, side: BattleSide, x: number, y: numb
 
 function makeEnemyCommanderStats(level: number, enemy?: Pick<WorldEnemy, 'personality' | 'bossId' | 'spawnKind'>): CharacterStats {
   const boss = enemy ? isBossBattleEnemy(enemy) : false;
-  const maxHealth = boss ? 105 + level * 11 : 70 + level * 7;
+  const earlySoftScale = !boss && level <= 3 ? 0.88 : !boss && level <= 5 ? 0.94 : 1;
+  const maxHealth = Math.round((boss ? 105 + level * 11 : 70 + level * 7) * earlySoftScale);
 
   return {
-    armyPower: 4 + Math.floor(level * 0.85) + (boss ? 4 + Math.floor(level * 0.12) : 0),
-    defensivePower: 3 + Math.floor(level * 0.58) + (boss ? 5 + Math.floor(level * 0.1) : 0),
-    morale: 4 + Math.floor(level * 0.35) + (boss ? 2 : 0),
-    spellPower: 2 + Math.floor(level * 0.48) + (boss ? 3 + Math.floor(level * 0.08) : 0),
+    armyPower: Math.max(1, Math.round((4 + Math.floor(level * 0.85) + (boss ? 4 + Math.floor(level * 0.12) : 0)) * earlySoftScale)),
+    defensivePower: Math.max(1, Math.round((3 + Math.floor(level * 0.58) + (boss ? 5 + Math.floor(level * 0.1) : 0)) * earlySoftScale)),
+    morale: Math.max(1, Math.round((4 + Math.floor(level * 0.35) + (boss ? 2 : 0)) * earlySoftScale)),
+    spellPower: Math.max(1, Math.round((2 + Math.floor(level * 0.48) + (boss ? 3 + Math.floor(level * 0.08) : 0)) * earlySoftScale)),
     health: maxHealth,
     maxHealth,
     level,
@@ -2088,7 +2143,9 @@ export function createNpcBattleState(user: User | BattleUserProfile, enemy: Worl
       options.playerModelNumber || user.selectedModel || 3,
       playerStats,
       playerCommanderSpawn.x,
-      playerCommanderSpawn.y
+      playerCommanderSpawn.y,
+      undefined,
+      options.playerCombatTraits,
     ),
     ...playerStacks
       .map((stack, index) => {
@@ -2690,7 +2747,9 @@ export function canSkirmishAttackAfterMove(state: BattleState, unitId: string): 
 }
 
 function isBleedStrikeUnit(unit: BattleUnit | undefined): boolean {
-  return unit?.templateId === 'crow' || unit?.templateId === 'thief';
+  return unit?.templateId === 'crow'
+    || unit?.templateId === 'thief'
+    || Boolean(unit?.combatTraits?.bleedOnHit);
 }
 
 function isPoisonShotUnit(unit: BattleUnit | undefined): boolean {
@@ -3406,18 +3465,35 @@ export function attackBattleUnit(state: BattleState, attackerId: string, targetI
     );
   }
 
-  const updatedState = updateBattleStatus(resolvedState);
+  let updatedState = updateBattleStatus(resolvedState);
+  const sustainHeal = Math.max(0, Math.floor(attacker.combatTraits?.sustainHealOnKill || 0));
   const attackerAfterResolution = updatedState.units.find(unit => unit.id === attackerId && unit.currentHealth > 0);
+  if (defeated && sustainHeal > 0 && attackerAfterResolution) {
+    updatedState = withBattleLog(
+      healUnit(updatedState, attackerAfterResolution.id, sustainHeal),
+      `${attackerAfterResolution.name} draws strength from the kill (+${sustainHeal} health).`,
+      {
+        side: attackerAfterResolution.side,
+        actor: attackerAfterResolution.name,
+        actorId: attackerAfterResolution.id,
+        targetIds: [attackerAfterResolution.id],
+        action: 'heal',
+        style: 'heal',
+      },
+    );
+  }
+
+  const attackerForSkirmish = updatedState.units.find(unit => unit.id === attackerId && unit.currentHealth > 0);
   if (
     updatedState.status === 'active' &&
-    isSkirmishStepUnit(attackerAfterResolution) &&
-    attackerAfterResolution?.side === attacker.side
+    isSkirmishStepUnit(attackerForSkirmish) &&
+    attackerForSkirmish?.side === attacker.side
   ) {
     return {
       ...updatedState,
-      activeUnitId: attackerAfterResolution.id,
+      activeUnitId: attackerForSkirmish.id,
       turnStartedAt: Date.now(),
-      bonusMoveUnitId: attackerAfterResolution.id,
+      bonusMoveUnitId: attackerForSkirmish.id,
       bonusMoveAwayFrom: { x: target.x, y: target.y },
     };
   }

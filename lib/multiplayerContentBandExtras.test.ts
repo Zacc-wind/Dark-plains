@@ -7,6 +7,7 @@ import { getActiveCandleKeyBoss } from './multiplayerCandleKey';
 import { getActiveGlassRoadBoss } from './multiplayerGlassRoad';
 import { getActiveLadyInGlassBoss } from './multiplayerLadyInGlass';
 import { getActiveMoonwellSideBoss, hasSealedDrownedMoonwell } from './multiplayerMoonwellSides';
+import { getActiveLaterBandSideBoss } from './multiplayerLaterBandSides';
 import { getQuestNpcById, getQuestNpcWorldVoice, getRotatingCityQuests } from './questData';
 
 function claimedThrough(questId: string) {
@@ -93,6 +94,60 @@ describe('Moonwell side stories and post-chapter response', () => {
       claimedStoryQuestIds: ['story-14-moonwell-sealed'],
     });
     expect(unlocked.some(quest => quest.id === 'mb-eastern-march-preview')).toBe(true);
+  });
+});
+
+describe('Later-band side stories', () => {
+  it('spawns the Ash Road Revenant after Broken Crown for the ash pilgrim side chain', () => {
+    const user = {
+      username: 'AshPilgrimSpawn',
+      x: 22,
+      y: 32,
+      stats: { level: 17 },
+      storyQuests: claimedThrough('story-15-broken-crown'),
+      activityLog: [],
+    } as unknown as User;
+
+    expect(getActiveLaterBandSideBoss(user)).toMatchObject({
+      enemyId: 'story-elite-ash-road-revenant',
+      bossId: 'ash-road-revenant',
+    });
+    expect(getNpcEnemiesForUser(user, Date.parse('2026-08-09T12:00:00Z'))
+      .find(enemy => enemy.id === 'story-elite-ash-road-revenant')).toMatchObject({
+      spawnKind: 'story-boss',
+      storyLabel: 'Glass Road Side: Ash Pilgrim',
+    });
+  });
+
+  it('unlocks Glass Road and Candle Key sides without blocking mainline chapter counts', () => {
+    const glassUser = {
+      username: 'WritSideOpen',
+      stats: { level: 17 },
+      storyQuests: [
+        ...claimedThrough('story-15-broken-crown'),
+        { questId: 'story-16-mirror-council', claimed: true },
+        { questId: 'story-17-moonwell-contract', claimed: true },
+      ],
+    } as unknown as User;
+    const candleUser = {
+      username: 'SynodSideOpen',
+      stats: { level: 21 },
+      storyQuests: [
+        ...claimedThrough('story-15-broken-crown'),
+        { questId: 'story-16-mirror-council', claimed: true },
+        { questId: 'story-17-moonwell-contract', claimed: true },
+        { questId: 'story-18-blackwater-gate', claimed: true },
+        { questId: 'story-19-eclipse-scouts', claimed: true },
+        { questId: 'story-20-first-dungeon-oath', claimed: true },
+        { questId: 'story-20-glass-sealed', claimed: true },
+        { questId: 'story-21-quarry-ledger', claimed: true },
+      ],
+    } as unknown as User;
+
+    expect(getStoryQuestStatus(glassUser, 'story-side-ash-scout').unlocked).toBe(true);
+    expect(getStoryQuestStatus(glassUser, 'story-side-writ-cutters').unlocked).toBe(true);
+    expect(getStoryQuestStatus(candleUser, 'story-side-synod-scout').unlocked).toBe(true);
+    expect(getStoryQuestStatus(candleUser, 'story-21-quarry-ledger').claimed).toBe(true);
   });
 });
 

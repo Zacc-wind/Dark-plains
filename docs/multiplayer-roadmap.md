@@ -16,6 +16,7 @@ Turn the current shared world-map prototype into a real multiplayer layer withou
 - [x] The Black Pike Ledger Chronicle provides 40 permanent free-track ranks driven by capped, genuine multiplayer action receipts. Glass Road Memorial archive progresses at half Renown after the Glass Road seal; seasonal featured rotation remains later.
 - [x] Player-vs-player combat has a versioned local two-player duel session with captured rosters, formation readiness, ownership-checked actions, timeout passing, and idempotent rating settlement. Session create/list/patch transport is live via `/api/pvp/duels` (combat action streaming still local).
 - [x] Cooperative raids now have a complete local-authoritative session: PVE launch/resume, two independent formations, readiness, synchronized combat and AI actions, four boss phases, abandon handling, recovery, and duplicate-safe per-player settlement. Session create/list/patch transport is live via `/api/coop/raids` (combat action streaming still local).
+- [x] Duo `CoopDungeonSession` foundation: 3-chamber route stub from active world dungeons, localStorage client, PVE hub "Duo Dungeon Route" entry, chamber combat via `createCoopBattleState` (full route length/loot still later).
 - [x] PVE intel exposes two deterministic co-op boss incursions per five-hour cycle without routing them through the solo encounter flow.
 - [x] The playable Drowned Moonwell core spans levels 6-10 with nine ordered quests, eight Moonbridge contracts, a named Blackroot elite, Mother Cindervein, exact encounter receipts, and an authored return to Naima.
 
@@ -80,7 +81,7 @@ Turn the current shared world-map prototype into a real multiplayer layer withou
 - [x] Add local idempotent raid settlement, per-player loot, reload recovery, and forfeit/abandon rules.
 - [ ] Replace local co-op session transport with database subscriptions and server-authoritative action validation.
 - [ ] Add map interaction only after party readiness can prevent the old solo encounter path from opening a raid.
-- [ ] Add the longer `CoopDungeonSession`: party id, members, dungeon level, route nodes, bosses, shared seed, and current chamber.
+- [x] Add the longer `CoopDungeonSession` foundation: party id, members, dungeon id, shared seed, three-chamber route stub, lobby/chamber/complete/abandoned phases (localStorage client + PVE hub entry; full length/loot still later).
 - [ ] Dungeon levels scale from 1 to 15, with longer routes as level rises.
 - [ ] Level 1 dungeons should be about 4-10 fights; high-level dungeons can reach around 30 fights with multiple bosses.
 - [ ] Consider four-player veteran dungeons only after the duo raid is reliable; do not make the first session solve both scales.
@@ -140,7 +141,7 @@ Turn the current shared world-map prototype into a real multiplayer layer withou
 - [x] Level 5: party creation and cooperative dungeon readiness unlock with an authored briefing and a guarded two-player raid entry.
 - [x] Level 7: Dungeon Tier II entry is enforced by the shared unlock registry and shown on map/PVE dungeon previews; level 12+ Tier III roads require level 16.
 - [ ] Later levels unlock harder regions, additional city services, dungeon tiers, boss rotations, and advanced social objectives.
-- [ ] Enforce every gate on the server as well as the client; a hidden button is not an authorization rule.
+- [x] Enforce unlock gates on mutating multiplayer APIs (PVP, trade, co-op) plus `/api/party/invite` and `/api/party/accept` (unlock check before online persistence); client authority remains for city contracts, gear forge, and local party until full party sync ships.
 - [x] Show locked features in a compact preview with level requirement and one-sentence value, rather than silently hiding the feature.
 
 ## Phase 10: Daily And Weekly Reasons To Return

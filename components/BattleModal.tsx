@@ -63,6 +63,7 @@ import {
   applyMinionSupportAbility,
   skipBonusBattleMove,
   waitBattleUnit,
+  type BattleCombatTraits,
 } from '@/lib/battle';
 import {
   ActivityEntry,
@@ -130,6 +131,7 @@ interface BattleModalProps {
   playerStats?: CharacterStats;
   playerFormation?: Record<string, { x: number; y: number }>;
   playerModelNumber?: number;
+  playerCombatTraits?: BattleCombatTraits;
   availableSpellIds?: string[];
   persistentResults?: boolean;
   onBattleEnd?: (result: { status: BattleResultReportData['status']; battle: BattleState; reward?: VictoryRewardReport; healthLost?: number; retreated?: boolean }) => void;
@@ -356,6 +358,7 @@ const BATTLE_PRELOAD_SOUND_IDS: GameSoundId[] = [
   'combat.spellShadow',
   'combat.spellFrost',
   'combat.spellHoly',
+  'combat.bossRoar',
   'combat.victory',
   'combat.defeat',
 ];
@@ -376,6 +379,7 @@ export default function BattleModal({
   playerStats,
   playerFormation,
   playerModelNumber,
+  playerCombatTraits,
   availableSpellIds,
   persistentResults = true,
   onBattleEnd,
@@ -392,6 +396,7 @@ export default function BattleModal({
       playerStats,
       playerFormation,
       playerModelNumber,
+      playerCombatTraits,
       suppressRecruitOffer: !persistentResults,
     }) : null;
   });
@@ -465,6 +470,7 @@ export default function BattleModal({
   const lastPresentedRound = useRef(0);
   const activeSpellNoticeRef = useRef<BattleSpellCastNoticeData | null>(null);
   const queuedTurnBanner = useRef<BattleTurnBannerData | null>(null);
+  const turnBannerRef = useRef<BattleTurnBannerData | null>(null);
   const lastTurnBannerKey = useRef<string | null>(null);
   const lastSoundLogEntryId = useRef<string | null>(null);
   const processedBattleLogIds = useRef<Set<string>>(new Set());
@@ -473,6 +479,7 @@ export default function BattleModal({
   const completionNoticeEmitted = useRef(false);
   const closeRequested = useRef(false);
   const resultSoundEmitted = useRef(false);
+  const bossIntroSoundEmitted = useRef(false);
   const combatTutorialCompletedRef = useRef(false);
   const speedConfig = BATTLE_SPEEDS[battleSpeed];
   const isCombatTutorialStep = tutorialStep?.id === 'combat' && Boolean(onTutorialContinue && onTutorialSkip);
@@ -643,6 +650,10 @@ export default function BattleModal({
   }, [bossSpecialCue]);
 
   useEffect(() => {
+    turnBannerRef.current = turnBanner;
+  }, [turnBanner]);
+
+  useEffect(() => {
     activeSpellNoticeRef.current = spellCastNotice;
 
     if (!spellCastNotice && queuedTurnBanner.current && !roundIntroActiveRef.current && !bossLastStandCueRef.current && !bossSpecialCueRef.current) {
@@ -662,13 +673,19 @@ export default function BattleModal({
       roundIntroActiveRef.current = false;
       return;
     }
-    if (isResolvingAction || spellCastNotice || bossLastStandCue || bossSpecialCue) return;
+    if (isResolvingAction || spellCastNotice || activeSpellNoticeRef.current || bossLastStandCue || bossSpecialCue) return;
     if (lastPresentedRound.current === battle.round) return;
 
     lastPresentedRound.current = battle.round;
     roundIntroActiveRef.current = true;
     if (turnBannerTimer.current) window.clearTimeout(turnBannerTimer.current);
     if (roundIntroTimer.current) window.clearTimeout(roundIntroTimer.current);
+
+    // Preserve a stomped unit-turn banner so it can flush after the round card.
+    const currentBanner = turnBannerRef.current;
+    if (currentBanner && currentBanner.kind !== 'round' && (currentBanner.side === 'player' || currentBanner.side === 'enemy')) {
+      queuedTurnBanner.current = currentBanner;
+    }
 
     const banner: BattleTurnBannerData = {
       id: `${battle.id}-round-${battle.round}`,
@@ -677,6 +694,17 @@ export default function BattleModal({
       title: `Round ${battle.round}`,
       detail: battle.round === 1 ? 'The first line advances.' : 'The field draws breath.',
     };
+    if (battle.round === 1 && !bossIntroSoundEmitted.current) {
+      bossIntroSoundEmitted.current = true;
+      const isBossBattle = battle.enemy.personality === 'boss'
+        || Boolean(battle.enemy.bossId)
+        || battle.enemy.spawnKind === 'world-boss'
+        || battle.enemy.spawnKind === 'coop-boss';
+      playGameSound(isBossBattle ? 'combat.bossRoar' : 'combat.weaponDraw', {
+        throttleMs: 1200,
+        volumeScale: isBossBattle ? 0.95 : 0.85,
+      });
+    }
     roundIntroTimer.current = window.setTimeout(() => {
       setRoundIntroActive(true);
       setTurnBanner(banner);
@@ -870,7 +898,12 @@ export default function BattleModal({
         spellNoticeTimer.current = window.setTimeout(() => {
           setSpellCastNotice(notice);
           const noticeDuration = entry.side === 'enemy' ? ENEMY_BATTLE_PACE.spellNoticeMs : SPELL_NOTICE_MS;
-          spellNoticeTimer.current = window.setTimeout(() => setSpellCastNotice(null), noticeDuration);
+          spellNoticeTimer.current = window.setTimeout(() => {
+            spellNoticeTimer.current = null;
+            activeSpellNoticeRef.current = null;
+            setSpellCastNotice(current => (current?.id === notice.id ? null : current));
+            flushQueuedTurnBanner();
+          }, noticeDuration);
         }, entry.side === 'enemy' ? 180 : 0);
       }
     }
@@ -911,11 +944,6 @@ export default function BattleModal({
     enemyTimer.current = window.setTimeout(() => {
       emitFxEvent({ type: activeUnit.healing > 0 ? 'status' : 'attack', tone: 'red', intensity: 0.55 });
       setIsResolvingAction(true);
-      setBattleCue({
-        headline: isEnemyCommander ? 'Enemy Spell' : 'Enemy Action',
-        detail: '',
-        tone: 'enemy',
-      });
       const next = resolveBattleAction(
         { type: 'ai-turn', unitId: activeUnit.id },
         () => runEnemyBattleTurn(battle),
@@ -928,6 +956,11 @@ export default function BattleModal({
       const presentationEntry = getRecentPresentationLogEntry(next, Date.now());
       const isCinematicOverlay = presentationEntry?.style === 'boss-phase' || presentationEntry?.style === 'boss-special';
       const holdMs = getEnemyActionHoldMs(presentationEntry, next, enemyHoldMs);
+      setBattleCue({
+        headline: presentationEntry?.action === 'spell' ? 'Enemy Spell' : 'Enemy Action',
+        detail: '',
+        tone: 'enemy',
+      });
       setBattle(next);
 
       if (!isCinematicOverlay) {
@@ -985,6 +1018,13 @@ export default function BattleModal({
 
     if (battle.status === 'victory') {
       if (!resultSoundEmitted.current) {
+        const isBossBattle = battle.enemy.personality === 'boss'
+          || Boolean(battle.enemy.bossId)
+          || battle.enemy.spawnKind === 'world-boss'
+          || battle.enemy.spawnKind === 'coop-boss';
+        if (isBossBattle) {
+          playGameSound('combat.bossRoar', { throttleMs: 800, volumeScale: 0.9 });
+        }
         playGameSound('combat.victory', { throttleMs: 800 });
         resultSoundEmitted.current = true;
       }

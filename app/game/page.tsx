@@ -17,6 +17,7 @@ import TradeSessionOverlay from '@/components/TradeSessionOverlay';
 import MultiplayerTutorialSpotlight from '@/components/MultiplayerTutorialSpotlight';
 import PvpDuelSessionOverlay from '@/components/PvpDuelSessionOverlay';
 import CoopRaidSessionOverlay from '@/components/CoopRaidSessionOverlay';
+import CoopDungeonSessionOverlay from '@/components/CoopDungeonSessionOverlay';
 import { writeGameMode } from '@/lib/gameMode';
 import { applyGraphicsQualityToDocument } from '@/lib/graphicsSettings';
 import BardMusicControls from '@/components/BardMusicControls';
@@ -80,6 +81,7 @@ export default function GamePage() {
       <TradeSessionOverlay />
       <PvpDuelSessionOverlay />
       <CoopRaidSessionOverlay />
+      <CoopDungeonSessionOverlay />
       <MultiplayerTutorialSpotlight />
     </div>
   );

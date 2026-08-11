@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { getMultiplayerChapterViews } from './multiplayerProgression';
-import { CITY_QUESTS } from './questData';
+import { CITY_QUESTS, getAllStoryQuestsSorted } from './questData';
 import { getStoryDialogSequence } from './storyDialogue';
 
 describe('levels 6-10 content band', () => {
@@ -55,14 +55,23 @@ describe('levels 6-10 content band', () => {
     const ashford = CITY_QUESTS.filter(quest => quest.town === 'Ashford');
     const requirementTypes = new Set(ashford.map(quest => quest.requirement.type));
 
-    expect(ashford).toHaveLength(5);
+    expect(ashford).toHaveLength(8);
+    expect(requirementTypes.size).toBeGreaterThanOrEqual(7);
     expect(requirementTypes).toEqual(new Set([
       'complete_jobs_at_poi',
       'defeat_enemies_level',
       'collect_item',
       'clear_dungeons',
       'complete_timed_jobs',
+      'visit_poi',
+      'win_battles',
+      'own_rare_gems',
     ]));
+  });
+
+  it('defers Harborview and Riverside consolidation above eight contracts', () => {
+    expect(CITY_QUESTS.filter(quest => quest.town === 'Harborview').length).toBeGreaterThan(8);
+    expect(CITY_QUESTS.filter(quest => quest.town === 'Riverside').length).toBeGreaterThan(8);
   });
 
   it('uses real thirty-minute thresholds for long city work', () => {
@@ -145,6 +154,38 @@ describe('levels 16-20 content band', () => {
   it('fills Blackwater Gate and Eclipse Hold boards to eight contracts', () => {
     expect(CITY_QUESTS.filter(quest => quest.town === 'Blackwater Gate')).toHaveLength(8);
     expect(CITY_QUESTS.filter(quest => quest.town === 'Eclipse Hold')).toHaveLength(8);
+  });
+
+  it('keeps Glass Road side stories outside the main chapter counter', () => {
+    const chapter = getMultiplayerChapterViews({ stats: { level: 20 }, storyQuests: [] })[3];
+    expect(chapter.questCount).toBe(6);
+    expect(chapter.quests.every(quest => quest.track !== 'side')).toBe(true);
+  });
+});
+
+describe('levels 16-30 later-band side stories', () => {
+  it('ships three three-step side chains with authored dialogue', () => {
+    const sideIds = [
+      'story-side-ash-scout',
+      'story-side-ash-clear',
+      'story-side-ash-return',
+      'story-side-writ-cutters',
+      'story-side-writ-clear',
+      'story-side-writ-return',
+      'story-side-synod-scout',
+      'story-side-synod-clear',
+      'story-side-synod-return',
+    ];
+    const sideQuests = getAllStoryQuestsSorted().filter(quest => sideIds.includes(quest.id));
+    const glassChapter = getMultiplayerChapterViews({ stats: { level: 20 }, storyQuests: [] })[3];
+    const candleChapter = getMultiplayerChapterViews({ stats: { level: 25 }, storyQuests: [] })[4];
+
+    expect(sideQuests).toHaveLength(9);
+    expect(sideQuests.every(quest => quest.track === 'side')).toBe(true);
+    expect(sideQuests.every(quest => quest.requiredLevel >= 16 && quest.requiredLevel <= 30)).toBe(true);
+    expect(sideIds.every(id => Boolean(getStoryDialogSequence(id)))).toBe(true);
+    expect(glassChapter.quests.every(quest => quest.track !== 'side')).toBe(true);
+    expect(candleChapter.quests.every(quest => quest.track !== 'side')).toBe(true);
   });
 });
 

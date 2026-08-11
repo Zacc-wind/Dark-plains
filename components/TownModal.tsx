@@ -5,6 +5,7 @@ import RewardIconStrip from '@/components/RewardIconStrip';
 import { useEffect, useState, type ReactNode } from 'react';
 import Image from 'next/image';
 import { ASSET_PATHS, getPlayerModelPath } from '@/lib/assetLoader';
+import { playGameSound } from '@/lib/sound';
 import {
   addEquipmentSocketBonus,
   acceptCityQuest,
@@ -161,8 +162,12 @@ export default function TownModal({ town, onClose, onTravel }: TownModalProps) {
 
   useEffect(() => {
     if (!town) return undefined;
+    playGameSound('world.townEnter', { throttleMs: 220, volumeScale: 0.9 });
     document.body.classList.add('town-view-open');
-    return () => document.body.classList.remove('town-view-open');
+    return () => {
+      document.body.classList.remove('town-view-open');
+      playGameSound('world.townLeave', { throttleMs: 220, volumeScale: 0.85 });
+    };
   }, [town]);
 
   useEffect(() => {
@@ -230,7 +235,10 @@ export default function TownModal({ town, onClose, onTravel }: TownModalProps) {
 
     const result = buyShopOffer(offerId, town.name);
     setNotice(result.success ? 'Bought.' : result.error || 'Purchase failed.');
-    if (result.success) emitFxEvent({ type: 'city', tone: 'gold', intensity: 0.46 });
+    if (result.success) {
+      playGameSound('inventory.coins', { throttleMs: 120 });
+      emitFxEvent({ type: 'city', tone: 'gold', intensity: 0.46 });
+    }
     setUser(getCurrentUser());
     window.setTimeout(() => setNotice(''), 2500);
   };
@@ -258,6 +266,7 @@ export default function TownModal({ town, onClose, onTravel }: TownModalProps) {
 
     const result = sellInventoryItem(itemId);
     setNotice(result.success ? result.message || 'Item sold.' : result.error || 'Sale failed.');
+    if (result.success) playGameSound('inventory.goldGain', { throttleMs: 120 });
     setUser(getCurrentUser());
     window.setTimeout(() => setNotice(''), 2500);
   };
@@ -270,6 +279,7 @@ export default function TownModal({ town, onClose, onTravel }: TownModalProps) {
 
     const result = sellEquipmentItem(equipmentId);
     setNotice(result.success ? result.message || 'Gear sold.' : result.error || 'Sale failed.');
+    if (result.success) playGameSound('inventory.goldGain', { throttleMs: 120 });
     setUser(getCurrentUser());
     window.setTimeout(() => setNotice(''), 2500);
   };
@@ -282,6 +292,7 @@ export default function TownModal({ town, onClose, onTravel }: TownModalProps) {
 
     const result = sellMinion(minionId);
     setNotice(result.success ? result.message || 'Unit sold.' : result.error || 'Sale failed.');
+    if (result.success) playGameSound('inventory.goldGain', { throttleMs: 120 });
     setUser(getCurrentUser());
     window.setTimeout(() => setNotice(''), 2500);
   };
@@ -322,6 +333,9 @@ export default function TownModal({ town, onClose, onTravel }: TownModalProps) {
     setNotice(result.success ? 'Contract reward claimed.' : result.error || 'Could not claim contract.');
     setUser(getCurrentUser());
     if (result.success) {
+      playGameSound('quest.claim', { throttleMs: 140 });
+      if (result.rewards?.gold) playGameSound('inventory.goldGain', { throttleMs: 140 });
+      if (result.rewards?.rareGems) playGameSound('inventory.gemGain', { throttleMs: 140 });
       emitCompletionNotice({
         id: `town-contract-completion-${questId}`,
         kind: 'quest',
