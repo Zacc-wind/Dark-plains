@@ -20,6 +20,7 @@ import {
 import {
   createOnlineCoopDungeonSession,
   fetchOnlineCoopDungeonSessions,
+  postOnlineCoopDungeonAction,
   shouldUseOnlineCoopDungeonClient,
   updateOnlineCoopDungeonSession,
 } from './coopDungeonOnlineClient';
@@ -260,7 +261,37 @@ export async function startCurrentCoopDungeonChamber(
   return { ...result, session: saveCoopDungeonSession(result.session, now) };
 }
 
-export function applyCurrentCoopDungeonAction(
+export async function applyCurrentCoopDungeonAction(
+  sessionId: string,
+  action: SynchronizedBattleAction,
+  expectedVersion: number,
+  now = Date.now(),
+): Promise<CoopDungeonSessionResult> {
+  const actor = requireCurrentActor(action.actorUsername);
+  if (!actor.allowed) return { success: false, error: actor.error };
+
+  if (shouldUseOnlineCoopDungeonClient()) {
+    try {
+      const payload = await postOnlineCoopDungeonAction(sessionId, action, expectedVersion);
+      return {
+        success: true,
+        session: saveCoopDungeonSession(payload.session, now),
+        duplicate: payload.duplicate,
+      };
+    } catch (error) {
+      return onlineError(error, 'Failed to apply dungeon action.');
+    }
+  }
+
+  const session = getStoredSession(sessionId, now);
+  if (!session) return { success: false, error: 'Dungeon session was not found.' };
+  const result = applyCoopDungeonAction(session, action, expectedVersion, now);
+  if (!result.success || !result.session || result.duplicate) return result;
+  return { ...result, session: saveCoopDungeonSession(result.session, now) };
+}
+
+/** Sync local apply for snappy BattleModal UI; pair with background postOnlineCoopDungeonAction when online. */
+export function applyLocalCurrentCoopDungeonAction(
   sessionId: string,
   action: SynchronizedBattleAction,
   expectedVersion: number,
@@ -268,11 +299,10 @@ export function applyCurrentCoopDungeonAction(
 ): CoopDungeonSessionResult {
   const actor = requireCurrentActor(action.actorUsername);
   if (!actor.allowed) return { success: false, error: actor.error };
-
   const session = getStoredSession(sessionId, now);
   if (!session) return { success: false, error: 'Dungeon session was not found.' };
   const result = applyCoopDungeonAction(session, action, expectedVersion, now);
-  if (!result.success || !result.session) return result;
+  if (!result.success || !result.session || result.duplicate) return result;
   return { ...result, session: saveCoopDungeonSession(result.session, now) };
 }
 

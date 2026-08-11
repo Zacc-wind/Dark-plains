@@ -371,20 +371,27 @@ Dual-path auth is live; this is not a full rewrite.
 
 ### Done
 
-- Login/register UI (`app/page.tsx`) chooses path via `isSupabaseAuthEnabled()`:
+- Login/register UI (`app/page.tsx`) chooses path via `getClientAuthMode()` / `isSupabaseAuthEnabled()`:
   - **Configured** (`NEXT_PUBLIC_SUPABASE_URL` + publishable/anon key): `loginWithSupabase` / `registerWithSupabase` → Supabase Auth cookies.
-  - **Not configured** (vitest / keyless local): `lib/auth` plaintext local passwords + `localStorage`.
-- Registration online path: `POST /api/auth/register` (service role creates user, cookie client signs in, `getAuthenticatedUser` validates session).
-- Login online path: browser `signInWithPassword` with username→synthetic email (`lib/supabase/username.ts`).
-- Middleware (`middleware.ts` → `lib/supabase/middleware.ts`) refreshes the Auth session with `getUser()` when configured; no-ops when not.
-- Auth-gated APIs (party, co-op raid, co-op dungeon, trade, PVP duel/challenge, chat, `/api/me`, world players, singleplayer achievements) resolve identity through shared `getAuthenticatedUser` / `getAuthenticatedUserId` (`lib/supabase/requireAuth.ts`), which always call `createClient().auth.getUser()` — never `getSession()` for authorization.
-- `/api/health` reports `authMode`: `supabase` | `local-prototype`.
+  - **Not configured** (vitest / keyless local, non-production): `lib/auth` plaintext local passwords + `localStorage`.
+  - **Production without keys** (`NODE_ENV=production` or `VERCEL_ENV=production`): auth mode `unavailable` — landing page shows a clear “auth unavailable” state and does **not** offer local prototype login as if live.
+- Fail-closed helpers in `lib/supabase/config.ts`: `isProductionAuthRequired()`, `assertManagedAuthAvailable()` (503), `getAuthMode()` → `supabase` | `local-prototype` | `unavailable`.
+- Registration online path: `POST /api/auth/register` (service role creates user, cookie client signs in, `getAuthenticatedUser` validates session). Returns **503** in production when keys are missing; **501** for keyless local/dev.
+- Login online path: browser `signInWithPassword` with username→synthetic email (`lib/supabase/username.ts`). Client login/register also refuse production-unavailable mode.
+- Password recovery:
+  - `POST /api/auth/forgot-password` `{ email }` or `{ username }` → `supabase.auth.resetPasswordForEmail` with redirect to `/reset-password` (set `NEXT_PUBLIC_SITE_URL` in production; allow that URL in Supabase Auth redirect allow-list).
+  - `profiles` has **no** `email` column; username accounts resolve via `auth.users` (admin) when possible, otherwise `usernameToAuthEmail` (same mapping as login/register). Explicit email is always accepted.
+  - Recovery UI: `/reset-password` (+ landing `?forgot=1` / “Forgot password?” when `authMode === supabase`) calls `supabase.auth.updateUser({ password })` after the recovery session exists.
+  - Deliverability: synthetic `@gmail.com` Auth emails will not receive mail unless you use a domain you control (`NEXT_PUBLIC_AUTH_EMAIL_DOMAIN`) with working MX/routing.
+- Middleware (`middleware.ts` → `lib/supabase/middleware.ts`) refreshes the Auth session with `getUser()` when configured; no-ops when not (production without keys still fail-closes at auth/API boundaries).
+- Auth-gated APIs (party, co-op raid, co-op dungeon, trade, PVP duel/challenge, chat, `/api/me`, world players, singleplayer achievements) resolve identity through shared `getAuthenticatedUser` / `getAuthenticatedUserId` (`lib/supabase/requireAuth.ts`), which always call `createClient().auth.getUser()` — never `getSession()` for authorization. `apiNotConfigured()` and `/api/me` fail closed with **503** in production when keys are missing.
+- `/api/health` reports `authMode`: `supabase` | `local-prototype` | `unavailable` (503 + hint when production keys are missing).
 
 ### Still open
 
-- [ ] Turn off local-password path in production builds (fail closed when keys missing on deployed hosts).
+- [x] Turn off local-password path in production builds (fail closed when keys missing on deployed hosts).
 - [ ] Stop client-side `player_states` writes as the primary save path; move mutations through trusted API routes (`PATCH /api/me/state` and feature endpoints).
 - [ ] Migrate any remaining local-only multiplayer helpers that still assume `lib/auth` users when online sessions are required.
-- [ ] Production password reset / account recovery UX (synthetic emails complicate mailbox delivery).
+- [x] Production password reset / account recovery UX (wire `forgot-password` + `/reset-password`; synthetic emails still need a deliverable Auth email domain for inbox delivery).
 - [ ] Optional: store display username in `app_metadata` for ops; keep authorization on `auth.uid()` + `profiles`, never `user_metadata` claims.
 - [ ] Apply remaining hosted migrations and validate two authenticated accounts against party/raid/trade RLS + handlers.

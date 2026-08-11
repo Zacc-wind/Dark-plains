@@ -16,7 +16,7 @@ Turn the current shared world-map prototype into a real multiplayer layer withou
 - [x] The Black Pike Ledger Chronicle provides 40 permanent free-track ranks driven by capped, genuine multiplayer action receipts. Glass Road Memorial archive progresses at half Renown after the Glass Road seal; seasonal featured rotation remains later.
 - [x] Player-vs-player combat has a versioned local two-player duel session with captured rosters, formation readiness, ownership-checked actions, timeout passing, and idempotent rating settlement. Session create/list/patch transport is live via `/api/pvp/duels`; combat action streaming is live via `/api/pvp/duels/[id]/actions` writing versioned `combat_snapshot` (no `duel_actions` table — action-log inserts remain raid-only).
 - [x] Cooperative raids now have a complete local-authoritative session: PVE launch/resume, two independent formations, readiness, synchronized combat and AI actions, four boss phases, abandon handling, recovery, and duplicate-safe per-player settlement. Session create/list/patch transport is live via `/api/coop/raids`; combat action streaming foundation is live via `/api/coop/raids/[id]/actions`.
-- [x] Duo `CoopDungeonSession` foundation: 3-chamber route stub from active world dungeons, localStorage client with online fallback via `/api/coop/dungeons` when Supabase admin is configured (migration `012_coop_dungeon_sessions.sql`), PVE hub "Duo Dungeon Route" entry, chamber combat via `createCoopBattleState` (full route length/loot still later).
+- [x] Duo `CoopDungeonSession` foundation: 3-chamber route stub from active world dungeons, localStorage client with online fallback via `/api/coop/dungeons` when Supabase admin is configured (migration `012_coop_dungeon_sessions.sql`), PVE hub "Duo Dungeon Route" entry, chamber combat via `createCoopBattleState` (full route length/loot still later). Combat action streaming is live via `/api/coop/dungeons/[id]/actions` writing versioned `combat_snapshot` (no `coop_dungeon_actions` table — action-log inserts remain raid-only).
 - [x] PVE intel exposes two deterministic co-op boss incursions per five-hour cycle without routing them through the solo encounter flow.
 - [x] The playable Drowned Moonwell core spans levels 6-10 with nine ordered quests, eight Moonbridge contracts, a named Blackroot elite, Mother Cindervein, exact encounter receipts, and an authored return to Naima.
 
@@ -133,7 +133,7 @@ Turn the current shared world-map prototype into a real multiplayer layer withou
   Duel formation/cancel/forfeit/settle transport is live via `/api/pvp/duels`; combat action streaming is live via `/api/pvp/duels/[id]/actions` with versioned `combat_snapshot` updates (no separate action-log table).
   Co-op raid formation/abandon/settle transport is live via `/api/coop/raids`; combat action streaming foundation is live via `/api/coop/raids/[id]/actions` with `coop_raid_actions` inserts + versioned session updates.
   Party invite/accept/decline persistence is live via `/api/party/*` + `party_invites` (migration `011_party_invites_and_realtime.sql`).
-  Duo dungeon create/list/patch foundation is live via `/api/coop/dungeons` + `coop_dungeon_sessions` (migration `012_coop_dungeon_sessions.sql`); chamber combat action streaming remains local until a later actions route.
+  Duo dungeon create/list/patch foundation is live via `/api/coop/dungeons` + `coop_dungeon_sessions` (migration `012_coop_dungeon_sessions.sql`); chamber combat action streaming is live via `/api/coop/dungeons/[id]/actions` with versioned `combat_snapshot` updates (no separate action-log table).
 
 ## Phase 9: Progression Gates And Unlock Communication
 - [x] Define one shared unlock registry consumed by HUD buttons, modal guards, API routes, and tutorial copy.
@@ -194,7 +194,7 @@ Ship order: docs → retention → story/tutorial remake → gear → map/visual
 - [x] Set scrap salvage into blacksmith sockets / set progress.
 
 ### Parked
-- Guild goals, seasonal PVP reset, 120 map expansion, omen SP depth, RLS harden (separate security track). (Duel/raid combat_snapshot streaming landed; per-action log table remains raid-only.)
+- Guild goals, seasonal PVP reset, 120 map expansion, omen SP depth, RLS harden (separate security track). (Duel/raid/dungeon combat_snapshot streaming landed; per-action log table remains raid-only.)
 
 ### Content bands after the above
 - [x] Moonwell side stories + post-chapter world response.
@@ -233,10 +233,11 @@ Ship order: docs → retention → story/tutorial remake → gear → map/visual
 6. [x] Complete local multiplayer sessions: duel ownership/synchronization and duo raid readiness, formation, combat, recovery, abandon, and settlement are implemented.
 7. [x] Finish the concise town-service pass and verify the new scroll-shell composition at all target viewports.
 8. [~] Move duel, trade, and co-op session transport and validation to Supabase.
-   Trade, duel, and co-op raid session create/list/patch transport are live; co-op raid and duel combat action streaming foundations are live (duel streams via versioned `combat_snapshot` only; action-log table remains raid-only).
+   Trade, duel, and co-op raid session create/list/patch transport are live; co-op raid, duel, and duo dungeon combat action streaming foundations are live (duel and dungeon stream via versioned `combat_snapshot` only; action-log table remains raid-only).
    Trade sessions: GET/POST/PATCH + client cutover with local fallback.
    Duel sessions: GET/POST/PATCH for create/formation/cancel/forfeit/settle; combat POST `/actions` writing versioned `combat_snapshot`.
    Co-op raid sessions: GET/POST/PATCH for create/formation/abandon/settle + claim dual-write; combat POST `/actions` + optional realtime session UPDATE subscribe.
+   Duo dungeon sessions: GET/POST/PATCH for create/start_chamber/advance/abandon; combat POST `/actions` writing versioned `combat_snapshot` + optional realtime session UPDATE subscribe.
    Party invites: POST invite/accept/decline with `party_invites` persistence when admin is configured.
 9. [x] Ship the playable levels 6-10 Drowned Moonwell core with exact story encounters, response choices, Moonbridge contracts, and Dungeon Tier II gating.
 10. [x] Phase 10B retention → story/tutorial remake → gear → map → interest mechanics (see Phase 10B checklist).

@@ -1,11 +1,17 @@
 import { apiOk } from '@/lib/apiResponses';
-import { isSupabaseConfigured } from '@/lib/supabase/config';
+import {
+  assertManagedAuthAvailable,
+  isSupabaseConfigured,
+} from '@/lib/supabase/config';
 import { getAuthenticatedUser } from '@/lib/supabase/requireAuth';
 import { createClient } from '@/lib/supabase/server';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
+  const productionBlock = assertManagedAuthAvailable();
+  if (productionBlock) return productionBlock;
+
   if (!isSupabaseConfigured()) {
     return apiOk({ players: [] });
   }

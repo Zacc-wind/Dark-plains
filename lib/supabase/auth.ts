@@ -2,7 +2,12 @@ import { getCurrentUser, type User } from '@/lib/auth';
 import { applyRemoteAccountTutorials, readRemoteTutorialsFromGameSessions } from '@/lib/accountTutorial';
 import { writeGameJson, removeGameStorageItem } from '@/lib/gameStore';
 import { createClient } from '@/lib/supabase/client';
-import { getAuthMode, isSupabaseConfigured, type AuthMode } from '@/lib/supabase/config';
+import {
+  getAuthMode,
+  isSupabaseConfigured,
+  MANAGED_AUTH_UNAVAILABLE_MESSAGE,
+  type AuthMode,
+} from '@/lib/supabase/config';
 import {
   fetchRemotePlayer,
   playerStateRowToUser,
@@ -16,7 +21,8 @@ let playerPersistenceQueue: Promise<void> = Promise.resolve();
 /**
  * Dual-path gate used by login/register UI and logout/persist.
  * When true: Supabase Auth (`signInWithPassword` / `/api/auth/register`).
- * When false: local `lib/auth` plaintext passwords for vitest and keyless local dev.
+ * When false: local `lib/auth` plaintext passwords for vitest and keyless local dev
+ * (or production unavailable — UI must not treat that as a live local login).
  */
 export function isSupabaseAuthEnabled(): boolean {
   return isSupabaseConfigured();
@@ -26,10 +32,72 @@ export function getClientAuthMode(): AuthMode {
   return getAuthMode();
 }
 
+export function isManagedAuthUnavailable(): boolean {
+  return getAuthMode() === 'unavailable';
+}
+
+export async function requestPasswordReset(
+  identifier: { email?: string; username?: string },
+): Promise<{ success: boolean; error?: string; message?: string }> {
+  if (isManagedAuthUnavailable()) {
+    return { success: false, error: MANAGED_AUTH_UNAVAILABLE_MESSAGE };
+  }
+
+  if (!isSupabaseConfigured()) {
+    return { success: false, error: 'Password recovery requires Supabase Auth.' };
+  }
+
+  const response = await fetch('/api/auth/forgot-password', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(identifier),
+  });
+
+  let payload: { ok?: boolean; error?: string; message?: string } = {};
+  try {
+    payload = await response.json();
+  } catch {
+    return { success: false, error: 'Password reset request failed.' };
+  }
+
+  if (!response.ok || !payload.ok) {
+    return { success: false, error: payload.error || 'Password reset request failed.' };
+  }
+
+  return {
+    success: true,
+    message: payload.message || 'If an account matches, a reset email was sent.',
+  };
+}
+
+export async function updatePasswordWithRecoverySession(
+  password: string,
+): Promise<{ success: boolean; error?: string }> {
+  if (!isSupabaseConfigured()) {
+    return { success: false, error: 'Supabase is not configured.' };
+  }
+
+  if (password.length < 6) {
+    return { success: false, error: 'Password must be at least 6 characters.' };
+  }
+
+  const supabase = createClient();
+  const { error } = await supabase.auth.updateUser({ password });
+  if (error) {
+    return { success: false, error: error.message };
+  }
+
+  return { success: true };
+}
+
 export async function registerWithSupabase(
   username: string,
   password: string,
 ): Promise<{ success: boolean; error?: string; needsEmailConfirmation?: boolean }> {
+  if (isManagedAuthUnavailable()) {
+    return { success: false, error: MANAGED_AUTH_UNAVAILABLE_MESSAGE };
+  }
+
   if (!isSupabaseConfigured()) {
     return { success: false, error: 'Supabase is not configured.' };
   }
@@ -71,6 +139,10 @@ export async function loginWithSupabase(
   username: string,
   password: string,
 ): Promise<{ success: boolean; error?: string; user?: User }> {
+  if (isManagedAuthUnavailable()) {
+    return { success: false, error: MANAGED_AUTH_UNAVAILABLE_MESSAGE };
+  }
+
   if (!isSupabaseConfigured()) {
     return { success: false, error: 'Supabase is not configured.' };
   }

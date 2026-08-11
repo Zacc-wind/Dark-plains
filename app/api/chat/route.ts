@@ -1,4 +1,7 @@
-import { isSupabaseConfigured } from '@/lib/supabase/config';
+import {
+  assertManagedAuthAvailable,
+  isSupabaseConfigured,
+} from '@/lib/supabase/config';
 import { getAuthenticatedUser } from '@/lib/supabase/requireAuth';
 import { createClient } from '@/lib/supabase/server';
 
@@ -31,6 +34,9 @@ function toClientMessage(row: ChatMessageRow, usernames: Map<string, string>) {
 }
 
 export async function GET() {
+  const productionBlock = assertManagedAuthAvailable();
+  if (productionBlock) return productionBlock;
+
   if (!isSupabaseConfigured()) {
     return Response.json({ ok: false, error: 'Shared chat is not configured.' }, { status: 503 });
   }
@@ -77,6 +83,9 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  const productionBlock = assertManagedAuthAvailable();
+  if (productionBlock) return productionBlock;
+
   if (!isSupabaseConfigured()) {
     return Response.json({ ok: false, error: 'Shared chat is not configured.' }, { status: 503 });
   }

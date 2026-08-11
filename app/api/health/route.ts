@@ -1,11 +1,34 @@
 import { apiOk } from '@/lib/apiResponses';
 import { isSupabaseAdminConfigured } from '@/lib/supabase/admin';
-import { getAuthMode, isSupabaseConfigured } from '@/lib/supabase/config';
+import {
+  assertManagedAuthAvailable,
+  getAuthMode,
+  isSupabaseConfigured,
+  MANAGED_AUTH_UNAVAILABLE_MESSAGE,
+} from '@/lib/supabase/config';
 import { createClient } from '@/lib/supabase/server';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
+  if (assertManagedAuthAvailable()) {
+    return Response.json(
+      {
+        ok: false,
+        error: MANAGED_AUTH_UNAVAILABLE_MESSAGE,
+        data: {
+          status: 'auth_unavailable',
+          storage: 'unavailable',
+          authMode: getAuthMode(),
+          databaseConnected: false,
+        },
+        authMode: getAuthMode(),
+        deploymentMode: 'unavailable',
+      },
+      { status: 503 },
+    );
+  }
+
   if (!isSupabaseConfigured()) {
     return apiOk({
       status: 'ready',

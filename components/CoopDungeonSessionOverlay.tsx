@@ -5,16 +5,23 @@ import { getCurrentUser, type User } from '@/lib/auth';
 import type { SynchronizedBattleAction } from '@/lib/battle';
 import {
   abandonCurrentCoopDungeonSession,
-  applyCurrentCoopDungeonAction,
+  applyLocalCurrentCoopDungeonAction,
   COOP_DUNGEON_SESSION_UPDATED_EVENT,
   dismissCompletedCoopDungeonSession,
   getCurrentCoopDungeonSession,
+  saveCoopDungeonSession,
   startCurrentCoopDungeonChamber,
+  syncOnlineCoopDungeonSessions,
 } from '@/lib/coopDungeonClient';
+import {
+  postOnlineCoopDungeonAction,
+  shouldUseOnlineCoopDungeonClient,
+} from '@/lib/coopDungeonOnlineClient';
 import {
   getCurrentCoopDungeonChamber,
   type CoopDungeonSession,
 } from '@/lib/coopDungeonSessions';
+import { isSupabaseConfigured } from '@/lib/supabase/config';
 import BattleModal, {
   type BattleModalActionRequest,
   type BattleModalActionResponse,
@@ -38,10 +45,12 @@ export default function CoopDungeonSessionOverlay() {
       setSession(null);
       return;
     }
-    const next = getCurrentCoopDungeonSession(user.username);
-    setSession(current => (
-      current?.id === next?.id && current?.version === next?.version ? current : next || null
-    ));
+    void syncOnlineCoopDungeonSessions().then(() => {
+      const next = getCurrentCoopDungeonSession(user.username);
+      setSession(current => (
+        current?.id === next?.id && current?.version === next?.version ? current : next || null
+      ));
+    });
   }, []);
 
   useEffect(() => {
@@ -57,6 +66,44 @@ export default function CoopDungeonSessionOverlay() {
     };
   }, [refresh]);
 
+  useEffect(() => {
+    if (!session?.id || !isSupabaseConfigured() || !shouldUseOnlineCoopDungeonClient()) return undefined;
+    let cancelled = false;
+    let cleanup: (() => void) | undefined;
+
+    void import('@/lib/supabase/client').then(({ createClient }) => {
+      if (cancelled) return;
+      try {
+        const supabase = createClient();
+        const channel = supabase
+          .channel(`coop-dungeon-session-${session.id}`)
+          .on(
+            'postgres_changes',
+            {
+              event: 'UPDATE',
+              schema: 'public',
+              table: 'coop_dungeon_sessions',
+              filter: `id=eq.${session.id}`,
+            },
+            () => {
+              refresh();
+            },
+          )
+          .subscribe();
+        cleanup = () => {
+          void supabase.removeChannel(channel);
+        };
+      } catch {
+        // Keep 1s poll when browser Supabase client is unavailable.
+      }
+    });
+
+    return () => {
+      cancelled = true;
+      cleanup?.();
+    };
+  }, [refresh, session?.id]);
+
   const username = currentUser?.username || '';
 
   const handleBattleAction = useCallback((request: BattleModalActionRequest): BattleModalActionResponse => {
@@ -71,17 +118,31 @@ export default function CoopDungeonSessionOverlay() {
       expectedRevision: session.combatSnapshot.revision || 0,
       createdAt: now,
     };
-    const result = applyCurrentCoopDungeonAction(session.id, action, session.version, now);
+    // Hybrid: BattleModal is sync, so apply locally for snappy UI, then stream online in background.
+    const result = applyLocalCurrentCoopDungeonAction(session.id, action, session.version, now);
     if (!result.success || !result.session) {
       return { success: false, error: result.error || 'Chamber command failed.' };
     }
     setSession(result.session);
     setNotice(null);
+
+    if (shouldUseOnlineCoopDungeonClient()) {
+      void postOnlineCoopDungeonAction(session.id, action, session.version)
+        .then(payload => {
+          saveCoopDungeonSession(payload.session, now);
+          setSession(payload.session);
+        })
+        .catch(error => {
+          setNotice(error instanceof Error ? error.message : 'Dungeon action failed to sync.');
+          void syncOnlineCoopDungeonSessions().then(refresh);
+        });
+    }
+
     if (result.session.combatSnapshot) {
       return { success: true, battle: result.session.combatSnapshot };
     }
     return { success: true, battle: session.combatSnapshot };
-  }, [session, username]);
+  }, [refresh, session, username]);
 
   const abandon = () => {
     if (!session || !username || busy) return;

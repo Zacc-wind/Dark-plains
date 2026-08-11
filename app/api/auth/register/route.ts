@@ -1,5 +1,8 @@
 import { createAdminClient } from '@/lib/supabase/admin';
-import { isSupabaseConfigured } from '@/lib/supabase/config';
+import {
+  assertManagedAuthAvailable,
+  isSupabaseConfigured,
+} from '@/lib/supabase/config';
 import { getAuthenticatedUser } from '@/lib/supabase/requireAuth';
 import { createClient } from '@/lib/supabase/server';
 import { isValidGameUsername, usernameToAuthEmail } from '@/lib/supabase/username';
@@ -7,6 +10,9 @@ import { isValidGameUsername, usernameToAuthEmail } from '@/lib/supabase/usernam
 export const dynamic = 'force-dynamic';
 
 export async function POST(request: Request) {
+  const productionBlock = assertManagedAuthAvailable();
+  if (productionBlock) return productionBlock;
+
   if (!isSupabaseConfigured()) {
     return Response.json(
       {

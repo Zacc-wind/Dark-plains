@@ -1,4 +1,5 @@
 import type { ApiEnvelope } from '@/lib/apiResponses';
+import type { SynchronizedBattleAction } from '@/lib/battle';
 import { isSupabaseConfigured } from '@/lib/supabase/config';
 import type { CoopDungeonSession } from '@/lib/coopDungeonSessions';
 
@@ -84,6 +85,35 @@ export async function updateOnlineCoopDungeonSession(
 
   if (!response.ok || !payload.ok || !payload.data) {
     throw new Error(payload.error || 'Failed to update dungeon session.');
+  }
+
+  return payload.data;
+}
+
+export async function postOnlineCoopDungeonAction(
+  sessionId: string,
+  action: SynchronizedBattleAction,
+  expectedVersion: number,
+): Promise<DungeonPayload> {
+  const response = await fetch(`/api/coop/dungeons/${encodeURIComponent(sessionId)}/actions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action, expectedVersion }),
+  });
+  const payload = await readApiEnvelope<DungeonPayload>(response);
+
+  if (response.status === 409 && payload.data?.session) {
+    const error = new Error(payload.error || 'Dungeon session changed. Refresh before acting.') as Error & {
+      session?: CoopDungeonSession;
+      conflict?: boolean;
+    };
+    error.session = payload.data.session;
+    error.conflict = true;
+    throw error;
+  }
+
+  if (!response.ok || !payload.ok || !payload.data) {
+    throw new Error(payload.error || 'Failed to stream dungeon action.');
   }
 
   return payload.data;
