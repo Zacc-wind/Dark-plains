@@ -46,11 +46,12 @@ export default function PlayerListModal({ isOpen, location, players: visiblePlay
 
   const handleSocialAction = (
     username: string,
-    action: () => { success: boolean; message?: string; error?: string }
+    action: () => Promise<{ success: boolean; message?: string; error?: string }> | { success: boolean; message?: string; error?: string },
   ) => {
-    const result = action();
-    setExpandedPlayer(username);
-    setSocialNotice(result.message || result.error || (result.success ? 'Social action complete.' : 'Social action failed.'));
+    void Promise.resolve(action()).then(result => {
+      setExpandedPlayer(username);
+      setSocialNotice(result.message || result.error || (result.success ? 'Social action complete.' : 'Social action failed.'));
+    });
   };
 
   const otherPlayers = currentUser

@@ -26,6 +26,7 @@ import {
 import {
   createOnlineCoopRaidSession,
   fetchOnlineCoopRaidSessions,
+  postOnlineCoopRaidAction,
   shouldUseOnlineCoopRaidClient,
   updateOnlineCoopRaidSession,
 } from './coopRaidOnlineClient';
@@ -271,13 +272,42 @@ export async function confirmCurrentCoopRaidFormation(
   return { ...result, session: saveCoopRaidSession(result.session, now) };
 }
 
-export function applyCurrentCoopRaidAction(
+export async function applyCurrentCoopRaidAction(
+  sessionId: string,
+  action: SynchronizedBattleAction,
+  expectedVersion: number,
+  now = Date.now(),
+): Promise<CoopRaidSessionResult> {
+  const actor = requireCurrentActor(action.actorUsername);
+  if (!actor.allowed) return { success: false, error: actor.error };
+
+  if (shouldUseOnlineCoopRaidClient()) {
+    try {
+      const payload = await postOnlineCoopRaidAction(sessionId, action, expectedVersion);
+      return {
+        success: true,
+        session: saveCoopRaidSession(payload.session, now),
+        duplicate: payload.duplicate,
+      };
+    } catch (error) {
+      return onlineError(error, 'Failed to apply raid action.');
+    }
+  }
+
+  const session = getStoredSession(sessionId, now);
+  if (!session) return { success: false, error: 'Raid session was not found.' };
+  const result = applyCoopRaidAction(session, action, expectedVersion, now);
+  if (!result.success || !result.session || result.duplicate) return result;
+  return { ...result, session: saveCoopRaidSession(result.session, now) };
+}
+
+/** Sync local apply for snappy BattleModal UI; pair with background postOnlineCoopRaidAction when online. */
+export function applyLocalCurrentCoopRaidAction(
   sessionId: string,
   action: SynchronizedBattleAction,
   expectedVersion: number,
   now = Date.now(),
 ): CoopRaidSessionResult {
-  // Combat action streaming stays local for this slice.
   const actor = requireCurrentActor(action.actorUsername);
   if (!actor.allowed) return { success: false, error: actor.error };
   const session = getStoredSession(sessionId, now);

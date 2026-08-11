@@ -4,6 +4,7 @@ export type SocialRequestStatus = 'pending' | 'accepted' | 'declined' | 'expired
 export interface SocialRequestPayload {
   partyLeaderUsername?: string;
   partyMemberCount?: number;
+  partyInviteId?: string;
   tradeSessionId?: string;
 }
 
@@ -59,6 +60,9 @@ export function normalizeSocialRequests(
       partyLeaderUsername: normalizeUsername(record.payload.partyLeaderUsername) || undefined,
       partyMemberCount: Number.isFinite(record.payload.partyMemberCount)
         ? Math.max(1, Math.floor(Number(record.payload.partyMemberCount)))
+        : undefined,
+      partyInviteId: typeof record.payload.partyInviteId === 'string'
+        ? record.payload.partyInviteId.trim().slice(0, 160) || undefined
         : undefined,
       tradeSessionId: typeof record.payload.tradeSessionId === 'string'
         ? record.payload.tradeSessionId.trim().slice(0, 160) || undefined

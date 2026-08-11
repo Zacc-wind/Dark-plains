@@ -1,4 +1,5 @@
 import type { ApiEnvelope } from '@/lib/apiResponses';
+import type { SynchronizedBattleAction } from '@/lib/battle';
 import { isSupabaseConfigured } from '@/lib/supabase/config';
 import type { PvpDuelSession } from '@/lib/pvpDuelSessions';
 
@@ -80,6 +81,35 @@ export async function updateOnlinePvpDuelSession(
 
   if (!response.ok || !payload.ok || !payload.data) {
     throw new Error(payload.error || 'Failed to update duel session.');
+  }
+
+  return payload.data;
+}
+
+export async function postOnlinePvpDuelAction(
+  sessionId: string,
+  action: SynchronizedBattleAction,
+  expectedVersion: number,
+): Promise<DuelPayload> {
+  const response = await fetch(`/api/pvp/duels/${encodeURIComponent(sessionId)}/actions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action, expectedVersion }),
+  });
+  const payload = await readApiEnvelope<DuelPayload>(response);
+
+  if (response.status === 409 && payload.data?.session) {
+    const error = new Error(payload.error || 'Duel session changed. Refresh before acting.') as Error & {
+      session?: PvpDuelSession;
+      conflict?: boolean;
+    };
+    error.session = payload.data.session;
+    error.conflict = true;
+    throw error;
+  }
+
+  if (!response.ok || !payload.ok || !payload.data) {
+    throw new Error(payload.error || 'Failed to stream duel action.');
   }
 
   return payload.data;

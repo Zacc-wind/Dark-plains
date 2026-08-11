@@ -57,7 +57,7 @@ function prepareCurrentCommander(prefix: string): void {
   });
 }
 
-function prepareDuo(): void {
+async function prepareDuo(): Promise<void> {
   expect(register('RaidLeader', 'test-password').success).toBe(true);
   expect(login('RaidLeader', 'test-password').success).toBe(true);
   prepareCurrentCommander('leader');
@@ -66,11 +66,11 @@ function prepareDuo(): void {
   prepareCurrentCommander('ally');
 
   expect(login('RaidLeader', 'test-password').success).toBe(true);
-  expect(invitePlayerToParty('RaidAlly')).toMatchObject({ success: true });
+  expect(await invitePlayerToParty('RaidAlly')).toMatchObject({ success: true });
   expect(login('RaidAlly', 'test-password').success).toBe(true);
   const invitation = getIncomingSocialRequests().find(request => request.kind === 'party');
   expect(invitation).toBeDefined();
-  expect(acceptPartyInvite(invitation!.id)).toMatchObject({ success: true });
+  expect(await acceptPartyInvite(invitation!.id)).toMatchObject({ success: true });
   expect(login('RaidLeader', 'test-password').success).toBe(true);
 }
 
@@ -86,7 +86,7 @@ beforeEach(() => {
 
 describe('co-op raid client persistence', () => {
   it('creates a party raid, recovers it after reload, and blocks a second victory claim', async () => {
-    prepareDuo();
+    await prepareDuo();
     const current = getCurrentUser()!;
     const boss = getActiveCoopBosses(current, NOW)[0];
     const created = await ensureCurrentCoopRaidSession(boss.id, NOW);
@@ -128,7 +128,7 @@ describe('co-op raid client persistence', () => {
   });
 
   it('allows the leader to retry after both defeat reports are closed', async () => {
-    prepareDuo();
+    await prepareDuo();
     const current = getCurrentUser()!;
     const boss = getActiveCoopBosses(current, NOW)[0];
     const created = (await ensureCurrentCoopRaidSession(boss.id, NOW)).session!;
@@ -180,7 +180,7 @@ describe('canPrepareCoopRaid', () => {
     });
   });
 
-  it('blocks until the duo is accepted, then allows the leader', () => {
+  it('blocks until the duo is accepted, then allows the leader', async () => {
     expect(register('PendingLeader', 'test-password').success).toBe(true);
     expect(login('PendingLeader', 'test-password').success).toBe(true);
     prepareCurrentCommander('pending-leader');
@@ -189,7 +189,7 @@ describe('canPrepareCoopRaid', () => {
     prepareCurrentCommander('pending-ally');
 
     expect(login('PendingLeader', 'test-password').success).toBe(true);
-    expect(invitePlayerToParty('PendingAlly')).toMatchObject({ success: true });
+    expect(await invitePlayerToParty('PendingAlly')).toMatchObject({ success: true });
     expect(canPrepareCoopRaid(getCurrentUser(), NOW)).toMatchObject({
       ok: false,
       reason: 'This raid requires exactly two accepted party members.',
@@ -198,7 +198,7 @@ describe('canPrepareCoopRaid', () => {
     expect(login('PendingAlly', 'test-password').success).toBe(true);
     const invitation = getIncomingSocialRequests().find(request => request.kind === 'party');
     expect(invitation).toBeDefined();
-    expect(acceptPartyInvite(invitation!.id)).toMatchObject({ success: true });
+    expect(await acceptPartyInvite(invitation!.id)).toMatchObject({ success: true });
 
     expect(login('PendingAlly', 'test-password').success).toBe(true);
     expect(canPrepareCoopRaid(getCurrentUser(), NOW)).toMatchObject({
@@ -211,7 +211,7 @@ describe('canPrepareCoopRaid', () => {
   });
 
   it('allows resume for either party member once a session exists', async () => {
-    prepareDuo();
+    await prepareDuo();
     const leader = getCurrentUser()!;
     const boss = getActiveCoopBosses(leader, NOW)[0];
     const created = await ensureCurrentCoopRaidSession(boss.id, NOW);

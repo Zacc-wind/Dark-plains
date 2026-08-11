@@ -14,8 +14,8 @@ Turn the current shared world-map prototype into a real multiplayer layer withou
 - [x] Main-story introductions can open as two-character RPG conversations on the world map.
 - [x] Challenge, trade, and party flows have in-game request popups and acceptance UX in the local multiplayer prototype. Server-backed synchronization remains deployment work.
 - [x] The Black Pike Ledger Chronicle provides 40 permanent free-track ranks driven by capped, genuine multiplayer action receipts. Glass Road Memorial archive progresses at half Renown after the Glass Road seal; seasonal featured rotation remains later.
-- [x] Player-vs-player combat has a versioned local two-player duel session with captured rosters, formation readiness, ownership-checked actions, timeout passing, and idempotent rating settlement. Session create/list/patch transport is live via `/api/pvp/duels` (combat action streaming still local).
-- [x] Cooperative raids now have a complete local-authoritative session: PVE launch/resume, two independent formations, readiness, synchronized combat and AI actions, four boss phases, abandon handling, recovery, and duplicate-safe per-player settlement. Session create/list/patch transport is live via `/api/coop/raids` (combat action streaming still local).
+- [x] Player-vs-player combat has a versioned local two-player duel session with captured rosters, formation readiness, ownership-checked actions, timeout passing, and idempotent rating settlement. Session create/list/patch transport is live via `/api/pvp/duels`; combat action streaming is live via `/api/pvp/duels/[id]/actions` writing versioned `combat_snapshot` (no `duel_actions` table — action-log inserts remain raid-only).
+- [x] Cooperative raids now have a complete local-authoritative session: PVE launch/resume, two independent formations, readiness, synchronized combat and AI actions, four boss phases, abandon handling, recovery, and duplicate-safe per-player settlement. Session create/list/patch transport is live via `/api/coop/raids`; combat action streaming foundation is live via `/api/coop/raids/[id]/actions`.
 - [x] Duo `CoopDungeonSession` foundation: 3-chamber route stub from active world dungeons, localStorage client, PVE hub "Duo Dungeon Route" entry, chamber combat via `createCoopBattleState` (full route length/loot still later).
 - [x] PVE intel exposes two deterministic co-op boss incursions per five-hour cycle without routing them through the solo encounter flow.
 - [x] The playable Drowned Moonwell core spans levels 6-10 with nine ordered quests, eight Moonbridge contracts, a named Blackroot elite, Mother Cindervein, exact encounter receipts, and an authored return to Naima.
@@ -79,7 +79,8 @@ Turn the current shared world-map prototype into a real multiplayer layer withou
 - [x] Add `CoopRaidSession` state: party id, two members, readiness, formations, shared combat revision, result, and claim receipts.
 - [x] Build collaborative duo formation; each player places only their own five field units and confirms independently.
 - [x] Add local idempotent raid settlement, per-player loot, reload recovery, and forfeit/abandon rules.
-- [ ] Replace local co-op session transport with database subscriptions and server-authoritative action validation.
+- [x] Replace local co-op session transport with database subscriptions and server-authoritative action validation.
+  Session create/list/patch plus combat action POST (`/api/coop/raids/[id]/actions`) and optional realtime UPDATE subscribe are live; duo map-entry gating remains.
 - [ ] Add map interaction only after party readiness can prevent the old solo encounter path from opening a raid.
 - [x] Add the longer `CoopDungeonSession` foundation: party id, members, dungeon id, shared seed, three-chamber route stub, lobby/chamber/complete/abandoned phases (localStorage client + PVE hub entry; full length/loot still later).
 - [ ] Dungeon levels scale from 1 to 15, with longer routes as level rises.
@@ -129,8 +130,9 @@ Turn the current shared world-map prototype into a real multiplayer layer withou
 - [x] Add participant-only RLS reads and reserve multiplayer session writes for trusted server handlers.
 - [x] Add server-side validation for trade completion and combat actions before deployment.
   Trade completion validation and optimistic-version settlement are live via `/api/trade/sessions` PATCH when Supabase admin is configured.
-  Duel formation/cancel/forfeit/settle transport is live via `/api/pvp/duels` (combat action streaming still local).
-  Co-op raid formation/abandon/settle transport is live via `/api/coop/raids` (combat action streaming still local).
+  Duel formation/cancel/forfeit/settle transport is live via `/api/pvp/duels`; combat action streaming is live via `/api/pvp/duels/[id]/actions` with versioned `combat_snapshot` updates (no separate action-log table).
+  Co-op raid formation/abandon/settle transport is live via `/api/coop/raids`; combat action streaming foundation is live via `/api/coop/raids/[id]/actions` with `coop_raid_actions` inserts + versioned session updates.
+  Party invite/accept/decline persistence is live via `/api/party/*` + `party_invites` (migration `011_party_invites_and_realtime.sql`).
 
 ## Phase 9: Progression Gates And Unlock Communication
 - [x] Define one shared unlock registry consumed by HUD buttons, modal guards, API routes, and tutorial copy.
@@ -141,7 +143,7 @@ Turn the current shared world-map prototype into a real multiplayer layer withou
 - [x] Level 5: party creation and cooperative dungeon readiness unlock with an authored briefing and a guarded two-player raid entry.
 - [x] Level 7: Dungeon Tier II entry is enforced by the shared unlock registry and shown on map/PVE dungeon previews; level 12+ Tier III roads require level 16.
 - [ ] Later levels unlock harder regions, additional city services, dungeon tiers, boss rotations, and advanced social objectives.
-- [x] Enforce unlock gates on mutating multiplayer APIs (PVP, trade, co-op) plus `/api/party/invite` and `/api/party/accept` (unlock check before online persistence); client authority remains for city contracts, gear forge, and local party until full party sync ships.
+- [x] Enforce unlock gates on mutating multiplayer APIs (PVP, trade, co-op) plus `/api/party/invite`, `/api/party/accept`, and `/api/party/decline` with `party_invites` persistence when admin is configured; client authority remains for city contracts and gear forge until full party membership sync ships.
 - [x] Show locked features in a compact preview with level requirement and one-sentence value, rather than silently hiding the feature.
 
 ## Phase 10: Daily And Weekly Reasons To Return
@@ -191,7 +193,7 @@ Ship order: docs → retention → story/tutorial remake → gear → map/visual
 - [x] Set scrap salvage into blacksmith sockets / set progress.
 
 ### Parked
-- Guild goals, seasonal PVP reset, 120 map expansion, combat-action DB streaming, omen SP depth, RLS harden (separate security track).
+- Guild goals, seasonal PVP reset, 120 map expansion, omen SP depth, RLS harden (separate security track). (Duel/raid combat_snapshot streaming landed; per-action log table remains raid-only.)
 
 ### Content bands after the above
 - [x] Moonwell side stories + post-chapter world response.
@@ -230,10 +232,11 @@ Ship order: docs → retention → story/tutorial remake → gear → map/visual
 6. [x] Complete local multiplayer sessions: duel ownership/synchronization and duo raid readiness, formation, combat, recovery, abandon, and settlement are implemented.
 7. [x] Finish the concise town-service pass and verify the new scroll-shell composition at all target viewports.
 8. [~] Move duel, trade, and co-op session transport and validation to Supabase.
-   Trade, duel, and co-op raid session create/list/patch transport are live; combat action streaming for duel and raid remains local.
+   Trade, duel, and co-op raid session create/list/patch transport are live; co-op raid and duel combat action streaming foundations are live (duel streams via versioned `combat_snapshot` only; action-log table remains raid-only).
    Trade sessions: GET/POST/PATCH + client cutover with local fallback.
-   Duel sessions: GET/POST/PATCH for create/formation/cancel/forfeit/settle; combat actions still local.
-   Co-op raid sessions: GET/POST/PATCH for create/formation/abandon/settle + claim dual-write; combat actions still local.
+   Duel sessions: GET/POST/PATCH for create/formation/cancel/forfeit/settle; combat POST `/actions` writing versioned `combat_snapshot`.
+   Co-op raid sessions: GET/POST/PATCH for create/formation/abandon/settle + claim dual-write; combat POST `/actions` + optional realtime session UPDATE subscribe.
+   Party invites: POST invite/accept/decline with `party_invites` persistence when admin is configured.
 9. [x] Ship the playable levels 6-10 Drowned Moonwell core with exact story encounters, response choices, Moonbridge contracts, and Dungeon Tier II gating.
 10. [x] Phase 10B retention → story/tutorial remake → gear → map → interest mechanics (see Phase 10B checklist).
 11. [x] Complete Moonwell side stories and visible post-chapter world response (bespoke enemy/item art and reputation prerequisites remain).

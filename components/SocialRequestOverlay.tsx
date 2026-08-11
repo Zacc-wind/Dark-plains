@@ -92,7 +92,7 @@ export default function SocialRequestOverlay() {
     setNotice('');
     try {
       const result = incoming.kind === 'party'
-        ? response === 'accept' ? acceptPartyInvite(incoming.id) : declinePartyInvite(incoming.id)
+        ? response === 'accept' ? await acceptPartyInvite(incoming.id) : await declinePartyInvite(incoming.id)
         : response === 'accept'
           ? await acceptPlayerTradeRequest(incoming.id)
           : await declinePlayerTradeRequest(incoming.id);

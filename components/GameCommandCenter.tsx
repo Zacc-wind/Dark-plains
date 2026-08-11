@@ -864,6 +864,13 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
     applyTradeResult(await action());
   };
 
+  const runPartyAction = async (
+    action: () => Promise<{ success: boolean; message?: string; error?: string }>,
+    targetId?: string,
+  ) => {
+    applyPartyResult(await action(), targetId);
+  };
+
   const openActiveTrade = () => {
     window.dispatchEvent(new Event(TRADE_SESSION_OPEN_EVENT));
   };
@@ -899,9 +906,12 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
   };
 
   const handleInvitePartyPlayer = () => {
-    const result = invitePlayerToParty(partyInviteDraft);
-    if (result.success) setPartyInviteDraft('');
-    applyPartyResult(result, partyInviteDraft.trim());
+    const draft = partyInviteDraft.trim();
+    void runPartyAction(async () => {
+      const result = await invitePlayerToParty(partyInviteDraft);
+      if (result.success) setPartyInviteDraft('');
+      return result;
+    }, draft);
   };
 
   const openPartyChat = () => {
@@ -1682,7 +1692,7 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
           {currentIsInvited && (
             <button
               type="button"
-              onClick={() => applyPartyResult(acceptPartyInvite())}
+              onClick={() => void runPartyAction(() => acceptPartyInvite())}
               className="party-map-strip-button party-map-strip-button-primary"
             >
               Join
@@ -1748,7 +1758,7 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
             </p>
             <button
               type="button"
-              onClick={() => applyPartyResult(acceptPartyInvite())}
+              onClick={() => void runPartyAction(() => acceptPartyInvite())}
               className="party-details-action party-details-action-primary"
             >
               Join Party
@@ -1930,7 +1940,7 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
               {isInvitedToParty ? (
                 <button
                   type="button"
-                  onClick={() => applyPartyResult(acceptPartyInvite())}
+                  onClick={() => void runPartyAction(() => acceptPartyInvite())}
                   className="ui-button-primary w-full rounded px-3 py-2 text-xs font-black"
                 >
                   Join Party
@@ -2046,7 +2056,7 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
                   <div className="flex shrink-0 gap-2">
                     <button
                       type="button"
-                      onClick={() => applyPartyResult(invitePlayerToParty(friend.username), friend.username)}
+                      onClick={() => void runPartyAction(() => invitePlayerToParty(friend.username), friend.username)}
                       className="ui-button rounded px-2 py-2 text-[10px] font-black"
                     >
                       Invite
@@ -2106,7 +2116,7 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
                       </button>
                       <button
                         type="button"
-                        onClick={() => applyPartyResult(invitePlayerToParty(candidate.username), candidate.username)}
+                        onClick={() => void runPartyAction(() => invitePlayerToParty(candidate.username), candidate.username)}
                         className="ui-button rounded px-2 py-2 text-[10px] font-black"
                       >
                         Party

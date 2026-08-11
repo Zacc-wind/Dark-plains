@@ -25,6 +25,7 @@ import {
 import {
   createOnlinePvpDuelSession,
   fetchOnlinePvpDuelSessions,
+  postOnlinePvpDuelAction,
   shouldUseOnlinePvpDuelClient,
   updateOnlinePvpDuelSession,
 } from './pvpDuelOnlineClient';
@@ -166,13 +167,35 @@ export async function confirmCurrentPvpDuelFormation(
   return { ...result, session: savePvpDuelSession(result.session, now) };
 }
 
-export function applyCurrentPvpDuelAction(
+export async function applyCurrentPvpDuelAction(
+  sessionId: string,
+  action: SynchronizedBattleAction,
+  expectedVersion: number,
+  now = Date.now(),
+): Promise<PvpDuelSessionResult> {
+  if (shouldUseOnlinePvpDuelClient()) {
+    try {
+      const payload = await postOnlinePvpDuelAction(sessionId, action, expectedVersion);
+      return {
+        success: true,
+        session: savePvpDuelSession(payload.session, now),
+        duplicate: payload.duplicate,
+      };
+    } catch (error) {
+      return onlineError(error, 'Failed to apply duel action.');
+    }
+  }
+
+  return applyLocalCurrentPvpDuelAction(sessionId, action, expectedVersion, now);
+}
+
+/** Sync local apply for snappy BattleModal UI; pair with background postOnlinePvpDuelAction when online. */
+export function applyLocalCurrentPvpDuelAction(
   sessionId: string,
   action: SynchronizedBattleAction,
   expectedVersion: number,
   now = Date.now(),
 ): PvpDuelSessionResult {
-  // Combat action streaming stays local for this slice.
   const session = getPvpDuelSessions(now).find(item => item.id === sessionId);
   if (!session) return { success: false, error: 'Duel session was not found.' };
   const result = applyPvpDuelAction(session, action, expectedVersion, now);

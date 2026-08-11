@@ -6,13 +6,18 @@ import { getPlayerModelPath } from '@/lib/assetLoader';
 import { getCurrentUser, type User } from '@/lib/auth';
 import {
   abandonCurrentCoopRaidSession,
-  applyCurrentCoopRaidAction,
+  applyLocalCurrentCoopRaidAction,
   confirmCurrentCoopRaidFormation,
   COOP_RAID_SESSION_UPDATED_EVENT,
   getCurrentCoopRaidSession,
+  saveCoopRaidSession,
   settleCurrentCoopRaidSession,
   syncOnlineCoopRaidSessions,
 } from '@/lib/coopRaidClient';
+import {
+  postOnlineCoopRaidAction,
+  shouldUseOnlineCoopRaidClient,
+} from '@/lib/coopRaidOnlineClient';
 import {
   getCoopRaidFormation,
   getCoopRaidReward,
@@ -20,6 +25,7 @@ import {
   type CoopRaidSession,
 } from '@/lib/coopRaidSessions';
 import type { PlayerModelNumber, SynchronizedBattleAction } from '@/lib/battle';
+import { isSupabaseConfigured } from '@/lib/supabase/config';
 import BattleModal, {
   type BattleModalActionRequest,
   type BattleModalActionResponse,
@@ -97,6 +103,44 @@ export default function CoopRaidSessionOverlay() {
     };
   }, [refresh]);
 
+  useEffect(() => {
+    if (!session?.id || !isSupabaseConfigured() || !shouldUseOnlineCoopRaidClient()) return undefined;
+    let cancelled = false;
+    let cleanup: (() => void) | undefined;
+
+    void import('@/lib/supabase/client').then(({ createClient }) => {
+      if (cancelled) return;
+      try {
+        const supabase = createClient();
+        const channel = supabase
+          .channel(`coop-raid-session-${session.id}`)
+          .on(
+            'postgres_changes',
+            {
+              event: 'UPDATE',
+              schema: 'public',
+              table: 'coop_raid_sessions',
+              filter: `id=eq.${session.id}`,
+            },
+            () => {
+              refresh();
+            },
+          )
+          .subscribe();
+        cleanup = () => {
+          void supabase.removeChannel(channel);
+        };
+      } catch {
+        // Keep 1s poll when browser Supabase client is unavailable.
+      }
+    });
+
+    return () => {
+      cancelled = true;
+      cleanup?.();
+    };
+  }, [refresh, session?.id]);
+
   const username = currentUser?.username || '';
   const snapshot = session && username ? getCoopRaidSnapshot(session, username) : null;
   const savedFormation = session && username ? getCoopRaidFormation(session, username) : null;
@@ -119,14 +163,28 @@ export default function CoopRaidSessionOverlay() {
       expectedRevision: session.combatSnapshot.revision || 0,
       createdAt: now,
     };
-    const result = applyCurrentCoopRaidAction(session.id, action, session.version, now);
+    // Hybrid: BattleModal is sync, so apply locally for snappy UI, then stream online in background.
+    const result = applyLocalCurrentCoopRaidAction(session.id, action, session.version, now);
     if (!result.success || !result.session?.combatSnapshot) {
       return { success: false, error: result.error || 'Raid command failed.' };
     }
     setSession(result.session);
     setNotice(null);
+
+    if (shouldUseOnlineCoopRaidClient()) {
+      void postOnlineCoopRaidAction(session.id, action, session.version)
+        .then(payload => {
+          saveCoopRaidSession(payload.session, now);
+          setSession(payload.session);
+        })
+        .catch(error => {
+          setNotice(error instanceof Error ? error.message : 'Raid action failed to sync.');
+          void syncOnlineCoopRaidSessions().then(refresh);
+        });
+    }
+
     return { success: true, battle: result.session.combatSnapshot };
-  }, [session, username]);
+  }, [refresh, session, username]);
 
   const abandon = () => {
     if (!session || !username || busy) return;

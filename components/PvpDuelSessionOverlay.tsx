@@ -10,7 +10,7 @@ import {
   type SynchronizedBattleAction,
 } from '@/lib/battle';
 import {
-  applyCurrentPvpDuelAction,
+  applyLocalCurrentPvpDuelAction,
   cancelCurrentPvpDuelSession,
   confirmCurrentPvpDuelFormation,
   ensurePvpDuelSession,
@@ -18,9 +18,14 @@ import {
   getCurrentPvpDuelSession,
   getPvpDuelSessions,
   PVP_DUEL_SESSION_UPDATED_EVENT,
+  savePvpDuelSession,
   settleCurrentPvpDuelSession,
   syncOnlinePvpDuelSessions,
 } from '@/lib/pvpDuelClient';
+import {
+  postOnlinePvpDuelAction,
+  shouldUseOnlinePvpDuelClient,
+} from '@/lib/pvpDuelOnlineClient';
 import {
   getPvpDuelSide,
   type PvpDuelSession,
@@ -107,14 +112,28 @@ export default function PvpDuelSessionOverlay() {
       expectedRevision: session.combatSnapshot.revision || 0,
       createdAt: now,
     };
-    const result = applyCurrentPvpDuelAction(session.id, action, session.version, now);
+    // Hybrid: BattleModal is sync, so apply locally for snappy UI, then stream online in background.
+    const result = applyLocalCurrentPvpDuelAction(session.id, action, session.version, now);
     if (!result.success || !result.session?.combatSnapshot) {
       return { success: false, error: result.error || 'Duel command failed.' };
     }
     setSession(result.session);
     setNotice(null);
+
+    if (shouldUseOnlinePvpDuelClient()) {
+      void postOnlinePvpDuelAction(session.id, action, session.version)
+        .then(payload => {
+          savePvpDuelSession(payload.session, now);
+          setSession(payload.session);
+        })
+        .catch(error => {
+          setNotice(error instanceof Error ? error.message : 'Duel action failed to sync.');
+          void syncOnlinePvpDuelSessions().then(refresh);
+        });
+    }
+
     return { success: true, battle: result.session.combatSnapshot };
-  }, [session, username]);
+  }, [refresh, session, username]);
 
   if (!session || !side || !snapshot || !savedFormation) return null;
   if (session.phase === 'cancelled' || session.phase === 'expired') return null;

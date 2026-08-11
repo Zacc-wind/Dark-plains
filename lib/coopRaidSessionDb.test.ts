@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { User } from './auth';
 import { getActiveCoopBosses, COOP_BOSS_CYCLE_MS } from './battle';
-import { createCoopRaidSession } from './coopRaidSessions';
+import { createCoopRaidSession, confirmCoopRaidFormation, applyCoopRaidAction } from './coopRaidSessions';
 import {
   coopRaidSessionFromDbRow,
   coopRaidSessionToDbPayload,
@@ -149,5 +149,86 @@ describe('coopRaidSessionDb', () => {
     expect(restored.abandonedBy).toBe('Alice');
     expect(restored.result?.outcome).toBe('abandoned');
     expect(restored.result?.finalBattleRevision).toBe(3);
+  });
+
+  it('shapes coop_raid_actions payloads from applyCoopRaidAction combat actions', () => {
+    const host = mockUser('Alice');
+    const ally = mockUser('Bob');
+    const boss = getActiveCoopBosses(host, NOW)[0];
+    const created = createCoopRaidSession(
+      {
+        leaderUsername: 'Alice',
+        memberUsernames: ['Alice', 'Bob'],
+        invitedUsernames: [],
+        updatedAt: NOW,
+      },
+      host,
+      ally,
+      boss,
+      NOW,
+    );
+    expect(created.success).toBe(true);
+    let session = created.session!;
+
+    session = confirmCoopRaidFormation(
+      session,
+      'Alice',
+      session.hostFormation.placements,
+      session.hostFormation.equippedSpellIds,
+      session.version,
+      NOW + 100,
+    ).session!;
+    session = confirmCoopRaidFormation(
+      session,
+      'Bob',
+      session.allyFormation.placements,
+      session.allyFormation.equippedSpellIds,
+      session.version,
+      NOW + 200,
+    ).session!;
+    expect(session.phase).toBe('active');
+    expect(session.combatSnapshot).toBeTruthy();
+
+    const hostUnit = session.combatSnapshot!.units.find(unit => unit.ownerUsername === 'Alice')!;
+    const hostTurn = {
+      ...session,
+      combatSnapshot: { ...session.combatSnapshot!, activeUnitId: hostUnit.id },
+    };
+    const action = {
+      id: `action-${session.id}-1`,
+      type: 'wait' as const,
+      actorUsername: 'Alice',
+      expectedRevision: hostTurn.combatSnapshot.revision || 0,
+      unitId: hostUnit.id,
+      createdAt: NOW + 300,
+    };
+    const applied = applyCoopRaidAction(hostTurn, action, hostTurn.version, NOW + 300);
+    expect(applied.success).toBe(true);
+    expect(applied.session?.version).toBe(hostTurn.version + 1);
+
+    const actionRow = {
+      session_id: session.id,
+      action_id: action.id,
+      actor_id: 'host-id',
+      expected_revision: action.expectedRevision,
+      payload: action,
+    };
+    expect(actionRow).toMatchObject({
+      session_id: session.id,
+      action_id: action.id,
+      expected_revision: action.expectedRevision,
+      payload: {
+        id: action.id,
+        type: 'wait',
+        actorUsername: 'Alice',
+        unitId: hostUnit.id,
+      },
+    });
+
+    const dbPayload = coopRaidSessionToDbPayload(applied.session!, 'host-id', 'ally-id');
+    expect(dbPayload.version).toBe(applied.session!.version);
+    expect(dbPayload.combat_snapshot).toMatchObject({
+      revision: applied.session!.combatSnapshot?.revision,
+    });
   });
 });

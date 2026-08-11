@@ -3,12 +3,11 @@ import {
   gatePartyInviteUnlocks,
   type MultiplayerUnlockGateResult,
 } from '@/lib/multiplayerUnlockGate';
-import { isSupabaseConfigured } from '@/lib/supabase/config';
-import { isSupabaseAdminConfigured } from '@/lib/supabase/admin';
+import { shouldUseOnlinePartySessions as shouldUseOnlinePartySessionsDb } from '@/lib/partySessionDb';
 
-/** Online party invite/accept persistence is not fully wired yet; unlock gates still run first. */
+/** Online party invite/accept when Supabase admin is configured for server writes. */
 export function shouldUseOnlinePartySessions(): boolean {
-  return isSupabaseConfigured() && isSupabaseAdminConfigured();
+  return shouldUseOnlinePartySessionsDb();
 }
 
 export function evaluatePartyInviteUnlock(

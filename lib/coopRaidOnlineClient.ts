@@ -1,4 +1,5 @@
 import type { ApiEnvelope } from '@/lib/apiResponses';
+import type { SynchronizedBattleAction } from '@/lib/battle';
 import { isSupabaseConfigured } from '@/lib/supabase/config';
 import type { CoopRaidSession } from '@/lib/coopRaidSessions';
 
@@ -84,6 +85,35 @@ export async function updateOnlineCoopRaidSession(
 
   if (!response.ok || !payload.ok || !payload.data) {
     throw new Error(payload.error || 'Failed to update raid session.');
+  }
+
+  return payload.data;
+}
+
+export async function postOnlineCoopRaidAction(
+  sessionId: string,
+  action: SynchronizedBattleAction,
+  expectedVersion: number,
+): Promise<RaidPayload> {
+  const response = await fetch(`/api/coop/raids/${encodeURIComponent(sessionId)}/actions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action, expectedVersion }),
+  });
+  const payload = await readApiEnvelope<RaidPayload>(response);
+
+  if (response.status === 409 && payload.data?.session) {
+    const error = new Error(payload.error || 'Raid session changed. Refresh before acting.') as Error & {
+      session?: CoopRaidSession;
+      conflict?: boolean;
+    };
+    error.session = payload.data.session;
+    error.conflict = true;
+    throw error;
+  }
+
+  if (!response.ok || !payload.ok || !payload.data) {
+    throw new Error(payload.error || 'Failed to stream raid action.');
   }
 
   return payload.data;

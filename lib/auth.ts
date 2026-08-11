@@ -103,6 +103,12 @@ import {
   type TradeParticipantStatePayload,
 } from './tradeSessionClient';
 import {
+  acceptOnlinePartyInvite,
+  createOnlinePartyInvite,
+  declineOnlinePartyInvite,
+  shouldUseOnlinePartyClient,
+} from './partyOnlineClient';
+import {
   claimMultiplayerBannerHunt as claimMultiplayerBannerHuntState,
   claimMultiplayerDailyContract as claimMultiplayerDailyContractState,
   claimMultiplayerFirstCompletionBonus as claimMultiplayerFirstCompletionBonusState,
@@ -2970,7 +2976,7 @@ export function removeFriend(username: string): { success: boolean; message?: st
   return { success: true, message: `${users[otherIndex].username} removed from friends.` };
 }
 
-export function invitePlayerToParty(targetUsername: string): { success: boolean; message?: string; error?: string } {
+export async function invitePlayerToParty(targetUsername: string): Promise<{ success: boolean; message?: string; error?: string }> {
   const current = getCurrentUser();
   if (!current) return { success: false, error: 'Login required.' };
 
@@ -3028,6 +3034,20 @@ export function invitePlayerToParty(targetUsername: string): { success: boolean;
     target.username,
     current.username,
   ];
+
+  let partyInviteId: string | undefined;
+  if (shouldUseOnlinePartyClient()) {
+    try {
+      const online = await createOnlinePartyInvite(target.username);
+      partyInviteId = online.inviteId;
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to send party invite.',
+      };
+    }
+  }
+
   const request = createSocialRequest({
     kind: 'party',
     senderUsername: current.username,
@@ -3035,6 +3055,7 @@ export function invitePlayerToParty(targetUsername: string): { success: boolean;
     payload: {
       partyLeaderUsername: nextParty.leaderUsername,
       partyMemberCount: nextParty.memberUsernames.length,
+      ...(partyInviteId ? { partyInviteId } : {}),
     },
   });
   let nextUsers = setPartyForUsers(users, nextParty, affected);
@@ -3044,7 +3065,7 @@ export function invitePlayerToParty(targetUsername: string): { success: boolean;
   return { success: true, message: `Party invite sent to ${target.username}.` };
 }
 
-export function acceptPartyInvite(requestId?: string): { success: boolean; message?: string; error?: string } {
+export async function acceptPartyInvite(requestId?: string): Promise<{ success: boolean; message?: string; error?: string }> {
   const current = getCurrentUser();
   if (!current) return { success: false, error: 'Login required.' };
   const unlockDenied = multiplayerUnlockActionDenied('party', current);
@@ -3068,6 +3089,17 @@ export function acceptPartyInvite(requestId?: string): { success: boolean; messa
     return { success: false, error: `Party is full (${MAX_PARTY_SIZE} players).` };
   }
 
+  if (shouldUseOnlinePartyClient()) {
+    try {
+      await acceptOnlinePartyInvite(request?.payload?.partyInviteId || requestId);
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to accept party invite.',
+      };
+    }
+  }
+
   const nextParty: PartyState = {
     ...party,
     memberUsernames: uniqueUsernames([...party.memberUsernames, current.username]).slice(0, MAX_PARTY_SIZE),
@@ -3082,7 +3114,7 @@ export function acceptPartyInvite(requestId?: string): { success: boolean; messa
   return { success: true, message: 'Joined party.' };
 }
 
-export function declinePartyInvite(requestId?: string): { success: boolean; message?: string; error?: string } {
+export async function declinePartyInvite(requestId?: string): Promise<{ success: boolean; message?: string; error?: string }> {
   const current = getCurrentUser();
   if (!current) return { success: false, error: 'Login required.' };
   const users = reconcileExpiredSocialRequests(getUsers());
@@ -3098,6 +3130,17 @@ export function declinePartyInvite(requestId?: string): { success: boolean; mess
     return { success: false, error: 'No party invite pending.' };
   }
   if (requestId && !request) return { success: false, error: 'Party invitation expired or was withdrawn.' };
+
+  if (shouldUseOnlinePartyClient()) {
+    try {
+      await declineOnlinePartyInvite(request?.payload?.partyInviteId || requestId);
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to decline party invite.',
+      };
+    }
+  }
 
   const nextParty: PartyState = {
     ...party,

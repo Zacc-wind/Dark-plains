@@ -1,8 +1,13 @@
-import { apiNotConfigured } from '@/lib/apiResponses';
+import { apiNotConfigured, apiOk } from '@/lib/apiResponses';
 import {
   evaluatePartyAcceptUnlock,
   shouldUseOnlinePartySessions,
 } from '@/lib/partyApi';
+import {
+  acceptPartyInviteRow,
+  getPartySessionAdminClient,
+  loadPartyInvite,
+} from '@/lib/partySessionDb';
 import { multiplayerUnlockForbiddenResponse } from '@/lib/multiplayerUnlockGate';
 import { isSupabaseConfigured } from '@/lib/supabase/config';
 import { createClient } from '@/lib/supabase/server';
@@ -25,6 +30,24 @@ async function getPlayerLevel(supabase: SupabaseServerClient, userId: string): P
     .maybeSingle();
   if (error) throw error;
   return Number(data?.level) || 1;
+}
+
+async function resolveInviteId(
+  admin: NonNullable<ReturnType<typeof getPartySessionAdminClient>>,
+  userId: string,
+  requestId?: string,
+): Promise<string | null> {
+  if (requestId) return requestId;
+  const { data, error } = await admin
+    .from('party_invites')
+    .select('id')
+    .eq('invitee_id', userId)
+    .eq('status', 'pending')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return data?.id || null;
 }
 
 export async function POST(request: Request) {
@@ -58,11 +81,35 @@ export async function POST(request: Request) {
       return apiNotConfigured('Online party invite persistence');
     }
 
-    void body.requestId;
-    // Parties / party_members tables exist, but invite acceptance sync is not wired yet.
-    return apiNotConfigured('Online party invite persistence');
+    const admin = getPartySessionAdminClient();
+    if (!admin) {
+      return apiNotConfigured('Online party invite persistence');
+    }
+
+    const inviteId = await resolveInviteId(admin, userId, body.requestId?.trim() || undefined);
+    if (!inviteId) {
+      return Response.json({ ok: false, error: 'No party invite pending.', deploymentMode: 'database' }, { status: 404 });
+    }
+
+    const invite = await loadPartyInvite(admin, inviteId);
+    if (!invite) {
+      return Response.json({
+        ok: false,
+        error: 'Party invitation expired or was withdrawn.',
+        deploymentMode: 'database',
+      }, { status: 404 });
+    }
+
+    const result = await acceptPartyInviteRow(admin, invite, userId);
+    return apiOk({
+      partyId: result.partyId,
+      inviteId: invite.id,
+      memberIds: result.memberIds,
+      ...(result.duplicate ? { duplicate: true } : {}),
+    }, undefined, 'database');
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Party accept failed.';
-    return Response.json({ ok: false, error: message, deploymentMode: 'database' }, { status: 500 });
+    const status = /expired|withdrawn|full|already|Only the invited|Leave your current/i.test(message) ? 409 : 500;
+    return Response.json({ ok: false, error: message, deploymentMode: 'database' }, { status });
   }
 }
