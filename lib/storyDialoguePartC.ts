@@ -1,1 +1,360 @@
-PLACEHOLDER
+import type { StoryDialogSequence } from './storyDialogueTypes';
+
+export const storyDialoguePartC: Record<string, StoryDialogSequence> = {
+  'story-21-quarry-ledger': {
+    id: 'story-21-quarry-ledger',
+    kicker: 'Movement V - Candle Key',
+    npcName: 'Brother Kaito',
+    npcTitle: 'Bell Tower Monk',
+    npcModelNumber: 2,
+    objective: {
+      label: 'Key Order',
+      title: 'Find Brother Kaito',
+      description: 'Visit Brother Kaito and open the Candle Key race before the Mirror Court seals the lock.',
+    },
+    lines: [
+      { speaker: 'npc', text: 'Voss is quiet and the Glass Road Memorial has begun. The candle key will not stay quiet. Rival powers already race the same fragments—pieces of synod authority that open or close the court\'s lock under living or mirrored law. I want living hands on those keys; I have almost completed drowned sequences to learn the enemy.' },
+      { speaker: 'player', text: 'Then show me the lock before they turn it.' },
+      { speaker: 'npc', text: 'Reach Eclipse Hold. Ser Kael Duskplate guards the quarry road where blue oaths still answer living steel. That is the field order before the synod lock chooses a master.' },
+    ],
+  },
+  'story-22-eclipse-hold': {
+    id: 'story-22-eclipse-hold',
+    kicker: 'Movement V - Eclipse Hold',
+    npcName: 'Brother Kaito',
+    npcTitle: 'Bell Tower Monk',
+    npcModelNumber: 2,
+    objective: {
+      label: 'March Order',
+      title: 'Reach Eclipse Hold',
+      description: 'Travel to Eclipse Hold before the Mirror Court rewrites the oaths recorded on its walls.',
+    },
+    lines: [
+      { speaker: 'npc', text: 'Eclipse Hold is where king-mages signed their last lies—the coast\'s memory palace. Walk the walls while the ink still remembers blood, before the court rewrites every oath recorded there into glass.' },
+      { speaker: 'player', text: 'Then I will reach the hold before their forgers dry.' },
+      { speaker: 'npc', text: 'After the walls, break Ser Kael near Granite Heights. He keeps the first candle-key route cold—blue-oath vows too frozen for mortal law.' },
+    ],
+  },
+  'story-23-iron-chorus': {
+    id: 'story-23-iron-chorus',
+    kicker: 'Movement V - Key Warden',
+    npcName: 'Brother Kaito',
+    npcTitle: 'Bell Tower Monk',
+    npcModelNumber: 2,
+    objective: {
+      label: 'Elite Order',
+      title: 'Defeat Ser Kael Duskplate',
+      description: 'Defeat Ser Kael Duskplate near Granite Heights Quarry and open the candle key fragment hunt.',
+    },
+    lines: [
+      { speaker: 'npc', text: 'Kael drowned in moonlit steel and returned with vows too cold for mortal law. He will not give the candle-key road freely—cold blue routes guarding synod fragments.' },
+      { speaker: 'player', text: 'Then blue steel answers me first.' },
+      { speaker: 'npc', text: 'Defeat Ser Kael Duskplate near Granite Heights Quarry. When he falls, gather three candle-key fragments. Key-Saint Ardan waits at the sealed gate—and every lock he opens takes a year from the living.' },
+    ],
+  },
+  'story-24-candle-key': {
+    id: 'story-24-candle-key',
+    kicker: 'Movement V - Candle Synod',
+    npcName: 'Brother Kaito',
+    npcTitle: 'Bell Tower Monk',
+    npcModelNumber: 2,
+    objective: {
+      label: 'Key Order',
+      title: 'Gather candle-key fragments',
+      description: 'Collect three candle-key fragments from road chests, quarry tithes, and fallen enemies.',
+    },
+    lines: [
+      { speaker: 'npc', text: 'Three candle-key fragments can unseal the mirror court, if the synod trusts the hand that carries them. Candles are law and predation both—never treat fragments as loot sparkles without jurisdiction.' },
+      { speaker: 'player', text: 'Where do the fragments hide?' },
+      { speaker: 'npc', text: 'In road chests, quarry tithes, and the pockets of cowards. Gather three. Ardan will feel the lock turning—and false synod bells already call fragments like frightened birds.' },
+    ],
+  },
+  'story-25-paragon-muster': {
+    id: 'story-25-paragon-muster',
+    kicker: 'Movement V - Key-Saint',
+    npcName: 'Brother Kaito',
+    npcTitle: 'Bell Tower Monk',
+    npcModelNumber: 2,
+    objective: {
+      label: 'Capstone Order',
+      title: 'Defeat Key-Saint Ardan',
+      description: 'Defeat Key-Saint Ardan near Eclipse Hold before he locks the court against living banners.',
+    },
+    lines: [
+      { speaker: 'npc', text: 'Ardan carries the last gate key, but every lock he opens takes a year from the living. He would lock the court against living banners at that cost. Crack his key so the lock stays turnable by living hands—and force Lady Mirror-Veyra to field reflections openly.' },
+      { speaker: 'player', text: 'Then the saint falls before another year is stolen.' },
+      { speaker: 'npc', text: 'Defeat Key-Saint Ardan near Eclipse Hold. Bring me the broken key. Tomorrow the synod will record that living hands still turn the lock—and the Lady will have to show her armies.' },
+    ],
+  },
+  'story-25-key-sealed': {
+    id: 'story-25-key-sealed',
+    kicker: 'Movement V - Key Sealed',
+    npcName: 'Brother Kaito',
+    npcTitle: 'Bell Tower Monk',
+    npcModelNumber: 2,
+    objective: {
+      label: 'Chapter Complete',
+      title: 'Seal the Candle Key',
+      description: 'Return to Brother Kaito after Key-Saint Ardan falls and claim the Candle Key chapter reward.',
+    },
+    lines: [
+      { speaker: 'npc', text: 'The key is cracked—the broken gate-key receipt of Movement V—but the court is not closed. Lady Mirror-Veyra already wears reflections of your victories from pike, Moonwell, crown, and glass. The lock remains under living hands; she must field her archive openly now.' },
+      { speaker: 'player', text: 'Then point me to the glass.' },
+      { speaker: 'npc', text: 'Archivist Letho waits on the eclipse road. Tell him the synod still answers living commanders. Tomorrow cracked bells will quiet—and reflected warbands of your old wins will take the field.' },
+    ],
+  },
+  'story-26-deep-dungeon': {
+    id: 'story-26-deep-dungeon',
+    kicker: 'Movement VI - Court Reflections',
+    npcName: 'Archivist Letho',
+    npcTitle: 'Mirror Court Scribe',
+    npcModelNumber: 5,
+    defaultChoiceId: 'court-open-defiant',
+    objective: {
+      label: 'Court Order',
+      title: 'Find Archivist Letho',
+      description: 'Visit Archivist Letho after the Candle Key seal and open the Lady in Glass chapter.',
+    },
+    lines: [
+      { speaker: 'npc', text: 'The candle key turned under living hands. Now the court fields armies built from your archived victories—Black Pike broken, Moonwell sealed, crown lesson taken, glass cracked. I want this act closed under living record; every reflection in my reliquary is a confession someone refused aloud—and I may have authored some refusals.' },
+      {
+        speaker: 'player',
+        text: 'Then show me which of my victories they stole.',
+        choicePrompt: 'How do you face the archive?',
+        choices: [
+          {
+            id: 'court-open-oathbound',
+            tone: 'oathbound',
+            label: 'Refuse mirrored law',
+            text: 'Show me which names they stole. Living law does not kneel to a prettier record.',
+          },
+          {
+            id: 'court-open-pragmatic',
+            tone: 'pragmatic',
+            label: 'Inventory the thefts',
+            text: 'Show me which of my victories they archived. We measure the theft before we shatter the glass.',
+          },
+          {
+            id: 'court-open-defiant',
+            tone: 'defiant',
+            label: 'Challenge the court',
+            text: 'Then the court answers me directly. I will not wear my own image as an enemy banner.',
+          }
+        ],
+      },
+      { speaker: 'npc', text: 'Stand with me first on the eclipse road. Scarlet Matron Yvane hunts banners that refuse to kneel—red thread for proud captains. That is the next field order.' },
+    ],
+  },
+  'story-27-mirror-envoy': {
+    id: 'story-27-mirror-envoy',
+    kicker: 'Movement VI - Glass Reliquary',
+    npcName: 'Archivist Letho',
+    npcTitle: 'Mirror Court Scribe',
+    npcModelNumber: 5,
+    objective: {
+      label: 'Envoy Order',
+      title: 'Face the court writ',
+      description: 'Visit Archivist Letho again and refuse the Mirror Court writ before the Scarlet Matron arrives.',
+    },
+    lines: [
+      { speaker: 'npc', text: 'I carry the court writ in a reliquary of glass. Every reflection inside it is a confession someone refused aloud—pike ledgers, drowned tithes, iron hymns, moon glass, cracked keys. I need you alive enough to refuse kneeling, which is also useful data for the court I flee.' },
+      { speaker: 'player', text: 'You wanted me on the eclipse road.' },
+      { speaker: 'npc', text: 'I want you alive when Lady Mirror-Veyra asks who broke her procession. First break Scarlet Matron Yvane in Shadowgrove before her thread knots your commander\'s heart.' },
+    ],
+  },
+  'story-28-eclipse-field': {
+    id: 'story-28-eclipse-field',
+    kicker: 'Movement VI - Scarlet Matron',
+    npcName: 'Archivist Letho',
+    npcTitle: 'Mirror Court Scribe',
+    npcModelNumber: 5,
+    objective: {
+      label: 'Elite Order',
+      title: 'Defeat Scarlet Matron Yvane',
+      description: 'Defeat Scarlet Matron Yvane near Shadowgrove before her red thread knots your commander.',
+    },
+    lines: [
+      { speaker: 'npc', text: 'Yvane writes curses in red thread and knots them around the hearts of proud captains—especially banners that will not kneel after a candle key cracked the court\'s preferred lock.' },
+      { speaker: 'player', text: 'Then the thread snaps on my terms.' },
+      { speaker: 'npc', text: 'Defeat Scarlet Matron Yvane near Shadowgrove. After her, Lady Mirror-Veyra will show herself. Inspect the host before you shatter the glass—see which old wins she stole.' },
+    ],
+  },
+  'story-29-high-war': {
+    id: 'story-29-high-war',
+    kicker: 'Movement VI - High War',
+    npcName: 'Archivist Letho',
+    npcTitle: 'Mirror Court Scribe',
+    npcModelNumber: 5,
+    objective: {
+      label: 'Threat Order',
+      title: 'Inspect Lady Mirror-Veyra',
+      description: 'Inspect the named Lady Mirror-Veyra threat and study which reflected victories she intends to field.',
+    },
+    lines: [
+      { speaker: 'npc', text: 'She breaks armies with reflections, then sends the surviving image home wearing the commander face. Look for your Broken Crown formations, your Moonwell seals, your Glass Road colors—glass archives, it does not invent.' },
+      { speaker: 'player', text: 'Then I will read the host before I strike.' },
+      { speaker: 'npc', text: 'Inspect the named Lady Mirror-Veyra threat. See which of your old banners she stole. Shatter her before the mirror learns your name by heart—and before a reflection walks home wearing it.' },
+    ],
+  },
+  'story-30-lady-in-glass': {
+    id: 'story-30-lady-in-glass',
+    kicker: 'Movement VI - Finale',
+    npcName: 'Archivist Letho',
+    npcTitle: 'Mirror Court Scribe',
+    npcModelNumber: 5,
+    objective: {
+      label: 'Capstone Order',
+      title: 'Defeat Lady Mirror-Veyra',
+      description: 'Defeat Lady Mirror-Veyra near Eclipse Hold and shatter the last king-mage reflection.',
+    },
+    lines: [
+      { speaker: 'npc', text: 'Lady Mirror-Veyra keeps the last king-mage reflection. Shatter the court, or kneel to your own image forever. She wants your name by heart—the final instrument of the coast\'s stolen continuity.' },
+      { speaker: 'player', text: 'I did not march east to admire myself.' },
+      { speaker: 'npc', text: 'Defeat Lady Mirror-Veyra near Eclipse Hold. Break the glass. Bring me a quiet shard so living law can record that the Mirror Court act is closed—knowing mirrors remember longer than roads.' },
+    ],
+  },
+  'story-30-court-sealed': {
+    id: 'story-30-court-sealed',
+    kicker: 'Movement VI - Court Closed',
+    npcName: 'Archivist Letho',
+    npcTitle: 'Mirror Court Scribe',
+    npcModelNumber: 5,
+    defaultChoiceId: 'court-sealed-oathbound',
+    objective: {
+      label: 'Act Complete',
+      title: 'Record the shattered court',
+      description: 'Return to Archivist Letho after Lady Mirror-Veyra falls and claim the Mirror Court finale reward.',
+    },
+    lines: [
+      { speaker: 'npc', text: 'The shard is quiet—the quiet-shard receipt of Movement VI. That is rarer than victory. From First Banner through Broken Crown to this glass, you refused to become someone else\'s ink, hymn, or reflection. Mirrors still remember; the act is closed under living law anyway.' },
+      {
+        speaker: 'player',
+        text: 'Record it. My banner does not kneel to glass.',
+        choicePrompt: 'How is the act recorded?',
+        choices: [
+          {
+            id: 'court-sealed-oathbound',
+            tone: 'oathbound',
+            label: 'Seal under living law',
+            text: 'Record it under living law. My banner guards names, not prettier records.',
+          },
+          {
+            id: 'court-sealed-pragmatic',
+            tone: 'pragmatic',
+            label: 'Archive the refusal',
+            text: 'Record the refusal and the shard. The endgame board will need proofs mirrors cannot polish.',
+          },
+          {
+            id: 'court-sealed-defiant',
+            tone: 'defiant',
+            label: 'Refuse the reflection',
+            text: 'Record that I shattered the court. I will not walk home as my own enemy image.',
+          }
+        ],
+      },
+      { speaker: 'npc', text: 'So recorded. Tomorrow the coast will talk differently—town boards quieter of court summons, endgame board open for commanders who still refuse reflections. Walk carefully. Mirrors remember longer than roads.' },
+    ],
+  },
+  'story-side-writ-cutters': {
+    id: 'story-side-writ-cutters',
+    kicker: 'Side Road - Forged Writs',
+    npcName: 'Gate Warden Sable',
+    npcTitle: 'Blackwater Quartermaster',
+    npcModelNumber: 1,
+    objective: {
+      label: 'Side Order',
+      title: 'Break forged-writ couriers',
+      description: 'Defeat two level 16-19 warbands between Blackwater Gate and East Road Camp to thin the glass writ couriers.',
+    },
+    lines: [
+      { speaker: 'npc', text: 'Living writs still hold this gate, but glass couriers are buying the rumor line with counterfeit seals.' },
+      { speaker: 'player', text: 'I will break their escorts first.' },
+      { speaker: 'npc', text: 'Bleed the road crews. The Forger only shows herself when the plates stop arriving.' },
+    ],
+  },
+  'story-side-writ-clear': {
+    id: 'story-side-writ-clear',
+    kicker: 'Side Road - Glass Forger',
+    npcName: 'Gate Warden Sable',
+    npcTitle: 'Blackwater Quartermaster',
+    npcModelNumber: 1,
+    objective: {
+      label: 'Side Order',
+      title: 'Defeat the Glass Writ Forger',
+      description: 'Defeat the named Glass Writ Forger near East Road Camp and seize a forged mirror writ.',
+    },
+    lines: [
+      { speaker: 'npc', text: 'The Forger stamps Blackwater law onto glass until the gate answers reflections. Take one plate before it cools.' },
+      { speaker: 'player', text: 'Then the Forger dies with her seal still hot.' },
+      { speaker: 'npc', text: 'Bring me the forged writ. I will burn it where living ledgers can smell the smoke.' },
+    ],
+  },
+  'story-side-writ-return': {
+    id: 'story-side-writ-return',
+    kicker: 'Side Road - Seal Burned',
+    npcName: 'Gate Warden Sable',
+    npcTitle: 'Blackwater Quartermaster',
+    npcModelNumber: 1,
+    objective: {
+      label: 'Side Complete',
+      title: 'Return the forged mirror writ',
+      description: 'Visit Gate Warden Sable with the forged mirror writ so Blackwater can purge the counterfeit seal.',
+    },
+    lines: [
+      { speaker: 'npc', text: 'Glass signature. Almost perfect. Almost is enough to hang a gate.' },
+      { speaker: 'player', text: 'Burn it. My banner does not answer mirrored law.' },
+      { speaker: 'npc', text: 'Done. Keep your writs living. Prior Voss already teaches the road to prefer pretty lies.' },
+    ],
+  },
+  'story-side-synod-scout': {
+    id: 'story-side-synod-scout',
+    kicker: 'Side Road - Synod Bell',
+    npcName: 'Brother Kaito',
+    npcTitle: 'Bell Tower Monk',
+    npcModelNumber: 2,
+    objective: {
+      label: 'Side Order',
+      title: 'Inspect the Synod Bell Reclaimer',
+      description: 'Find the named Synod Bell Reclaimer near Eclipse Hold and study how cracked bells call candle-key fragments.',
+    },
+    lines: [
+      { speaker: 'npc', text: 'Someone rings cracked synod bells on the hold road. Fragments answer like frightened birds.' },
+      { speaker: 'player', text: 'I will read the Reclaimer before I mute the bell.' },
+      { speaker: 'npc', text: 'Inspect the host. If the court finishes the call first, living keys go dark.' },
+    ],
+  },
+  'story-side-synod-clear': {
+    id: 'story-side-synod-clear',
+    kicker: 'Side Road - Mute the Bell',
+    npcName: 'Brother Kaito',
+    npcTitle: 'Bell Tower Monk',
+    npcModelNumber: 2,
+    objective: {
+      label: 'Side Order',
+      title: 'Defeat the Synod Bell Reclaimer',
+      description: 'Defeat the Synod Bell Reclaimer near Eclipse Hold and recover the cracked synod bell.',
+    },
+    lines: [
+      { speaker: 'npc', text: 'You have heard how the crack pulls fragments. Break the Reclaimer and bring the bell home quiet.' },
+      { speaker: 'player', text: 'I will take the cracked bell to the monks.' },
+      { speaker: 'npc', text: 'Guard your commander. False rings climb under armor faster than honest prayer.' },
+    ],
+  },
+  'story-side-synod-return': {
+    id: 'story-side-synod-return',
+    kicker: 'Side Road - Bell Quieted',
+    npcName: 'Brother Kaito',
+    npcTitle: 'Bell Tower Monk',
+    npcModelNumber: 2,
+    objective: {
+      label: 'Side Complete',
+      title: 'Return the cracked synod bell',
+      description: 'Visit Brother Kaito with the cracked synod bell so Bridge Bell Monks can mute false key-calls.',
+    },
+    lines: [
+      { speaker: 'npc', text: 'The crack still wants a fragment. That is how you know the race is real.' },
+      { speaker: 'player', text: 'Mute it. Living hands keep the key.' },
+      { speaker: 'npc', text: 'We will. When Ardan locks the court, your fragments will still answer the right bell.' },
+    ],
+  }
+};
