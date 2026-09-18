@@ -1,23 +1,23 @@
 # Dark Plains status
-Updated 26 Aug 2026.
+Updated 18 Sep 2026.
 
 ## Phase
-Post-content, pre-production-hardening. SP roguelike is playable (run cap 15). MP campaign chapters I–VI are in the repo. Hosted multiplayer is not two-account validated.
-
-Last ship: 11 Aug 2026 (hosted migrations 008–012, session APIs, combat snapshots).
+Story remake: bible first, then reshape campaign to match.
 
 ## Now
-1. [#1 P0 Auth URLs, Vercel env, reset email](https://github.com/Zacc-wind/Dark-plains/issues/1) (Filip, dashboard)
-2. [#2 Two-browser hosted smoke](https://github.com/Zacc-wind/Dark-plains/issues/2)
-3. [#4 Trust PATCH /api/me, then revoke client player_states writes](https://github.com/Zacc-wind/Dark-plains/issues/4)
-4. [#3 Raid map-entry gate](https://github.com/Zacc-wind/Dark-plains/issues/3)
+1. Review/lock [docs/STORY_BIBLE.md](STORY_BIBLE.md)
+2. Remake chapter dialogue/spine to bible ([docs/REMAKE_FROM_STORY.md](REMAKE_FROM_STORY.md))
+3. Parked P0 until Filip unparks ([#1](https://github.com/Zacc-wind/Dark-plains/issues/1) Auth URLs / Vercel env / reset email, and related #2–#4)
 
 ## Parked
-Bespoke art, 120 map, seasonal PVP, guilds, 4-player veteran dungeons.
+P0/auth and hosted-smoke hardening until Filip unparks; side-fill issue #5 until bible-aligned rewrites land; bespoke art, 120 map, seasonal PVP, guilds, 4-player veteran dungeons.
 
 ## If this file disagrees with a roadmap
-This file wins. Design still lives in:
+This file wins for the ops queue. Narrative SoT is [docs/STORY_BIBLE.md](STORY_BIBLE.md). Remake execution order is [docs/REMAKE_FROM_STORY.md](REMAKE_FROM_STORY.md). Design still lives in:
+- [docs/STORY_BIBLE.md](STORY_BIBLE.md) (narrative canon)
+- [docs/REMAKE_FROM_STORY.md](REMAKE_FROM_STORY.md) (story remake phases)
 - [docs/supabase-manual-checklist.md](supabase-manual-checklist.md) (ops)
 - [docs/multiplayer-roadmap.md](multiplayer-roadmap.md) (sessions)
 - [docs/database-deployment-plan.md](database-deployment-plan.md) (auth/API)
+- [docs/progression-content-roadmap.md](progression-content-roadmap.md) (bands / SP-MP split)
 - [docs/pvp-loss-policy.md](pvp-loss-policy.md) (locked PVP stakes)
