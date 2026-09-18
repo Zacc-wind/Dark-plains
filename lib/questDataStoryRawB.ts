@@ -6,7 +6,7 @@ export const STORY_CHAPTERS_RAW_B: StoryChapter[] = [
   {
     id: 'chapter-2',
     title: 'Chapter II: The Mirror Court',
-    summary: 'After the Broken Crown, glass roads and candle keys open the path to Lady Mirror-Veyra and the court that rewrites living law.',
+    summary: 'The broken crown was only the first seal. A mirror court rises in the east, and every road you cleared now feeds its war.',
     quests: [...CHAPTER2_QUESTS_P1, ...CHAPTER2_QUESTS_P2],
   },
 ];
