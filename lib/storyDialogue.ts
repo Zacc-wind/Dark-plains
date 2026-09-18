@@ -1,5 +1,6 @@
 import type { StoryDialogSequence } from './storyDialogueTypes';
-import { storyDialoguePartA } from './storyDialoguePartA';
+import { storyDialoguePartA1 } from './storyDialoguePartA1';
+import { storyDialoguePartA2 } from './storyDialoguePartA2';
 import { storyDialoguePartB } from './storyDialoguePartB';
 import { storyDialoguePartC } from './storyDialoguePartC';
 
@@ -13,7 +14,8 @@ export type {
 } from './storyDialogueTypes';
 
 export const STORY_DIALOG_SEQUENCES: Record<string, StoryDialogSequence> = {
-  ...storyDialoguePartA,
+  ...storyDialoguePartA1,
+  ...storyDialoguePartA2,
   ...storyDialoguePartB,
   ...storyDialoguePartC,
 };
