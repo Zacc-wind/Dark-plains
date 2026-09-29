@@ -2269,9 +2269,69 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
       })
       .find(item => item && !item.status.claimed) || null;
     const openDailyQuests = quests.filter(quest => !quest.claimed);
+    const equippedGearCount = Object.values(equippedSlots).filter(Boolean).length;
+    const shortcuts: Array<{ id: PanelId; label: string; value: string }> = [
+      { id: 'minions', label: 'Army', value: `${fieldedMinions.length}/7 fielded` },
+      { id: 'inventory', label: 'Gear', value: `${equippedGearCount} equipped` },
+      { id: 'spells', label: 'Spells', value: `${(player.equippedSpellIds?.length === 4 ? player.equippedSpellIds : DEFAULT_EQUIPPED_SPELL_IDS).length}/4 ready` },
+      { id: 'jobs', label: 'Jobs', value: `${activeJobs.length}/4 queued` },
+    ];
 
     return (
       <div className="overview-dashboard-grid overview-dashboard-modern">
+        <section className="overview-commander ui-card rounded border">
+          <span className="overview-commander-avatar ui-avatar-frame relative block overflow-hidden rounded-full border">
+            <Image
+              src={getPlayerModelPath(currentModel)}
+              alt=""
+              fill
+              className="player-model-art object-contain p-1.5"
+              sizes="88px"
+              unoptimized
+            />
+          </span>
+          <div className="overview-commander-main">
+            <div className="arcane-label">Commander · Level {player.stats.level}</div>
+            <h3 className="fantasy-heading overview-commander-name">{player.username}</h3>
+            <div className="overview-commander-xp ui-progress-track h-2 overflow-hidden rounded border">
+              <div className="ui-progress-fill h-full" style={{ width: `${expProgress}%` }} />
+            </div>
+            <div className="ui-faint text-xs font-bold">{player.exp} / {expNeeded} XP</div>
+          </div>
+          <dl className="overview-commander-stats">
+            <div><dt>Army</dt><dd>{player.stats.armyPower}</dd></div>
+            <div><dt>Ward</dt><dd>{player.stats.defensivePower}</dd></div>
+            <div><dt>Spell</dt><dd>{player.stats.spellPower}</dd></div>
+            <div><dt>Health</dt><dd>{player.stats.health}/{player.stats.maxHealth}</dd></div>
+          </dl>
+          {player.stats.unallocatedPoints > 0 && (
+            <button
+              type="button"
+              onClick={() => setActivePanel('character')}
+              className="overview-commander-points ui-button-primary rounded px-4 py-2 text-xs font-black"
+            >
+              Spend {player.stats.unallocatedPoints} points
+            </button>
+          )}
+        </section>
+
+        <nav className="overview-shortcuts" aria-label="Command shortcuts">
+          {shortcuts.map(shortcut => (
+            <button
+              key={shortcut.id}
+              type="button"
+              onClick={() => setActivePanel(shortcut.id)}
+              className="overview-shortcut ui-card rounded border"
+            >
+              <span className="overview-shortcut-icon"><PanelIcon icon={shortcut.id} /></span>
+              <span className="min-w-0">
+                <span className="block text-sm font-black text-zinc-100">{shortcut.label}</span>
+                <span className="ui-faint block text-xs font-bold">{shortcut.value}</span>
+              </span>
+            </button>
+          ))}
+        </nav>
+
         <section className="ui-card rounded border p-4">
           <SectionTitle title="Work" action={`${activeJobs.length}/4`} />
           {!player.traveling && activeJobs.length === 0 ? (
