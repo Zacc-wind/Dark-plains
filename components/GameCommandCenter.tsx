@@ -9,7 +9,7 @@ import { getActiveGearSetSummaries } from '@/lib/gearSets';
 import { formatEquipmentQualityLabel } from '@/lib/gearProgression';
 import { getPlayerModelPath } from '@/lib/assetLoader';
 import { BATTLE_SPELLS, type BattleSpell } from '@/lib/battle';
-import { DailyRunModal, getSavedDailyRunSummary } from './RoguelikeRunModal';
+import type { SavedDailyRunSummary } from './RoguelikeRunModal';
 import ChatLiveFeed from './ChatLiveFeed';
 import MultiplayerFeatureLock from './MultiplayerFeatureLock';
 import type { MultiplayerProgressionTab } from './MultiplayerProgressionModal';
@@ -23,6 +23,9 @@ import {
 import { useClock, usePolling } from '@/lib/hooks/usePolling';
 import { keepIfUnchanged } from '@/lib/hooks/userSnapshot';
 
+// The run module also carries the whole battle UI, so the world map only loads it for singleplayer.
+const loadRoguelikeRunModule = () => import('./RoguelikeRunModal');
+const DailyRunModal = dynamic(() => loadRoguelikeRunModule().then(module => module.DailyRunModal), { ssr: false });
 const loadMultiplayerHubModal = () => import('./MultiplayerHubModal');
 const loadPveHubModal = () => import('./PveHubModal');
 const loadGameSettingsPanel = () => import('./GameSettingsPanel');
@@ -546,6 +549,7 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
   const [selectedSpellSlot, setSelectedSpellSlot] = useState(0);
   const [expandedQuestId, setExpandedQuestId] = useState<string | null>(null);
   const [showDailyRun, setShowDailyRun] = useState(false);
+  const [savedDailyRun, setSavedDailyRun] = useState<SavedDailyRunSummary | null>(null);
   const [friendSearch, setFriendSearch] = useState('');
   const [chatChannel, setChatChannel] = useState<SocialChatChannel>('global');
   const [chatDraft, setChatDraft] = useState('');
@@ -738,6 +742,19 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
   }, []);
 
   useEffect(() => {
+    if (!showRandomRun) return undefined;
+    let cancelled = false;
+    void loadRoguelikeRunModule().then(module => {
+      if (cancelled) return;
+      const next = module.getSavedDailyRunSummary(user);
+      setSavedDailyRun(previous => keepIfUnchanged(previous, next));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [showRandomRun, showDailyRun, user]);
+
+  useEffect(() => {
     if (!showRandomRun) return;
     document.body.classList.toggle('daily-run-open', showDailyRun);
     return () => document.body.classList.remove('daily-run-open');
@@ -809,7 +826,6 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
   const inventoryUpgradeQuote = getInventoryUpgradeQuote(player);
   const rareGemCount = getRareGemCount(player);
   const hudRunState = getDailyRunState(player);
-  const savedDailyRun = getSavedDailyRunSummary(player);
   const socialState = getSocialState(player);
   const acceptedFriends = socialState.friends.filter(friend => friend.status === 'accepted');
   const incomingFriendRequests = socialState.friends.filter(
