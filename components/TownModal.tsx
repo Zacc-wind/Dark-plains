@@ -457,8 +457,11 @@ export default function TownModal({ town, onClose, onTravel }: TownModalProps) {
                   aria-pressed={activeService === service.key}
                   className={`town-service-tab rounded px-3 py-2 ${activeService === service.key ? 'town-service-tab-active' : ''} ${service.unlock && !service.unlock.unlocked ? 'town-service-tab-locked' : ''}`}
                 >
-                  <span className="block text-sm font-black text-zinc-100">{service.label}</span>
-                  <span className="ui-faint block text-[10px] font-black uppercase">{service.detail}</span>
+                  <span className="town-service-tab-icon"><TownServiceIcon service={service.key} /></span>
+                  <span className="town-service-tab-copy">
+                    <span className="block text-sm font-black text-zinc-100">{service.label}</span>
+                    <span className="ui-faint block text-[10px] font-black uppercase">{service.detail}</span>
+                  </span>
                 </button>
               ))}
             </nav>
@@ -1056,6 +1059,45 @@ function TownBuyGrid({
         </section>
       )}
     </div>
+  );
+}
+
+function TownServiceIcon({ service }: { service: TownServiceKey }) {
+  const common = {
+    fill: 'none',
+    stroke: 'currentColor',
+    strokeLinecap: 'round' as const,
+    strokeLinejoin: 'round' as const,
+    strokeWidth: 1.7,
+  };
+
+  return (
+    <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true">
+      {service === 'quests' && (
+        <>
+          <path {...common} d="M5 4h14v11H5z" />
+          <path {...common} d="M8 8h8M8 11h5M9 15v5M15 15v5" />
+        </>
+      )}
+      {service === 'shop' && (
+        <>
+          <path {...common} d="M4 9h16l-1.5 11h-13L4 9Z" />
+          <path {...common} d="M8.5 9a3.5 3.5 0 0 1 7 0" />
+        </>
+      )}
+      {service === 'blacksmith' && (
+        <>
+          <path {...common} d="M4 10h11l-1 3H6l-2-3ZM9 13v3M6 20h8l-1-4H7l-1 4Z" />
+          <path {...common} d="M15 10l5-5M17 4l3 3" />
+        </>
+      )}
+      {service === 'players' && (
+        <>
+          <path {...common} d="M9 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM16.5 10a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z" />
+          <path {...common} d="M3.5 20c.9-4 2.7-6 5.5-6s4.6 2 5.5 6M14.5 14.6c2.6-.6 4.6.9 5.5 4.4" />
+        </>
+      )}
+    </svg>
   );
 }
 
