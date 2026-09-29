@@ -32,6 +32,11 @@ import BattleModal, {
 } from './BattleModal';
 import CinematicScrollShell from './CinematicScrollShell';
 import FormationPanel from './FormationPanel';
+import { usePolling } from '@/lib/hooks/usePolling';
+import { keepIfUnchanged } from '@/lib/hooks/userSnapshot';
+
+const IDLE_SESSION_POLL_MS = 3_000;
+const ACTIVE_SESSION_POLL_MS = 1_000;
 
 function ReadinessRow({
   username,
@@ -77,12 +82,12 @@ export default function CoopRaidSessionOverlay() {
 
   const refresh = useCallback(() => {
     const user = getCurrentUser();
-    setCurrentUser(user);
+    setCurrentUser(previous => keepIfUnchanged(previous, user));
     if (!user) {
       setSession(null);
       return;
     }
-    void syncOnlineCoopRaidSessions().then(() => {
+    return syncOnlineCoopRaidSessions().then(() => {
       const next = getCurrentCoopRaidSession(user.username);
       setSession(current => (
         current?.id === next?.id && current?.version === next?.version ? current : next || null
@@ -90,14 +95,12 @@ export default function CoopRaidSessionOverlay() {
     });
   }, []);
 
+  usePolling(refresh, session ? ACTIVE_SESSION_POLL_MS : IDLE_SESSION_POLL_MS);
+
   useEffect(() => {
-    const initial = window.setTimeout(refresh, 0);
-    const interval = window.setInterval(refresh, 1_000);
     window.addEventListener(COOP_RAID_SESSION_UPDATED_EVENT, refresh);
     window.addEventListener('storage', refresh);
     return () => {
-      window.clearTimeout(initial);
-      window.clearInterval(interval);
       window.removeEventListener(COOP_RAID_SESSION_UPDATED_EVENT, refresh);
       window.removeEventListener('storage', refresh);
     };

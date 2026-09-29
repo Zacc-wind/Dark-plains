@@ -14,6 +14,7 @@ import {
   shouldEnableMapFog,
   type GraphicsQuality,
 } from '@/lib/graphicsSettings';
+import { isMapCoveredByModal } from '@/lib/overlayVisibility';
 
 function setCameraSize(camera: THREE.OrthographicCamera, width: number, height: number): void {
   camera.left = -width / 2;
@@ -26,6 +27,10 @@ function setCameraSize(camera: THREE.OrthographicCamera, width: number, height: 
 function screenToWorld(point: { x: number; y: number }, width: number, height: number): THREE.Vector2 {
   return new THREE.Vector2(point.x - width / 2, height / 2 - point.y);
 }
+
+const SETTLED_DISTANCE_PX = 0.5;
+const SETTLED_STRENGTH = 0.999;
+const SETTLED_ZOOM_DELTA = 0.0005;
 
 export default function MapFogOverlay() {
   const mountRef = useRef<HTMLDivElement | null>(null);
@@ -206,6 +211,7 @@ export default function MapFogOverlay() {
       !disposed
       && shouldEnableMapFog(quality)
       && !isHeavyUiOverlayOpen()
+      && !isMapCoveredByModal()
       && !document.hidden
     );
 
@@ -225,6 +231,8 @@ export default function MapFogOverlay() {
         (uniforms.uTime.value as number) = time * 0.001;
       }
       (uniforms.uZoom.value as number) += (zoomTarget - (uniforms.uZoom.value as number)) * (1 - Math.pow(0.04, delta));
+      let settled = !animateGrain
+        && Math.abs(zoomTarget - (uniforms.uZoom.value as number)) < SETTLED_ZOOM_DELTA;
 
       if (pointerTarget) {
         const target = screenToWorld(pointerTarget, width, height);
@@ -235,6 +243,9 @@ export default function MapFogOverlay() {
         }
         pointerLight.lerp(target, 1 - Math.pow(0.02, delta));
         pointerStrength += (1 - pointerStrength) * (1 - Math.pow(0.02, delta));
+        settled = settled
+          && pointerStrength > SETTLED_STRENGTH
+          && pointerLight.distanceTo(target) < SETTLED_DISTANCE_PX;
         uniforms.uHasPointer.value = 1;
         uniforms.uPointerStrength.value = pointerStrength;
       } else {
@@ -253,6 +264,9 @@ export default function MapFogOverlay() {
         }
         playerLight.lerp(target, 1 - Math.pow(0.04, delta));
         playerStrength += (1 - playerStrength) * (1 - Math.pow(0.04, delta));
+        settled = settled
+          && playerStrength > SETTLED_STRENGTH
+          && playerLight.distanceTo(target) < SETTLED_DISTANCE_PX;
         uniforms.uHasPlayer.value = 1;
         uniforms.uPlayerStrength.value = playerStrength;
       } else {
@@ -274,6 +288,11 @@ export default function MapFogOverlay() {
 
       frameCounter += 1;
       const stride = Math.max(1, getMapFogFrameStride(quality));
+      if (settled) {
+        // Nothing is moving: draw the final state and idle until the next fog event.
+        renderer.render(scene, camera);
+        return;
+      }
       if (frameCounter % stride === 0) {
         renderer.render(scene, camera);
       }
@@ -316,6 +335,7 @@ export default function MapFogOverlay() {
       width = Math.ceil(window.visualViewport?.width || window.innerWidth || 1);
       height = Math.ceil(window.visualViewport?.height || window.innerHeight || 1);
       applyRendererSize();
+      requestAnimate();
     };
 
     const handleQualityChange = () => {

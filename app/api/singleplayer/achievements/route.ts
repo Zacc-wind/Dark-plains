@@ -1,5 +1,6 @@
 import { apiNotConfigured, apiOk } from '@/lib/apiResponses';
-import { getDailyRunState } from '@/lib/auth';
+import { normalizeUserDailyRunState } from '@/lib/dailyRunState';
+import type { User } from '@/lib/playerTypes';
 import { getRunDiscoveryViews } from '@/lib/runDiscovery';
 import {
   getRunMilestoneUnlockCounts,
@@ -7,7 +8,6 @@ import {
   isRunMilestoneRewardClaimed,
 } from '@/lib/runMilestones';
 import { isSupabaseConfigured } from '@/lib/supabase/config';
-import { playerStateRowToUser } from '@/lib/supabase/playerRepository';
 import { getAuthenticatedUser } from '@/lib/supabase/requireAuth';
 import { createClient } from '@/lib/supabase/server';
 
@@ -24,7 +24,7 @@ export async function GET() {
 
   const [{ data: profile, error: profileError }, { data: state, error: stateError }] = await Promise.all([
     supabase.from('profiles').select('id, username, selected_model').eq('id', user.id).maybeSingle(),
-    supabase.from('player_states').select('*').eq('user_id', user.id).maybeSingle(),
+    supabase.from('player_states').select('daily_run, known_spell_ids').eq('user_id', user.id).maybeSingle(),
   ]);
 
   if (profileError || stateError) {
@@ -42,8 +42,10 @@ export async function GET() {
     }, { status: 404 });
   }
 
-  const player = playerStateRowToUser(state, profile);
-  const runState = getDailyRunState(player);
+  const runState = normalizeUserDailyRunState({
+    dailyRun: state.daily_run as User['dailyRun'],
+    knownSpellIds: (state.known_spell_ids as string[] | null) ?? undefined,
+  });
   const milestones = getRunMilestoneViews(runState).map(milestone => ({
     id: milestone.id,
     title: milestone.title,

@@ -137,15 +137,25 @@ export function getMapCanvasMaxEdge(
   return maxEdge;
 }
 
+export const MAP_CANVAS_MAX_PIXEL_RATIO = 2;
+
+/**
+ * Backing-store size for the world map canvas. `pixelRatio` (devicePixelRatio, capped at 2) sharpens
+ * HiDPI screens, but the quality max edge still bounds total fill rate.
+ */
 export function getMapCanvasRenderSize(
   cssWidth: number,
   cssHeight: number,
   quality: GraphicsQuality = readGraphicsQualitySetting(),
+  pixelRatio = 1,
 ): { width: number; height: number; scale: number } {
   const safeWidth = Math.max(1, Math.ceil(cssWidth));
   const safeHeight = Math.max(1, Math.ceil(cssHeight));
   const maxEdge = getMapCanvasMaxEdge(quality, safeWidth, safeHeight);
-  const scale = Math.min(1, maxEdge / Math.max(safeWidth, safeHeight));
+  const safeRatio = Number.isFinite(pixelRatio) && pixelRatio > 1
+    ? Math.min(MAP_CANVAS_MAX_PIXEL_RATIO, pixelRatio)
+    : 1;
+  const scale = Math.min(safeRatio, maxEdge / Math.max(safeWidth, safeHeight));
   return {
     width: Math.max(1, Math.floor(safeWidth * scale)),
     height: Math.max(1, Math.floor(safeHeight * scale)),

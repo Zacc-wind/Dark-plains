@@ -2,6 +2,7 @@
 
 import { type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import dynamic from 'next/dynamic';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { getActiveGearSetSummaries } from '@/lib/gearSets';
@@ -9,13 +10,32 @@ import { formatEquipmentQualityLabel } from '@/lib/gearProgression';
 import { getPlayerModelPath } from '@/lib/assetLoader';
 import { BATTLE_SPELLS, type BattleSpell } from '@/lib/battle';
 import { DailyRunModal, getSavedDailyRunSummary } from './RoguelikeRunModal';
-import MultiplayerHubModal from './MultiplayerHubModal';
-import PveHubModal from './PveHubModal';
 import ChatLiveFeed from './ChatLiveFeed';
-import GameSettingsPanel from './GameSettingsPanel';
 import MultiplayerFeatureLock from './MultiplayerFeatureLock';
-import MultiplayerProgressionModal, { type MultiplayerProgressionTab } from './MultiplayerProgressionModal';
+import type { MultiplayerProgressionTab } from './MultiplayerProgressionModal';
 import CinematicScrollShell from './CinematicScrollShell';
+import {
+  CHAT_FEED_ACTIVE_INTERVAL_MS,
+  CHAT_FEED_IDLE_INTERVAL_MS,
+  pushGlobalChatMessage,
+  useGlobalChatFeed,
+} from '@/lib/chatFeed';
+import { useClock, usePolling } from '@/lib/hooks/usePolling';
+import { keepIfUnchanged } from '@/lib/hooks/userSnapshot';
+
+const loadMultiplayerHubModal = () => import('./MultiplayerHubModal');
+const loadPveHubModal = () => import('./PveHubModal');
+const loadGameSettingsPanel = () => import('./GameSettingsPanel');
+const loadMultiplayerProgressionModal = () => import('./MultiplayerProgressionModal');
+
+const MultiplayerHubModal = dynamic(loadMultiplayerHubModal, { ssr: false });
+const PveHubModal = dynamic(loadPveHubModal, { ssr: false });
+const GameSettingsPanel = dynamic(loadGameSettingsPanel, { ssr: false });
+const MultiplayerProgressionModal = dynamic(loadMultiplayerProgressionModal, { ssr: false });
+
+const USER_POLL_INTERVAL_MS = 1_000;
+const FAST_CLOCK_INTERVAL_MS = 1_000;
+const IDLE_CLOCK_INTERVAL_MS = 10_000;
 import {
   ActivityEntry,
   AllocatableStat,
@@ -521,7 +541,6 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
   const [activePanel, setActivePanel] = useState<PanelId>('overview');
   const [isCommandOpen, setIsCommandOpen] = useState(false);
   const [hoveredSpellId, setHoveredSpellId] = useState<string | null>(null);
-  const [now, setNow] = useState(() => Date.now());
   const [notice, setNotice] = useState('');
   const [armySwapSourceId, setArmySwapSourceId] = useState<string | null>(null);
   const [selectedSpellSlot, setSelectedSpellSlot] = useState(0);
@@ -530,9 +549,8 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
   const [friendSearch, setFriendSearch] = useState('');
   const [chatChannel, setChatChannel] = useState<SocialChatChannel>('global');
   const [chatDraft, setChatDraft] = useState('');
-  const [chatHistory, setChatHistory] = useState<SocialChatMessage[]>([]);
+  const [partyChatHistory, setPartyChatHistory] = useState<SocialChatMessage[]>([]);
   const [chatSending, setChatSending] = useState(false);
-  const latestChatMessageId = chatHistory.at(-1)?.id;
   const [isChatDockOpen, setIsChatDockOpen] = useState(false);
   const [showMultiplayerHub, setShowMultiplayerHub] = useState(false);
   const [showPveHub, setShowPveHub] = useState(false);
@@ -544,7 +562,19 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
   const lastActivityNoticeId = useRef<string | null>(null);
   const chatHistoryRef = useRef<HTMLDivElement | null>(null);
   const router = useRouter();
+  const needsFastClock = isCommandOpen
+    || showMultiplayerProgression
+    || Boolean(user?.traveling)
+    || Boolean(user?.jobQueue?.length);
+  const now = useClock(needsFastClock ? FAST_CLOCK_INTERVAL_MS : IDLE_CLOCK_INTERVAL_MS);
   const engagementDayKey = new Date(now).toDateString();
+  const isChatVisible = isChatDockOpen || (isCommandOpen && activePanel === 'social');
+  const globalChat = useGlobalChatFeed(
+    isChatVisible && chatChannel === 'global' ? CHAT_FEED_ACTIVE_INTERVAL_MS : CHAT_FEED_IDLE_INTERVAL_MS,
+  );
+  const chatHistory = chatChannel === 'global' ? globalChat.messages : partyChatHistory;
+  const latestChatMessageId = chatHistory.at(-1)?.id;
+  const partyChatKey = `${user?.username ?? ''}:${user?.social?.party?.updatedAt ?? ''}`;
 
   useEffect(() => {
     preloadGameSounds();
@@ -624,32 +654,39 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
     };
   }, []);
 
-  useEffect(() => {
-    const interval = window.setInterval(() => {
-      setNow(Date.now());
-      setUser(getCurrentUser());
-    }, 1000);
-
-    return () => window.clearInterval(interval);
+  const refreshUserSnapshot = useCallback(() => {
+    setUser(previous => keepIfUnchanged(previous, getCurrentUser()));
   }, []);
+  usePolling(refreshUserSnapshot, USER_POLL_INTERVAL_MS);
+
+  const refreshPartyChat = useCallback(async () => {
+    const messages = await fetchSharedChatHistory('party', getCurrentUser());
+    setPartyChatHistory(previous => keepIfUnchanged(previous, messages.slice(-MAX_VISIBLE_CHAT_HISTORY)));
+  }, []);
+  usePolling(
+    refreshPartyChat,
+    isChatVisible ? CHAT_FEED_ACTIVE_INTERVAL_MS : CHAT_FEED_IDLE_INTERVAL_MS,
+    { enabled: chatChannel === 'party', restartKey: partyChatKey },
+  );
 
   useEffect(() => {
-    let active = true;
-
-    const refresh = async () => {
-      const messages = await fetchSharedChatHistory(chatChannel, getCurrentUser());
-      if (active) setChatHistory(messages.slice(-MAX_VISIBLE_CHAT_HISTORY));
+    const idleWindow = window as Window & {
+      requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number;
+      cancelIdleCallback?: (handle: number) => void;
     };
-
-    setChatHistory([]);
-    void refresh();
-    const interval = window.setInterval(() => void refresh(), 2000);
-
-    return () => {
-      active = false;
-      window.clearInterval(interval);
+    const prefetch = () => {
+      void loadMultiplayerHubModal();
+      void loadPveHubModal();
+      void loadMultiplayerProgressionModal();
+      void loadGameSettingsPanel();
     };
-  }, [chatChannel, user?.social?.party?.updatedAt, user?.username]);
+    if (idleWindow.requestIdleCallback) {
+      const handle = idleWindow.requestIdleCallback(prefetch, { timeout: 8_000 });
+      return () => idleWindow.cancelIdleCallback?.(handle);
+    }
+    const timer = window.setTimeout(prefetch, 4_000);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   useLayoutEffect(() => {
     const list = chatHistoryRef.current;
@@ -889,10 +926,15 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
     if (result.success) {
       setChatDraft('');
       if (result.chat) {
-        setChatHistory(previous => [
-          ...previous.filter(message => message.id !== result.chat?.id),
-          result.chat!,
-        ].slice(-MAX_VISIBLE_CHAT_HISTORY));
+        const sentMessage = result.chat;
+        if (chatChannel === 'global') {
+          pushGlobalChatMessage(sentMessage);
+        } else {
+          setPartyChatHistory(previous => [
+            ...previous.filter(message => message.id !== sentMessage.id),
+            sentMessage,
+          ].slice(-MAX_VISIBLE_CHAT_HISTORY));
+        }
       }
       recordCurrentMultiplayerEngagementEvent({
         kind: 'chat-sent',
@@ -1326,14 +1368,18 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
               }}
             />
           )}
-          <MultiplayerHubModal
-            isOpen={showMultiplayerHub}
-            onClose={() => setShowMultiplayerHub(false)}
-          />
-          <PveHubModal
-            isOpen={showPveHub}
-            onClose={() => setShowPveHub(false)}
-          />
+          {showMultiplayerHub && (
+            <MultiplayerHubModal
+              isOpen
+              onClose={() => setShowMultiplayerHub(false)}
+            />
+          )}
+          {showPveHub && (
+            <PveHubModal
+              isOpen
+              onClose={() => setShowPveHub(false)}
+            />
+          )}
         </>
       )}
     </>

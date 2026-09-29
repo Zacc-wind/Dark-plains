@@ -36,6 +36,10 @@ import BattleModal, {
 } from './BattleModal';
 import CinematicScrollShell from './CinematicScrollShell';
 import FormationPanel from './FormationPanel';
+import { usePolling } from '@/lib/hooks/usePolling';
+
+const IDLE_SESSION_POLL_MS = 3_000;
+const ACTIVE_SESSION_POLL_MS = 1_000;
 
 async function findOrCreateCurrentSession(username: string, now = Date.now()): Promise<PvpDuelSession | undefined> {
   await syncOnlinePvpDuelSessions(now);
@@ -67,21 +71,19 @@ export default function PvpDuelSessionOverlay() {
       setSession(null);
       return;
     }
-    void findOrCreateCurrentSession(username).then(next => {
+    return findOrCreateCurrentSession(username).then(next => {
       setSession(current => (
         current?.id === next?.id && current?.version === next?.version ? current : next || null
       ));
     });
   }, [username]);
 
+  usePolling(refresh, session ? ACTIVE_SESSION_POLL_MS : IDLE_SESSION_POLL_MS);
+
   useEffect(() => {
-    const initial = window.setTimeout(refresh, 0);
-    const interval = window.setInterval(refresh, 1_000);
     window.addEventListener(PVP_DUEL_SESSION_UPDATED_EVENT, refresh);
     window.addEventListener('storage', refresh);
     return () => {
-      window.clearTimeout(initial);
-      window.clearInterval(interval);
       window.removeEventListener(PVP_DUEL_SESSION_UPDATED_EVENT, refresh);
       window.removeEventListener('storage', refresh);
     };

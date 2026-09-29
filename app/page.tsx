@@ -2,6 +2,7 @@
 
 import { Suspense, useEffect, useState } from 'react';
 import Image from 'next/image';
+import dynamic from 'next/dynamic';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { login, register } from '@/lib/auth';
 import { authorizeBackgroundMusic } from '@/lib/backgroundMusic';
@@ -14,7 +15,15 @@ import {
   requestPasswordReset,
 } from '@/lib/supabase/auth';
 import { MANAGED_AUTH_UNAVAILABLE_MESSAGE } from '@/lib/supabase/config';
-import ThreeFxOverlay from '@/components/ThreeFxOverlay';
+import LoadingScreen from '@/components/ui/LoadingScreen';
+
+const ThreeFxOverlay = dynamic(() => import('@/components/ThreeFxOverlay'), { ssr: false });
+
+const HERO_POINTS = [
+  'Command a warband on a shared, living coast',
+  'Solo roguelike roads with lasting upgrades',
+  'Formation combat where the commander must stand',
+];
 
 function AuthPageContent() {
   const [isLogin, setIsLogin] = useState(true);
@@ -115,211 +124,175 @@ function AuthPageContent() {
     }
   };
 
+  const switchTab = (toLogin: boolean) => {
+    if (toLogin === isLogin && !showForgot) return;
+    emitFxEvent({ type: 'interface', tone: 'bone', intensity: 0.36 });
+    setIsLogin(toLogin);
+    setShowForgot(false);
+    setError('');
+    setSuccess('');
+    setPassword('');
+  };
+
+  const openForgot = () => {
+    emitFxEvent({ type: 'interface', tone: 'bone', intensity: 0.36 });
+    setShowForgot(true);
+    setError('');
+    setSuccess('');
+    setPassword('');
+  };
+
+  const closeForgot = () => {
+    emitFxEvent({ type: 'interface', tone: 'bone', intensity: 0.36 });
+    setShowForgot(false);
+    setError('');
+    setSuccess('');
+  };
+
+  const feedback = (
+    <>
+      {error && <div className="dp-alert dp-alert-danger" role="alert">{error}</div>}
+      {success && <div className="dp-alert dp-alert-success" role="status">{success}</div>}
+    </>
+  );
+
   return (
-    <div className="auth-page-shell fantasy-ui flex min-h-screen items-center justify-center bg-[#05080a] p-4">
+    <div className="dp-screen dp-auth fantasy-ui">
+      <Image
+        src="/assets/loginscreenbackgorund.png"
+        alt=""
+        fill
+        priority
+        className="dp-screen-bg object-cover object-center"
+        sizes="100vw"
+        quality={70}
+      />
+      <div className="dp-screen-vignette" aria-hidden="true" />
       <ThreeFxOverlay />
-      <div className="auth-card command-panel vine-frame relative z-[100] w-full max-w-md rounded border p-8">
-        <div className="mb-8 text-center">
-          <p className="arcane-label mb-2">Helo</p>
-          <h1 className="auth-title fantasy-heading text-center">Dark Plains</h1>
-        </div>
 
-        {authUnavailable ? (
-          <div className="space-y-4 text-center">
-            <p className="arcane-label">Auth unavailable</p>
-            <p className="ui-faint text-[12px] font-bold leading-relaxed">
-              {MANAGED_AUTH_UNAVAILABLE_MESSAGE}
-            </p>
-            <p className="ui-faint text-[11px] font-bold leading-relaxed">
-              Local prototype login is disabled on this production host so browser passwords cannot be mistaken for live accounts.
-            </p>
-          </div>
-        ) : (
-          <>
-            {!isLogin && !showForgot ? (
-              <p className="arcane-label mb-6 text-center">Create your account</p>
-            ) : null}
-            {showForgot ? (
-              <p className="arcane-label mb-6 text-center">Forgot password</p>
-            ) : null}
-            {onlineAuth ? (
-              <p className="ui-faint mb-6 text-center text-[11px] font-bold">
-                Online account — Supabase Auth session.
-              </p>
-            ) : (
-              <p className="ui-faint mb-6 text-center text-[11px] font-bold">
-                Local prototype — saves stay in this browser only.
-              </p>
-            )}
-
-            {showForgot && onlineAuth ? (
-              <form onSubmit={handleForgotSubmit} className="space-y-6">
-                <div>
-                  <label className="arcane-label mb-2 block">Username or email</label>
-                  <input
-                    type="text"
-                    value={username}
-                    onChange={(e) => setUsername(e.target.value)}
-                    className="ui-card w-full rounded-lg border px-4 py-3 font-semibold text-[var(--ui-text)] outline-none transition-all focus:border-[var(--ui-border-strong)]"
-                    style={{ imageRendering: 'pixelated' }}
-                    placeholder="Enter username or email"
-                    required
-                    disabled={submitting}
-                  />
-                </div>
-
-                {error && (
-                  <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 font-semibold text-red-300">
-                    {error}
-                  </div>
-                )}
-
-                {success && (
-                  <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 font-semibold text-emerald-200">
-                    {success}
-                  </div>
-                )}
-
-                <button
-                  type="submit"
-                  disabled={submitting}
-                  className="ui-button-primary w-full rounded-lg px-6 py-4 font-semibold transition-all disabled:opacity-60"
-                >
-                  {submitting ? 'Please wait…' : 'Send reset email'}
-                </button>
-              </form>
-            ) : (
-              <form onSubmit={handleSubmit} className="space-y-6">
-                <div>
-                  <label className="arcane-label mb-2 block">Username</label>
-                  <input
-                    type="text"
-                    value={username}
-                    onChange={(e) => setUsername(e.target.value)}
-                    className="ui-card w-full rounded-lg border px-4 py-3 font-semibold text-[var(--ui-text)] outline-none transition-all focus:border-[var(--ui-border-strong)]"
-                    style={{ imageRendering: 'pixelated' }}
-                    placeholder="Enter username"
-                    required
-                    disabled={submitting}
-                  />
-                </div>
-
-                <div>
-                  <label className="arcane-label mb-2 block">Password</label>
-                  <input
-                    type="password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    className="ui-card w-full rounded-lg border px-4 py-3 font-semibold text-[var(--ui-text)] outline-none transition-all focus:border-[var(--ui-border-strong)]"
-                    style={{ imageRendering: 'pixelated' }}
-                    placeholder="Enter password"
-                    required
-                    disabled={submitting}
-                  />
-                </div>
-
-                {error && (
-                  <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 font-semibold text-red-300">
-                    {error}
-                  </div>
-                )}
-
-                {success && (
-                  <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 font-semibold text-emerald-200">
-                    {success}
-                  </div>
-                )}
-
-                <button
-                  type="submit"
-                  disabled={submitting}
-                  className="ui-button-primary w-full rounded-lg px-6 py-4 font-semibold transition-all disabled:opacity-60"
-                >
-                  {submitting ? 'Please wait…' : isLogin ? 'Login' : 'Register'}
-                </button>
-              </form>
-            )}
-
-            <div className="mt-6 space-y-3 text-center">
-              {onlineAuth && isLogin && !showForgot ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    emitFxEvent({ type: 'interface', tone: 'bone', intensity: 0.36 });
-                    setShowForgot(true);
-                    setError('');
-                    setSuccess('');
-                    setPassword('');
-                  }}
-                  className="block w-full font-bold text-[var(--ui-accent)] underline hover:text-white"
-                >
-                  Forgot password?
-                </button>
-              ) : null}
-
-              {showForgot ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    emitFxEvent({ type: 'interface', tone: 'bone', intensity: 0.36 });
-                    setShowForgot(false);
-                    setError('');
-                    setSuccess('');
-                  }}
-                  className="font-bold text-[var(--ui-accent)] underline hover:text-white"
-                >
-                  Back to login
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => {
-                    emitFxEvent({ type: 'interface', tone: 'bone', intensity: 0.36 });
-                    setIsLogin(!isLogin);
-                    setShowForgot(false);
-                    setError('');
-                    setSuccess('');
-                    setPassword('');
-                  }}
-                  className="font-bold text-[var(--ui-accent)] underline hover:text-white"
-                >
-                  {isLogin ? "Don't have an account? Register" : 'Already have an account? Login'}
-                </button>
-              )}
-            </div>
-          </>
-        )}
-
-        <section className="auth-feedback mt-8 border-t border-[rgba(250,239,211,0.14)] pt-6 text-center "
-        style={{ position: "absolute", bottom: "20vh", left: "60vh", width: "16vh" }}
-        >
-          <p className="arcane-label mb-1">Share your feedback</p>
-          <p className="ui-faint mb-4 text-[11px] font-bold">
-            Just gimme feedback on discord.
-          </p>
-          <div className="auth-feedback-qr mx-auto w-fit rounded-lg border border-[rgba(250,239,211,0.22)] bg-white p-2 shadow-[0_8px_24px_rgba(0,0,0,0.35)]">
-            <Image
-              src="/assets/qrcode.png"
-              alt="QR code to submit feedback"
-              width={152}
-              height={152}
-              className="h-auto w-[152px]"
-              unoptimized
-            />
-          </div>
+      <main className="dp-auth-layout">
+        <section className="dp-auth-hero">
+          <p className="arcane-label">A dark fantasy strategy RPG</p>
+          <h1 className="fantasy-heading dp-auth-title">Dark Plains</h1>
+          <ul className="dp-auth-points">
+            {HERO_POINTS.map(point => <li key={point}>{point}</li>)}
+          </ul>
         </section>
-      </div>
+
+        <section className="dp-panel dp-auth-card" aria-label="Account">
+          {authUnavailable ? (
+            <div className="dp-stack">
+              <p className="arcane-label">Sign-in unavailable</p>
+              <p className="dp-body">{MANAGED_AUTH_UNAVAILABLE_MESSAGE}</p>
+              <p className="dp-caption">
+                Local prototype login is disabled on this production host so browser passwords cannot be mistaken for live accounts.
+              </p>
+            </div>
+          ) : showForgot && onlineAuth ? (
+            <form onSubmit={handleForgotSubmit} className="dp-stack">
+              <div>
+                <p className="arcane-label">Recover your account</p>
+                <h2 className="fantasy-heading dp-auth-card-title">Forgot password</h2>
+              </div>
+              <label className="dp-field">
+                <span className="dp-field-label">Username or email</span>
+                <input
+                  type="text"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  className="dp-input"
+                  placeholder="Enter username or email"
+                  autoComplete="username"
+                  required
+                  disabled={submitting}
+                />
+              </label>
+              {feedback}
+              <button type="submit" disabled={submitting} className="ui-button-primary dp-button-block">
+                {submitting ? 'Please wait…' : 'Send reset email'}
+              </button>
+              <button type="button" onClick={closeForgot} className="dp-link">Back to login</button>
+            </form>
+          ) : (
+            <form onSubmit={handleSubmit} className="dp-stack">
+              <div className="dp-tabs" role="tablist" aria-label="Account mode">
+                <button type="button" role="tab" aria-selected={isLogin} className="dp-tab" onClick={() => switchTab(true)}>
+                  Log in
+                </button>
+                <button type="button" role="tab" aria-selected={!isLogin} className="dp-tab" onClick={() => switchTab(false)}>
+                  Register
+                </button>
+              </div>
+
+              <label className="dp-field">
+                <span className="dp-field-label">Username</span>
+                <input
+                  type="text"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  className="dp-input"
+                  placeholder="Your commander name"
+                  autoComplete="username"
+                  required
+                  disabled={submitting}
+                />
+              </label>
+
+              <label className="dp-field">
+                <span className="dp-field-label">Password</span>
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="dp-input"
+                  placeholder="Password"
+                  autoComplete={isLogin ? 'current-password' : 'new-password'}
+                  required
+                  disabled={submitting}
+                />
+              </label>
+
+              {feedback}
+
+              <button type="submit" disabled={submitting} className="ui-button-primary dp-button-block">
+                {submitting ? 'Please wait…' : isLogin ? 'Enter the Plains' : 'Create commander'}
+              </button>
+
+              <div className="dp-auth-meta">
+                <span className="dp-caption">
+                  {onlineAuth ? 'Online account' : 'Local prototype: saves stay in this browser'}
+                </span>
+                {onlineAuth && isLogin && (
+                  <button type="button" onClick={openForgot} className="dp-link">Forgot password?</button>
+                )}
+              </div>
+            </form>
+          )}
+        </section>
+      </main>
+
+      <aside className="dp-panel dp-auth-feedback">
+        <Image
+          src="/assets/qrcode.png"
+          alt="QR code to share feedback on Discord"
+          width={72}
+          height={72}
+          className="dp-auth-feedback-qr"
+        />
+        <span>
+          <span className="arcane-label">Share feedback</span>
+          <span className="dp-caption">Scan to reach us on Discord.</span>
+        </span>
+      </aside>
+
+      <footer className="dp-screen-footer">v2.0</footer>
     </div>
   );
 }
 
 export default function AuthPage() {
   return (
-    <Suspense fallback={
-      <div className="auth-page-shell fantasy-ui flex min-h-screen items-center justify-center bg-[#05080a] p-4">
-        <p className="ui-faint text-[12px] font-bold">Loading…</p>
-      </div>
-    }>
+    <Suspense fallback={<LoadingScreen label="Opening the gates" />}>
       <AuthPageContent />
     </Suspense>
   );

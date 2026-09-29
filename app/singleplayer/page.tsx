@@ -6,6 +6,7 @@ import { getCurrentUser } from '@/lib/auth';
 import { bootstrapSupabaseSession, isSupabaseAuthEnabled } from '@/lib/supabase/auth';
 import { writeGameMode } from '@/lib/gameMode';
 import SingleplayerHub from '@/components/SingleplayerHub';
+import LoadingScreen from '@/components/ui/LoadingScreen';
 
 export default function SingleplayerPage() {
   const router = useRouter();
@@ -38,13 +39,7 @@ export default function SingleplayerPage() {
     };
   }, [router]);
 
-  if (!ready) {
-    return (
-      <div className="fantasy-ui flex min-h-screen items-center justify-center bg-[#05080a]">
-        <div className="fantasy-heading text-2xl">Loading...</div>
-      </div>
-    );
-  }
+  if (!ready) return <LoadingScreen label="Opening the run hall" />;
 
   return <SingleplayerHub />;
 }

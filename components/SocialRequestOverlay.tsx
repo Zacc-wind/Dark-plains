@@ -1,13 +1,12 @@
 'use client';
 
 import Image from 'next/image';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   acceptPlayerTradeRequest,
   acceptPartyInvite,
   declinePlayerTradeRequest,
   declinePartyInvite,
-  expireCurrentSocialRequests,
   getCurrentUser,
   getIncomingSocialRequests,
   getUsers,
@@ -17,7 +16,13 @@ import { getPlayerModelPath } from '@/lib/assetLoader';
 import { getSocialRequestTimeRemaining } from '@/lib/socialRequests';
 import { emitFxEvent } from '@/lib/fxEvents';
 import { playGameSound, preloadGameSounds } from '@/lib/sound';
+import { usePolling } from '@/lib/hooks/usePolling';
+import { expireSocialRequestsShared } from '@/lib/socialRequestTicker';
+import { TRADE_SESSION_OPEN_EVENT } from '@/lib/tradeSessions';
 import CinematicScrollShell from './CinematicScrollShell';
+
+const IDLE_REQUEST_POLL_MS = 3_000;
+const ACTIVE_REQUEST_POLL_MS = 1_000;
 
 export default function SocialRequestOverlay() {
   const [now, setNow] = useState(() => Date.now());
@@ -32,14 +37,18 @@ export default function SocialRequestOverlay() {
     : undefined;
   const requestId = incoming?.id;
 
-  useEffect(() => {
-    const interval = window.setInterval(() => {
-      expireCurrentSocialRequests();
-      setNow(Date.now());
-      setRevision(value => value + 1);
-    }, 1000);
-    return () => window.clearInterval(interval);
+  const refresh = useCallback(() => {
+    const tickAt = Date.now();
+    expireSocialRequestsShared(tickAt);
+    setNow(tickAt);
+    setRevision(value => value + 1);
   }, []);
+  usePolling(refresh, requestId ? ACTIVE_REQUEST_POLL_MS : IDLE_REQUEST_POLL_MS, { immediate: false });
+
+  useEffect(() => {
+    window.addEventListener('storage', refresh);
+    return () => window.removeEventListener('storage', refresh);
+  }, [refresh]);
 
   useEffect(() => {
     if (!requestId) return undefined;
@@ -108,6 +117,9 @@ export default function SocialRequestOverlay() {
         playGameSound(response === 'accept' ? 'social.accept' : 'social.decline', { throttleMs: 120 });
         setDismissedIds(ids => ids.includes(incoming.id) ? ids : [...ids, incoming.id]);
         setRevision(value => value + 1);
+        if (incoming.kind === 'trade' && response === 'accept') {
+          window.dispatchEvent(new Event(TRADE_SESSION_OPEN_EVENT));
+        }
       } else {
         setNotice(result.error || 'Could not answer request.');
       }

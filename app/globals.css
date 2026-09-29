@@ -1,4 +1,3 @@
-@import url("https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;800;900&family=Grenze+Gotisch:wght@500;600;700;800;900&family=IM+Fell+English:ital@0;1&family=IM+Fell+English+SC&family=Inter:wght@400;600;700;800;900&family=Uncial+Antiqua&display=swap");
 @import "tailwindcss";
 
 :root {
@@ -30,7 +29,7 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: "IM Fell English", "Inter", Arial, Helvetica, sans-serif;
+  --font-sans: var(--font-body), Georgia, serif;
   --font-mono: "Courier New", monospace;
 }
 
@@ -52,7 +51,7 @@ body {
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: "IM Fell English", "Inter", Arial, Helvetica, sans-serif;
+  font-family: var(--font-body), Georgia, serif;
 }
 
 * {
@@ -80,13 +79,13 @@ textarea {
 
 .fantasy-ui {
   color: var(--ui-text);
-  font-family: "IM Fell English", "Inter", Arial, Helvetica, sans-serif;
+  font-family: var(--font-body), Georgia, serif;
 }
 
 .font-fantasy,
 .fantasy-heading,
 .arcane-title {
-  font-family: "Grenze Gotisch", "Uncial Antiqua", "Cinzel", "IM Fell English SC", Georgia, serif;
+  font-family: var(--font-display), Georgia, serif;
   letter-spacing: 0;
 }
 
@@ -489,7 +488,7 @@ textarea {
   border: 1px solid rgba(196, 171, 115, 0.32);
   border-radius: 999px;
   background: rgba(5, 7, 8, 0.76);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 900;
   letter-spacing: 0;
   text-transform: uppercase;
@@ -593,7 +592,7 @@ textarea {
 }
 
 .story-dialog-choice-tone {
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 900;
   line-height: 1;
   text-transform: uppercase;
@@ -680,7 +679,7 @@ textarea {
   }
 
   .story-dialog-spirit-label {
-    font-size: 8px;
+    font-size: 11px;
   }
 
   .story-dialog-panel {
@@ -698,7 +697,7 @@ textarea {
   }
 
   .story-dialog-choice-copy {
-    font-size: 10px;
+    font-size: 11px;
   }
 
   .story-dialog-hint {
@@ -910,7 +909,7 @@ textarea {
 
 .singleplayer-tutorial-card-body {
   margin-top: 0.15rem;
-  font-size: 0.68rem;
+  font-size: 0.6875rem;
   font-weight: 800;
   line-height: 1.28;
   color: rgba(214, 203, 183, 0.82);
@@ -1022,8 +1021,8 @@ textarea {
   background: rgba(2, 5, 7, 0.72);
   padding: 0.28rem 0.62rem;
   color: rgba(255, 248, 231, 0.78);
-  font-family: "Cinzel", "IM Fell English SC", Georgia, serif;
-  font-size: 0.58rem;
+  font-family: var(--font-label), Georgia, serif;
+  font-size: 0.6875rem;
   font-weight: 900;
   letter-spacing: 0.05em;
   line-height: 1;
@@ -1444,7 +1443,7 @@ textarea {
 }
 
 .sp-hub-achievement-category-title {
-  font-size: 0.66rem;
+  font-size: 0.6875rem;
   font-weight: 900;
   text-transform: uppercase;
   letter-spacing: 0.03em;
@@ -1539,7 +1538,7 @@ textarea {
 
 .sp-hub-featured-achievement-state {
   color: rgba(232, 217, 184, 0.62);
-  font-size: 0.64rem;
+  font-size: 0.6875rem;
   font-weight: 900;
   text-transform: uppercase;
 }
@@ -1619,7 +1618,7 @@ textarea {
 }
 
 .sp-hub-stat-tile-label {
-  font-size: 0.62rem;
+  font-size: 0.6875rem;
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -1676,7 +1675,7 @@ textarea {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 0.58rem;
+  font-size: 0.6875rem;
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.03em;
@@ -1696,7 +1695,7 @@ button.sp-hub-bonus-tile-spendable:focus-visible {
 }
 
 .sp-hub-bonus-tile-action {
-  font-size: 0.58rem;
+  font-size: 0.6875rem;
   font-weight: 900;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -1746,7 +1745,7 @@ button.sp-hub-bonus-tile-spendable:focus-visible {
   background: rgba(0, 0, 0, 0.72);
   padding: 0.12rem 0.22rem;
   color: rgba(232, 217, 184, 0.68);
-  font-size: 0.38rem;
+  font-size: 0.6875rem;
   font-weight: 950;
   letter-spacing: 0.04em;
   line-height: 1;
@@ -1755,19 +1754,19 @@ button.sp-hub-bonus-tile-spendable:focus-visible {
 }
 
 .sp-milestone-lock-sm {
-  font-size: 0.5rem;
+  font-size: 0.6875rem;
 }
 
 .sp-milestone-tile-title {
   max-width: 4.5rem;
-  font-size: 0.58rem;
+  font-size: 0.6875rem;
   font-weight: 800;
   line-height: 1.2;
   text-align: center;
 }
 
 .sp-milestone-progress {
-  font-size: 0.55rem;
+  font-size: 0.6875rem;
   font-weight: 800;
 }
 
@@ -1886,7 +1885,7 @@ button.sp-hub-bonus-tile-spendable:focus-visible {
 .sp-milestone-card-progress,
 .sp-milestone-record {
   margin-top: 0.15rem;
-  font-size: 0.68rem;
+  font-size: 0.6875rem;
   font-weight: 700;
   line-height: 1.35;
 }
@@ -2106,7 +2105,7 @@ button.sp-hub-bonus-tile-spendable:focus-visible {
 
 .arcane-label {
   color: var(--ui-accent);
-  font-size: 0.68rem;
+  font-size: 0.6875rem;
   font-weight: 900;
   letter-spacing: 0;
   text-transform: uppercase;
@@ -2216,7 +2215,7 @@ button.vine-frame::before,
 
 .hud-xp-value {
   flex-shrink: 0;
-  font-size: 0.62rem;
+  font-size: 0.6875rem;
   font-weight: 900;
   letter-spacing: 0.02em;
   color: #9be7ff;
@@ -2311,7 +2310,7 @@ button.vine-frame::before,
 }
 
 .hud-stat-chip-label {
-  font-size: 0.58rem;
+  font-size: 0.6875rem;
   font-weight: 900;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -2582,11 +2581,11 @@ button.vine-frame::before,
 }
 
 .map-action-rail-compact .map-action-detail {
-  font-size: 0.62rem;
+  font-size: 0.6875rem;
 }
 
 .map-action-rail-compact .map-action-badge {
-  font-size: 0.58rem;
+  font-size: 0.6875rem;
   padding: 0.12rem 0.35rem;
 }
 
@@ -2798,7 +2797,7 @@ button.vine-frame::before,
   background: rgba(245, 201, 103, 0.08);
   color: rgba(255, 248, 231, 0.82);
   padding: 0.16rem 0.44rem;
-  font-size: 0.62rem;
+  font-size: 0.6875rem;
   font-weight: 950;
   text-transform: uppercase;
 }
@@ -2864,7 +2863,7 @@ button.vine-frame::before,
   background: rgba(0, 0, 0, 0.28);
   color: rgba(255, 248, 231, 0.82);
   padding: 0.45rem 0.6rem;
-  font-size: 0.68rem;
+  font-size: 0.6875rem;
   font-weight: 950;
   text-transform: uppercase;
   transition: border-color 140ms ease, background 140ms ease, color 140ms ease, transform 140ms ease;
@@ -3006,7 +3005,7 @@ button.vine-frame::before,
 .party-details-member-meta {
   overflow: hidden;
   color: rgba(232, 217, 184, 0.58);
-  font-size: 0.66rem;
+  font-size: 0.6875rem;
   font-weight: 850;
   text-overflow: ellipsis;
   text-transform: uppercase;
@@ -3031,7 +3030,7 @@ button.vine-frame::before,
 .party-details-mini-action {
   border-radius: 0.34rem;
   padding: 0.38rem 0.48rem;
-  font-size: 0.62rem;
+  font-size: 0.6875rem;
   text-transform: uppercase;
 }
 
@@ -3072,7 +3071,7 @@ button.vine-frame::before,
   background: rgba(14, 48, 62, 0.24);
   color: rgba(219, 234, 254, 0.88);
   padding: 0.28rem 0.38rem 0.28rem 0.58rem;
-  font-size: 0.66rem;
+  font-size: 0.6875rem;
   font-weight: 900;
 }
 
@@ -3082,7 +3081,7 @@ button.vine-frame::before,
   height: 1.1rem;
   place-items: center;
   border-radius: 999px;
-  font-size: 0.55rem;
+  font-size: 0.6875rem;
   line-height: 1;
 }
 
@@ -3244,7 +3243,7 @@ button.vine-frame::before,
   margin-top: 0.16rem;
   overflow: hidden;
   color: rgba(232, 217, 184, 0.68);
-  font-size: 0.64rem;
+  font-size: 0.6875rem;
   font-weight: 850;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -3257,7 +3256,7 @@ button.vine-frame::before,
   background: rgba(2, 5, 6, 0.48);
   padding: 0.2rem 0.38rem;
   color: rgba(255, 248, 231, 0.9);
-  font-size: 0.58rem;
+  font-size: 0.6875rem;
   font-weight: 950;
   text-align: center;
   text-transform: uppercase;
@@ -3379,7 +3378,7 @@ button.vine-frame::before,
 
 .command-center-tab-meta {
   letter-spacing: 0;
-  font-size: 0.58rem;
+  font-size: 0.6875rem;
   line-height: 1.05;
 }
 
@@ -3390,7 +3389,7 @@ button.vine-frame::before,
   background: rgba(0, 0, 0, 0.24);
   padding: 0.1rem 0.34rem;
   color: rgba(180, 255, 223, 0.78);
-  font-size: 0.62rem;
+  font-size: 0.6875rem;
   font-weight: 900;
   line-height: 1;
   text-align: center;
@@ -3636,7 +3635,7 @@ button.vine-frame::before,
 }
 
 .spells-loadout-slot-label {
-  font-size: 0.64rem;
+  font-size: 0.6875rem;
   font-weight: 900;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -3702,7 +3701,7 @@ button.vine-frame::before,
   border-radius: 999px;
   background: rgba(8, 18, 14, 0.94);
   color: #d9fff0;
-  font-size: 0.56rem;
+  font-size: 0.6875rem;
   font-weight: 900;
   box-shadow: 0 0 10px rgba(110, 231, 183, 0.16);
 }
@@ -3713,13 +3712,13 @@ button.vine-frame::before,
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 0.62rem;
+  font-size: 0.6875rem;
   font-weight: 900;
   color: #fafafa;
 }
 
 .spells-archive-tile-meta {
-  font-size: 0.56rem;
+  font-size: 0.6875rem;
   font-weight: 800;
   line-height: 1.05;
   color: rgba(212, 212, 216, 0.72);
@@ -3825,7 +3824,7 @@ button.vine-frame::before,
 }
 
 .character-quick-stat-label {
-  font-size: 0.62rem;
+  font-size: 0.6875rem;
   font-weight: 900;
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -3898,7 +3897,7 @@ button.vine-frame::before,
 }
 
 .character-gear-chip-label {
-  font-size: 0.64rem;
+  font-size: 0.6875rem;
   font-weight: 900;
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -3987,7 +3986,7 @@ button.vine-frame::before,
   z-index: 3;
   border-radius: 999px;
   padding: 0.1rem 0.35rem;
-  font-size: 0.56rem;
+  font-size: 0.6875rem;
   font-weight: 900;
   line-height: 1.2;
   text-transform: uppercase;
@@ -4022,7 +4021,7 @@ button.vine-frame::before,
   transform: translateX(-50%);
   background: rgba(0, 0, 0, 0.72);
   color: rgba(232, 217, 184, 0.82);
-  font-size: 0.52rem;
+  font-size: 0.6875rem;
 }
 
 .army-roster-tile-fielded .army-roster-fielded {
@@ -4074,7 +4073,7 @@ button.vine-frame::before,
 }
 
 .spells-panel-modern .spells-archive-tile-meta {
-  font-size: 0.62rem;
+  font-size: 0.6875rem;
 }
 
 .spells-spotlight-modern {
@@ -4343,7 +4342,7 @@ button.vine-frame::before,
 
 .random-run-setup-selected span {
   color: rgba(244, 244, 245, 0.62);
-  font-size: 0.68rem;
+  font-size: 0.6875rem;
   font-weight: 900;
   text-transform: uppercase;
 }
@@ -4370,7 +4369,7 @@ button.vine-frame::before,
 
 .random-run-setup-label {
   color: rgba(232, 217, 184, 0.74);
-  font-size: 0.68rem;
+  font-size: 0.6875rem;
   font-weight: 950;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -4458,7 +4457,7 @@ button.vine-frame::before,
   text-overflow: ellipsis;
   white-space: nowrap;
   color: inherit;
-  font-size: 0.62rem;
+  font-size: 0.6875rem;
   font-weight: 950;
   text-shadow: 0 1px 5px rgba(0, 0, 0, 0.95);
   text-transform: uppercase;
@@ -4483,7 +4482,7 @@ button.vine-frame::before,
 
 .random-run-length-choice-label {
   color: rgba(232, 217, 184, 0.7);
-  font-size: 0.66rem;
+  font-size: 0.6875rem;
   font-weight: 950;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -4498,7 +4497,7 @@ button.vine-frame::before,
 
 .random-run-length-choice span:last-child {
   color: rgba(244, 244, 245, 0.54);
-  font-size: 0.62rem;
+  font-size: 0.6875rem;
   font-weight: 800;
 }
 
@@ -4585,7 +4584,7 @@ button.vine-frame::before,
     radial-gradient(circle, rgba(245, 201, 103, 0.16), transparent 68%),
     rgba(0, 0, 0, 0.48);
   color: #fff8e7;
-  font-family: var(--font-fantasy), serif;
+  font-family: var(--font-display), Georgia, serif;
   font-size: 1.55rem;
   font-weight: 950;
   line-height: 1;
@@ -4816,7 +4815,7 @@ button.vine-frame::before,
   background: rgba(0, 0, 0, 0.34);
   color: rgba(244, 244, 245, 0.74);
   padding: 0.28rem 0.62rem;
-  font-size: 0.68rem;
+  font-size: 0.6875rem;
   font-weight: 900;
   line-height: 1.1;
 }
@@ -5435,7 +5434,7 @@ button.vine-frame::before,
     radial-gradient(circle at 50% 35%, rgba(234, 220, 154, 0.18), transparent 58%),
     linear-gradient(180deg, rgba(13, 10, 13, 0.96), rgba(6, 6, 8, 0.92));
   color: #fff8e7;
-  font-family: "Cinzel", serif;
+  font-family: var(--font-label), Georgia, serif;
   font-size: 1.3rem;
   font-weight: 900;
   line-height: 1;
@@ -5693,7 +5692,7 @@ button.vine-frame::before,
   padding: 0.14rem 0.55rem;
   background: rgba(8, 13, 15, 0.82);
   color: #fff8e7;
-  font-size: 0.64rem;
+  font-size: 0.6875rem;
   font-weight: 900;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -5886,7 +5885,7 @@ button.vine-frame::before,
   border-radius: 999px;
   padding: 0.16rem 0.48rem;
   background: rgba(0, 0, 0, 0.38);
-  font-size: 0.62rem;
+  font-size: 0.6875rem;
   font-weight: 900;
   letter-spacing: 0.07em;
   text-transform: uppercase;
@@ -6139,7 +6138,7 @@ button.vine-frame::before,
   background: rgba(0, 0, 0, 0.78);
   padding: 0.04rem 0.24rem;
   color: #fff8e7;
-  font-size: 0.58rem;
+  font-size: 0.6875rem;
   font-weight: 900;
   line-height: 1rem;
 }
@@ -6212,7 +6211,7 @@ button.vine-frame::before,
 
 .reward-hover-popover-meta {
   margin-top: 0.2rem;
-  font-size: 0.62rem;
+  font-size: 0.6875rem;
   letter-spacing: 0.08em;
 }
 
@@ -6410,7 +6409,7 @@ button.vine-frame::before,
 
 .town-section-status {
   color: var(--ui-muted);
-  font-size: 0.65rem;
+  font-size: 0.6875rem;
   font-weight: 900;
   text-transform: uppercase;
 }
@@ -6553,13 +6552,13 @@ button.vine-frame::before,
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 0.68rem;
+  font-size: 0.6875rem;
   font-weight: 900;
   color: #f4f0e6;
 }
 
 .town-grid-cell-meta {
-  font-size: 0.62rem;
+  font-size: 0.6875rem;
   font-weight: 800;
   color: var(--ui-gold, #d4b06a);
 }
@@ -6569,7 +6568,7 @@ button.vine-frame::before,
   border-top: 1px solid rgba(232, 217, 184, 0.14);
   padding-top: 0.28rem;
   color: #fff8e7;
-  font-size: 0.58rem;
+  font-size: 0.6875rem;
   font-weight: 900;
   text-transform: uppercase;
 }
@@ -6582,7 +6581,7 @@ button.vine-frame::before,
   border-radius: 999px;
   border: 1px solid rgba(232, 217, 184, 0.18);
   padding: 0.1rem 0.35rem;
-  font-size: 0.56rem;
+  font-size: 0.6875rem;
   font-weight: 900;
   text-transform: uppercase;
   color: var(--ui-muted);
@@ -6634,7 +6633,7 @@ button.vine-frame::before,
 .town-quest-phase {
   border-radius: 999px;
   padding: 0.2rem 0.55rem;
-  font-size: 0.62rem;
+  font-size: 0.6875rem;
   font-weight: 900;
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -6697,7 +6696,7 @@ button.vine-frame::before,
 .town-value-label {
   display: block;
   color: var(--ui-faint);
-  font-size: 0.55rem;
+  font-size: 0.6875rem;
   font-weight: 900;
   text-transform: uppercase;
 }
@@ -6729,7 +6728,7 @@ button.vine-frame::before,
   align-items: center;
   gap: 0.45rem;
   color: var(--ui-gold, #d4b06a);
-  font-size: 0.65rem;
+  font-size: 0.6875rem;
 }
 
 .town-exchange-values strong {
@@ -6941,7 +6940,7 @@ button.vine-frame::before,
 .settings-option-hint {
   display: block;
   margin-top: 0.12rem;
-  font-size: 0.68rem;
+  font-size: 0.6875rem;
   font-weight: 700;
   line-height: 1.35;
   color: rgba(212, 200, 180, 0.72);
@@ -7599,7 +7598,7 @@ button.vine-frame::before,
   background: rgba(0, 0, 0, 0.72);
   padding: 0.05rem 0.28rem;
   color: #fff8e7;
-  font-size: 0.62rem;
+  font-size: 0.6875rem;
   font-weight: 900;
   line-height: 1rem;
 }
@@ -7614,7 +7613,7 @@ button.vine-frame::before,
   border: 1px solid rgba(110, 231, 183, 0.3);
   background: rgba(7, 58, 45, 0.84);
   color: #d1fae5;
-  font-size: 0.58rem;
+  font-size: 0.6875rem;
   font-weight: 900;
   opacity: 0;
   transform: translateY(0.2rem);
@@ -7649,17 +7648,17 @@ button.vine-frame::before,
 }
 
 .command-icon-tooltip-title {
-  font-size: 0.64rem;
+  font-size: 0.6875rem;
   line-height: 1.1;
 }
 
 .command-icon-tooltip-meta {
-  font-size: 0.54rem;
+  font-size: 0.6875rem;
   line-height: 1.1;
 }
 
 .command-icon-tooltip-copy {
-  font-size: 0.58rem;
+  font-size: 0.6875rem;
   line-height: 1.2;
   display: -webkit-box;
   overflow: hidden;
@@ -7680,7 +7679,7 @@ button.vine-frame::before,
   grid-template-columns: auto 1fr auto;
   align-items: center;
   gap: 0.22rem;
-  font-size: 0.56rem;
+  font-size: 0.6875rem;
   font-weight: 900;
   line-height: 1.1;
 }
@@ -7696,7 +7695,7 @@ button.vine-frame::before,
 }
 
 .command-icon-tooltip-stat-delta {
-  font-size: 0.52rem;
+  font-size: 0.6875rem;
   font-weight: 900;
 }
 
@@ -7710,7 +7709,7 @@ button.vine-frame::before,
 
 .command-icon-tooltip-compare {
   margin-top: 0.06rem;
-  font-size: 0.52rem;
+  font-size: 0.6875rem;
   line-height: 1.15;
 }
 
@@ -7737,12 +7736,12 @@ button.vine-frame::before,
 
 .gear-available-grid .command-icon-tooltip-title,
 .inventory-item-grid .command-icon-tooltip-title {
-  font-size: 0.68rem;
+  font-size: 0.6875rem;
 }
 
 .gear-available-grid .command-icon-tooltip-copy,
 .inventory-item-grid .command-icon-tooltip-copy {
-  font-size: 0.62rem;
+  font-size: 0.6875rem;
 }
 
 .command-icon-tile:hover .command-icon-tooltip,
@@ -7970,7 +7969,7 @@ button.vine-frame::before,
     radial-gradient(circle at 35% 26%, rgba(255, 255, 255, 0.28), transparent 36%),
     rgba(0, 0, 0, 0.46);
   color: #fff8e7;
-  font-family: "Grenze Gotisch", "Cinzel", serif;
+  font-family: var(--font-display), Georgia, serif;
   font-size: 1.15rem;
   font-weight: 900;
   line-height: 1;
@@ -8085,7 +8084,7 @@ button.vine-frame::before,
   background: rgba(0, 0, 0, 0.24);
   padding: 0.12rem 0.45rem;
   color: var(--ui-muted);
-  font-size: 0.68rem;
+  font-size: 0.6875rem;
   font-weight: 900;
 }
 
@@ -8106,7 +8105,7 @@ button.vine-frame::before,
 
 .formation-tier-mark,
 .formation-tier-badge {
-  font-family: "Cinzel", "IM Fell English SC", serif;
+  font-family: var(--font-label), Georgia, serif;
   font-weight: 900;
   letter-spacing: 0;
 }
@@ -8191,7 +8190,7 @@ button.vine-frame::before,
 
 .formation-open-number {
   color: rgba(232, 217, 184, 0.2);
-  font-family: "Cinzel", serif;
+  font-family: var(--font-label), Georgia, serif;
   font-size: clamp(1.1rem, 2vw, 1.55rem);
   font-weight: 900;
   line-height: 1;
@@ -8199,7 +8198,7 @@ button.vine-frame::before,
 
 .formation-commander-mark {
   color: rgba(255, 248, 231, 0.82);
-  font-family: "Cinzel", serif;
+  font-family: var(--font-label), Georgia, serif;
   font-size: clamp(1.4rem, 2.6vw, 2rem);
   font-weight: 900;
   line-height: 1;
@@ -9208,7 +9207,7 @@ button.vine-frame::before,
 .battle-retreat-panel-copy {
   margin: 0.28rem 0 0;
   color: rgba(232, 217, 184, 0.58);
-  font-size: 0.68rem;
+  font-size: 0.6875rem;
   font-weight: 700;
   line-height: 1.3;
 }
@@ -9249,8 +9248,8 @@ button.vine-frame::before,
 .battle-command-danger-label {
   display: block;
   color: rgba(232, 217, 184, 0.58);
-  font-family: "Cinzel", "IM Fell English SC", Georgia, serif;
-  font-size: 0.58rem;
+  font-family: var(--font-label), Georgia, serif;
+  font-size: 0.6875rem;
   font-weight: 900;
   letter-spacing: 0.08em;
   line-height: 1;
@@ -9268,7 +9267,7 @@ button.vine-frame::before,
 .battle-command-copy {
   margin: 0.28rem 0 0;
   color: rgba(232, 217, 184, 0.62);
-  font-size: 0.68rem;
+  font-size: 0.6875rem;
   font-weight: 800;
   line-height: 1.28;
 }
@@ -9335,7 +9334,7 @@ button.vine-frame::before,
 
 .battle-command-unit-meta {
   color: rgba(232, 217, 184, 0.52);
-  font-size: 0.58rem;
+  font-size: 0.6875rem;
   font-weight: 900;
   letter-spacing: 0.04em;
   line-height: 1;
@@ -9353,7 +9352,7 @@ button.vine-frame::before,
   justify-content: space-between;
   gap: 0.4rem;
   color: rgba(232, 217, 184, 0.6);
-  font-size: 0.6rem;
+  font-size: 0.6875rem;
   font-weight: 900;
   letter-spacing: 0.05em;
   text-transform: uppercase;
@@ -9361,7 +9360,7 @@ button.vine-frame::before,
 
 .battle-command-health-head b {
   color: rgba(216, 253, 225, 0.9);
-  font-size: 0.66rem;
+  font-size: 0.6875rem;
   letter-spacing: 0;
 }
 
@@ -9406,7 +9405,7 @@ button.vine-frame::before,
 
 .battle-command-stat-grid em {
   color: rgba(232, 217, 184, 0.5);
-  font-size: 0.52rem;
+  font-size: 0.6875rem;
   font-style: normal;
   font-weight: 900;
   letter-spacing: 0.06em;
@@ -9425,7 +9424,7 @@ button.vine-frame::before,
   border-radius: 999px;
   background: rgba(8, 15, 18, 0.72);
   color: rgba(226, 232, 240, 0.82);
-  font-size: 0.56rem;
+  font-size: 0.6875rem;
   font-weight: 900;
   line-height: 1;
   padding: 0.26rem 0.42rem;
@@ -9455,8 +9454,8 @@ button.vine-frame::before,
   justify-content: space-between;
   gap: 0.4rem;
   color: rgba(232, 217, 184, 0.58);
-  font-family: "Cinzel", "IM Fell English SC", Georgia, serif;
-  font-size: 0.55rem;
+  font-family: var(--font-label), Georgia, serif;
+  font-size: 0.6875rem;
   font-weight: 900;
   letter-spacing: 0.08em;
   line-height: 1;
@@ -9465,7 +9464,7 @@ button.vine-frame::before,
 
 .battle-combat-feed-head b {
   color: rgba(255, 248, 231, 0.72);
-  font-size: 0.55rem;
+  font-size: 0.6875rem;
   letter-spacing: 0;
 }
 
@@ -9573,7 +9572,7 @@ button.vine-frame::before,
   border-radius: 999px;
   background: rgba(8, 15, 18, 0.72);
   color: rgba(224, 242, 254, 0.82);
-  font-size: 0.48rem;
+  font-size: 0.6875rem;
   font-weight: 1000;
   letter-spacing: 0.06em;
   line-height: 1;
@@ -9619,7 +9618,7 @@ button.vine-frame::before,
   border: 1px dashed rgba(232, 217, 184, 0.08);
   border-radius: 0.42rem;
   color: rgba(232, 217, 184, 0.42);
-  font-size: 0.62rem;
+  font-size: 0.6875rem;
   font-weight: 900;
   text-align: center;
 }
@@ -9628,7 +9627,7 @@ button.vine-frame::before,
   border-color: rgba(232, 217, 184, 0.14);
   background: rgba(0, 0, 0, 0.28);
   color: rgba(232, 217, 184, 0.52);
-  font-size: 0.68rem;
+  font-size: 0.6875rem;
   font-weight: 900;
   padding: 0.65rem;
   text-align: center;
@@ -9657,7 +9656,7 @@ button.vine-frame::before,
   justify-content: center;
   padding: 0.75rem 0.55rem;
   border-radius: 0.48rem;
-  font-family: "Grenze Gotisch", "Uncial Antiqua", "Cinzel", "IM Fell English SC", Georgia, serif;
+  font-family: var(--font-display), Georgia, serif;
   font-size: clamp(1rem, 1.2vw, 1.18rem);
   font-weight: 900;
   letter-spacing: 0.02em;
@@ -9826,7 +9825,7 @@ button.vine-frame::before,
 
 .battle-order-index {
   color: rgba(232, 217, 184, 0.52);
-  font-size: 0.68rem;
+  font-size: 0.6875rem;
   font-weight: 900;
   line-height: 1;
   text-align: center;
@@ -9894,7 +9893,7 @@ button.vine-frame::before,
 .battle-order-meta {
   overflow: hidden;
   color: rgba(232, 217, 184, 0.56);
-  font-size: 0.62rem;
+  font-size: 0.6875rem;
   font-weight: 800;
   letter-spacing: 0.04em;
   line-height: 1.1;
@@ -9909,7 +9908,7 @@ button.vine-frame::before,
   border-radius: 999px;
   background: rgba(48, 30, 18, 0.72);
   color: rgba(255, 248, 231, 0.92);
-  font-size: 0.58rem;
+  font-size: 0.6875rem;
   font-weight: 900;
   letter-spacing: 0.06em;
   line-height: 1;
@@ -10608,7 +10607,7 @@ button.vine-frame::before,
 .battle-forecast-stats em {
   margin-top: 0.12rem;
   color: rgba(232, 217, 184, 0.55);
-  font-size: 0.5rem;
+  font-size: 0.6875rem;
   font-style: normal;
   font-weight: 900;
   line-height: 1;
@@ -10987,7 +10986,7 @@ button.vine-frame::before,
   place-items: center;
   border-radius: 999px;
   border: 1px solid rgba(232, 217, 184, 0.22);
-  font-family: "Grenze Gotisch", Georgia, serif;
+  font-family: var(--font-display), Georgia, serif;
   font-size: 2rem;
   font-weight: 900;
   line-height: 1;
@@ -11399,7 +11398,7 @@ button.vine-frame::before,
 }
 
 .completion-recruit-stat-label {
-  font-size: 0.58rem;
+  font-size: 0.6875rem;
   font-weight: 900;
   letter-spacing: 0.14em;
   text-transform: uppercase;
@@ -11685,7 +11684,7 @@ button.vine-frame::before,
 }
 
 .completion-gear-stat-label {
-  font-size: 0.62rem;
+  font-size: 0.6875rem;
   font-weight: 900;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -11960,7 +11959,7 @@ button.vine-frame::before,
   border-radius: 999px;
   background: rgba(0, 0, 0, 0.42);
   color: rgba(228, 219, 202, 0.62);
-  font-size: 0.68rem;
+  font-size: 0.6875rem;
   font-weight: 950;
   transition: transform 180ms ease, color 180ms ease, border-color 180ms ease, background 180ms ease;
 }
@@ -12079,7 +12078,7 @@ button.vine-frame::before,
   background:
     linear-gradient(180deg, rgba(83, 25, 34, 0.92), rgba(3, 5, 6, 0.86));
   color: #fff8e7;
-  font-size: 0.62rem;
+  font-size: 0.6875rem;
   font-weight: 950;
   letter-spacing: 0.05em;
   line-height: 1;
@@ -12753,7 +12752,7 @@ button.vine-frame::before,
 }
 
 .run-header-chip-value {
-  font-size: 0.68rem;
+  font-size: 0.6875rem;
   font-weight: 900;
   color: #f4eedf;
   letter-spacing: 0.02em;
@@ -13266,7 +13265,7 @@ button.vine-frame::before,
 
 .formation-warband-section-label {
   color: rgba(244, 221, 176, 0.72);
-  font-family: "Cinzel", "IM Fell English SC", serif;
+  font-family: var(--font-label), Georgia, serif;
   font-size: 0.82rem;
   font-weight: 900;
   letter-spacing: 0.1em;
@@ -13276,7 +13275,7 @@ button.vine-frame::before,
 }
 
 .formation-warband-status {
-  font-size: 0.56rem;
+  font-size: 0.6875rem;
   font-weight: 900;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -13435,7 +13434,7 @@ button.vine-frame::before,
 .formation-warband-role {
   min-width: 0;
   overflow: hidden;
-  font-size: 0.64rem;
+  font-size: 0.6875rem;
   font-weight: 900;
   line-height: 1.2;
   text-overflow: ellipsis;
@@ -13471,7 +13470,7 @@ button.vine-frame::before,
 
 .formation-warband-health-text {
   color: rgba(187, 247, 208, 0.82);
-  font-size: 0.52rem;
+  font-size: 0.6875rem;
   font-weight: 900;
   line-height: 1;
   white-space: nowrap;
@@ -13516,7 +13515,7 @@ button.vine-frame::before,
 
 .formation-board-eyebrow {
   margin-bottom: 0.12rem;
-  font-size: 0.58rem;
+  font-size: 0.6875rem;
   letter-spacing: 0.16em;
   opacity: 0.72;
 }
@@ -13567,7 +13566,7 @@ button.vine-frame::before,
 }
 
 .formation-deploy-selected-kicker {
-  font-size: 0.56rem;
+  font-size: 0.6875rem;
   letter-spacing: 0.13em;
   opacity: 0.72;
 }
@@ -13585,7 +13584,7 @@ button.vine-frame::before,
 .formation-deploy-selected-meta {
   overflow: hidden;
   color: rgba(232, 217, 184, 0.58);
-  font-size: 0.68rem;
+  font-size: 0.6875rem;
   font-weight: 900;
   letter-spacing: 0.04em;
   line-height: 1.1;
@@ -13611,7 +13610,7 @@ button.vine-frame::before,
 
 .formation-deploy-rule-sub {
   color: rgba(244, 244, 245, 0.52);
-  font-size: 0.68rem;
+  font-size: 0.6875rem;
   font-weight: 800;
   line-height: 1.25;
 }
@@ -13643,7 +13642,7 @@ button.vine-frame::before,
 
 .formation-deploy-counts small {
   color: rgba(232, 217, 184, 0.55);
-  font-size: 0.58rem;
+  font-size: 0.6875rem;
   font-weight: 900;
   letter-spacing: 0.06em;
   line-height: 1;
@@ -13769,7 +13768,7 @@ button.vine-frame::before,
 
 .formation-lane-labels small {
   color: rgba(244, 244, 245, 0.42);
-  font-size: 0.64rem;
+  font-size: 0.6875rem;
   font-weight: 900;
   letter-spacing: 0.08em;
   line-height: 1;
@@ -13908,7 +13907,7 @@ button.vine-frame::before,
 .formation-spells-section-label {
   margin: 0 0 0.5rem;
   color: rgba(244, 221, 176, 0.72);
-  font-family: "Cinzel", "IM Fell English SC", serif;
+  font-family: var(--font-label), Georgia, serif;
   font-size: 0.92rem;
   font-weight: 900;
   letter-spacing: 0.12em;
@@ -14122,7 +14121,7 @@ button.vine-frame::before,
 
 .formation-tip-meta {
   margin-top: 0.15rem;
-  font-size: 0.58rem;
+  font-size: 0.6875rem;
   font-weight: 800;
   text-transform: uppercase;
   color: rgba(244, 244, 245, 0.58);
@@ -14134,14 +14133,14 @@ button.vine-frame::before,
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0.2rem 0.35rem;
   margin-top: 0.4rem;
-  font-size: 0.62rem;
+  font-size: 0.6875rem;
   font-weight: 900;
   color: rgba(255, 248, 231, 0.88);
 }
 
 .formation-tip-copy {
   margin-top: 0.35rem;
-  font-size: 0.68rem;
+  font-size: 0.6875rem;
   font-weight: 700;
   line-height: 1.35;
   color: rgba(212, 212, 216, 0.82);
@@ -14225,7 +14224,7 @@ button.vine-frame::before,
   justify-content: center;
   transform: none;
   color: rgba(232, 217, 184, 0.22);
-  font-family: "Cinzel", "IM Fell English SC", serif;
+  font-family: var(--font-label), Georgia, serif;
   font-size: calc(var(--formation-cell-size, 4rem) * 0.34);
   font-weight: 900;
   line-height: 1;
@@ -14292,7 +14291,7 @@ button.vine-frame::before,
   position: relative;
   z-index: 1;
   color: rgba(232, 217, 184, 0.42);
-  font-family: "Cinzel", "IM Fell English SC", serif;
+  font-family: var(--font-label), Georgia, serif;
   font-size: 0.82rem;
   font-weight: 900;
   line-height: 1;
@@ -14310,7 +14309,7 @@ button.vine-frame::before,
   border: 1px solid rgba(232, 217, 184, 0.16);
   background: rgba(0, 0, 0, 0.62);
   color: rgba(255, 248, 231, 0.82);
-  font-size: 0.52rem;
+  font-size: 0.6875rem;
   line-height: 1.1;
 }
 
@@ -14330,7 +14329,7 @@ button.vine-frame::before,
   border: 1px solid rgba(232, 217, 184, 0.28);
   background: radial-gradient(circle at 50% 35%, rgba(255, 255, 255, 0.2), rgba(0, 0, 0, 0.55));
   color: #fff8e7;
-  font-family: "Grenze Gotisch", "Cinzel", serif;
+  font-family: var(--font-display), Georgia, serif;
   font-size: 1.15rem;
   font-weight: 900;
 }
@@ -14357,7 +14356,7 @@ button.vine-frame::before,
 
 .formation-roster-label {
   text-align: center;
-  font-size: 0.68rem;
+  font-size: 0.6875rem;
   font-weight: 800;
   line-height: 1.2;
   color: rgba(244, 244, 245, 0.88);
@@ -14369,7 +14368,7 @@ button.vine-frame::before,
   border-radius: 999px;
   background: rgba(0, 0, 0, 0.32);
   color: rgba(244, 238, 223, 0.88);
-  font-size: 0.64rem;
+  font-size: 0.6875rem;
   font-weight: 900;
   letter-spacing: 0.06em;
   line-height: 1;
@@ -14382,7 +14381,7 @@ button.vine-frame::before,
   border: 1px solid rgba(232, 217, 184, 0.1);
   border-radius: 999px;
   background: rgba(0, 0, 0, 0.24);
-  font-size: 0.64rem;
+  font-size: 0.6875rem;
   line-height: 1.3;
   text-align: center;
 }
@@ -14411,7 +14410,7 @@ button.vine-frame::before,
     inset 0 1px 0 rgba(255, 255, 255, 0.04),
     0 6px 16px rgba(0, 0, 0, 0.28);
   overflow: visible;
-  font-family: "Cinzel", "IM Fell English SC", serif;
+  font-family: var(--font-label), Georgia, serif;
   transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
   z-index: 1;
 }
@@ -14489,7 +14488,7 @@ button.vine-frame::before,
   background: rgba(8, 12, 18, 0.94);
   border: 1px solid rgba(232, 217, 184, 0.22);
   color: rgba(244, 244, 245, 0.78);
-  font-size: 0.56rem;
+  font-size: 0.6875rem;
   font-weight: 900;
   line-height: 1;
 }
@@ -14561,7 +14560,7 @@ button.vine-frame::before,
   background: linear-gradient(180deg, rgba(24, 18, 12, 0.72), rgba(8, 6, 4, 0.82));
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
   overflow: hidden;
-  font-family: "Cinzel", "IM Fell English SC", serif;
+  font-family: var(--font-label), Georgia, serif;
   text-align: left;
   transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
 }
@@ -14611,7 +14610,7 @@ button.vine-frame::before,
 
 .formation-known-spell-meta {
   color: rgba(232, 217, 184, 0.58);
-  font-size: 0.68rem;
+  font-size: 0.6875rem;
   font-weight: 700;
   line-height: 1.2;
   text-transform: uppercase;
@@ -14650,7 +14649,7 @@ button.vine-frame::before,
   justify-content: center;
   background: rgba(125, 211, 252, 0.92);
   color: #071018;
-  font-size: 0.55rem;
+  font-size: 0.6875rem;
   font-weight: 900;
 }
 
@@ -14934,7 +14933,7 @@ button.vine-frame::before,
   padding: 0.28rem 0.2rem;
   border-radius: 0.25rem;
   color: rgba(215, 205, 187, 0.68);
-  font-size: 0.58rem;
+  font-size: 0.6875rem;
   font-weight: 900;
   text-transform: uppercase;
 }
@@ -15016,7 +15015,7 @@ button.vine-frame::before,
 
 .run-roster-row-tags {
   color: rgba(232, 217, 184, 0.58);
-  font-size: 0.58rem;
+  font-size: 0.6875rem;
   font-weight: 900;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -15036,7 +15035,7 @@ button.vine-frame::before,
 
 .run-roster-row-hp {
   color: rgba(167, 243, 208, 0.92);
-  font-size: 0.62rem;
+  font-size: 0.6875rem;
   font-weight: 900;
   white-space: nowrap;
 }
@@ -15334,7 +15333,7 @@ button.vine-frame::before,
 .run-roster-tip-meta {
   margin-top: 0.15rem;
   color: rgba(244, 244, 245, 0.62);
-  font-size: 0.68rem;
+  font-size: 0.6875rem;
   font-weight: 800;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -15346,14 +15345,14 @@ button.vine-frame::before,
   gap: 0.25rem 0.35rem;
   margin-top: 0.45rem;
   color: rgba(244, 244, 245, 0.82);
-  font-size: 0.68rem;
+  font-size: 0.6875rem;
   font-weight: 800;
 }
 
 .run-roster-tip-copy {
   margin-top: 0.45rem;
   color: rgba(244, 244, 245, 0.58);
-  font-size: 0.68rem;
+  font-size: 0.6875rem;
   font-weight: 700;
   line-height: 1.35;
 }
@@ -15431,7 +15430,7 @@ button.vine-frame::before,
 .run-gear-tip-compare-label {
   display: block;
   color: rgba(244, 244, 245, 0.5);
-  font-size: 0.66rem;
+  font-size: 0.6875rem;
   font-weight: 800;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -15457,7 +15456,7 @@ button.vine-frame::before,
 .run-gear-tip-hint {
   margin-top: 0.6rem;
   color: rgba(244, 244, 245, 0.46);
-  font-size: 0.68rem;
+  font-size: 0.6875rem;
   font-weight: 800;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -15526,7 +15525,7 @@ button.vine-frame::before,
 
 .run-map-stat-tile-label {
   color: rgba(244, 244, 245, 0.58);
-  font-size: 0.62rem;
+  font-size: 0.6875rem;
   font-weight: 800;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -15896,7 +15895,7 @@ button.vine-frame::before,
 
 .run-draft-card-tierline {
   margin-top: 0.15rem;
-  font-size: 0.68rem;
+  font-size: 0.6875rem;
   line-height: 1.15;
   letter-spacing: 0.02em;
 }
@@ -16190,7 +16189,7 @@ button.vine-frame::before,
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: 0.62rem;
+    font-size: 0.6875rem;
   }
 }
 
@@ -16306,7 +16305,7 @@ button.vine-frame::before,
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: 0.62rem;
+    font-size: 0.6875rem;
   }
 }
 
@@ -16551,7 +16550,7 @@ button.vine-frame::before,
 }
 
 .run-completion-outcome-glyph {
-  font-family: "Grenze Gotisch", Georgia, serif;
+  font-family: var(--font-display), Georgia, serif;
   font-size: 1.65rem;
   font-weight: 900;
   line-height: 1;
@@ -17166,7 +17165,7 @@ button.vine-frame::before,
   display: block;
   width: 100%;
   min-height: 2.4rem;
-  font-size: 0.68rem;
+  font-size: 0.6875rem;
   font-weight: 700;
   line-height: 1.35;
 }
@@ -17406,7 +17405,7 @@ button.vine-frame::before,
 
 .run-shop-screen .run-shop-offer-card .run-blessing-impact {
   padding: 0.35rem 0.62rem;
-  font-size: 0.68rem;
+  font-size: 0.6875rem;
 }
 
 .run-shop-empty-slot {
@@ -17535,7 +17534,7 @@ button.vine-frame::before,
 
 .run-shop-gold-pill small {
   color: rgba(244, 238, 223, 0.58);
-  font-size: 0.62rem;
+  font-size: 0.6875rem;
   font-weight: 900;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -18198,7 +18197,7 @@ button.vine-frame::before,
 
 .battle-versus {
   color: rgba(255, 244, 220, 0.78);
-  font-family: var(--font-fantasy), Georgia, serif;
+  font-family: var(--font-display), Georgia, serif;
   font-size: 0.78rem;
   font-weight: 900;
   letter-spacing: 0;
@@ -18657,7 +18656,7 @@ button.vine-frame::before,
   z-index: 6;
   border-radius: 0.2rem;
   padding: 0 0.18rem;
-  font-size: 0.62rem;
+  font-size: 0.6875rem;
   font-weight: 900;
   line-height: 1.15rem;
   pointer-events: none;
@@ -18753,7 +18752,7 @@ button.vine-frame::before,
   border: 1px solid rgba(232, 217, 184, 0.34);
   padding: 0 0.34rem;
   color: #fff8e7;
-  font-size: 0.68rem;
+  font-size: 0.6875rem;
   font-weight: 900;
   line-height: 1;
   box-shadow: 0 0 14px rgba(0, 0, 0, 0.42), inset 0 0 12px rgba(255, 255, 255, 0.06);
@@ -18943,7 +18942,7 @@ button.vine-frame::before,
 
 .battle-combat-tutorial-meta {
   color: rgba(244, 221, 176, 0.62);
-  font-size: 0.68rem;
+  font-size: 0.6875rem;
   font-weight: 900;
   text-transform: uppercase;
 }
@@ -19072,7 +19071,7 @@ button.vine-frame::before,
   background: rgba(0, 0, 0, 0.34);
   padding: 1px 5px;
   color: rgba(255, 244, 220, 0.62);
-  font-size: 8px;
+  font-size: 11px;
   font-weight: 900;
   text-transform: uppercase;
 }
@@ -19266,7 +19265,7 @@ button.vine-frame::before,
   padding: 0.04rem 0.2rem;
   background: rgba(3, 5, 6, 0.82);
   color: rgba(255, 248, 231, 0.92);
-  font-size: 0.58rem;
+  font-size: 0.6875rem;
   font-weight: 900;
   line-height: 1.1;
   letter-spacing: 0;
@@ -22109,7 +22108,7 @@ button.vine-frame::before,
 .spells-loadout-slot-label {
   margin-top: auto;
   color: rgba(218, 189, 132, 0.8);
-  font-size: 0.58rem;
+  font-size: 0.6875rem;
   letter-spacing: 0;
 }
 
@@ -22186,7 +22185,7 @@ button.vine-frame::before,
 .spells-panel-modern .spells-archive-tile-meta {
   margin-top: auto;
   color: rgba(211, 188, 143, 0.72);
-  font-size: 0.58rem;
+  font-size: 0.6875rem;
   line-height: 1.1;
 }
 
@@ -22226,7 +22225,7 @@ button.vine-frame::before,
 .chat-history-meta time {
   flex-shrink: 0;
   color: rgba(193, 176, 147, 0.52);
-  font-size: 0.58rem;
+  font-size: 0.6875rem;
   font-weight: 800;
 }
 
@@ -22297,7 +22296,7 @@ button.vine-frame::before,
   border: 1px solid transparent;
   border-radius: 0.32rem;
   color: rgba(236, 220, 186, 0.78);
-  font-size: 0.65rem;
+  font-size: 0.6875rem;
   font-weight: 900;
   text-transform: uppercase;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
@@ -22345,13 +22344,13 @@ button.vine-frame::before,
 
 .main-quest-daily-copy span {
   color: rgba(232, 219, 190, 0.84);
-  font-size: 0.62rem;
+  font-size: 0.6875rem;
   line-height: 1.25;
 }
 
 .main-quest-daily-copy small {
   color: rgba(232, 188, 108, 0.9);
-  font-size: 0.56rem;
+  font-size: 0.6875rem;
   font-weight: 900;
   text-transform: uppercase;
 }
@@ -22367,7 +22366,7 @@ button.vine-frame::before,
 .main-quest-daily-action > span,
 .main-quest-daily-action > b {
   color: rgba(236, 214, 168, 0.88);
-  font-size: 0.58rem;
+  font-size: 0.6875rem;
   font-weight: 900;
   text-transform: uppercase;
 }
@@ -22379,7 +22378,7 @@ button.vine-frame::before,
   background: linear-gradient(180deg, rgba(122, 42, 48, 0.62), rgba(48, 18, 22, 0.55));
   color: #fff0ce;
   padding: 0.25rem 0.45rem;
-  font-size: 0.58rem;
+  font-size: 0.6875rem;
   font-weight: 900;
   text-transform: uppercase;
 }
@@ -22738,7 +22737,7 @@ button.vine-frame::before,
 .main-quest-order-row > strong {
   flex-shrink: 0;
   color: rgba(247, 214, 148, 0.95);
-  font-size: 0.64rem;
+  font-size: 0.6875rem;
 }
 
 .main-quest-order-row:hover {
@@ -22850,8 +22849,8 @@ button.vine-frame::before,
 .formation-spellbook-trigger-kicker,
 .formation-spellbook-kicker {
   color: rgba(239, 216, 171, 0.72);
-  font-family: "Cinzel", "IM Fell English SC", serif;
-  font-size: 0.64rem;
+  font-family: var(--font-label), Georgia, serif;
+  font-size: 0.6875rem;
   font-weight: 900;
   line-height: 1.1;
   text-transform: uppercase;
@@ -22859,7 +22858,7 @@ button.vine-frame::before,
 
 .formation-spellbook-trigger-title {
   color: #fff8e7;
-  font-family: "Grenze Gotisch", "Cinzel", serif;
+  font-family: var(--font-display), Georgia, serif;
   font-size: 1.08rem;
   font-weight: 900;
   line-height: 1.08;
@@ -22981,7 +22980,7 @@ button.vine-frame::before,
   top: 0.25rem;
   left: 0.35rem;
   color: rgba(239, 216, 171, 0.6);
-  font-size: 0.62rem;
+  font-size: 0.6875rem;
   font-weight: 900;
 }
 
@@ -23000,7 +22999,7 @@ button.vine-frame::before,
 
 .formation-spellbook-slot-copy strong {
   overflow: hidden;
-  font-family: "Cinzel", "IM Fell English SC", serif;
+  font-family: var(--font-label), Georgia, serif;
   font-size: 0.8rem;
   line-height: 1.18;
   text-overflow: ellipsis;
@@ -23009,7 +23008,7 @@ button.vine-frame::before,
 
 .formation-spellbook-slot-copy small {
   color: rgba(239, 216, 171, 0.62);
-  font-size: 0.62rem;
+  font-size: 0.6875rem;
   font-weight: 800;
   text-transform: uppercase;
 }
@@ -23099,14 +23098,14 @@ button.vine-frame::before,
 }
 
 .formation-spellbook-choice-topline strong {
-  font-family: "Cinzel", "IM Fell English SC", serif;
+  font-family: var(--font-label), Georgia, serif;
   font-size: 0.92rem;
 }
 
 .formation-spellbook-choice-topline > span,
 .formation-spellbook-choice-copy small {
   color: rgba(239, 216, 171, 0.66);
-  font-size: 0.64rem;
+  font-size: 0.6875rem;
   font-weight: 900;
   text-transform: uppercase;
 }
@@ -23123,7 +23122,7 @@ button.vine-frame::before,
   right: 0.45rem;
   bottom: 0.38rem;
   color: rgba(150, 240, 212, 0.82);
-  font-size: 0.6rem;
+  font-size: 0.6875rem;
   font-weight: 900;
   text-transform: uppercase;
 }
@@ -23198,7 +23197,7 @@ button.vine-frame::before,
   }
 
   .hud-stat-chip-value {
-    font-size: 0.64rem;
+    font-size: 0.6875rem;
   }
 
   .hud-stat-chip-bar {
@@ -23337,7 +23336,7 @@ button.vine-frame::before,
 .multiplayer-tutorial-kicker {
   margin: 0;
   color: rgba(236, 208, 150, 0.95);
-  font-size: 0.62rem;
+  font-size: 0.6875rem;
   font-weight: 900;
   text-transform: uppercase;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.78);
@@ -23407,7 +23406,7 @@ button.vine-frame::before,
   border-radius: 50%;
   color: rgba(246, 220, 164, 0.9);
   background: rgba(18, 13, 12, 0.84);
-  font-family: Georgia, serif;
+  font-family: var(--font-label), Georgia, serif;
   font-size: 1.1rem;
   font-weight: 900;
 }
@@ -23426,7 +23425,7 @@ button.vine-frame::before,
 
 .multiplayer-feature-lock-level {
   padding: 0.45rem 0.65rem;
-  font-size: 0.68rem;
+  font-size: 0.6875rem;
   font-weight: 900;
   white-space: nowrap;
 }
@@ -23548,7 +23547,7 @@ body.multiplayer-progression-open {
 .multiplayer-current-objective-progress strong {
   display: block;
   color: rgba(239, 213, 158, 0.96);
-  font-family: Georgia, serif;
+  font-family: var(--font-label), Georgia, serif;
   font-size: 1.7rem;
 }
 
@@ -23556,7 +23555,7 @@ body.multiplayer-progression-open {
   display: block;
   margin-top: 0.15rem;
   color: var(--ui-muted);
-  font-size: 0.64rem;
+  font-size: 0.6875rem;
   font-weight: 900;
   text-transform: uppercase;
 }
@@ -23595,7 +23594,7 @@ body.multiplayer-progression-open {
   border-radius: 50%;
   color: rgba(237, 215, 168, 0.92);
   background: rgba(9, 12, 13, 0.74);
-  font-family: Georgia, serif;
+  font-family: var(--font-label), Georgia, serif;
   font-size: 0.86rem;
   font-weight: 900;
 }
@@ -23617,7 +23616,7 @@ body.multiplayer-progression-open {
 .multiplayer-chapter-state span {
   margin-top: 0.15rem;
   color: var(--ui-faint);
-  font-size: 0.6rem;
+  font-size: 0.6875rem;
   font-weight: 900;
   text-transform: uppercase;
 }
@@ -23673,7 +23672,7 @@ body.multiplayer-progression-open {
 .multiplayer-next-unlock span,
 .multiplayer-future-bands span {
   color: rgba(231, 194, 111, 0.82);
-  font-size: 0.62rem;
+  font-size: 0.6875rem;
   font-weight: 900;
   text-transform: uppercase;
 }
@@ -23681,7 +23680,7 @@ body.multiplayer-progression-open {
 .multiplayer-next-unlock strong {
   margin-top: 0.35rem;
   color: var(--ui-text);
-  font-family: Georgia, serif;
+  font-family: var(--font-label), Georgia, serif;
   font-size: 0.95rem;
 }
 
@@ -23724,19 +23723,19 @@ body.multiplayer-progression-open {
   border-radius: 50%;
   color: rgba(208, 229, 221, 0.94);
   background: rgba(8, 14, 15, 0.72);
-  font-family: Georgia, serif;
+  font-family: var(--font-label), Georgia, serif;
   font-weight: 900;
 }
 
 .multiplayer-level-path-row div span {
   color: var(--ui-muted);
-  font-size: 0.68rem;
+  font-size: 0.6875rem;
   font-weight: 800;
 }
 
 .multiplayer-level-path-row > strong {
   color: rgba(177, 226, 207, 0.9);
-  font-size: 0.62rem;
+  font-size: 0.6875rem;
   text-transform: uppercase;
 }
 
@@ -23762,7 +23761,7 @@ body.multiplayer-progression-open {
   margin-top: 0.3rem;
   overflow-wrap: anywhere;
   color: var(--ui-text);
-  font-family: Georgia, serif;
+  font-family: var(--font-label), Georgia, serif;
   font-size: 0.82rem;
 }
 
@@ -23787,7 +23786,7 @@ body.multiplayer-progression-open {
 .multiplayer-oath-progress span {
   display: block;
   color: var(--ui-faint);
-  font-size: 0.62rem;
+  font-size: 0.6875rem;
   font-weight: 900;
   text-transform: uppercase;
 }
@@ -23839,7 +23838,7 @@ body.multiplayer-progression-open {
   gap: 0.45rem;
   margin-top: 0.75rem;
   color: rgba(242, 211, 141, 0.9);
-  font-size: 0.68rem;
+  font-size: 0.6875rem;
   font-weight: 900;
   text-transform: uppercase;
 }
@@ -23870,7 +23869,7 @@ body.multiplayer-progression-open {
 .multiplayer-oath-progress strong {
   display: block;
   color: rgba(213, 231, 238, 0.95);
-  font-family: Georgia, serif;
+  font-family: var(--font-label), Georgia, serif;
   font-size: 1.75rem;
 }
 
@@ -23916,7 +23915,7 @@ body.multiplayer-progression-open {
 }
 
 .multiplayer-return-day small {
-  font-size: 0.58rem;
+  font-size: 0.6875rem;
   font-weight: 900;
   text-transform: uppercase;
 }
@@ -24000,14 +23999,14 @@ body.multiplayer-progression-open {
 .multiplayer-deed-state {
   display: block;
   color: rgba(239, 213, 158, 0.96);
-  font-family: Georgia, serif;
+  font-family: var(--font-label), Georgia, serif;
   font-size: 1.35rem;
 }
 
 .multiplayer-reputation-standing span {
   display: block;
   color: var(--ui-faint);
-  font-size: 0.62rem;
+  font-size: 0.6875rem;
   font-weight: 900;
   text-transform: uppercase;
 }
@@ -24041,7 +24040,7 @@ body.multiplayer-progression-open {
 .multiplayer-reputation-tier span,
 .multiplayer-reputation-tier em {
   color: var(--ui-faint);
-  font-size: 0.68rem;
+  font-size: 0.6875rem;
   font-weight: 800;
 }
 
@@ -24084,13 +24083,13 @@ body.multiplayer-progression-open {
 
 .multiplayer-chronicle-rank-summary strong {
   color: rgba(239, 213, 158, 0.96);
-  font-family: Georgia, serif;
+  font-family: var(--font-label), Georgia, serif;
   font-size: 1.9rem;
 }
 
 .multiplayer-chronicle-rank-summary span {
   color: var(--ui-faint);
-  font-size: 0.62rem;
+  font-size: 0.6875rem;
   font-weight: 900;
   text-transform: uppercase;
 }
@@ -24098,7 +24097,7 @@ body.multiplayer-progression-open {
 .multiplayer-chronicle-rank-summary em {
   margin-top: 0.35rem;
   color: rgba(145, 225, 195, 0.96);
-  font-size: 0.67rem;
+  font-size: 0.6875rem;
   font-style: normal;
   font-weight: 900;
   text-transform: uppercase;
@@ -24158,7 +24157,7 @@ body.multiplayer-progression-open {
   border-radius: 50%;
   color: rgba(244, 218, 160, 0.96);
   background: rgba(4, 7, 9, 0.72);
-  font-family: Georgia, serif;
+  font-family: var(--font-label), Georgia, serif;
   font-size: 0.72rem;
   font-weight: 900;
 }
@@ -24166,7 +24165,7 @@ body.multiplayer-progression-open {
 .multiplayer-chronicle-rank-state {
   flex: 0 0 auto;
   color: var(--ui-faint);
-  font-size: 0.56rem;
+  font-size: 0.6875rem;
   font-weight: 900;
   text-transform: uppercase;
 }
@@ -24245,7 +24244,7 @@ body.multiplayer-progression-open {
 
 .multiplayer-chronicle-entitlements span {
   color: rgba(145, 225, 195, 0.88);
-  font-size: 0.6rem;
+  font-size: 0.6875rem;
   font-weight: 900;
   text-transform: uppercase;
 }
@@ -24253,7 +24252,7 @@ body.multiplayer-progression-open {
 .multiplayer-chronicle-entitlements strong {
   margin-top: 0.3rem;
   color: var(--ui-text);
-  font-family: Georgia, serif;
+  font-family: var(--font-label), Georgia, serif;
   font-size: 0.88rem;
 }
 
@@ -24351,7 +24350,7 @@ body.multiplayer-progression-open {
     min-width: 0;
     padding-right: 0.2rem;
     padding-left: 0.2rem;
-    font-size: 0.58rem;
+    font-size: 0.6875rem;
     line-height: 1.15;
     text-align: center;
   }
@@ -24565,7 +24564,7 @@ body.multiplayer-progression-open {
   border-radius: 50%;
   background: rgba(22, 12, 13, 0.96);
   color: #f1d595;
-  font-family: Georgia, serif;
+  font-family: var(--font-label), Georgia, serif;
   font-size: 0.82rem;
   line-height: 1;
 }
@@ -24592,7 +24591,7 @@ body.multiplayer-progression-open {
 .bard-music-volume > span {
   display: block;
   color: rgba(205, 178, 128, 0.72);
-  font-size: 0.58rem;
+  font-size: 0.6875rem;
   font-weight: 900;
   line-height: 1.15;
   text-transform: uppercase;
@@ -24624,7 +24623,7 @@ body.multiplayer-progression-open {
   border-radius: 0.35rem;
   background: linear-gradient(180deg, rgba(63, 35, 31, 0.82), rgba(13, 10, 11, 0.96));
   color: #f2d89e;
-  font-family: Georgia, serif;
+  font-family: var(--font-label), Georgia, serif;
   font-size: 1rem;
   line-height: 1;
 }
@@ -24650,7 +24649,7 @@ body.multiplayer-progression-open {
 
 .bard-music-volume output {
   color: rgba(236, 217, 178, 0.8);
-  font-size: 0.66rem;
+  font-size: 0.6875rem;
   font-weight: 900;
   text-align: right;
 }

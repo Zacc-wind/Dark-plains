@@ -5,8 +5,10 @@ import {
 } from '@/lib/supabase/config';
 import { createAdminClient } from '@/lib/supabase/admin';
 import {
+  PLAYER_STATE_COLUMNS,
   playerStateRowToUser,
   userToPlayerStateRow,
+  type PlayerStateRow,
 } from '@/lib/supabase/playerRepository';
 import { validatePlayerSyncPayload } from '@/lib/supabase/playerStateSync';
 import { getAuthenticatedUser } from '@/lib/supabase/requireAuth';
@@ -39,7 +41,7 @@ export async function GET() {
 
   const [{ data: profile, error: profileError }, { data: state, error: stateError }] = await Promise.all([
     supabase.from('profiles').select('id, username, selected_model').eq('id', user.id).maybeSingle(),
-    supabase.from('player_states').select('*').eq('user_id', user.id).maybeSingle(),
+    supabase.from('player_states').select(PLAYER_STATE_COLUMNS).eq('user_id', user.id).maybeSingle(),
   ]);
 
   if (profileError || stateError) {
@@ -61,7 +63,7 @@ export async function GET() {
   return apiOk({
     userId: user.id,
     username: profile.username,
-    player: playerStateRowToUser(state, profile),
+    player: playerStateRowToUser(state as unknown as PlayerStateRow, profile),
   }, undefined, 'database');
 }
 

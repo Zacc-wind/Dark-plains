@@ -1,7 +1,12 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
-import { fetchSharedChatHistory } from '@/lib/socialChatClient';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import {
+  CHAT_FEED_TOAST_INTERVAL_MS,
+  getGlobalChatSnapshot,
+  registerChatFeedDemand,
+  subscribeGlobalChat,
+} from '@/lib/chatFeed';
 
 const RECENT_MESSAGE_WINDOW_MS = 60_000;
 const MAX_VISIBLE_TOASTS = 6;
@@ -17,38 +22,59 @@ interface ChatLiveFeedProps {
   enabled?: boolean;
 }
 
+function LiveToastLine({ toast }: { toast: LiveToast }) {
+  const ref = useRef<HTMLDivElement | null>(null);
+
+  useLayoutEffect(() => {
+    const element = ref.current;
+    if (!element) return undefined;
+    const remaining = toast.createdAt + RECENT_MESSAGE_WINDOW_MS - Date.now();
+    const startOpacity = Math.max(0, Math.min(1, remaining / RECENT_MESSAGE_WINDOW_MS));
+    if (remaining <= 0 || typeof element.animate !== 'function') {
+      element.style.opacity = String(startOpacity);
+      return undefined;
+    }
+    const animation = element.animate(
+      [{ opacity: startOpacity }, { opacity: 0 }],
+      { duration: remaining, easing: 'linear', fill: 'forwards' },
+    );
+    return () => animation.cancel();
+  }, [toast.createdAt]);
+
+  return (
+    <div ref={ref} className="chat-live-toast">
+      <span className="chat-live-author">{toast.author}</span>
+      <span className="chat-live-text">{toast.text}</span>
+    </div>
+  );
+}
+
 export default function ChatLiveFeed({ enabled = true }: ChatLiveFeedProps) {
   const [toasts, setToasts] = useState<LiveToast[]>([]);
-  const [now, setNow] = useState(() => Date.now());
-  const seenIds = useRef(new Set<string>());
-  const bootstrapped = useRef(false);
 
   useEffect(() => {
     if (!enabled) return undefined;
 
-    let active = true;
-    let polling = false;
+    const seenIds = new Set<string>();
+    let bootstrapped = false;
 
-    const poll = async () => {
-      if (polling) return;
-      polling = true;
+    const processSnapshot = () => {
+      const current = getGlobalChatSnapshot();
+      if (!current.loaded) return;
+
       const cutoff = Date.now() - RECENT_MESSAGE_WINDOW_MS;
-      const messages = (await fetchSharedChatHistory('global'))
-        .filter(message => message.createdAt >= cutoff);
-      polling = false;
-      if (!active) return;
+      const messages = current.messages.filter(message => message.createdAt >= cutoff);
 
-      if (!bootstrapped.current) {
-        messages.forEach(message => seenIds.current.add(message.id));
-        bootstrapped.current = true;
+      if (!bootstrapped) {
+        messages.forEach(message => seenIds.add(message.id));
+        bootstrapped = true;
         return;
       }
 
       const fresh: LiveToast[] = [];
-
       messages.forEach(message => {
-        if (seenIds.current.has(message.id)) return;
-        seenIds.current.add(message.id);
+        if (seenIds.has(message.id)) return;
+        seenIds.add(message.id);
         fresh.push({
           id: message.id,
           author: message.author,
@@ -62,38 +88,31 @@ export default function ChatLiveFeed({ enabled = true }: ChatLiveFeedProps) {
       }
     };
 
-    void poll();
-    const pollInterval = window.setInterval(() => void poll(), 2000);
-    const clockInterval = window.setInterval(() => setNow(Date.now()), 250);
+    processSnapshot();
+    const unsubscribe = subscribeGlobalChat(processSnapshot);
+    const releaseDemand = registerChatFeedDemand(CHAT_FEED_TOAST_INTERVAL_MS);
 
     return () => {
-      active = false;
-      window.clearInterval(pollInterval);
-      window.clearInterval(clockInterval);
+      unsubscribe();
+      releaseDemand();
     };
   }, [enabled]);
 
-  const visibleToasts = toasts.filter(toast => toast.createdAt >= now - RECENT_MESSAGE_WINDOW_MS);
+  useEffect(() => {
+    if (toasts.length === 0) return undefined;
+    const nextExpiry = Math.min(...toasts.map(toast => toast.createdAt + RECENT_MESSAGE_WINDOW_MS));
+    const timer = window.setTimeout(() => {
+      const now = Date.now();
+      setToasts(previous => previous.filter(toast => toast.createdAt + RECENT_MESSAGE_WINDOW_MS > now));
+    }, Math.max(0, nextExpiry - Date.now()) + 50);
+    return () => window.clearTimeout(timer);
+  }, [toasts]);
 
-  if (!enabled || visibleToasts.length === 0) return null;
+  if (!enabled || toasts.length === 0) return null;
 
   return (
     <div className="chat-live-feed" aria-live="polite">
-      {visibleToasts.map(toast => {
-        const remaining = toast.createdAt + RECENT_MESSAGE_WINDOW_MS - now;
-        const opacity = Math.max(0, Math.min(1, remaining / RECENT_MESSAGE_WINDOW_MS));
-
-        return (
-          <div
-            key={toast.id}
-            className="chat-live-toast"
-            style={{ opacity }}
-          >
-            <span className="chat-live-author">{toast.author}</span>
-            <span className="chat-live-text">{toast.text}</span>
-          </div>
-        );
-      })}
+      {toasts.map(toast => <LiveToastLine key={toast.id} toast={toast} />)}
     </div>
   );
 }

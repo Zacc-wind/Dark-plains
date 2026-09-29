@@ -1,4 +1,4 @@
-import type { User } from '@/lib/auth';
+import type { User } from '@/lib/playerTypes';
 import { createClient } from '@/lib/supabase/client';
 import { shouldFallbackPlayerSyncToDirectWrite } from '@/lib/supabase/playerStateSync';
 
@@ -45,6 +45,38 @@ export interface PlayerStateRow {
   game_sessions: Record<string, unknown>;
   updated_at?: string;
 }
+
+/** Every column mapped by `PlayerStateRow`; keep in sync when the row shape changes. */
+export const PLAYER_STATE_COLUMNS = [
+  'user_id',
+  'level',
+  'gold',
+  'exp',
+  'x',
+  'y',
+  'stats',
+  'inventory',
+  'equipment',
+  'equipped_slots',
+  'known_spell_ids',
+  'equipped_spell_ids',
+  'minions',
+  'job_queue',
+  'traveling',
+  'inventory_slots',
+  'inventory_upgrade_level',
+  'daily_quests',
+  'city_quests',
+  'story_quests',
+  'daily_run',
+  'mp_daily_dungeon',
+  'gear_set_bonus_snapshot',
+  'social',
+  'activity_log',
+  'spell_unlock_version',
+  'game_sessions',
+  'updated_at',
+].join(', ');
 
 export interface ProfileRow {
   id: string;
@@ -127,26 +159,40 @@ export async function fetchRemotePlayer(userId: string): Promise<{ profile: Prof
 
   const [{ data: profile, error: profileError }, { data: state, error: stateError }] = await Promise.all([
     supabase.from('profiles').select('id, username, selected_model').eq('id', userId).maybeSingle(),
-    supabase.from('player_states').select('*').eq('user_id', userId).maybeSingle(),
+    supabase.from('player_states').select(PLAYER_STATE_COLUMNS).eq('user_id', userId).maybeSingle(),
   ]);
 
   if (profileError) throw profileError;
   if (stateError) throw stateError;
   if (!profile || !state) return null;
 
-  return { profile, state: state as PlayerStateRow };
+  return { profile, state: state as unknown as PlayerStateRow };
 }
 
-async function saveRemotePlayerViaApi(user: User, userId: string): Promise<'saved' | 'fallback'> {
+/** Browsers reject keepalive bodies over 64 KiB; stay under it with headroom. */
+const KEEPALIVE_BODY_LIMIT = 60 * 1024;
+
+export interface SaveRemotePlayerOptions {
+  /** Let the request outlive the page (tab hide / unload). Ignored for oversized payloads. */
+  keepalive?: boolean;
+}
+
+async function saveRemotePlayerViaApi(
+  user: User,
+  userId: string,
+  options: SaveRemotePlayerOptions,
+): Promise<'saved' | 'fallback'> {
+  const body = JSON.stringify({
+    userId,
+    player: user,
+  });
   let response: Response;
   try {
     response = await fetch('/api/me', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        userId,
-        player: user,
-      }),
+      body,
+      keepalive: Boolean(options.keepalive) && body.length <= KEEPALIVE_BODY_LIMIT,
     });
   } catch {
     return 'fallback';
@@ -213,10 +259,14 @@ async function saveRemotePlayerDirect(user: User, userId: string): Promise<void>
  * 501/503/network failure so local/keyless and pre-cutover deploys keep saving.
  * Client UPDATE on player_states must stay until this path is trusted.
  */
-export function saveRemotePlayer(user: User, userId: string): Promise<void> {
+export function saveRemotePlayer(
+  user: User,
+  userId: string,
+  options: SaveRemotePlayerOptions = {},
+): Promise<void> {
   return enqueueRemoteWrite(userId, async () => {
     if (typeof fetch === 'function') {
-      const result = await saveRemotePlayerViaApi(user, userId);
+      const result = await saveRemotePlayerViaApi(user, userId, options);
       if (result === 'saved') return;
     }
     await saveRemotePlayerDirect(user, userId);

@@ -1,8 +1,10 @@
 'use client';
 
 import Image from 'next/image';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { getCurrentUser, getPartyMembers, getSocialState } from '@/lib/auth';
+import { usePolling } from '@/lib/hooks/usePolling';
+import { keepIfUnchanged } from '@/lib/hooks/userSnapshot';
 import {
   ensureCurrentCoopRaidSession,
   getCoopRaidSessions,
@@ -174,20 +176,11 @@ export default function PveHubModal({ isOpen, onClose }: PveHubModalProps) {
     ));
   }, [currentUser, now]);
 
-  useEffect(() => {
-    if (!isOpen) return undefined;
-
-    const refresh = () => {
-      setNow(Date.now());
-      setCurrentUser(getCurrentUser());
-    };
-    const openRefresh = window.setTimeout(refresh, 0);
-    const clock = window.setInterval(refresh, 1000);
-    return () => {
-      window.clearTimeout(openRefresh);
-      window.clearInterval(clock);
-    };
-  }, [isOpen]);
+  const refresh = useCallback(() => {
+    setNow(Date.now());
+    setCurrentUser(previous => keepIfUnchanged(previous, getCurrentUser()));
+  }, []);
+  usePolling(refresh, 1_000, { enabled: isOpen });
 
   if (!isOpen) return null;
 

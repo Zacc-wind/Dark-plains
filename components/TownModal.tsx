@@ -2,7 +2,9 @@
 
 import { buildQuestRewardChips } from '@/lib/rewardDisplay';
 import RewardIconStrip from '@/components/RewardIconStrip';
-import { useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { usePolling } from '@/lib/hooks/usePolling';
+import { keepIfUnchanged } from '@/lib/hooks/userSnapshot';
 import Image from 'next/image';
 import { ASSET_PATHS, getPlayerModelPath } from '@/lib/assetLoader';
 import { playGameSound } from '@/lib/sound';
@@ -152,10 +154,13 @@ export default function TownModal({ town, onClose, onTravel }: TownModalProps) {
   const [activeShopSection, setActiveShopSection] = useState<TownShopSection>('buy');
   const [activeSellCategory, setActiveSellCategory] = useState<TownSellCategory>('items');
 
-  useEffect(() => {
-    const interval = window.setInterval(() => setUser(getCurrentUser()), 1000);
-    return () => window.clearInterval(interval);
-  }, []);
+  const isTownOpen = Boolean(town);
+  const refreshUser = useCallback(() => {
+    // While open, the rotating city quest board and reset timers read Date.now() during render,
+    // so keep the per-second re-render; while closed only re-render on real changes.
+    setUser(previous => (isTownOpen ? getCurrentUser() : keepIfUnchanged(previous, getCurrentUser())));
+  }, [isTownOpen]);
+  usePolling(refreshUser, 1_000, { immediate: false });
 
   useEffect(() => {
     if (!town) return undefined;
