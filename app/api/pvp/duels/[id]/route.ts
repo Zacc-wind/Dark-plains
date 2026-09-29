@@ -166,7 +166,7 @@ export async function PATCH(request: Request, context: RouteContext) {
     }
 
     const now = Date.now();
-    let session = hydrate(row, usernameById, now);
+    const session = hydrate(row, usernameById, now);
     if (!session) {
       return Response.json({ ok: false, error: 'Duel session could not be loaded.', deploymentMode: 'database' }, { status: 500 });
     }

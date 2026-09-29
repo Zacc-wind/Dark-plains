@@ -8,6 +8,7 @@ import BattleModal from './BattleModal';
 import FormationPanel from './FormationPanel';
 import SingleplayerTutorialOverlay from './SingleplayerTutorialOverlay';
 import CinematicScrollShell from './CinematicScrollShell';
+import { getEncounterRunBattleCount } from '@/lib/encounterRunBattleCount';
 import {
   BATTLE_SPELLS,
   BoardCell,
@@ -6069,11 +6070,7 @@ function createDailyRunNodes(challenge: DailyRunChallenge, playerLevel: number):
   return normalizeDailyRunNodes(nodes);
 }
 
-export function getEncounterRunBattleCount(enemyLevel: number): number {
-  if (enemyLevel <= 1) return 2;
-  if (enemyLevel <= 3) return 3;
-  return clamp(3 + Math.ceil((enemyLevel - 3) / 2), 3, 10);
-}
+export { getEncounterRunBattleCount };
 
 interface ScaledRunNodeOptions {
   idPrefix: string;

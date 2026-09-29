@@ -12,17 +12,16 @@ import {
   type QuestRewardSpec,
   type StoryQuestTemplate,
 } from './questData';
-import {
-  getStoryDialogSequence,
-  type StoryResponseTone,
-} from './storyDialogue';
+import { getStoryDialogSequence } from './storyDialogue';
 import {
   TRAVEL_EVENT_CONTENT_COUNTS,
   rollTravelEvents,
   type TravelEventTemplate,
 } from './travelEvents';
 import { readGameJson, removeGameStorageItem, writeGameJson } from './gameStore';
-import { isSupabaseAuthEnabled, logoutSupabase, persistCurrentUserToSupabase } from './supabase/auth';
+import { CURRENT_USER_KEY, registerCurrentUserReader } from './playerStore';
+import { isSupabaseAuthEnabled, logoutSupabase } from './supabase/auth';
+import { flushPlayerPersist, schedulePlayerPersist } from './supabase/playerPersistence';
 import { getCachedWorldPlayers, worldMapPlayerToUser } from './worldPlayers';
 import { isSupabaseConfigured } from './supabase/config';
 import { getStaticPOIs, MAP_CONFIG, POIType } from './mapData';
@@ -38,10 +37,9 @@ import {
   getJobEquipmentDropChance,
   rollEquipmentAffix,
   rollJobEquipmentRarity,
-  type EquipmentQualityLabel,
 } from './gearProgression';
 import { canAcquireMinionTier, getMinionTierMinLevel } from './minionProgression';
-import { normalizeMpDailyDungeonState, type MpDailyDungeonState } from './mpDailyDungeon';
+import { normalizeMpDailyDungeonState } from './mpDailyDungeon';
 import {
   applyPvpRatingLoss,
   applyPvpRatingWin,
@@ -60,12 +58,16 @@ import {
   scaleMultiplayerRewards,
   type MultiplayerRewardSource,
 } from './multiplayerRewards';
-import { syncRunMilestoneUnlockRecords } from './runMilestones';
 import {
-  normalizeRunDiscoveryState,
-  syncRunDiscoveryState,
-  type RunDiscoveryState,
-} from './runDiscovery';
+  RANDOM_RUN_BALANCE,
+  capRandomRunPermanentStats,
+  getRandomRunEffectiveLevel,
+  normalizeDailyRunState,
+  normalizeRandomRunPermanentStats,
+  normalizeUserDailyRunState,
+} from './dailyRunState';
+import { syncRunMilestoneUnlockRecords } from './runMilestones';
+import { syncRunDiscoveryState } from './runDiscovery';
 import {
   TOWN_RECRUITMENT_TOWNS,
   getTownRecruitmentSlots,
@@ -178,20 +180,63 @@ import {
   type MultiplayerDeedsState,
   type MultiplayerDeedsView,
 } from './multiplayerDeeds';
+import {
+  MAX_PLAYER_LEVEL,
+  type ActivityEntry,
+  type AllocatableStat,
+  type AutoClaimedQuestReward,
+  type CharacterStats,
+  type CityQuestProgress,
+  type DailyQuestState,
+  type DailyRunChallenge,
+  type DailyRunHistoryEntry,
+  type DailyRunLeaderboardEntry,
+  type DailyRunModifier,
+  type DailyRunState,
+  type DailyRunStatus,
+  type Equipment,
+  type EquipmentRarity,
+  type EquipmentSlot,
+  type EquipmentSocketBonus,
+  type EquipmentSocketStat,
+  type FriendRecord,
+  type FriendRequestStatus,
+  type InventoryActionResult,
+  type InventoryDropContext,
+  type InventoryItem,
+  type InventoryItemDefinition,
+  type InventoryItemKind,
+  type InventoryItemRarity,
+  type JobRewardPreview,
+  type JobState,
+  type LeaderboardBoard,
+  type LeaderboardCategory,
+  type LeaderboardEntry,
+  type LeaderboardScope,
+  type MinionCasualtyReport,
+  type MinionClass,
+  type MinionStack,
+  type MinionTemplate,
+  type MinionTier,
+  type PartyState,
+  type RandomRunPermanentStats,
+  type RewardSummary,
+  type SocialChatChannel,
+  type SocialChatMessage,
+  type SocialState,
+  type TradeExchangeOffer,
+  type TravelState,
+  type User,
+} from './playerTypes';
 
 export { CITY_QUESTS, QUEST_NPCS, STORY_CHAPTERS, getAllStoryQuestsSorted, getCityQuestTemplate, getRotatingCityQuests };
 export { TRAVEL_EVENT_CONTENT_COUNTS };
+export * from './playerTypes';
+export { RANDOM_RUN_BALANCE, getRandomRunEffectiveLevel };
+export { flushPlayerPersist };
 
-export type EquipmentSlot = 'sword' | 'shield' | 'armor' | 'armor-pants' | 'boots' | 'gloves' | 'helmet';
-export type EquipmentRarity = 'decent' | 'rare' | 'epic' | 'legendary';
-export type EquipmentSocketStat = 'armyPower' | 'defensivePower' | 'morale' | 'spellPower' | 'maxHealth';
-export type MinionClass = 'wizard' | 'knight' | 'templar' | 'priest';
-export type MinionTier = 'tier1' | 'tier2' | 'tier3';
-export type ActivityEntryType = 'job' | 'quest' | 'battle' | 'shop' | 'upgrade' | 'travel' | 'item';
-export type AllocatableStat = 'armyPower' | 'defensivePower' | 'morale' | 'spellPower' | 'health';
 export const MAX_FIELD_MINIONS = 7;
 export const BASE_INVENTORY_SLOTS = 20;
-export const MAX_PLAYER_LEVEL = 30;
 export const MAX_PARTY_SIZE = 4;
 export const MINION_INJURY_DURATION_MS = 2 * 60 * 60 * 1000;
 export const MINION_SAFE_INJURIES = 2;
@@ -241,506 +286,6 @@ const LEGENDARY_SPELL_REWARD_IDS = [
   'saint-king-aegis',
   'time-crown-edict',
 ];
-
-export interface EquipmentSocketBonus {
-  id: string;
-  stat: EquipmentSocketStat;
-  baseValue: number;
-  upgradeLevel: number;
-}
-
-export type { EquipmentQualityLabel };
-
-export interface Equipment {
-  id: string;
-  name: string;
-  slot: EquipmentSlot;
-  rarity: EquipmentRarity;
-  stats: {
-    armyPower?: number;
-    defensivePower?: number;
-    morale?: number;
-    spellPower?: number;
-    maxHealth?: number;
-    attack?: number;
-    defense?: number;
-    speed?: number;
-  };
-  socketBonuses?: EquipmentSocketBonus[];
-  passive?: string; // Legendary equipment passive effect description
-  gearSetId?: string;
-  lootSource?: string;
-  /** Affix roll vs rarity base (typically 0.85–1.15; Lucky+ uses 1.0–1.15). */
-  rollMultiplier?: number;
-  /** Display quality derived from the affix roll — not a 5th rarity. */
-  qualityLabel?: EquipmentQualityLabel;
-  /** ~2% of drops; name ends with +, better roll floor. */
-  isLucky?: boolean;
-}
-
-export interface MinionStats {
-  attack: number;
-  defense: number;
-  magic: number;
-  healing: number;
-  health: number;
-  movement: number;
-  range: number;
-}
-
-export interface MinionTemplate {
-  templateId: string;
-  class: MinionClass;
-  tier: MinionTier;
-  name: string;
-  role: string;
-  assetName: string;
-  stats: MinionStats;
-}
-
-export interface MinionStack {
-  id: string;
-  templateId: string;
-  quantity: number;
-  acquiredAt: number;
-  fielded?: boolean;
-  rosterOrder?: number;
-  injuredUntil?: number;
-  injuryCount?: number;
-  lastInjuredAt?: number;
-  runCurrentHealth?: number;
-  runStatBonus?: Partial<Pick<MinionStats, 'attack' | 'defense' | 'magic' | 'healing' | 'health' | 'movement' | 'range'>>;
-  runBonusLabel?: string;
-}
-
-export interface MinionCasualtyReport {
-  injuredNames: string[];
-  deadNames: string[];
-}
-
-export interface RewardSummary {
-  gold?: number;
-  goldLoss?: number;
-  exp?: number;
-  items?: InventoryItem[];
-  equipment?: Equipment[];
-  minions?: MinionStack[];
-  rareGems?: number;
-  healthRestore?: number;
-  healthLoss?: number;
-  spellIds?: string[];
-}
-
-export interface ActivityEntry {
-  id: string;
-  type: ActivityEntryType;
-  title: string;
-  source: string;
-  completedAt: number;
-  rewards: RewardSummary;
-  description?: string;
-  battleLevel?: number;
-  jobDurationMs?: number;
-  dungeonLevel?: number;
-  questNpcId?: string;
-}
-
-export interface DailyQuest {
-  id: string;
-  name: string;
-  description: string;
-  requirement: {
-    type: 'complete_jobs' | 'complete_timed_jobs' | 'collect_daily_gift';
-    count: number;
-    minDuration?: number; // in milliseconds
-  };
-  progress: number;
-  claimed: boolean;
-  claimedAt?: number;
-  rewards: {
-    guaranteedItem: EquipmentRarity;
-    bonusItem?: {
-      rarity: EquipmentRarity;
-      chance: number;
-    };
-    legendaryChance: number; // 0.01 for 1%
-    randomSupply?: boolean;
-    guaranteedMinionTier?: MinionTier;
-    minionChance?: {
-      tier: MinionTier;
-      chance: number;
-      quantity?: number;
-    };
-  };
-}
-
-export interface DailyQuestState {
-  lastResetDate: string; // YYYY-MM-DD format
-  lastResetAt: number;
-  quests: DailyQuest[];
-}
-
-export interface CityQuestProgress {
-  questId: string;
-  progress: number;
-  acceptedAt: number;
-  claimed: boolean;
-  completedAt?: number;
-}
-
-export interface DailyRunHistoryEntry {
-  id: string;
-  date: string;
-  completedAt: number;
-  wins: number;
-  targetBattles: number;
-  unitsStanding: number;
-  gold: number;
-  exp: number;
-  rareGems?: number;
-  itemNames?: string[];
-  equipmentNames?: string[];
-  challengeName?: string;
-  weeklyRewardName?: string;
-  score?: number;
-  durationMs?: number;
-  bossesDefeated?: string[];
-  flawlessBossNames?: string[];
-  fastBossNames?: string[];
-  routeSummary?: string[];
-  shopBuys?: string[];
-  shopGoldSpent?: number;
-  omens?: string[];
-  unlockedSpellNames?: string[];
-  temporarySpellIds?: string[];
-  unitTemplateIds?: string[];
-  unitClassIds?: MinionClass[];
-  tierThreeUnitNames?: string[];
-  healingDone?: number;
-  unitsLost?: number;
-  lowestCommanderHealthRatio?: number;
-  commanderUntouchedBattles?: number;
-  challengeModifierIds?: string[];
-  discoveryOfferIdsSeen?: string[];
-  runLevelAfter?: number;
-  streakAfter: number;
-}
-
-export interface RandomRunPermanentStats {
-  armyPower: number;
-  defensivePower: number;
-  morale: number;
-  spellPower: number;
-  maxHealth: number;
-  unitPower: number;
-  unitWard: number;
-}
-
-export type RunMilestoneTier = 'bronze' | 'silver' | 'gold' | 'legendary';
-
-export interface RunMilestoneUnlockRecord {
-  id: string;
-  unlockedAt: number;
-  tier: RunMilestoneTier;
-  title: string;
-  category: string;
-  iconPath: string;
-}
-
-export interface DailyRunState {
-  lastCompletedDate?: string;
-  streak: number;
-  bestWins: number;
-  completions: number;
-  history: DailyRunHistoryEntry[];
-  runLevel: number;
-  runExp: number;
-  runUpgradePoints: number;
-  permanentStats: RandomRunPermanentStats;
-  claimedMilestoneIds?: string[];
-  milestoneUnlocks?: RunMilestoneUnlockRecord[];
-  discovery?: RunDiscoveryState;
-}
-
-export interface DailyRunStatus {
-  today: string;
-  completedToday: boolean;
-  streak: number;
-  bestWins: number;
-  completions: number;
-  history: DailyRunHistoryEntry[];
-}
-
-export interface DailyRunLeaderboardEntry {
-  username: string;
-  streak: number;
-  bestWins: number;
-  completions: number;
-  lastCompletedDate?: string;
-}
-
-export type LeaderboardCategory = 'power' | 'daily' | 'gold' | 'battles' | 'pvp';
-export type LeaderboardScope = 'world' | 'run' | 'all';
-
-export interface LeaderboardEntry {
-  rank: number;
-  username: string;
-  category: LeaderboardCategory;
-  score: number;
-  label: string;
-  detail: string;
-  level: number;
-  selectedModel: number;
-}
-
-export interface LeaderboardBoard {
-  id: LeaderboardCategory;
-  title: string;
-  subtitle: string;
-  entries: LeaderboardEntry[];
-}
-
-export interface DailyRunModifier {
-  id: string;
-  name: string;
-  description: string;
-  statBonus?: Partial<Pick<CharacterStats, 'armyPower' | 'defensivePower' | 'morale' | 'spellPower' | 'maxHealth' | 'health'>>;
-  enemyLevelOffset?: number;
-  rewardGoldMultiplier?: number;
-  rewardExpMultiplier?: number;
-  targetBattleBonus?: number;
-}
-
-export interface DailyRunChallenge {
-  date: string;
-  weekKey: string;
-  name: string;
-  subtitle: string;
-  bossId: string;
-  bossName: string;
-  bossSubtitle: string;
-  bossStory: string;
-  bossIntro: string;
-  bossArtworkPath: string;
-  bossModelNumber: 1 | 2 | 3 | 4 | 5 | 6;
-  modifiers: DailyRunModifier[];
-  weeklyRewardName: string;
-  weeklyRewardDescription: string;
-  weeklyRewardItemId?: string;
-  rewardGoldMultiplier: number;
-  rewardExpMultiplier: number;
-  enemyLevelOffset: number;
-  targetBattles: number;
-}
-
-export type FriendRequestStatus = 'pending' | 'accepted' | 'declined';
-export type SocialChatChannel = 'global' | 'party';
-
-export interface FriendRecord {
-  username: string;
-  requestedBy: string;
-  requestedAt: number;
-  status: FriendRequestStatus;
-  acceptedAt?: number;
-}
-
-export interface PartyState {
-  leaderUsername: string;
-  memberUsernames: string[];
-  invitedUsernames: string[];
-  updatedAt: number;
-}
-
-export interface SocialState {
-  friends: FriendRecord[];
-  party?: PartyState;
-  requests?: SocialRequestRecord[];
-  tradeSessions?: TradeSession[];
-}
-
-export interface SocialChatMessage {
-  id: string;
-  channel: SocialChatChannel;
-  author: string;
-  text: string;
-  createdAt: number;
-  partyKey?: string;
-}
-
-export interface User {
-  username: string;
-  password: string;
-  gold: number;
-  exp: number;
-  x: number;
-  y: number;
-  inventory: InventoryItem[];
-  equipment: Equipment[];
-  equippedSlots: Partial<Record<EquipmentSlot, string>>; // Maps slot to equipment ID
-  minions: MinionStack[];
-  activityLog: ActivityEntry[];
-  stats: CharacterStats;
-  traveling: TravelState | null;
-  jobQueue: JobState[];
-  selectedModel: number; // 1-6 for playermodel selection
-  inventorySlots?: number;
-  inventoryUpgradeLevel?: number;
-  dailyQuests?: DailyQuestState;
-  cityQuests?: CityQuestProgress[];
-  storyQuests?: StoryQuestProgress[];
-  dailyRun?: DailyRunState;
-  mpDailyDungeon?: MpDailyDungeonState;
-  gearSetBonusSnapshot?: {
-    armyPower: number;
-    defensivePower: number;
-    morale: number;
-    spellPower: number;
-    maxHealth: number;
-  };
-  knownSpellIds?: string[];
-  equippedSpellIds?: string[];
-  spellUnlockVersion?: number;
-  social?: SocialState;
-  pvpRating?: PvpRatingState;
-  multiplayerEngagement?: MultiplayerEngagementState;
-  multiplayerChronicle?: MultiplayerChronicleState;
-  multiplayerReputation?: MultiplayerReputationState;
-  multiplayerDeeds?: MultiplayerDeedsState;
-  chapterTalentIds?: string[];
-  townRecruitmentClaims?: TownRecruitmentClaim[];
-}
-
-export type { PvpRatingState };
-
-export interface JobState {
-  id: string;
-  poiId: string;
-  poiName: string;
-  jobName: string;
-  startTime: number;
-  duration: number;
-  workDuration: number; // Duration of actual work (excluding travel)
-  rewards: JobRewards;
-  targetX: number; // POI location
-  targetY: number;
-  startX: number; // Starting position
-  startY: number;
-  travelComplete: boolean; // Track if travel phase is done
-  travelCompleteTime: number | null; // When travel was completed
-  lastMoveTime: number; // Last time position was updated
-  eventSeed?: string;
-  travelEventsResolved?: boolean;
-}
-
-export interface JobRewards {
-  gold: number;
-  exp: number;
-  items?: InventoryItem[];
-  equipment?: Equipment[];
-  minions?: MinionStack[];
-  rareGems?: number;
-  healthRestore?: number;
-}
-
-export interface JobRewardPreview extends JobRewards {
-  levelRequirement?: number;
-  equipmentRarity?: EquipmentRarity;
-  equipmentDropChance?: number;
-  minionTier?: MinionTier;
-  rewardNote?: string;
-}
-
-export interface CharacterStats {
-  armyPower: number;
-  defensivePower: number;
-  morale: number;
-  spellPower: number;
-  health: number;
-  maxHealth: number;
-  level: number;
-  unallocatedPoints: number;
-  attack?: number;
-  defense?: number;
-  speed?: number;
-}
-
-export interface TravelState {
-  targetX: number;
-  targetY: number;
-  startTime: number;
-  duration: number; // in milliseconds
-  startX?: number;
-  startY?: number;
-  eventSeed?: string;
-}
-
-export interface InventoryItem {
-  id: string;
-  name: string;
-  quantity: number;
-  icon: string;
-  kind?: InventoryItemKind;
-  rarity?: InventoryItemRarity;
-  description?: string;
-  value?: number;
-  imagePath?: string;
-}
-
-export type InventoryItemKind = 'material' | 'consumable' | 'container' | 'trade' | 'quest';
-export type InventoryItemRarity = 'common' | 'uncommon' | 'rare' | 'epic' | 'legendary';
-export type InventoryDropContext = 'job' | 'battle' | 'nearbyBattle' | 'dungeon' | 'dailyRun' | 'dungeonRun' | 'travel';
-
-export interface InventoryItemDefinition {
-  id: string;
-  name: string;
-  kind: InventoryItemKind;
-  rarity: InventoryItemRarity;
-  description: string;
-  icon: string;
-  imagePath: string;
-  useLabel?: string;
-  sellValue?: number;
-  healthRestore?: number;
-  chestRarity?: EquipmentRarity;
-  spellRewardCount?: number;
-}
-
-export interface StoryQuestProgress {
-  questId: string;
-  claimed: boolean;
-  completedAt?: number;
-  introSeen?: boolean;
-  responseChoiceId?: string;
-  responseTone?: StoryResponseTone;
-  responseSelectedAt?: number;
-}
-
-export interface InventoryActionResult {
-  success: boolean;
-  message?: string;
-  error?: string;
-  rewards?: RewardSummary;
-}
-
-export interface TradeExchangeOffer {
-  id: string;
-  name: string;
-  description: string;
-  cost: {
-    gold?: number;
-    items?: Array<{ itemId: string; quantity: number }>;
-  };
-  rewardItems: Array<{ itemId: string; quantity: number }>;
-}
-
-export interface AutoClaimedQuestReward {
-  id: string;
-  type: 'story' | 'city' | 'daily';
-  kicker: string;
-  title: string;
-  description: string;
-  rewards: RewardSummary;
-}
 
 export const INVENTORY_ITEM_DEFINITIONS: Record<string, InventoryItemDefinition> = {
   'rare-gem': {
@@ -1990,6 +1535,7 @@ export function claimCityQuestReward(questId: string): {
       rewards: rewardSummary,
     }),
   });
+  void flushPlayerPersist();
 
   return { success: true, rewards: rewardSummary };
 }
@@ -2085,6 +1631,7 @@ export function claimQuestNpcReward(npcId: string): {
       description: npc.questHook,
     }),
   });
+  void flushPlayerPersist();
 
   return { success: true, rewards: rewardSummary };
 }
@@ -2186,6 +1733,7 @@ export function claimStoryQuestReward(questId: string): {
       description: quest.lore,
     }),
   });
+  void flushPlayerPersist();
 
   return { success: true, rewards: rewardSummary };
 }
@@ -2440,7 +1988,6 @@ export function isPlayerRecruitableMinionTemplate(templateId: string): boolean {
 }
 
 const USERS_KEY = 'pirate_game_users';
-const CURRENT_USER_KEY = 'pirate_game_current_user';
 const SOCIAL_CHAT_KEY = 'wizardy_social_chat';
 const MAX_ACTIVITY_LOG_ENTRIES = 30;
 const MAX_SOCIAL_CHAT_MESSAGES = 120;
@@ -5907,9 +5454,11 @@ export function updateCurrentUser(updates: Partial<User>): void {
   }
 
   if (isSupabaseAuthEnabled()) {
-    void persistCurrentUserToSupabase();
+    schedulePlayerPersist();
   }
 }
+
+registerCurrentUserReader(getCurrentUser);
 
 function recordUserMultiplayerEvent(
   user: User,
@@ -8155,17 +7704,6 @@ export const DEFAULT_RANDOM_RUN_PERMANENT_STATS: RandomRunPermanentStats = {
   unitWard: 0,
 };
 
-export const RANDOM_RUN_BALANCE = {
-  levelCap: 15,
-  routeBattleMin: 12,
-  routeBattleMax: 15,
-  enemyLevelCap: 15,
-  bossSpacing: 5,
-  minBosses: 2,
-  currentContentBosses: 8,
-  maxBankedCapLevels: 2,
-} as const;
-
 /** Piecewise pressure for B1 soft start → mid check → late payoff (0–1). */
 export function getRandomRunBattlePressure(battleNumber: number, battleCount: number): number {
   if (battleCount <= 1) return 1;
@@ -8188,40 +7726,9 @@ export function getRandomRunScaledBattleLevel(playerLevel: number, battleNumber:
   return Math.max(1, Math.min(RANDOM_RUN_BALANCE.enemyLevelCap, level));
 }
 
-export function getRandomRunEffectiveLevel(level: number): number {
-  return Math.max(1, Math.min(RANDOM_RUN_BALANCE.levelCap, Math.floor(toFiniteNumber(level, 1))));
-}
-
 export function getRandomRunProgressRatio(level: number): number {
   if (RANDOM_RUN_BALANCE.levelCap <= 1) return 1;
   return (getRandomRunEffectiveLevel(level) - 1) / (RANDOM_RUN_BALANCE.levelCap - 1);
-}
-
-function capRandomRunPermanentStats(stats: RandomRunPermanentStats, _runLevel: number = RANDOM_RUN_BALANCE.levelCap): RandomRunPermanentStats {
-  void _runLevel;
-  return {
-    armyPower: Math.max(0, Math.floor(toFiniteNumber(stats.armyPower, 0))),
-    defensivePower: Math.max(0, Math.floor(toFiniteNumber(stats.defensivePower, 0))),
-    morale: Math.max(0, Math.floor(toFiniteNumber(stats.morale, 0))),
-    spellPower: Math.max(0, Math.floor(toFiniteNumber(stats.spellPower, 0))),
-    maxHealth: Math.max(0, Math.floor(toFiniteNumber(stats.maxHealth, 0))),
-    unitPower: Math.max(0, Math.floor(toFiniteNumber(stats.unitPower, 0))),
-    unitWard: Math.max(0, Math.floor(toFiniteNumber(stats.unitWard, 0))),
-  };
-}
-
-function normalizeRandomRunPermanentStats(stats?: Partial<RandomRunPermanentStats> | null): RandomRunPermanentStats {
-  const normalized = {
-    armyPower: Math.max(0, Math.floor(toFiniteNumber(stats?.armyPower, 0))),
-    defensivePower: Math.max(0, Math.floor(toFiniteNumber(stats?.defensivePower, 0))),
-    morale: Math.max(0, Math.floor(toFiniteNumber(stats?.morale, 0))),
-    spellPower: Math.max(0, Math.floor(toFiniteNumber(stats?.spellPower, 0))),
-    maxHealth: Math.max(0, Math.floor(toFiniteNumber(stats?.maxHealth, 0))),
-    unitPower: Math.max(0, Math.floor(toFiniteNumber(stats?.unitPower, 0))),
-    unitWard: Math.max(0, Math.floor(toFiniteNumber(stats?.unitWard, 0))),
-  };
-
-  return capRandomRunPermanentStats(normalized);
 }
 
 export function getRandomRunExpNeeded(level: number): number {
@@ -8257,72 +7764,10 @@ function applyAutomaticRandomRunUpgrade(stats: RandomRunPermanentStats, newLevel
   return upgraded;
 }
 
-function normalizeDailyRunState(
-  state?: Partial<DailyRunState> | null,
-  legacySpellIds: readonly string[] = [],
-): DailyRunState {
-  const runLevel = getRandomRunEffectiveLevel(toFiniteNumber(state?.runLevel, 1));
-  const runExp = Math.max(0, Math.floor(toFiniteNumber(state?.runExp, 0)));
-  const history = (state?.history || []).slice(0, 12).map(entry => ({
-    ...entry,
-    wins: Math.max(0, Math.floor(toFiniteNumber(entry.wins, 0))),
-    targetBattles: Math.max(1, Math.floor(toFiniteNumber(entry.targetBattles, 1))),
-    unitsStanding: Math.max(0, Math.floor(toFiniteNumber(entry.unitsStanding, 0))),
-    gold: Math.max(0, Math.floor(toFiniteNumber(entry.gold, 0))),
-    exp: Math.max(0, Math.floor(toFiniteNumber(entry.exp, 0))),
-    score: Math.max(0, Math.floor(toFiniteNumber(entry.score, 0))),
-    durationMs: Math.max(0, Math.floor(toFiniteNumber(entry.durationMs, 0))),
-    bossesDefeated: (entry.bossesDefeated || []).slice(0, 6),
-    flawlessBossNames: (entry.flawlessBossNames || []).filter(Boolean).slice(0, 6),
-    fastBossNames: (entry.fastBossNames || []).filter(Boolean).slice(0, 6),
-    routeSummary: (entry.routeSummary || []).slice(0, 24),
-    shopBuys: (entry.shopBuys || []).slice(0, 24),
-    shopGoldSpent: Math.max(0, Math.floor(toFiniteNumber(entry.shopGoldSpent, 0))),
-    omens: (entry.omens || []).slice(0, 24),
-    unlockedSpellNames: (entry.unlockedSpellNames || []).slice(0, 12),
-    temporarySpellIds: (entry.temporarySpellIds || []).filter(Boolean).slice(0, 20),
-    unitTemplateIds: (entry.unitTemplateIds || []).filter(Boolean).slice(0, 24),
-    unitClassIds: (entry.unitClassIds || []).filter(Boolean).slice(0, 8) as MinionClass[],
-    tierThreeUnitNames: (entry.tierThreeUnitNames || []).filter(Boolean).slice(0, 12),
-    healingDone: Math.max(0, Math.floor(toFiniteNumber(entry.healingDone, 0))),
-    unitsLost: Math.max(0, Math.floor(toFiniteNumber(entry.unitsLost, 0))),
-    lowestCommanderHealthRatio: Math.max(0, Math.min(1, toFiniteNumber(entry.lowestCommanderHealthRatio, 1))),
-    commanderUntouchedBattles: Math.max(0, Math.floor(toFiniteNumber(entry.commanderUntouchedBattles, 0))),
-    challengeModifierIds: Array.from(new Set((entry.challengeModifierIds || []).filter(Boolean))).slice(0, 12),
-    discoveryOfferIdsSeen: Array.from(new Set((entry.discoveryOfferIdsSeen || []).filter(Boolean))).slice(0, 36),
-    runLevelAfter: Math.max(1, Math.floor(toFiniteNumber(entry.runLevelAfter, runLevel))),
-    streakAfter: Math.max(0, Math.floor(toFiniteNumber(entry.streakAfter, 0))),
-  }));
-
-  const normalized: DailyRunState = {
-    lastCompletedDate: state?.lastCompletedDate,
-    streak: Math.max(0, Math.floor(toFiniteNumber(state?.streak, 0))),
-    bestWins: Math.max(0, Math.floor(toFiniteNumber(state?.bestWins, 0))),
-    completions: Math.max(0, Math.floor(toFiniteNumber(state?.completions, 0))),
-    history,
-    runLevel,
-    runExp,
-    runUpgradePoints: Math.max(0, Math.floor(toFiniteNumber(state?.runUpgradePoints, 0))),
-    permanentStats: capRandomRunPermanentStats(normalizeRandomRunPermanentStats(state?.permanentStats)),
-    claimedMilestoneIds: Array.from(new Set((state?.claimedMilestoneIds || []).filter(Boolean))).slice(0, 64),
-    milestoneUnlocks: (state?.milestoneUnlocks || []).filter(record => (
-      Boolean(record?.id) && Number.isFinite(record?.unlockedAt)
-    )),
-    discovery: normalizeRunDiscoveryState(state?.discovery, legacySpellIds, history),
-  };
-
-  const migrationTimestamp = history[history.length - 1]?.completedAt || 1;
-  const withMilestones = syncRunMilestoneUnlockRecords(normalized, migrationTimestamp);
-  return {
-    ...withMilestones,
-    discovery: syncRunDiscoveryState(withMilestones, legacySpellIds, migrationTimestamp),
-  };
-}
-
 export function getDailyRunState(
   user: (Pick<User, 'dailyRun'> & Partial<Pick<User, 'knownSpellIds'>>) | null | undefined = getCurrentUser(),
 ): DailyRunState {
-  return normalizeDailyRunState(user?.dailyRun, user?.knownSpellIds || []);
+  return normalizeUserDailyRunState(user);
 }
 
 export function getDailyRunStatus(user: Pick<User, 'dailyRun'> | null | undefined = getCurrentUser(), now = Date.now()): DailyRunStatus {
@@ -8484,6 +7929,7 @@ export function recordPvpDuelOutcome(
         multiplayerDeeds: users[loserIndex].multiplayerDeeds,
       });
     }
+    void flushPlayerPersist();
   }
 
   return { success: true, delta };
@@ -8644,6 +8090,7 @@ export function recordCoopRaidOutcome(
       multiplayerReputation: nextUser.multiplayerReputation,
       multiplayerDeeds: nextUser.multiplayerDeeds,
     });
+    void flushPlayerPersist();
   }
 
   return {
@@ -9261,6 +8708,7 @@ export function claimQuestReward(questId: string): { success: boolean; rewards?:
     minions: updatedMinions,
     activityLog: updatedActivityLog
   });
+  void flushPlayerPersist();
 
   return { success: true, rewards: acceptedEquipment, minions: rewardMinions };
 }

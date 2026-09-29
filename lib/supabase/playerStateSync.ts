@@ -1,4 +1,4 @@
-import { MAX_PLAYER_LEVEL, type User } from '@/lib/auth';
+import { MAX_PLAYER_LEVEL, type User } from '@/lib/playerTypes';
 
 /** Soft caps so a malicious client cannot dump unbounded JSON into player_states. */
 export const PLAYER_SYNC_MAX_INVENTORY_ITEMS = 200;

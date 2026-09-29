@@ -263,7 +263,7 @@ export function syncMultiplayerChronicleEvents(
   state: Partial<MultiplayerChronicleState> | null | undefined,
   events: readonly MultiplayerEngagementEvent[],
 ): MultiplayerChronicleState {
-  let normalized = normalizeMultiplayerChronicleState(state);
+  const normalized = normalizeMultiplayerChronicleState(state);
   const processed = new Set(normalized.processedEventIds);
   const counts = { ...normalized.contributionCounts };
   let renownAwarded = 0;

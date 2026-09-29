@@ -1,26 +1,28 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth';
 import { bootstrapSupabaseSession, isSupabaseAuthEnabled } from '@/lib/supabase/auth';
 import BackgroundMusic from '@/components/BackgroundMusic';
 import MapRenderer from '@/components/MapRenderer';
 import GameCommandCenter from '@/components/GameCommandCenter';
-import PlayerModelSelector from '@/components/PlayerModelSelector';
 import CompletionOverlay from '@/components/CompletionOverlay';
-import ThreeFxOverlay from '@/components/ThreeFxOverlay';
-import MapFogOverlay from '@/components/MapFogOverlay';
-import PvpChallengeOverlay from '@/components/PvpChallengeOverlay';
-import SocialRequestOverlay from '@/components/SocialRequestOverlay';
-import TradeSessionOverlay from '@/components/TradeSessionOverlay';
-import MultiplayerTutorialSpotlight from '@/components/MultiplayerTutorialSpotlight';
-import PvpDuelSessionOverlay from '@/components/PvpDuelSessionOverlay';
-import CoopRaidSessionOverlay from '@/components/CoopRaidSessionOverlay';
-import CoopDungeonSessionOverlay from '@/components/CoopDungeonSessionOverlay';
 import { writeGameMode } from '@/lib/gameMode';
 import { applyGraphicsQualityToDocument } from '@/lib/graphicsSettings';
-import BardMusicControls from '@/components/BardMusicControls';
+
+const PlayerModelSelector = dynamic(() => import('@/components/PlayerModelSelector'), { ssr: false });
+const ThreeFxOverlay = dynamic(() => import('@/components/ThreeFxOverlay'), { ssr: false });
+const MapFogOverlay = dynamic(() => import('@/components/MapFogOverlay'), { ssr: false });
+const PvpChallengeOverlay = dynamic(() => import('@/components/PvpChallengeOverlay'), { ssr: false });
+const SocialRequestOverlay = dynamic(() => import('@/components/SocialRequestOverlay'), { ssr: false });
+const TradeSessionOverlay = dynamic(() => import('@/components/TradeSessionOverlay'), { ssr: false });
+const MultiplayerTutorialSpotlight = dynamic(() => import('@/components/MultiplayerTutorialSpotlight'), { ssr: false });
+const PvpDuelSessionOverlay = dynamic(() => import('@/components/PvpDuelSessionOverlay'), { ssr: false });
+const CoopRaidSessionOverlay = dynamic(() => import('@/components/CoopRaidSessionOverlay'), { ssr: false });
+const CoopDungeonSessionOverlay = dynamic(() => import('@/components/CoopDungeonSessionOverlay'), { ssr: false });
+const BardMusicControls = dynamic(() => import('@/components/BardMusicControls'), { ssr: false });
 
 export default function GamePage() {
   const router = useRouter();
@@ -74,7 +76,7 @@ export default function GamePage() {
       </main>
       <MapFogOverlay />
       <ThreeFxOverlay />
-      <PlayerModelSelector isOpen={showAvatar} onClose={() => setShowAvatar(false)} />
+      {showAvatar && <PlayerModelSelector isOpen onClose={() => setShowAvatar(false)} />}
       <CompletionOverlay />
       <PvpChallengeOverlay />
       <SocialRequestOverlay />

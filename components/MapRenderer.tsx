@@ -2,9 +2,23 @@
 
 import { type WheelEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import dynamic from 'next/dynamic';
 import Image from 'next/image';
 import { findPoiAtTile, getPoiFootprint, getStaticPOIs, MAP_CONFIG, POI, POIType } from '@/lib/mapData';
-import { AssetLoader, ASSET_PATHS, getPlayerModelPath, preloadAllAssets } from '@/lib/assetLoader';
+import {
+  AssetLoader,
+  ASSET_PATHS,
+  getPlayerModelPath,
+  preloadDeferredAssetsWhenIdle,
+  preloadMapAssets,
+} from '@/lib/assetLoader';
+import { getEncounterRunBattleCount } from '@/lib/encounterRunBattleCount';
+import {
+  drawMapPlateLabel,
+  getMapLabelFont,
+  MAP_LABEL_BONE,
+  resetMapLabelCache,
+} from './map/mapLabels';
 import {
   areFriends as areSocialFriends,
   claimReadyQuestRewards,
@@ -46,7 +60,6 @@ import { playGameSound } from '@/lib/sound';
 import { QUEST_NPCS, getAllStoryQuestsSorted, getQuestNpcWorldVoice, type QuestNpc } from '@/lib/questData';
 import { getStoryDialogSequence, type StoryDialogSequence } from '@/lib/storyDialogue';
 import { isDungeonQuestObjective, isPoiQuestObjective, isQuestNpcObjective } from '@/lib/questMarkers';
-import StoryDialogOverlay from './StoryDialogOverlay';
 import {
   WorldDungeon,
   formatDungeonTier,
@@ -57,10 +70,6 @@ import {
   getRegionForTile,
 } from '@/lib/worldEvents';
 import { getMultiplayerUnlockStatus, type MultiplayerFeatureId } from '@/lib/multiplayerUnlocks';
-import POIModal from './POIModal';
-import TownModal from './TownModal';
-import PlayerListModal from './PlayerListModal';
-import { DungeonRunModal, EncounterRunModal, getEncounterRunBattleCount } from './RoguelikeRunModal';
 import CinematicScrollShell from './CinematicScrollShell';
 import {
   clearMultiplayerTutorialDialogue,
@@ -78,6 +87,7 @@ import {
 } from '@/lib/multiplayerUnlockDialogue';
 import {
   GRAPHICS_QUALITY_EVENT_NAME,
+  type GraphicsQuality,
   getMapAnimIntervalMs,
   getMapCanvasRenderSize,
   getMapImageSmoothingQuality,
@@ -87,6 +97,42 @@ import {
   shouldDrawMapShadows,
   shouldDrawRichMapMarkers,
 } from '@/lib/graphicsSettings';
+
+const POIModal = dynamic(() => import('./POIModal'), { ssr: false });
+const TownModal = dynamic(() => import('./TownModal'), { ssr: false });
+const PlayerListModal = dynamic(() => import('./PlayerListModal'), { ssr: false });
+const StoryDialogOverlay = dynamic(() => import('./StoryDialogOverlay'), { ssr: false });
+const EncounterRunModal = dynamic(
+  () => import('./RoguelikeRunModal').then(module => module.EncounterRunModal),
+  { ssr: false },
+);
+const DungeonRunModal = dynamic(
+  () => import('./RoguelikeRunModal').then(module => module.DungeonRunModal),
+  { ssr: false },
+);
+
+/**
+ * Graphics flags read once per quality change instead of per draw call
+ * (each settings read parses localStorage JSON).
+ */
+const mapGfx = {
+  quality: 'medium' as GraphicsQuality,
+  shadows: true,
+  rich: false,
+  particles: false,
+  smoothing: 'medium' as ImageSmoothingQuality,
+  animIntervalMs: 66,
+};
+
+function refreshMapGfx(): void {
+  const quality = readGraphicsQualitySetting();
+  mapGfx.quality = quality;
+  mapGfx.shadows = shouldDrawMapShadows(quality);
+  mapGfx.rich = shouldDrawRichMapMarkers(quality);
+  mapGfx.particles = shouldDrawCampfireParticles(quality);
+  mapGfx.smoothing = getMapImageSmoothingQuality(quality);
+  mapGfx.animIntervalMs = getMapAnimIntervalMs(quality);
+}
 
 // POI image mapping
 const POI_IMAGE_PATHS: Record<POIType, string> = {
@@ -225,7 +271,7 @@ function drawCampfireEmberParticles(
   now: number,
   pulse: number
 ): void {
-  if (!shouldDrawCampfireParticles()) return;
+  if (!mapGfx.particles) return;
   const seedBase = centerX * 0.17 + centerY * 0.23;
   const particleCount = 4;
 
@@ -507,9 +553,9 @@ function drawMapLabel(
   ctx.save();
   ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
   ctx.fillStyle = color;
-  ctx.font = `bold ${fontSize}px serif`;
+  ctx.font = getMapLabelFont(fontSize);
   ctx.textAlign = 'center';
-  if (shouldDrawMapShadows()) {
+  if (mapGfx.shadows) {
     ctx.shadowColor = 'rgba(0, 0, 0, 0.9)';
     ctx.shadowBlur = 4;
   }
@@ -517,15 +563,40 @@ function drawMapLabel(
   ctx.restore();
 }
 
-function getMapLabelBudget(zoom: number): { showNames: boolean; questBangAlpha: number; questBangSize: number } {
+const rgbaAlphaCache = new Map<string, Map<string, string>>();
+
+/** Swaps the alpha of an `rgba(...)` color; cached because draw helpers call it every frame. */
+function withRgbaAlpha(color: string, alpha: string): string {
+  let byAlpha = rgbaAlphaCache.get(color);
+  if (!byAlpha) {
+    byAlpha = new Map();
+    rgbaAlphaCache.set(color, byAlpha);
+  }
+  let result = byAlpha.get(alpha);
+  if (!result) {
+    result = color.replace(/[\d.]+\)$/, `${alpha})`);
+    byAlpha.set(alpha, result);
+  }
+  return result;
+}
+
+interface MapLabelBudget {
+  showNames: boolean;
+  questBangAlpha: number;
+  questBangSize: number;
+}
+
+const MAP_LABEL_BUDGET_FAR: MapLabelBudget = { showNames: false, questBangAlpha: 0.38, questBangSize: 10 };
+const MAP_LABEL_BUDGET_MID: MapLabelBudget = { showNames: false, questBangAlpha: 0.58, questBangSize: 11 };
+const MAP_LABEL_BUDGET_NEAR: MapLabelBudget = { showNames: true, questBangAlpha: 1, questBangSize: 13 };
+const MAP_LANDMARK_LABEL_SIZE = 13;
+const MAP_CHARACTER_LABEL_SIZE = 12;
+
+function getMapLabelBudget(zoom: number): MapLabelBudget {
   const zoomRatio = zoom / DEFAULT_MAP_ZOOM;
-  if (zoomRatio < 0.92) {
-    return { showNames: false, questBangAlpha: 0.38, questBangSize: 8 };
-  }
-  if (zoomRatio < 1) {
-    return { showNames: false, questBangAlpha: 0.58, questBangSize: 9 };
-  }
-  return { showNames: true, questBangAlpha: 1, questBangSize: 10 };
+  if (zoomRatio < 0.92) return MAP_LABEL_BUDGET_FAR;
+  if (zoomRatio < 1) return MAP_LABEL_BUDGET_MID;
+  return MAP_LABEL_BUDGET_NEAR;
 }
 
 function drawGroundShadow(
@@ -535,7 +606,7 @@ function drawGroundShadow(
   radiusX: number,
   radiusY: number
 ): void {
-  if (!shouldDrawMapShadows()) return;
+  if (!mapGfx.shadows) return;
   ctx.save();
   ctx.fillStyle = 'rgba(0, 0, 0, 0.34)';
   ctx.beginPath();
@@ -629,7 +700,7 @@ function drawJobPoiDisk(
   drawJobPoiSkyBackdrop(ctx, centerX, centerY, radius, sky, hovered);
 
   ctx.save();
-  ctx.lineWidth = hovered ? 1.35 : 1.1;
+  ctx.lineWidth = hovered ? 1.9 : 1.5;
   ctx.strokeStyle = hovered ? JOB_POI_DISK.borderHover : JOB_POI_DISK.border;
   ctx.beginPath();
   ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
@@ -637,9 +708,7 @@ function drawJobPoiDisk(
 
   if (accentRing) {
     ctx.lineWidth = 1;
-    ctx.strokeStyle = hovered
-      ? accentRing.replace(/[\d.]+\)$/, '0.34)')
-      : accentRing.replace(/[\d.]+\)$/, '0.18)');
+    ctx.strokeStyle = withRgbaAlpha(accentRing, hovered ? '0.34' : '0.18');
     ctx.beginPath();
     ctx.arc(centerX, centerY, radius - 1.8, 0, Math.PI * 2);
     ctx.stroke();
@@ -754,7 +823,7 @@ function drawCircularLandmarkMarker(
   if (image) {
     const imageSize = radius * 2.05;
     ctx.save();
-    if (!hovered && idleImageFilter && shouldDrawRichMapMarkers()) {
+    if (!hovered && idleImageFilter && mapGfx.rich) {
       ctx.filter = idleImageFilter;
     }
     ctx.drawImage(image, centerX - imageSize / 2, centerY - imageSize / 2, imageSize, imageSize);
@@ -772,7 +841,7 @@ function drawCircularLandmarkMarker(
 
   if (accentColor) {
     ctx.save();
-    ctx.strokeStyle = hovered ? accentColor : accentColor.replace(/[\d.]+\)$/, '0.52)');
+    ctx.strokeStyle = hovered ? accentColor : withRgbaAlpha(accentColor, '0.52');
     ctx.lineWidth = hovered ? 1.35 : 1.1;
     ctx.beginPath();
     ctx.arc(centerX, centerY, radius - 0.6, Math.PI * 0.18, Math.PI * 0.82);
@@ -781,16 +850,14 @@ function drawCircularLandmarkMarker(
   }
 
   if (label && (showLabel || hovered)) {
-    ctx.save();
-    ctx.fillStyle = labelColor;
-    ctx.font = `bold ${hovered ? 10 : 9}px serif`;
-    ctx.textAlign = 'center';
-    if (shouldDrawMapShadows()) {
-      ctx.shadowColor = 'rgba(0, 0, 0, 0.9)';
-      ctx.shadowBlur = 3;
-    }
-    ctx.fillText(label, centerX, centerY + radius + 9);
-    ctx.restore();
+    drawMapPlateLabel(
+      ctx,
+      label,
+      centerX,
+      centerY + radius + 4,
+      labelColor,
+      hovered ? MAP_LANDMARK_LABEL_SIZE + 1 : MAP_LANDMARK_LABEL_SIZE,
+    );
   }
 }
 
@@ -822,19 +889,19 @@ function drawTownMarker(
     centerX,
     centerY,
     footprint,
-    radiusRatio: 0.13,
-    hoveredRadiusRatio: 0.15,
+    radiusRatio: 0.14,
+    hoveredRadiusRatio: 0.16,
     image,
     hovered,
     fallbackLabel,
     label,
     showLabel: showLabel || hovered,
-    ringColor: 'rgba(234, 220, 154, 0.72)',
+    ringColor: 'rgba(234, 220, 154, 0.78)',
     ringHoverColor: 'rgba(255, 236, 170, 0.95)',
     backingColor: 'rgba(8, 7, 9, 0.55)',
-    labelColor: MAP_MARKER_TONES.town.label,
-    ringWidth: 1.25,
-    ringHoverWidth: 2,
+    labelColor: MAP_LABEL_BONE,
+    ringWidth: 1.75,
+    ringHoverWidth: 2.5,
   });
 }
 
@@ -867,8 +934,8 @@ function drawDungeonMarker(
     ringHoverColor: 'rgba(224, 190, 255, 0.96)',
     backingColor: 'rgba(18, 8, 28, 0.72)',
     labelColor: '#f5d0fe',
-    ringWidth: 1.35,
-    ringHoverWidth: 2.1,
+    ringWidth: 1.7,
+    ringHoverWidth: 2.4,
     accentColor: 'rgba(168, 85, 247, 0.7)',
     idleImageFilter: 'saturate(0.92) brightness(0.94)',
   });
@@ -894,7 +961,7 @@ function drawCampfireMarker(
   const fogHaloAlpha = (0.018 + pulse * 0.012) * (0.9 + flicker * 0.08);
 
   drawCampfireGroundPad(ctx, centerX, centerY, size);
-  if (shouldDrawRichMapMarkers()) {
+  if (mapGfx.rich) {
     drawMapGlowPool(ctx, {
       centerX,
       centerY: centerY + size * 0.04,
@@ -912,7 +979,7 @@ function drawCampfireMarker(
 
   if (image) {
     ctx.save();
-    if (shouldDrawMapShadows()) {
+    if (mapGfx.shadows) {
       ctx.shadowColor = 'rgba(0, 0, 0, 0.45)';
       ctx.shadowBlur = hovered ? 6 : 3;
       ctx.shadowOffsetY = 1;
@@ -930,7 +997,7 @@ function drawCampfireMarker(
   drawCampfireEmberParticles(ctx, centerX, centerY, size, now, pulse);
 
   if (hovered && label) {
-    drawMapLabel(ctx, label, centerX, centerY + size * 0.56, '#ffd7a8');
+    drawMapPlateLabel(ctx, label, centerX, centerY + size * 0.5, MAP_LABEL_BONE, MAP_LANDMARK_LABEL_SIZE);
   }
 }
 
@@ -954,7 +1021,7 @@ function drawJobPoiMarker(
   const diskRadius = radius * 0.88;
   const glow = JOB_POI_GLOW_TONES[poiType] ?? DEFAULT_JOB_POI_GLOW;
   const sky = JOB_POI_SKY_TONES[poiType] ?? DEFAULT_JOB_POI_SKY;
-  const rich = shouldDrawRichMapMarkers();
+  const rich = mapGfx.rich;
   const poolAlpha = hovered ? 0.2 : rich ? 0.08 + pulse * 0.06 : 0.1;
   const glowStrength = hovered ? 0.62 : rich ? 0.26 + pulse * 0.14 : 0.3;
 
@@ -1020,7 +1087,7 @@ function drawJobPoiMarker(
   ctx.restore();
 
   if (hovered && label) {
-    drawMapLabel(ctx, label, centerX, centerY + diskRadius + 8, MAP_MARKER_TONES.poi.label);
+    drawMapPlateLabel(ctx, label, centerX, centerY + diskRadius + 4, MAP_LABEL_BONE, MAP_LANDMARK_LABEL_SIZE);
   }
 }
 
@@ -1070,8 +1137,8 @@ function drawCharacterSprite(
 
     ctx.save();
     ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = getMapImageSmoothingQuality();
-    if (hovered && shouldDrawRichMapMarkers()) {
+    ctx.imageSmoothingQuality = mapGfx.smoothing;
+    if (hovered && mapGfx.rich) {
       ctx.filter = 'brightness(1.06) contrast(1.04)';
     }
     ctx.drawImage(image, drawX, drawY, drawSize, drawSize);
@@ -1090,7 +1157,7 @@ function drawCharacterSprite(
     ctx.globalAlpha = 0.82;
     ctx.strokeStyle = frameColor;
     ctx.lineWidth = Math.max(1.5, drawSize * 0.045);
-    if (shouldDrawMapShadows()) {
+    if (mapGfx.shadows) {
       ctx.shadowColor = frameColor;
       ctx.shadowBlur = Math.max(5, drawSize * 0.18);
     }
@@ -1108,7 +1175,7 @@ function drawCharacterSprite(
   }
 
   if (label && (showLabel || hovered)) {
-    drawMapLabel(ctx, label, x + size / 2, y + size + 10, labelColor);
+    drawMapPlateLabel(ctx, label, x + size / 2, y + size + 1, labelColor, MAP_CHARACTER_LABEL_SIZE);
   }
 }
 
@@ -1160,7 +1227,7 @@ function drawTravelPathPreview(
   ctx.save();
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
-  if (shouldDrawMapShadows()) {
+  if (mapGfx.shadows) {
     ctx.shadowColor = shadow;
     ctx.shadowBlur = Math.max(8, tileSize * 0.22);
   }
@@ -1177,7 +1244,7 @@ function drawTravelPathPreview(
   ctx.stroke();
   ctx.setLineDash([]);
 
-  if (shouldDrawMapShadows()) {
+  if (mapGfx.shadows) {
     ctx.shadowBlur = Math.max(10, tileSize * 0.18);
   }
   ctx.strokeStyle = primary;
@@ -1192,6 +1259,464 @@ function drawTravelPathPreview(
   ctx.restore();
 }
 
+type MapUser = ReturnType<typeof getCurrentUser>;
+type MapPlayer = ReturnType<typeof getUsers>[number];
+type MapHoverKind = 'enemy' | 'dungeon' | 'npc' | 'poi';
+
+interface MapHoverTarget {
+  kind: MapHoverKind | null;
+  id: string | null;
+}
+
+interface MapView {
+  x: number;
+  y: number;
+  zoom: number;
+}
+
+interface MapViewMetrics {
+  minZoom: number;
+  effectiveZoom: number;
+  tileSize: number;
+  maxCameraX: number;
+  maxCameraY: number;
+}
+
+interface MapPoiGroups {
+  landmarks: POI[];
+  sites: POI[];
+  campfires: POI[];
+}
+
+interface OtherPlayerMarker {
+  player: MapPlayer;
+  modelPath: string;
+  labelColor: string;
+  partyMember: boolean;
+}
+
+/** Latest React-derived data the imperative draw loop reads; replaced (not mutated) when inputs change. */
+interface MapScene {
+  width: number;
+  height: number;
+  poiGroups: MapPoiGroups;
+  questPoiNames: ReadonlySet<string>;
+  dungeonQuestObjective: boolean;
+  worldDungeons: WorldDungeon[];
+  visibleQuestNpcs: QuestNpc[];
+  tutorialAnchorNpc: QuestNpc | null;
+  otherPlayerMarkers: OtherPlayerMarker[];
+  worldEnemies: WorldEnemy[];
+  pendingTravel: PendingTravelIntent | null;
+}
+
+interface MapFrameOutput {
+  hasPlayer: boolean;
+  playerX: number;
+  playerY: number;
+}
+
+function computeMapViewMetrics(width: number, height: number, zoom: number, out?: MapViewMetrics): MapViewMetrics {
+  const minZoom = getMinMapZoom(width, height);
+  const effectiveZoom = Math.max(minZoom, Math.min(MAX_MAP_ZOOM, zoom));
+  const tileSize = MAP_CONFIG.tileSize * effectiveZoom;
+  const target = out ?? { minZoom: 0, effectiveZoom: 0, tileSize: 0, maxCameraX: 0, maxCameraY: 0 };
+  target.minZoom = minZoom;
+  target.effectiveZoom = effectiveZoom;
+  target.tileSize = tileSize;
+  target.maxCameraX = Math.max(0, MAP_CONFIG.width * tileSize - width);
+  target.maxCameraY = Math.max(0, MAP_CONFIG.height * tileSize - height);
+  return target;
+}
+
+function getPlayerScreenPoint(
+  user: MapUser,
+  now: number,
+  view: MapView,
+  tileSize: number,
+): { x: number; y: number } | null {
+  const position = getRenderedUserPosition(user, now);
+  if (!position) return null;
+  return {
+    x: position.x * tileSize - view.x + tileSize / 2,
+    y: position.y * tileSize - view.y + tileSize / 2,
+  };
+}
+
+/** Changes only when the committed tile position or travel/job phase changes, not on every interpolation tick. */
+function getUserMovementSignature(user: MapUser): string {
+  if (!user) return '';
+  const activeJob = user.jobQueue?.[0];
+  return [
+    user.x,
+    user.y,
+    user.traveling ? `${user.traveling.startTime}:${user.traveling.targetX}:${user.traveling.targetY}` : '-',
+    user.jobQueue?.length ?? 0,
+    activeJob ? `${activeJob.id}:${activeJob.travelComplete ? 1 : 0}` : '-',
+  ].join('|');
+}
+
+function getTownMarkerImagePath(poi: POI): string {
+  return ['Harborview', 'Blackwater Gate', 'Eclipse Hold'].includes(poi.name)
+    ? ASSET_PATHS.pois.harborview
+    : ASSET_PATHS.pois.riverside;
+}
+
+const renderSizeCache = {
+  width: -1,
+  height: -1,
+  quality: '' as GraphicsQuality | '',
+  pixelRatio: -1,
+  result: { width: 1, height: 1, scale: 1 },
+};
+
+function getCachedMapCanvasRenderSize(width: number, height: number, pixelRatio: number) {
+  if (
+    renderSizeCache.width !== width
+    || renderSizeCache.height !== height
+    || renderSizeCache.quality !== mapGfx.quality
+    || renderSizeCache.pixelRatio !== pixelRatio
+  ) {
+    renderSizeCache.width = width;
+    renderSizeCache.height = height;
+    renderSizeCache.quality = mapGfx.quality;
+    renderSizeCache.pixelRatio = pixelRatio;
+    renderSizeCache.result = getMapCanvasRenderSize(width, height, mapGfx.quality, pixelRatio);
+  }
+  return renderSizeCache.result;
+}
+
+const playerRevealScratch = { x: 0, y: 0 };
+
+function drawWorldMapFrame(
+  canvas: HTMLCanvasElement,
+  ctx: CanvasRenderingContext2D,
+  scene: MapScene,
+  view: MapView,
+  metrics: MapViewMetrics,
+  hover: MapHoverTarget,
+  currentUser: MapUser,
+  cursorScreen: { x: number; y: number } | null,
+  now: number,
+  out: MapFrameOutput,
+): void {
+  const actualWidth = scene.width;
+  const actualHeight = scene.height;
+  const pixelRatio = window.devicePixelRatio || 1;
+  const renderSize = getCachedMapCanvasRenderSize(actualWidth, actualHeight, pixelRatio);
+  if (canvas.width !== renderSize.width || canvas.height !== renderSize.height) {
+    canvas.width = renderSize.width;
+    canvas.height = renderSize.height;
+  }
+  ctx.setTransform(renderSize.scale, 0, 0, renderSize.scale, 0, 0);
+
+  // Clear canvas in CSS-pixel space
+  ctx.fillStyle = '#000000';
+  ctx.fillRect(0, 0, actualWidth, actualHeight);
+  // Terrain, markers and sprites are all drawn resampled, so smoothing stays on at every buffer scale.
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = mapGfx.smoothing;
+
+  const cameraX = view.x;
+  const cameraY = view.y;
+  const tileSize = metrics.tileSize;
+  const effectiveZoom = metrics.effectiveZoom;
+  const mapWidth = MAP_CONFIG.width * tileSize;
+  const mapHeight = MAP_CONFIG.height * tileSize;
+  const renderedUserPosition = getRenderedUserPosition(currentUser, now);
+  let playerRevealPoint: { x: number; y: number } | null = null;
+  if (renderedUserPosition) {
+    playerRevealScratch.x = renderedUserPosition.x * tileSize - cameraX + tileSize / 2;
+    playerRevealScratch.y = renderedUserPosition.y * tileSize - cameraY + tileSize / 2;
+    playerRevealPoint = playerRevealScratch;
+    out.hasPlayer = true;
+    out.playerX = playerRevealScratch.x;
+    out.playerY = playerRevealScratch.y;
+  } else {
+    out.hasPlayer = false;
+  }
+
+  const worldMap = AssetLoader.requestImage(ASSET_PATHS.map.world);
+  if (worldMap) {
+    drawVisibleWorldMap(ctx, worldMap, cameraX, cameraY, actualWidth, actualHeight, effectiveZoom);
+  } else {
+    ctx.fillStyle = '#182216';
+    ctx.fillRect(-cameraX, -cameraY, mapWidth, mapHeight);
+  }
+
+  const pendingTravel = scene.pendingTravel;
+  const activeTravel = currentUser?.traveling;
+  const activeJob = currentUser?.jobQueue?.[0];
+  const activeJobTraveling = Boolean(
+    activeJob &&
+    now >= activeJob.startTime &&
+    !activeJob.travelComplete
+  );
+  const travelPathTarget = pendingTravel
+    ? { x: pendingTravel.targetX, y: pendingTravel.targetY, active: false }
+    : activeTravel
+      ? { x: activeTravel.targetX, y: activeTravel.targetY, active: true }
+      : activeJob && activeJobTraveling
+        ? { x: activeJob.targetX, y: activeJob.targetY, active: true }
+      : null;
+
+  if (renderedUserPosition && travelPathTarget) {
+    drawTravelPathPreview(ctx, {
+      start: renderedUserPosition,
+      target: travelPathTarget,
+      tileSize,
+      cameraX,
+      cameraY,
+      active: travelPathTarget.active,
+      now,
+    });
+  }
+
+  const labelBudget = getMapLabelBudget(effectiveZoom);
+  const drawQuestBang = (x: number, y: number) => {
+    drawMapLabel(ctx, '!', x, y, '#fef08a', {
+      alpha: labelBudget.questBangAlpha,
+      fontSize: labelBudget.questBangSize,
+    });
+  };
+  const hoveredPoiId = hover.kind === 'poi' ? hover.id : null;
+  const hoveredDungeonId = hover.kind === 'dungeon' ? hover.id : null;
+  const hoveredNpcId = hover.kind === 'npc' ? hover.id : null;
+  const hoveredEnemyId = hover.kind === 'enemy' ? hover.id : null;
+
+  const drawPoiMarker = (poi: POI) => {
+    const screenX = poi.x * tileSize - cameraX;
+    const screenY = poi.y * tileSize - cameraY;
+    const footprint = getPoiFootprint(poi);
+    const footprintWidth = footprint.width * tileSize;
+    const footprintHeight = footprint.height * tileSize;
+    const poiSize = poi.type === POIType.TOWN ? footprintWidth :
+                    poi.type === POIType.CAMPFIRE ? tileSize * CAMPFIRE_MARKER_TILES : footprintWidth;
+    const boundsSize = poi.type === POIType.CAMPFIRE ? footprintWidth : poiSize;
+
+    if (screenX < -boundsSize || screenX >= actualWidth || screenY < -boundsSize || screenY >= actualHeight) {
+      return;
+    }
+
+    const imagePath = poi.type === POIType.TOWN ? getTownMarkerImagePath(poi) : POI_IMAGE_PATHS[poi.type];
+    const poiImage = AssetLoader.requestImage(imagePath);
+    const markerCenterX = screenX + footprintWidth / 2;
+    const markerCenterY = screenY + footprintHeight / 2;
+    const hovered = hoveredPoiId === poi.id;
+    const questObjective = scene.questPoiNames.has(poi.name);
+
+    if (poi.type === POIType.TOWN) {
+      drawTownMarker(ctx, {
+        centerX: markerCenterX,
+        centerY: markerCenterY,
+        footprint: poiSize,
+        image: poiImage,
+        hovered,
+        fallbackLabel: poi.name.slice(0, 2).toUpperCase(),
+        label: poi.name,
+        showLabel: labelBudget.showNames,
+      });
+      if (questObjective) {
+        drawQuestBang(markerCenterX, screenY - 6);
+      }
+      return;
+    }
+
+    if (poi.type === POIType.CAMPFIRE) {
+      drawCampfireMarker(ctx, {
+        centerX: markerCenterX,
+        centerY: markerCenterY,
+        footprint: poiSize,
+        image: poiImage,
+        hovered,
+        label: poi.name,
+        now,
+      });
+      if (questObjective) {
+        drawQuestBang(markerCenterX, screenY - 6);
+      }
+      return;
+    }
+
+    drawJobPoiMarker(ctx, {
+      centerX: markerCenterX,
+      centerY: markerCenterY,
+      footprint: poiSize,
+      poiType: poi.type,
+      image: poiImage,
+      hovered,
+      fallbackLabel: poi.name.slice(0, 2).toUpperCase(),
+      label: poi.name,
+      now,
+    });
+    if (questObjective) {
+      drawQuestBang(markerCenterX, screenY - 6);
+    }
+  };
+
+  scene.poiGroups.landmarks.forEach(drawPoiMarker);
+
+  const dungeonImage = AssetLoader.requestImage(ASSET_PATHS.pois.mountain);
+  scene.worldDungeons.forEach(dungeon => {
+    const dungeonSize = tileSize * 1.45;
+    const dungeonCenterX = dungeon.x * tileSize - cameraX + tileSize * 1.5;
+    const dungeonCenterY = dungeon.y * tileSize - cameraY + tileSize * 1.5;
+    const hovered = hoveredDungeonId === dungeon.id;
+
+    if (
+      dungeonCenterX >= -dungeonSize &&
+      dungeonCenterX < actualWidth + dungeonSize &&
+      dungeonCenterY >= -dungeonSize &&
+      dungeonCenterY < actualHeight + dungeonSize
+    ) {
+      drawDungeonMarker(ctx, {
+        centerX: dungeonCenterX,
+        centerY: dungeonCenterY,
+        size: dungeonSize,
+        image: dungeonImage,
+        hovered,
+        label: dungeon.name,
+        showLabel: false,
+      });
+
+      const labelPoint = { x: dungeonCenterX, y: dungeonCenterY };
+      if (hovered || isScreenPointRevealed(labelPoint, cursorScreen, playerRevealPoint, effectiveZoom)) {
+        drawMapLabel(ctx, `Lv ${dungeon.level}`, dungeonCenterX, dungeonCenterY - dungeonSize * 0.58, '#f5d0fe', {
+          fontSize: 11,
+        });
+      }
+      if (scene.dungeonQuestObjective) {
+        drawQuestBang(dungeonCenterX, dungeonCenterY - dungeonSize * 0.72);
+      }
+    }
+  });
+
+  scene.poiGroups.sites.forEach(drawPoiMarker);
+
+  scene.visibleQuestNpcs.forEach(npc => {
+    const npcScreenX = npc.x * tileSize - cameraX;
+    const npcScreenY = npc.y * tileSize - cameraY;
+    const npcSize = getCharacterSpriteSize(tileSize, effectiveZoom, 0.9, 26);
+
+    if (
+      npcScreenX >= -npcSize &&
+      npcScreenX < actualWidth &&
+      npcScreenY >= -npcSize &&
+      npcScreenY < actualHeight
+    ) {
+      drawCharacterSprite(ctx, {
+        image: AssetLoader.requestImage(getPlayerModelPath(npc.modelNumber)),
+        x: npcScreenX + (tileSize - npcSize) / 2,
+        y: npcScreenY + (tileSize - npcSize) / 2 - tileSize * 0.08,
+        size: npcSize,
+        fallbackColor: '#854d0e',
+        label: npc.name,
+        labelColor: '#fef08a',
+        showLabel: labelBudget.showNames,
+        // visibleQuestNpcs is already filtered by shouldShowQuestNpcMarker.
+        topText: '!',
+        topTextColor: '#fef08a',
+        topTextAlpha: labelBudget.questBangAlpha,
+        topTextSize: labelBudget.questBangSize,
+        hovered: hoveredNpcId === npc.id,
+      });
+    }
+  });
+
+  // Draw current player with model image
+  if (currentUser && renderedUserPosition) {
+    const playerScreenX = renderedUserPosition.x * tileSize - cameraX;
+    const playerScreenY = renderedUserPosition.y * tileSize - cameraY;
+
+    // Only draw if in viewport
+    if (playerScreenX >= -tileSize && playerScreenX < actualWidth &&
+        playerScreenY >= -tileSize && playerScreenY < actualHeight) {
+      // Draw player model image scaled to read clearly without overwhelming the map.
+      const playerImg = AssetLoader.requestImage(getPlayerModelPath(currentUser.selectedModel || 3));
+      const playerSize = getCharacterSpriteSize(tileSize, effectiveZoom, 0.98, 28);
+      const offsetX = (tileSize - playerSize) / 2;
+      const offsetY = (tileSize - playerSize) / 2;
+
+      drawCharacterSprite(ctx, {
+        image: playerImg,
+        x: playerScreenX + offsetX,
+        y: playerScreenY + offsetY,
+        size: playerSize,
+        fallbackColor: '#ffd700',
+        label: currentUser.username,
+        labelColor: '#ffffff',
+        showLabel: labelBudget.showNames,
+      });
+    }
+  }
+
+  const otherPlayerSize = getCharacterSpriteSize(tileSize, effectiveZoom, 0.88, 25);
+  scene.otherPlayerMarkers.forEach(({ player, modelPath, labelColor, partyMember }) => {
+    const sameTileAsCurrentUser = currentUser && player.x === currentUser.x && player.y === currentUser.y;
+    const playerScreenX = player.x * tileSize - cameraX + (sameTileAsCurrentUser ? tileSize * 0.22 : 0);
+    const playerScreenY = player.y * tileSize - cameraY + (sameTileAsCurrentUser ? tileSize * 0.1 : 0);
+
+    if (
+      playerScreenX >= -otherPlayerSize &&
+      playerScreenX < actualWidth &&
+      playerScreenY >= -otherPlayerSize &&
+      playerScreenY < actualHeight
+    ) {
+      drawCharacterSprite(ctx, {
+        image: AssetLoader.requestImage(modelPath),
+        x: playerScreenX + (tileSize - otherPlayerSize) / 2,
+        y: playerScreenY + (tileSize - otherPlayerSize) / 2 - tileSize * 0.08,
+        size: otherPlayerSize,
+        fallbackColor: '#0e7490',
+        label: player.username,
+        labelColor,
+        showLabel: labelBudget.showNames,
+        frameColor: partyMember ? '#6ee7b7' : undefined,
+      });
+    }
+  });
+
+  scene.worldEnemies.forEach(enemy => {
+    const enemyScreenX = enemy.x * tileSize - cameraX;
+    const enemyScreenY = enemy.y * tileSize - cameraY;
+    const isWorldBoss = enemy.spawnKind === 'world-boss';
+    const isStoryBoss = enemy.spawnKind === 'story-boss';
+    const isRegionalThreat = enemy.spawnKind === 'regional-threat';
+    const isCoopBoss = enemy.spawnKind === 'coop-boss';
+    const isBossThreat = isWorldBoss || isStoryBoss || isRegionalThreat || isCoopBoss;
+    const enemySize = getCharacterSpriteSize(tileSize, effectiveZoom, isBossThreat ? 1.22 : 0.88, isBossThreat ? 36 : 25);
+
+    if (
+      enemyScreenX < -enemySize ||
+      enemyScreenX >= actualWidth ||
+      enemyScreenY < -enemySize ||
+      enemyScreenY >= actualHeight ||
+      !isEnemyRevealedOnScreen(enemy, cameraX, cameraY, tileSize, cursorScreen, playerRevealPoint, effectiveZoom)
+    ) {
+      return;
+    }
+
+    const enemyHovered = hoveredEnemyId === enemy.id;
+    drawCharacterSprite(ctx, {
+      image: AssetLoader.requestImage(enemy.artworkPath || getPlayerModelAsset(enemy.modelNumber)),
+      x: enemyScreenX + (tileSize - enemySize) / 2,
+      y: enemyScreenY + (tileSize - enemySize) / 2 - tileSize * 0.08,
+      size: enemySize,
+      fallbackColor: '#7f1d1d',
+      topText: isWorldBoss ? 'Boss' : isStoryBoss ? 'Story' : isRegionalThreat ? 'Threat' : (labelBudget.showNames || enemyHovered ? `Lv ${enemy.level}` : undefined),
+      topTextColor: isBossThreat ? '#fca5a5' : '#fecaca',
+      topTextAlpha: labelBudget.showNames ? 1 : 0.7,
+      topTextSize: labelBudget.showNames ? 12 : 10,
+      label: isBossThreat || enemyHovered ? enemy.name : undefined,
+      labelColor: '#fecaca',
+      showLabel: labelBudget.showNames || enemyHovered,
+      hovered: enemyHovered,
+    });
+  });
+
+  ctx.shadowBlur = 0;
+}
+
 interface MapRendererProps {
   viewportWidth?: number;
   viewportHeight?: number;
@@ -1203,11 +1728,19 @@ export default function MapRenderer({
 }: MapRendererProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const [cameraX, setCameraX] = useState(0);
-  const [cameraY, setCameraY] = useState(0);
-  const [zoom, setZoom] = useState(DEFAULT_MAP_ZOOM);
-  const [isDragging, setIsDragging] = useState(false);
-  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  const tutorialAnchorRef = useRef<HTMLSpanElement>(null);
+  // Camera, zoom, hover and animation time live in refs: the rAF loop draws from them without re-rendering React.
+  const viewRef = useRef<MapView>({ x: 0, y: 0, zoom: DEFAULT_MAP_ZOOM });
+  const hoverRef = useRef<MapHoverTarget>({ kind: null, id: null });
+  const sceneRef = useRef<MapScene | null>(null);
+  const liveUserRef = useRef<MapUser>(null);
+  const dirtyRef = useRef(true);
+  const mapCoveredRef = useRef(false);
+  const syncDrawLoopRef = useRef<(() => void) | null>(null);
+  const frameOutputRef = useRef<MapFrameOutput>({ hasPlayer: false, playerX: 0, playerY: 0 });
+  const isDraggingRef = useRef(false);
+  const dragStartRef = useRef({ x: 0, y: 0 });
+  const userMovementSignatureRef = useRef('');
   const [selectedPOI, setSelectedPOI] = useState<POI | null>(null);
   const [selectedTown, setSelectedTown] = useState<POI | null>(null);
   const [selectedEnemy, setSelectedEnemy] = useState<WorldEnemy | null>(null);
@@ -1215,13 +1748,7 @@ export default function MapRenderer({
   const [selectedDungeon, setSelectedDungeon] = useState<WorldDungeon | null>(null);
   const [selectedDungeonRun, setSelectedDungeonRun] = useState<WorldDungeon | null>(null);
   const [selectedQuestNpc, setSelectedQuestNpc] = useState<QuestNpc | null>(null);
-  const [hoveredPOI, setHoveredPOI] = useState<POI | null>(null);
-  const [hoveredEnemy, setHoveredEnemy] = useState<WorldEnemy | null>(null);
-  const [hoveredDungeon, setHoveredDungeon] = useState<WorldDungeon | null>(null);
-  const [hoveredQuestNpc, setHoveredQuestNpc] = useState<QuestNpc | null>(null);
   const cursorScreenRef = useRef<{ x: number; y: number } | null>(null);
-  const lastFogPointerEmitRef = useRef(0);
-  const [graphicsRevision, setGraphicsRevision] = useState(0);
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
   const [dimensionsReady, setDimensionsReady] = useState(false);
   const [assetsLoaded, setAssetsLoaded] = useState(false);
@@ -1230,7 +1757,6 @@ export default function MapRenderer({
   const [currentUser, setCurrentUser] = useState(getCurrentUser());
   const [worldPlayersTick, setWorldPlayersTick] = useState(0);
   const [worldNow, setWorldNow] = useState(() => Date.now());
-  const [mapAnimNow, setMapAnimNow] = useState(() => Date.now());
   const [pendingTravel, setPendingTravel] = useState<PendingTravelIntent | null>(null);
   const [isMounted, setIsMounted] = useState(false);
   const [mainQuestTrackerHidden, setMainQuestTrackerHidden] = useState(() => {
@@ -1286,6 +1812,11 @@ export default function MapRenderer({
   }, [selectedDungeonRun]);
 
   useEffect(() => {
+    mapCoveredRef.current = Boolean(activeBattleEnemy || selectedDungeonRun);
+    syncDrawLoopRef.current?.();
+  }, [activeBattleEnemy, selectedDungeonRun]);
+
+  useEffect(() => {
     const pending = getPendingStoryDialogQuest(currentUser);
     if (!pending || storyDialogQuestId || unlockDialogId) return;
 
@@ -1320,9 +1851,17 @@ export default function MapRenderer({
   }, []);
 
   useEffect(() => {
-    preloadAllAssets().then(() => {
+    let cancelled = false;
+    let cancelDeferred: (() => void) | null = null;
+    void preloadMapAssets().then(() => {
+      if (cancelled) return;
       setAssetsLoaded(true);
+      cancelDeferred = preloadDeferredAssetsWhenIdle();
     });
+    return () => {
+      cancelled = true;
+      cancelDeferred?.();
+    };
   }, []);
 
   useEffect(() => {
@@ -1347,8 +1886,17 @@ export default function MapRenderer({
 
   // Update current user periodically
   useEffect(() => {
-    const interval = setInterval(() => {
+    const refreshWorldState = () => {
       setWorldNow(Date.now());
+      setCurrentUser(getCurrentUser());
+    };
+    // Game progress is timestamp-based, so the logic below keeps running while hidden;
+    // only the React refresh is skipped until the tab is visible again.
+    const handleVisibilityChange = () => {
+      if (!document.hidden) refreshWorldState();
+    };
+
+    const interval = setInterval(() => {
       updateJobTravelProgress(); // Update player position during job travel
       checkJobsComplete(); // Check and complete any finished jobs
       checkTravelComplete(); // Check and complete travel
@@ -1388,10 +1936,14 @@ export default function MapRenderer({
         }
       }
 
-      setCurrentUser(getCurrentUser());
+      if (!document.hidden) refreshWorldState();
     }, 1000);
 
-    return () => clearInterval(interval);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, []);
 
   useEffect(() => {
@@ -1410,11 +1962,16 @@ export default function MapRenderer({
       }
 
       const now = Date.now();
-      setWorldNow(now);
       if (activeJobTraveling) updateJobTravelProgress();
       checkTravelComplete();
       const nextUser = getCurrentUser();
-      setCurrentUser(nextUser);
+      // The draw loop interpolates the walker from timestamps; React only hears about committed steps.
+      liveUserRef.current = nextUser;
+      const movementSignature = getUserMovementSignature(nextUser);
+      if (movementSignature !== userMovementSignatureRef.current) {
+        userMovementSignatureRef.current = movementSignature;
+        setCurrentUser(nextUser);
+      }
 
       const position = getRenderedUserPosition(nextUser, now);
       if (!position) {
@@ -1436,36 +1993,190 @@ export default function MapRenderer({
     return () => window.clearInterval(interval);
   }, []);
 
+  // Single imperative draw loop. Input changes (camera, hover, scene) mark the frame dirty and draw on the
+  // next animation frame; ambient animation (campfires, travel) redraws at the graphics-quality frame cap.
   useEffect(() => {
     if (!assetsLoaded) return;
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext('2d');
+    if (!canvas || !ctx) return;
 
+    refreshMapGfx();
     let frameId = 0;
-    let lastTick = 0;
-    let animIntervalMs = getMapAnimIntervalMs(readGraphicsQualitySetting());
-
-    const syncInterval = () => {
-      animIntervalMs = getMapAnimIntervalMs(readGraphicsQualitySetting());
+    let lastDrawAt = 0;
+    let lastFogEmitAt = 0;
+    const metrics = computeMapViewMetrics(1, 1, DEFAULT_MAP_ZOOM);
+    const fog = {
+      emitted: false,
+      hasPlayer: false,
+      playerX: 0,
+      playerY: 0,
+      hasPointer: false,
+      pointerX: 0,
+      pointerY: 0,
+      cameraX: 0,
+      cameraY: 0,
+      zoom: 0,
+      width: 0,
+      height: 0,
+      campfires: [] as Array<{ x: number; y: number }>,
     };
+    const anchor = { element: null as HTMLSpanElement | null, left: NaN, top: NaN, size: NaN };
 
-    const loop = (timestamp: number) => {
-      if (
-        !document.hidden
-        && !isHeavyUiOverlayOpen()
-        && timestamp - lastTick >= animIntervalMs
-      ) {
-        lastTick = timestamp;
-        setMapAnimNow(Date.now());
+    const shouldRun = () => !document.hidden && !isHeavyUiOverlayOpen() && !mapCoveredRef.current;
+
+    const positionTutorialAnchor = (scene: MapScene, view: MapView) => {
+      const element = tutorialAnchorRef.current;
+      const npc = scene.tutorialAnchorNpc;
+      if (!element || !npc) {
+        anchor.element = null;
+        return;
       }
-      frameId = window.requestAnimationFrame(loop);
+      const tileSize = metrics.tileSize;
+      const size = getCharacterSpriteSize(tileSize, metrics.effectiveZoom, 0.9, 26);
+      const left = npc.x * tileSize - view.x + (tileSize - size) / 2;
+      const top = npc.y * tileSize - view.y + (tileSize - size) / 2 - tileSize * 0.08;
+      if (anchor.element === element && anchor.left === left && anchor.top === top && anchor.size === size) return;
+      anchor.element = element;
+      anchor.left = left;
+      anchor.top = top;
+      anchor.size = size;
+      element.style.left = `${left}px`;
+      element.style.top = `${top}px`;
+      element.style.width = `${size}px`;
+      element.style.height = `${size}px`;
     };
 
-    window.addEventListener(GRAPHICS_QUALITY_EVENT_NAME, syncInterval);
-    window.addEventListener('visibilitychange', syncInterval);
-    frameId = window.requestAnimationFrame(loop);
+    const emitFogIfChanged = (scene: MapScene, view: MapView, now: number) => {
+      const output = frameOutputRef.current;
+      const pointer = cursorScreenRef.current;
+      const cameraChanged = fog.cameraX !== view.x
+        || fog.cameraY !== view.y
+        || fog.zoom !== metrics.effectiveZoom
+        || fog.width !== scene.width
+        || fog.height !== scene.height;
+      const playerChanged = fog.hasPlayer !== output.hasPlayer
+        || (output.hasPlayer && (fog.playerX !== output.playerX || fog.playerY !== output.playerY));
+      const pointerPresenceChanged = fog.hasPointer !== Boolean(pointer);
+      const pointerMoved = Boolean(pointer) && (fog.pointerX !== pointer?.x || fog.pointerY !== pointer?.y);
+      if (fog.emitted && !cameraChanged && !playerChanged && !pointerPresenceChanged) {
+        if (!pointerMoved || now - lastFogEmitAt < MAP_FOG_POINTER_EMIT_MS) return;
+      }
+
+      if (!fog.emitted || cameraChanged) {
+        const tileSize = metrics.tileSize;
+        fog.campfires = scene.poiGroups.campfires.map(poi => {
+          const footprint = getPoiFootprint(poi);
+          return {
+            x: poi.x * tileSize - view.x + (footprint.width * tileSize) / 2,
+            y: poi.y * tileSize - view.y + (footprint.height * tileSize) / 2,
+          };
+        });
+      }
+      fog.emitted = true;
+      fog.hasPlayer = output.hasPlayer;
+      fog.playerX = output.playerX;
+      fog.playerY = output.playerY;
+      fog.hasPointer = Boolean(pointer);
+      fog.pointerX = pointer?.x ?? 0;
+      fog.pointerY = pointer?.y ?? 0;
+      fog.cameraX = view.x;
+      fog.cameraY = view.y;
+      fog.zoom = metrics.effectiveZoom;
+      fog.width = scene.width;
+      fog.height = scene.height;
+      lastFogEmitAt = now;
+      emitMapFogState({
+        pointer: pointer ? { x: pointer.x, y: pointer.y } : null,
+        player: output.hasPlayer ? { x: output.playerX, y: output.playerY } : null,
+        campfires: fog.campfires,
+        width: scene.width,
+        height: scene.height,
+        zoom: metrics.effectiveZoom,
+      });
+    };
+
+    const tick = (timestamp: number) => {
+      frameId = 0;
+      if (!shouldRun()) return;
+      frameId = window.requestAnimationFrame(tick);
+
+      const scene = sceneRef.current;
+      if (!scene) return;
+      const view = viewRef.current;
+      computeMapViewMetrics(scene.width, scene.height, view.zoom, metrics);
+      const clampedX = Math.max(0, Math.min(metrics.maxCameraX, view.x));
+      const clampedY = Math.max(0, Math.min(metrics.maxCameraY, view.y));
+      if (clampedX !== view.x || clampedY !== view.y) {
+        view.x = clampedX;
+        view.y = clampedY;
+        dirtyRef.current = true;
+      }
+
+      if (dirtyRef.current || timestamp - lastDrawAt >= mapGfx.animIntervalMs) {
+        dirtyRef.current = false;
+        lastDrawAt = timestamp;
+        drawWorldMapFrame(
+          canvas,
+          ctx,
+          scene,
+          view,
+          metrics,
+          hoverRef.current,
+          liveUserRef.current,
+          cursorScreenRef.current,
+          Date.now(),
+          frameOutputRef.current,
+        );
+        positionTutorialAnchor(scene, view);
+      }
+      emitFogIfChanged(scene, view, timestamp);
+    };
+
+    const sync = () => {
+      if (shouldRun()) {
+        if (!frameId) {
+          dirtyRef.current = true;
+          frameId = window.requestAnimationFrame(tick);
+        }
+      } else if (frameId) {
+        window.cancelAnimationFrame(frameId);
+        frameId = 0;
+      }
+    };
+
+    const markDirty = () => {
+      dirtyRef.current = true;
+    };
+    const handleQualityChange = () => {
+      refreshMapGfx();
+      markDirty();
+    };
+    const handleFontsLoaded = () => {
+      resetMapLabelCache();
+      markDirty();
+    };
+
+    const overlayObserver = new MutationObserver(sync);
+    overlayObserver.observe(document.body, { attributes: true, attributeFilter: ['class'] });
+    document.addEventListener('visibilitychange', sync);
+    window.addEventListener(GRAPHICS_QUALITY_EVENT_NAME, handleQualityChange);
+    const unsubscribeImages = AssetLoader.onImageLoaded(markDirty);
+    const fontSet = typeof document.fonts !== 'undefined' ? document.fonts : null;
+    fontSet?.addEventListener('loadingdone', handleFontsLoaded);
+    void fontSet?.ready.then(handleFontsLoaded);
+    syncDrawLoopRef.current = sync;
+    sync();
+
     return () => {
-      window.cancelAnimationFrame(frameId);
-      window.removeEventListener(GRAPHICS_QUALITY_EVENT_NAME, syncInterval);
-      window.removeEventListener('visibilitychange', syncInterval);
+      if (frameId) window.cancelAnimationFrame(frameId);
+      frameId = 0;
+      syncDrawLoopRef.current = null;
+      overlayObserver.disconnect();
+      document.removeEventListener('visibilitychange', sync);
+      window.removeEventListener(GRAPHICS_QUALITY_EVENT_NAME, handleQualityChange);
+      unsubscribeImages();
+      fontSet?.removeEventListener('loadingdone', handleFontsLoaded);
     };
   }, [assetsLoaded]);
 
@@ -1487,12 +2198,6 @@ export default function MapRenderer({
       window.removeEventListener('resize', handleResize);
       window.visualViewport?.removeEventListener('resize', handleResize);
     };
-  }, []);
-
-  useEffect(() => {
-    const handleQualityChange = () => setGraphicsRevision(current => current + 1);
-    window.addEventListener(GRAPHICS_QUALITY_EVENT_NAME, handleQualityChange);
-    return () => window.removeEventListener(GRAPHICS_QUALITY_EVENT_NAME, handleQualityChange);
   }, []);
 
   const actualWidth = viewportWidth || dimensions.width;
@@ -1518,10 +2223,64 @@ export default function MapRenderer({
 
     return getUsers().filter(player => player.username !== currentUser.username);
   }, [currentUser, worldPlayersTick]);
-  const renderedUserPosition = useMemo(
-    () => getRenderedUserPosition(currentUser, worldNow),
-    [currentUser, worldNow]
+  const poiGroups = useMemo<MapPoiGroups>(() => ({
+    landmarks: poisData.filter(poi => poi.type === POIType.TOWN || poi.type === POIType.CAMPFIRE),
+    sites: poisData.filter(poi => poi.type !== POIType.TOWN && poi.type !== POIType.CAMPFIRE),
+    campfires: poisData.filter(poi => poi.type === POIType.CAMPFIRE),
+  }), [poisData]);
+  const questPoiNames = useMemo<ReadonlySet<string>>(
+    () => new Set(poisData.filter(poi => isPoiQuestObjective(currentUser, poi.name)).map(poi => poi.name)),
+    [currentUser, poisData]
   );
+  const dungeonQuestObjective = useMemo(() => isDungeonQuestObjective(currentUser), [currentUser]);
+  const otherPlayerMarkers = useMemo<OtherPlayerMarker[]>(() => otherPlayers.map((player, index) => {
+    const partyMember = isSocialPartyMember(currentUser, player.username);
+    const friend = areSocialFriends(currentUser, player.username);
+    return {
+      player,
+      modelPath: getPlayerModelPath(player.selectedModel || ((index % 6) + 1)),
+      labelColor: partyMember ? '#a7f3d0' : friend ? '#bfdbfe' : '#ffffff',
+      partyMember,
+    };
+  }), [currentUser, otherPlayers]);
+  const tutorialAnchorNpc = useMemo(
+    () => visibleQuestNpcs.find(npc => npc.id === 'quest-npc-marshal-orren') ?? null,
+    [visibleQuestNpcs]
+  );
+
+  useEffect(() => {
+    liveUserRef.current = currentUser;
+    dirtyRef.current = true;
+  }, [currentUser]);
+
+  useEffect(() => {
+    sceneRef.current = {
+      width: actualWidth,
+      height: actualHeight,
+      poiGroups,
+      questPoiNames,
+      dungeonQuestObjective,
+      worldDungeons,
+      visibleQuestNpcs,
+      tutorialAnchorNpc,
+      otherPlayerMarkers,
+      worldEnemies,
+      pendingTravel,
+    };
+    dirtyRef.current = true;
+  }, [
+    actualWidth,
+    actualHeight,
+    poiGroups,
+    questPoiNames,
+    dungeonQuestObjective,
+    worldDungeons,
+    visibleQuestNpcs,
+    tutorialAnchorNpc,
+    otherPlayerMarkers,
+    worldEnemies,
+    pendingTravel,
+  ]);
 
   const worldPanelOpen = Boolean(
     selectedPOI ||
@@ -1575,41 +2334,7 @@ export default function MapRenderer({
     }
   }, [worldEnemies]);
 
-  const minMapZoom = getMinMapZoom(actualWidth, actualHeight);
-  const effectiveZoom = Math.max(minMapZoom, Math.min(MAX_MAP_ZOOM, zoom));
-  const scaledTileSize = MAP_CONFIG.tileSize * effectiveZoom;
-  const maxCameraX = Math.max(0, MAP_CONFIG.width * scaledTileSize - actualWidth);
-  const maxCameraY = Math.max(0, MAP_CONFIG.height * scaledTileSize - actualHeight);
-
-  useEffect(() => {
-    const playerPoint = renderedUserPosition
-      ? {
-          x: renderedUserPosition.x * scaledTileSize - cameraX + scaledTileSize / 2,
-          y: renderedUserPosition.y * scaledTileSize - cameraY + scaledTileSize / 2,
-        }
-      : null;
-
-    const campfires = poisData
-      .filter(poi => poi.type === POIType.CAMPFIRE)
-      .map(poi => {
-        const footprint = getPoiFootprint(poi);
-        return {
-          x: poi.x * scaledTileSize - cameraX + (footprint.width * scaledTileSize) / 2,
-          y: poi.y * scaledTileSize - cameraY + (footprint.height * scaledTileSize) / 2,
-        };
-      });
-
-    emitMapFogState({
-      pointer: cursorScreenRef.current,
-      player: playerPoint,
-      campfires,
-      width: actualWidth,
-      height: actualHeight,
-      zoom: effectiveZoom,
-    });
-  }, [actualHeight, actualWidth, cameraX, cameraY, effectiveZoom, mapAnimNow, poisData, renderedUserPosition, scaledTileSize]);
-
-  const clampZoom = (value: number) => Math.max(minMapZoom, Math.min(MAX_MAP_ZOOM, Number(value.toFixed(2))));
+  const getViewMetrics = () => computeMapViewMetrics(actualWidth, actualHeight, viewRef.current.zoom);
 
   const zoomAroundBasePoint = (
     nextZoomValue: number,
@@ -1618,15 +2343,18 @@ export default function MapRenderer({
     anchorScreenX: number,
     anchorScreenY: number
   ) => {
-    const nextZoom = clampZoom(nextZoomValue);
-    if (nextZoom === effectiveZoom) return;
+    const metrics = getViewMetrics();
+    const nextZoom = Math.max(metrics.minZoom, Math.min(MAX_MAP_ZOOM, Number(nextZoomValue.toFixed(2))));
+    if (nextZoom === metrics.effectiveZoom) return;
 
     const nextMaxCameraX = Math.max(0, MAP_CONFIG.width * MAP_CONFIG.tileSize * nextZoom - actualWidth);
     const nextMaxCameraY = Math.max(0, MAP_CONFIG.height * MAP_CONFIG.tileSize * nextZoom - actualHeight);
 
-    setZoom(nextZoom);
-    setCameraX(Math.max(0, Math.min(nextMaxCameraX, anchorBaseX * nextZoom - anchorScreenX)));
-    setCameraY(Math.max(0, Math.min(nextMaxCameraY, anchorBaseY * nextZoom - anchorScreenY)));
+    const view = viewRef.current;
+    view.zoom = nextZoom;
+    view.x = Math.max(0, Math.min(nextMaxCameraX, anchorBaseX * nextZoom - anchorScreenX));
+    view.y = Math.max(0, Math.min(nextMaxCameraY, anchorBaseY * nextZoom - anchorScreenY));
+    dirtyRef.current = true;
   };
 
   const isCurrentUserAt = (targetX: number, targetY: number, width = 1, height = 1) => (
@@ -1660,378 +2388,32 @@ export default function MapRenderer({
   // Center camera on player initially only once
   useEffect(() => {
     if (currentUser && viewportReady && actualWidth > 0 && actualHeight > 0 && !cameraInitialized.current) {
-      const targetX = Math.max(0, Math.min(
+      const { tileSize, maxCameraX, maxCameraY } = computeMapViewMetrics(actualWidth, actualHeight, viewRef.current.zoom);
+      viewRef.current.x = Math.max(0, Math.min(
         maxCameraX,
-        currentUser.x * scaledTileSize - actualWidth / 2 + scaledTileSize / 2
+        currentUser.x * tileSize - actualWidth / 2 + tileSize / 2
       ));
-      const targetY = Math.max(0, Math.min(
+      viewRef.current.y = Math.max(0, Math.min(
         maxCameraY,
-        currentUser.y * scaledTileSize - actualHeight / 2 + scaledTileSize / 2
+        currentUser.y * tileSize - actualHeight / 2 + tileSize / 2
       ));
       cameraInitialized.current = true;
-      const frameId = window.requestAnimationFrame(() => {
-        setCameraX(targetX);
-        setCameraY(targetY);
-      });
-      return () => window.cancelAnimationFrame(frameId);
+      dirtyRef.current = true;
     }
-  }, [currentUser, viewportReady, actualWidth, actualHeight, maxCameraX, maxCameraY, scaledTileSize]);
-
-  useEffect(() => {
-    const frameId = window.requestAnimationFrame(() => {
-      setCameraX(current => Math.max(0, Math.min(maxCameraX, current)));
-      setCameraY(current => Math.max(0, Math.min(maxCameraY, current)));
-    });
-
-    return () => window.cancelAnimationFrame(frameId);
-  }, [maxCameraX, maxCameraY]);
-
-  // Render the map
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas || !assetsLoaded) return;
-
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    const graphicsQuality = readGraphicsQualitySetting();
-    const renderSize = getMapCanvasRenderSize(actualWidth, actualHeight, graphicsQuality);
-    if (canvas.width !== renderSize.width || canvas.height !== renderSize.height) {
-      canvas.width = renderSize.width;
-      canvas.height = renderSize.height;
-    }
-    ctx.setTransform(renderSize.scale, 0, 0, renderSize.scale, 0, 0);
-
-    // Clear canvas in CSS-pixel space
-    ctx.fillStyle = '#000000';
-    ctx.fillRect(0, 0, actualWidth, actualHeight);
-    // Avoid double-softening when buffer already matches CSS size.
-    ctx.imageSmoothingEnabled = renderSize.scale < 1;
-    ctx.imageSmoothingQuality = getMapImageSmoothingQuality(graphicsQuality);
-
-    const tileSize = scaledTileSize;
-    const mapWidth = MAP_CONFIG.width * tileSize;
-    const mapHeight = MAP_CONFIG.height * tileSize;
-    const cursorScreen = cursorScreenRef.current;
-    const playerRevealPoint = renderedUserPosition
-      ? {
-          x: renderedUserPosition.x * tileSize - cameraX + tileSize / 2,
-          y: renderedUserPosition.y * tileSize - cameraY + tileSize / 2,
-        }
-      : null;
-
-    const worldMap = AssetLoader.getImage(ASSET_PATHS.map.world);
-    if (worldMap) {
-      drawVisibleWorldMap(ctx, worldMap, cameraX, cameraY, actualWidth, actualHeight, effectiveZoom);
-    } else {
-      ctx.fillStyle = '#182216';
-      ctx.fillRect(-cameraX, -cameraY, mapWidth, mapHeight);
-    }
-
-    const activeTravel = currentUser?.traveling;
-    const activeJob = currentUser?.jobQueue?.[0];
-    const activeJobTraveling = Boolean(
-      activeJob &&
-      worldNow >= activeJob.startTime &&
-      !activeJob.travelComplete
-    );
-    const travelPathTarget = pendingTravel
-      ? { x: pendingTravel.targetX, y: pendingTravel.targetY, active: false }
-      : activeTravel
-        ? { x: activeTravel.targetX, y: activeTravel.targetY, active: true }
-        : activeJob && activeJobTraveling
-          ? { x: activeJob.targetX, y: activeJob.targetY, active: true }
-        : null;
-
-    if (renderedUserPosition && travelPathTarget) {
-      drawTravelPathPreview(ctx, {
-        start: renderedUserPosition,
-        target: travelPathTarget,
-        tileSize,
-        cameraX,
-        cameraY,
-        active: travelPathTarget.active,
-        now: worldNow,
-      });
-    }
-
-    const labelBudget = getMapLabelBudget(effectiveZoom);
-    const drawQuestBang = (x: number, y: number) => {
-      drawMapLabel(ctx, '!', x, y, '#fef08a', {
-        alpha: labelBudget.questBangAlpha,
-        fontSize: labelBudget.questBangSize,
-      });
-    };
-
-    const drawPoiMarker = (poi: POI) => {
-      const screenX = poi.x * tileSize - cameraX;
-      const screenY = poi.y * tileSize - cameraY;
-      const footprint = getPoiFootprint(poi);
-      const footprintWidth = footprint.width * tileSize;
-      const footprintHeight = footprint.height * tileSize;
-      const poiSize = poi.type === POIType.TOWN ? footprintWidth :
-                      poi.type === POIType.CAMPFIRE ? tileSize * CAMPFIRE_MARKER_TILES : footprintWidth;
-      const boundsSize = poi.type === POIType.CAMPFIRE ? footprintWidth : poiSize;
-
-      if (screenX < -boundsSize || screenX >= actualWidth || screenY < -boundsSize || screenY >= actualHeight) {
-        return;
-      }
-
-      let imagePath = POI_IMAGE_PATHS[poi.type];
-
-      if (poi.type === POIType.TOWN) {
-        imagePath = ["Harborview", "Blackwater Gate", "Eclipse Hold"].includes(poi.name)
-          ? ASSET_PATHS.pois.harborview
-          : ASSET_PATHS.pois.riverside;
-      }
-
-      const poiImage = AssetLoader.getImage(imagePath);
-      const markerCenterX = screenX + footprintWidth / 2;
-      const markerCenterY = screenY + footprintHeight / 2;
-      const hovered = hoveredPOI?.id === poi.id;
-
-      if (poi.type === POIType.TOWN) {
-        drawTownMarker(ctx, {
-          centerX: markerCenterX,
-          centerY: markerCenterY,
-          footprint: poiSize,
-          image: poiImage,
-          hovered,
-          fallbackLabel: poi.name.slice(0, 2).toUpperCase(),
-          label: poi.name,
-          showLabel: labelBudget.showNames,
-        });
-        if (isPoiQuestObjective(currentUser, poi.name)) {
-          drawQuestBang(markerCenterX, screenY - 6);
-        }
-        return;
-      }
-
-      if (poi.type === POIType.CAMPFIRE) {
-        drawCampfireMarker(ctx, {
-          centerX: markerCenterX,
-          centerY: markerCenterY,
-          footprint: poiSize,
-          image: poiImage,
-          hovered,
-          label: poi.name,
-          now: mapAnimNow,
-        });
-        if (isPoiQuestObjective(currentUser, poi.name)) {
-          drawQuestBang(markerCenterX, screenY - 6);
-        }
-        return;
-      }
-
-      drawJobPoiMarker(ctx, {
-        centerX: markerCenterX,
-        centerY: markerCenterY,
-        footprint: poiSize,
-        poiType: poi.type,
-        image: poiImage,
-        hovered,
-        fallbackLabel: poi.name.slice(0, 2).toUpperCase(),
-        label: poi.name,
-        now: worldNow,
-      });
-      if (isPoiQuestObjective(currentUser, poi.name)) {
-        drawQuestBang(markerCenterX, screenY - 6);
-      }
-    };
-
-    poisData
-      .filter(poi => poi.type === POIType.TOWN || poi.type === POIType.CAMPFIRE)
-      .forEach(drawPoiMarker);
-
-    worldDungeons.forEach(dungeon => {
-      const dungeonSize = tileSize * 1.45;
-      const dungeonCenterX = dungeon.x * tileSize - cameraX + tileSize * 1.5;
-      const dungeonCenterY = dungeon.y * tileSize - cameraY + tileSize * 1.5;
-      const dungeonImage = AssetLoader.getImage(ASSET_PATHS.pois.mountain);
-      const hovered = hoveredDungeon?.id === dungeon.id;
-
-      if (
-        dungeonCenterX >= -dungeonSize &&
-        dungeonCenterX < actualWidth + dungeonSize &&
-        dungeonCenterY >= -dungeonSize &&
-        dungeonCenterY < actualHeight + dungeonSize
-      ) {
-        drawDungeonMarker(ctx, {
-          centerX: dungeonCenterX,
-          centerY: dungeonCenterY,
-          size: dungeonSize,
-          image: dungeonImage,
-          hovered,
-          label: dungeon.name,
-          showLabel: false,
-        });
-
-        const labelPoint = { x: dungeonCenterX, y: dungeonCenterY };
-        if (hovered || isScreenPointRevealed(labelPoint, cursorScreen, playerRevealPoint, effectiveZoom)) {
-          ctx.save();
-          ctx.fillStyle = '#f5d0fe';
-          ctx.font = 'bold 9px sans-serif';
-          ctx.textAlign = 'center';
-          if (shouldDrawMapShadows()) {
-            ctx.shadowColor = 'rgba(0, 0, 0, 0.85)';
-            ctx.shadowBlur = 3;
-          }
-          ctx.fillText(`Lv ${dungeon.level}`, dungeonCenterX, dungeonCenterY - dungeonSize * 0.58);
-          ctx.restore();
-        }
-        if (isDungeonQuestObjective(currentUser)) {
-          drawQuestBang(dungeonCenterX, dungeonCenterY - dungeonSize * 0.72);
-        }
-      }
-    });
-
-    poisData
-      .filter(poi => poi.type !== POIType.TOWN && poi.type !== POIType.CAMPFIRE)
-      .forEach(drawPoiMarker);
-
-    visibleQuestNpcs.forEach(npc => {
-      const npcScreenX = npc.x * tileSize - cameraX;
-      const npcScreenY = npc.y * tileSize - cameraY;
-      const npcSize = getCharacterSpriteSize(tileSize, effectiveZoom, 0.9, 26);
-      const npcImage = AssetLoader.getImage(getPlayerModelPath(npc.modelNumber));
-      const hasQuestMarker = shouldShowQuestNpcMarker(currentUser, npc);
-      const npcHovered = hoveredQuestNpc?.id === npc.id;
-
-      if (
-        npcScreenX >= -npcSize &&
-        npcScreenX < actualWidth &&
-        npcScreenY >= -npcSize &&
-        npcScreenY < actualHeight
-      ) {
-        drawCharacterSprite(ctx, {
-          image: npcImage,
-          x: npcScreenX + (tileSize - npcSize) / 2,
-          y: npcScreenY + (tileSize - npcSize) / 2 - tileSize * 0.08,
-          size: npcSize,
-          fallbackColor: '#854d0e',
-          label: npc.name,
-          labelColor: '#fef08a',
-          showLabel: labelBudget.showNames,
-          topText: hasQuestMarker ? '!' : undefined,
-          topTextColor: '#fef08a',
-          topTextAlpha: labelBudget.questBangAlpha,
-          topTextSize: labelBudget.questBangSize,
-          hovered: npcHovered,
-        });
-      }
-    });
-
-    // Draw current player with model image
-    if (currentUser && renderedUserPosition) {
-      const playerScreenX = renderedUserPosition.x * tileSize - cameraX;
-      const playerScreenY = renderedUserPosition.y * tileSize - cameraY;
-      
-      // Only draw if in viewport
-      if (playerScreenX >= -tileSize && playerScreenX < actualWidth && 
-          playerScreenY >= -tileSize && playerScreenY < actualHeight) {
-        
-        // Draw player model image scaled to read clearly without overwhelming the map.
-        const selectedModelNumber = currentUser?.selectedModel || 3;
-        const modelPath = getPlayerModelPath(selectedModelNumber);
-        const playerImg = AssetLoader.getImage(modelPath as string);
-        const playerSize = getCharacterSpriteSize(tileSize, effectiveZoom, 0.98, 28);
-        const offsetX = (tileSize - playerSize) / 2;
-        const offsetY = (tileSize - playerSize) / 2;
-
-        drawCharacterSprite(ctx, {
-          image: playerImg,
-          x: playerScreenX + offsetX,
-          y: playerScreenY + offsetY,
-          size: playerSize,
-          fallbackColor: '#ffd700',
-          label: currentUser.username,
-          labelColor: '#ffffff',
-          showLabel: labelBudget.showNames,
-        });
-      }
-    }
-
-    otherPlayers.forEach((player, index) => {
-      const sameTileAsCurrentUser = currentUser && player.x === currentUser.x && player.y === currentUser.y;
-      const playerScreenX = player.x * tileSize - cameraX + (sameTileAsCurrentUser ? tileSize * 0.22 : 0);
-      const playerScreenY = player.y * tileSize - cameraY + (sameTileAsCurrentUser ? tileSize * 0.1 : 0);
-      const playerSize = getCharacterSpriteSize(tileSize, effectiveZoom, 0.88, 25);
-      const playerImage = AssetLoader.getImage(getPlayerModelPath(player.selectedModel || ((index % 6) + 1)));
-      const partyMember = isSocialPartyMember(currentUser, player.username);
-      const friend = areSocialFriends(currentUser, player.username);
-
-      if (
-        playerScreenX >= -playerSize &&
-        playerScreenX < actualWidth &&
-        playerScreenY >= -playerSize &&
-        playerScreenY < actualHeight
-      ) {
-        drawCharacterSprite(ctx, {
-          image: playerImage,
-          x: playerScreenX + (tileSize - playerSize) / 2,
-          y: playerScreenY + (tileSize - playerSize) / 2 - tileSize * 0.08,
-          size: playerSize,
-          fallbackColor: '#0e7490',
-          label: player.username,
-          labelColor: partyMember ? '#a7f3d0' : friend ? '#bfdbfe' : '#ffffff',
-          showLabel: labelBudget.showNames,
-          frameColor: partyMember ? '#6ee7b7' : undefined,
-        });
-      }
-    });
-
-    worldEnemies.forEach(enemy => {
-      const enemyScreenX = enemy.x * tileSize - cameraX;
-      const enemyScreenY = enemy.y * tileSize - cameraY;
-      const isWorldBoss = enemy.spawnKind === 'world-boss';
-      const isStoryBoss = enemy.spawnKind === 'story-boss';
-      const isRegionalThreat = enemy.spawnKind === 'regional-threat';
-      const isCoopBoss = enemy.spawnKind === 'coop-boss';
-      const isBossThreat = isWorldBoss || isStoryBoss || isRegionalThreat || isCoopBoss;
-      const enemySize = getCharacterSpriteSize(tileSize, effectiveZoom, isBossThreat ? 1.22 : 0.88, isBossThreat ? 36 : 25);
-      const enemyImage = AssetLoader.getImage(enemy.artworkPath || getPlayerModelAsset(enemy.modelNumber));
-      const enemyRevealed = isEnemyRevealedOnScreen(
-        enemy,
-        cameraX,
-        cameraY,
-        tileSize,
-        cursorScreen,
-        playerRevealPoint,
-        effectiveZoom
-      );
-
-      if (
-        enemyRevealed &&
-        enemyScreenX >= -enemySize &&
-        enemyScreenX < actualWidth &&
-        enemyScreenY >= -enemySize &&
-        enemyScreenY < actualHeight
-      ) {
-        drawCharacterSprite(ctx, {
-          image: enemyImage,
-          x: enemyScreenX + (tileSize - enemySize) / 2,
-          y: enemyScreenY + (tileSize - enemySize) / 2 - tileSize * 0.08,
-          size: enemySize,
-          fallbackColor: '#7f1d1d',
-          topText: isWorldBoss ? 'Boss' : isStoryBoss ? 'Story' : isRegionalThreat ? 'Threat' : (labelBudget.showNames || hoveredEnemy?.id === enemy.id ? `Lv ${enemy.level}` : undefined),
-          topTextColor: isBossThreat ? '#fca5a5' : '#fecaca',
-          topTextAlpha: labelBudget.showNames ? 1 : 0.7,
-          topTextSize: labelBudget.showNames ? 10 : 8,
-          label: isBossThreat || hoveredEnemy?.id === enemy.id ? enemy.name : undefined,
-          labelColor: '#fecaca',
-          showLabel: labelBudget.showNames || Boolean(hoveredEnemy?.id === enemy.id),
-          hovered: hoveredEnemy?.id === enemy.id,
-        });
-      }
-    });
-
-    ctx.shadowBlur = 0;
-  }, [cameraX, cameraY, actualWidth, actualHeight, hoveredPOI, hoveredEnemy, hoveredDungeon, hoveredQuestNpc, currentUser, renderedUserPosition, pendingTravel, otherPlayers, assetsLoaded, worldEnemies, worldDungeons, visibleQuestNpcs, poisData, scaledTileSize, effectiveZoom, worldNow, mapAnimNow, graphicsRevision]);
+  }, [currentUser, viewportReady, actualWidth, actualHeight]);
 
   // Mouse drag handlers
+  const setHoverTarget = (kind: MapHoverKind | null, id: string | null) => {
+    const hover = hoverRef.current;
+    if (hover.kind === kind && hover.id === id) return;
+    hover.kind = kind;
+    hover.id = id;
+    dirtyRef.current = true;
+  };
+
   const handleMouseDown = (e: React.MouseEvent) => {
-    setIsDragging(true);
-    setDragStart({ x: e.clientX + cameraX, y: e.clientY + cameraY });
+    isDraggingRef.current = true;
+    dragStartRef.current = { x: e.clientX + viewRef.current.x, y: e.clientY + viewRef.current.y };
     dragOriginRef.current = { x: e.clientX, y: e.clientY };
     hasDraggedRef.current = false;
   };
@@ -2044,34 +2426,12 @@ export default function MapRenderer({
     const screenX = e.clientX - rect.left;
     const screenY = e.clientY - rect.top;
     cursorScreenRef.current = { x: screenX, y: screenY };
-    const now = performance.now();
-    const tileSize = scaledTileSize;
-    const playerRevealPoint = renderedUserPosition
-      ? {
-          x: renderedUserPosition.x * tileSize - cameraX + tileSize / 2,
-          y: renderedUserPosition.y * tileSize - cameraY + tileSize / 2,
-        }
-      : null;
-    if (now - lastFogPointerEmitRef.current >= MAP_FOG_POINTER_EMIT_MS) {
-      lastFogPointerEmitRef.current = now;
-      const campfires = poisData
-        .filter(poi => poi.type === POIType.CAMPFIRE)
-        .map(poi => {
-          const footprint = getPoiFootprint(poi);
-          return {
-            x: poi.x * scaledTileSize - cameraX + (footprint.width * scaledTileSize) / 2,
-            y: poi.y * scaledTileSize - cameraY + (footprint.height * scaledTileSize) / 2,
-          };
-        });
-      emitMapFogState({
-        pointer: cursorScreenRef.current,
-        player: playerRevealPoint,
-        campfires,
-        width: actualWidth,
-        height: actualHeight,
-        zoom: effectiveZoom,
-      });
-    }
+    const view = viewRef.current;
+    const cameraX = view.x;
+    const cameraY = view.y;
+    const { tileSize, effectiveZoom, maxCameraX, maxCameraY } = getViewMetrics();
+    const playerRevealPoint = getPlayerScreenPoint(liveUserRef.current, Date.now(), view, tileSize);
+    const isDragging = isDraggingRef.current;
     const mouseX = screenX + cameraX;
     const mouseY = screenY + cameraY;
     const tileX = Math.floor(mouseX / tileSize);
@@ -2101,38 +2461,29 @@ export default function MapRenderer({
       tileY < npc.y + 2
     ));
 
-    if (hoveredEnemy) {
-      setHoveredEnemy(hoveredEnemy);
-      setHoveredDungeon(null);
-      setHoveredQuestNpc(null);
-      setHoveredPOI(null);
-      canvas.style.cursor = currentUser?.x === hoveredEnemy.x && currentUser?.y === hoveredEnemy.y ? 'crosshair' : 'pointer';
-    } else if (hoveredDungeon) {
-      setHoveredEnemy(null);
-      setHoveredDungeon(hoveredDungeon);
-      setHoveredQuestNpc(null);
-      setHoveredPOI(null);
-      canvas.style.cursor = 'pointer';
-    } else if (hoveredQuestNpc) {
-      setHoveredEnemy(null);
-      setHoveredDungeon(null);
-      setHoveredQuestNpc(hoveredQuestNpc);
-      setHoveredPOI(null);
-      canvas.style.cursor = 'pointer';
-    } else {
-      setHoveredEnemy(null);
-      setHoveredDungeon(null);
-      setHoveredQuestNpc(null);
-    }
-
     // Check if hovering over a POI (2x2 for campfire, 4x4 tiles or 8x8 for towns)
-    const hoveredPOI = findPoiAtTile(poisData, tileX, tileY);
-    if (!hoveredEnemy && !hoveredDungeon && !hoveredQuestNpc) setHoveredPOI(hoveredPOI || null);
+    const hoveredPOI = hoveredEnemy || hoveredDungeon || hoveredQuestNpc
+      ? undefined
+      : findPoiAtTile(poisData, tileX, tileY);
 
-    // Update cursor
-    if (!hoveredEnemy && !hoveredDungeon && !hoveredQuestNpc) {
-      canvas.style.cursor = hoveredPOI ? 'pointer' : (isDragging ? 'grabbing' : 'grab');
+    let nextCursor: string;
+    if (hoveredEnemy) {
+      setHoverTarget('enemy', hoveredEnemy.id);
+      nextCursor = currentUser?.x === hoveredEnemy.x && currentUser?.y === hoveredEnemy.y ? 'crosshair' : 'pointer';
+    } else if (hoveredDungeon) {
+      setHoverTarget('dungeon', hoveredDungeon.id);
+      nextCursor = 'pointer';
+    } else if (hoveredQuestNpc) {
+      setHoverTarget('npc', hoveredQuestNpc.id);
+      nextCursor = 'pointer';
+    } else if (hoveredPOI) {
+      setHoverTarget('poi', hoveredPOI.id);
+      nextCursor = 'pointer';
+    } else {
+      setHoverTarget(null, null);
+      nextCursor = isDragging ? 'grabbing' : 'grab';
     }
+    if (canvas.style.cursor !== nextCursor) canvas.style.cursor = nextCursor;
 
     if (!isDragging) return;
 
@@ -2140,53 +2491,31 @@ export default function MapRenderer({
     if (dragDistance > 4) {
       hasDraggedRef.current = true;
     }
-    
+
     const newCameraX = Math.max(0, Math.min(
       maxCameraX,
-      dragStart.x - e.clientX
+      dragStartRef.current.x - e.clientX
     ));
     const newCameraY = Math.max(0, Math.min(
       maxCameraY,
-      dragStart.y - e.clientY
+      dragStartRef.current.y - e.clientY
     ));
-    
-    setCameraX(newCameraX);
-    setCameraY(newCameraY);
+
+    if (newCameraX !== view.x || newCameraY !== view.y) {
+      view.x = newCameraX;
+      view.y = newCameraY;
+      dirtyRef.current = true;
+    }
   };
 
   const handleMouseUp = () => {
-    setIsDragging(false);
+    isDraggingRef.current = false;
   };
 
   const handleMouseLeave = () => {
-    setIsDragging(false);
-    setHoveredPOI(null);
-    setHoveredEnemy(null);
-    setHoveredDungeon(null);
-    setHoveredQuestNpc(null);
+    isDraggingRef.current = false;
+    setHoverTarget(null, null);
     cursorScreenRef.current = null;
-    lastFogPointerEmitRef.current = 0;
-    emitMapFogState({
-      pointer: null,
-      player: renderedUserPosition
-        ? {
-            x: renderedUserPosition.x * scaledTileSize - cameraX + scaledTileSize / 2,
-            y: renderedUserPosition.y * scaledTileSize - cameraY + scaledTileSize / 2,
-          }
-        : null,
-      campfires: poisData
-        .filter(poi => poi.type === POIType.CAMPFIRE)
-        .map(poi => {
-          const footprint = getPoiFootprint(poi);
-          return {
-            x: poi.x * scaledTileSize - cameraX + (footprint.width * scaledTileSize) / 2,
-            y: poi.y * scaledTileSize - cameraY + (footprint.height * scaledTileSize) / 2,
-          };
-        }),
-      width: actualWidth,
-      height: actualHeight,
-      zoom: effectiveZoom,
-    });
     hasDraggedRef.current = false;
   };
 
@@ -2200,9 +2529,12 @@ export default function MapRenderer({
     if (!canvas) return;
 
     const rect = canvas.getBoundingClientRect();
+    const view = viewRef.current;
+    const cameraX = view.x;
+    const cameraY = view.y;
+    const { tileSize, effectiveZoom } = getViewMetrics();
     const mouseX = e.clientX - rect.left + cameraX;
     const mouseY = e.clientY - rect.top + cameraY;
-    const tileSize = scaledTileSize;
     const tileX = Math.floor(mouseX / tileSize);
     const tileY = Math.floor(mouseY / tileSize);
 
@@ -2220,12 +2552,7 @@ export default function MapRenderer({
 
     const clickScreenX = e.clientX - rect.left;
     const clickScreenY = e.clientY - rect.top;
-    const playerRevealPoint = renderedUserPosition
-      ? {
-          x: renderedUserPosition.x * tileSize - cameraX + tileSize / 2,
-          y: renderedUserPosition.y * tileSize - cameraY + tileSize / 2,
-        }
-      : null;
+    const playerRevealPoint = getPlayerScreenPoint(liveUserRef.current, Date.now(), view, tileSize);
     const revealedEnemies = worldEnemies.filter(enemy => isEnemyRevealedOnScreen(
       enemy,
       cameraX,
@@ -2350,8 +2677,10 @@ export default function MapRenderer({
     const rect = canvas.getBoundingClientRect();
     const anchorScreenX = event.clientX - rect.left;
     const anchorScreenY = event.clientY - rect.top;
-    const anchorBaseX = (cameraX + anchorScreenX) / effectiveZoom;
-    const anchorBaseY = (cameraY + anchorScreenY) / effectiveZoom;
+    const view = viewRef.current;
+    const { effectiveZoom } = getViewMetrics();
+    const anchorBaseX = (view.x + anchorScreenX) / effectiveZoom;
+    const anchorBaseY = (view.y + anchorScreenY) / effectiveZoom;
     const zoomDirection = event.deltaY > 0 ? -ZOOM_STEP : ZOOM_STEP;
 
     zoomAroundBasePoint(effectiveZoom + zoomDirection, anchorBaseX, anchorBaseY, anchorScreenX, anchorScreenY);
@@ -2469,25 +2798,16 @@ export default function MapRenderer({
         onClick={handleClick}
       />
 
-      {visibleQuestNpcs
-        .filter(npc => npc.id === 'quest-npc-marshal-orren')
-        .map(npc => {
-          const markerSize = getCharacterSpriteSize(scaledTileSize, effectiveZoom, 0.9, 26);
-          return (
-            <span
-              key={`tutorial-anchor-${npc.id}`}
-              data-multiplayer-tutorial-anchor="marshal-orren-contact"
-              className="pointer-events-none absolute"
-              style={{
-                left: npc.x * scaledTileSize - cameraX + (scaledTileSize - markerSize) / 2,
-                top: npc.y * scaledTileSize - cameraY + (scaledTileSize - markerSize) / 2 - scaledTileSize * 0.08,
-                width: markerSize,
-                height: markerSize,
-              }}
-              aria-hidden="true"
-            />
-          );
-        })}
+      {tutorialAnchorNpc && (
+        // Positioned imperatively by the draw loop so camera moves don't re-render React.
+        <span
+          ref={tutorialAnchorRef}
+          key={`tutorial-anchor-${tutorialAnchorNpc.id}`}
+          data-multiplayer-tutorial-anchor="marshal-orren-contact"
+          className="pointer-events-none absolute"
+          aria-hidden="true"
+        />
+      )}
 
       <TravelConfirmModal
         pendingTravel={pendingTravel}

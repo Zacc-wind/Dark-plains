@@ -10,6 +10,9 @@ export const MAX_VISIBLE_CHAT_HISTORY = 50;
 
 type ChatUser = Pick<User, 'username' | 'social'> | null | undefined;
 
+/** Set once `/api/chat` answers 503 (no chat backend); later reads stay local until reload. */
+let sharedChatUnavailable = false;
+
 function normalizeMessages(value: unknown): SocialChatMessage[] {
   if (!Array.isArray(value)) return [];
 
@@ -41,10 +44,14 @@ export async function fetchSharedChatHistory(
   user?: ChatUser,
 ): Promise<SocialChatMessage[]> {
   const localMessages = getSocialChatMessages(channel, user).slice(-MAX_VISIBLE_CHAT_HISTORY);
-  if (channel === 'party') return localMessages;
+  if (channel === 'party' || sharedChatUnavailable) return localMessages;
 
   try {
     const response = await fetch('/api/chat', { cache: 'no-store' });
+    if (response.status === 503) {
+      sharedChatUnavailable = true;
+      return localMessages;
+    }
     const payload = await response.json() as { ok?: boolean; messages?: unknown };
     if (!response.ok || !payload.ok) return localMessages;
     return normalizeMessages(payload.messages);

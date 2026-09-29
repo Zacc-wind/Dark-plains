@@ -1,11 +1,10 @@
 'use client';
 
 import Image from 'next/image';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   cancelPlayerTradeSession,
   confirmCurrentPlayerTrade,
-  expireCurrentSocialRequests,
   getCurrentPlayerTradeSession,
   getCurrentUser,
   getInventoryItemDefinition,
@@ -27,8 +26,12 @@ import {
 import { emitCompletionNotice } from '@/lib/completionEvents';
 import { emitFxEvent } from '@/lib/fxEvents';
 import { playGameSound, preloadGameSounds } from '@/lib/sound';
+import { usePolling } from '@/lib/hooks/usePolling';
+import { expireSocialRequestsShared } from '@/lib/socialRequestTicker';
 
 const EQUIPMENT_ICON_BASE = '/assets/equipment';
+const IDLE_TRADE_POLL_MS = 3_000;
+const ACTIVE_TRADE_POLL_MS = 1_000;
 
 function getEquipmentIconPath(item: Pick<Equipment, 'slot' | 'rarity'>): string {
   return `${EQUIPMENT_ICON_BASE}/${item.slot}-${item.rarity}.png`;
@@ -131,23 +134,28 @@ export default function TradeSessionOverlay() {
   const activeSession = session?.status === 'active' && !dismissedIds.includes(session.id) ? session : undefined;
   const activeSessionId = activeSession?.id;
 
+  const refresh = useCallback(() => {
+    const tickAt = Date.now();
+    expireSocialRequestsShared(tickAt);
+    setNow(tickAt);
+    setRevision(value => value + 1);
+  }, []);
+  usePolling(refresh, activeSessionId ? ACTIVE_TRADE_POLL_MS : IDLE_TRADE_POLL_MS, { immediate: false });
+
   useEffect(() => {
-    const interval = window.setInterval(() => {
-      expireCurrentSocialRequests();
-      setNow(Date.now());
-      setRevision(value => value + 1);
-    }, 1000);
     const handleOpen = () => {
       const latest = getCurrentPlayerTradeSession();
       if (latest) setDismissedIds(ids => ids.filter(id => id !== latest.id));
+      setNow(Date.now());
       setRevision(value => value + 1);
     };
     window.addEventListener(TRADE_SESSION_OPEN_EVENT, handleOpen);
+    window.addEventListener('storage', refresh);
     return () => {
-      window.clearInterval(interval);
       window.removeEventListener(TRADE_SESSION_OPEN_EVENT, handleOpen);
+      window.removeEventListener('storage', refresh);
     };
-  }, []);
+  }, [refresh]);
 
   useEffect(() => {
     if (!activeSessionId) return undefined;

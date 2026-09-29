@@ -74,12 +74,31 @@ export function formatWorldPlayerLastSeen(player: Pick<WorldMapPlayer, 'updatedA
   return `${Math.floor(diffMs / (24 * 60 * 60_000))}d ago`;
 }
 
-export async function refreshWorldPlayers(): Promise<WorldMapPlayer[]> {
+/** Map, PVP overlay and PVP hub all poll this endpoint; calls inside this window share one response. */
+export const WORLD_PLAYERS_CACHE_TTL_MS = 4_000;
+
+let worldPlayersInFlight: Promise<WorldMapPlayer[]> | null = null;
+let worldPlayersFetchedAt = 0;
+
+export function refreshWorldPlayers(options: { force?: boolean } = {}): Promise<WorldMapPlayer[]> {
   if (!isSupabaseConfigured()) {
     cachedWorldPlayers = [];
-    return cachedWorldPlayers;
+    return Promise.resolve(cachedWorldPlayers);
   }
 
+  if (worldPlayersInFlight) return worldPlayersInFlight;
+  if (!options.force && worldPlayersFetchedAt > 0 && Date.now() - worldPlayersFetchedAt < WORLD_PLAYERS_CACHE_TTL_MS) {
+    return Promise.resolve(cachedWorldPlayers);
+  }
+
+  worldPlayersInFlight = fetchWorldPlayers().finally(() => {
+    worldPlayersFetchedAt = Date.now();
+    worldPlayersInFlight = null;
+  });
+  return worldPlayersInFlight;
+}
+
+async function fetchWorldPlayers(): Promise<WorldMapPlayer[]> {
   try {
     const response = await fetch('/api/world/players', { cache: 'no-store' });
     if (!response.ok) return cachedWorldPlayers;

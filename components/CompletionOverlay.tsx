@@ -8,7 +8,11 @@ import { getCurrentUser } from '@/lib/auth';
 import { getPlayerModelPath } from '@/lib/assetLoader';
 
 type CompletionPhase = 'burst' | 'report';
-const COMPLETION_BURST_DURATION_MS = 4200;
+const COMPLETION_BURST_DURATION_MS = 2800;
+
+function isStoryDialogOpen(): boolean {
+  return typeof document !== 'undefined' && document.querySelector('.story-dialog-layer') !== null;
+}
 
 function getCompletionFxType(notice: CompletionNotice): FxEventType {
   if (notice.kind === 'defeat') return 'defeat';
@@ -40,6 +44,7 @@ function emitCompletionFx(notice: CompletionNotice): void {
 export default function CompletionOverlay() {
   const [activeNotice, setActiveNotice] = useState<CompletionNotice | null>(null);
   const [phase, setPhase] = useState<CompletionPhase>('burst');
+  const [queuedCount, setQueuedCount] = useState(0);
   const activeRef = useRef<CompletionNotice | null>(null);
   const queueRef = useRef<CompletionNotice[]>([]);
   const seenRef = useRef<Set<string>>(new Set());
@@ -50,7 +55,7 @@ export default function CompletionOverlay() {
   const advanceNoticeQueue = useCallback(() => {
     if (timerRef.current) window.clearTimeout(timerRef.current);
     timerRef.current = null;
-    const next = queueRef.current.shift();
+    const next = isStoryDialogOpen() ? undefined : queueRef.current.shift();
     if (next) {
       startNoticeRef.current(next);
       return;
@@ -74,6 +79,7 @@ export default function CompletionOverlay() {
     notifyCompletionOverlayState('busy');
     activeRef.current = notice;
     setActiveNotice(notice);
+    setQueuedCount(queueRef.current.length);
 
     if (timerRef.current) window.clearTimeout(timerRef.current);
     timerRef.current = null;
@@ -105,11 +111,35 @@ export default function CompletionOverlay() {
   }, [phase]);
 
   useEffect(() => {
+    // Rewards wait for story dialogue to close so the two never fight for the screen.
+    const dialogObserver = typeof MutationObserver === 'undefined'
+      ? null
+      : new MutationObserver(() => {
+        if (isStoryDialogOpen()) {
+          const paused = activeRef.current;
+          if (!paused) return;
+          if (timerRef.current) window.clearTimeout(timerRef.current);
+          timerRef.current = null;
+          queueRef.current.unshift(paused);
+          activeRef.current = null;
+          setActiveNotice(null);
+          setQueuedCount(queueRef.current.length);
+          return;
+        }
+        if (activeRef.current || queueRef.current.length === 0) return;
+        const next = queueRef.current.shift();
+        if (next) startNoticeRef.current(next);
+      });
+    if (dialogObserver && typeof document !== 'undefined') {
+      dialogObserver.observe(document.body, { childList: true });
+    }
+
     const unsubscribe = subscribeCompletionNotices((notice) => {
       if (!notice?.id || seenRef.current.has(notice.id)) return;
-      if (activeRef.current) {
+      if (activeRef.current || isStoryDialogOpen()) {
         seenRef.current.add(notice.id);
         queueRef.current.push(notice);
+        setQueuedCount(queueRef.current.length);
         return;
       }
 
@@ -117,6 +147,7 @@ export default function CompletionOverlay() {
     });
 
     return () => {
+      dialogObserver?.disconnect();
       unsubscribe();
       if (timerRef.current) window.clearTimeout(timerRef.current);
       if (!activeRef.current && queueRef.current.length === 0) {
@@ -176,8 +207,6 @@ export default function CompletionOverlay() {
       : hasCustomArtwork
         ? 'completion-avatar-item-art'
         : 'player-model-art';
-  const queuedCount = queueRef.current.length;
-
   return (
     <div
       className={`completion-overlay fixed inset-0 z-[95] flex cursor-pointer items-center justify-center p-4 text-zinc-100 ${isUnitRecruitReveal || isGearReveal ? 'completion-overlay-reveal' : 'bg-black/20 backdrop-blur-[2px]'}`}

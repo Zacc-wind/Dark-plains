@@ -1,6 +1,6 @@
-import { getCurrentUser, type User } from '@/lib/auth';
 import { applyRemoteAccountTutorials, readRemoteTutorialsFromGameSessions } from '@/lib/accountTutorial';
-import { writeGameJson, removeGameStorageItem } from '@/lib/gameStore';
+import { clearStoredSessionUser, readCurrentUser, writeStoredSessionUser } from '@/lib/playerStore';
+import type { User } from '@/lib/playerTypes';
 import { createClient } from '@/lib/supabase/client';
 import {
   getAuthMode,
@@ -9,14 +9,14 @@ import {
   type AuthMode,
 } from '@/lib/supabase/config';
 import {
-  fetchRemotePlayer,
-  playerStateRowToUser,
-  saveRemotePlayer,
-} from '@/lib/supabase/playerRepository';
+  flushPlayerPersist,
+  resetPlayerPersist,
+  schedulePlayerPersist,
+} from '@/lib/supabase/playerPersistence';
+import { fetchRemotePlayer, playerStateRowToUser } from '@/lib/supabase/playerRepository';
 import { isValidGameUsername, usernameToAuthEmail } from '@/lib/supabase/username';
 
-const CURRENT_USER_KEY = 'pirate_game_current_user';
-let playerPersistenceQueue: Promise<void> = Promise.resolve();
+export { flushPlayerPersist, schedulePlayerPersist };
 
 /**
  * Dual-path gate used by login/register UI and logout/persist.
@@ -147,6 +147,10 @@ export async function loginWithSupabase(
     return { success: false, error: 'Supabase is not configured.' };
   }
 
+  // Settle any previous account's pending save before the session switches.
+  await flushPlayerPersist();
+  resetPlayerPersist();
+
   const supabase = createClient();
   const email = usernameToAuthEmail(username);
 
@@ -164,14 +168,19 @@ export async function loginWithSupabase(
 }
 
 export async function logoutSupabase(): Promise<void> {
-  removeGameStorageItem(CURRENT_USER_KEY);
+  if (isSupabaseConfigured()) await flushPlayerPersist();
+  resetPlayerPersist();
+  clearStoredSessionUser();
   if (!isSupabaseConfigured()) return;
   const supabase = createClient();
   await supabase.auth.signOut();
 }
 
 export async function hydrateLocalUserFromSession(): Promise<User | null> {
-  if (!isSupabaseConfigured()) return getCurrentUser();
+  if (!isSupabaseConfigured()) return readCurrentUser();
+
+  // Pending local edits must reach the server before the remote row overwrites them.
+  await flushPlayerPersist();
 
   const supabase = createClient();
   const { data: { user }, error } = await supabase.auth.getUser();
@@ -183,27 +192,15 @@ export async function hydrateLocalUserFromSession(): Promise<User | null> {
   const sessionUser = playerStateRowToUser(remote.state, remote.profile);
   const remoteTutorials = readRemoteTutorialsFromGameSessions(remote.state.game_sessions);
   applyRemoteAccountTutorials(sessionUser.username, remoteTutorials);
-  writeGameJson(CURRENT_USER_KEY, sessionUser);
+  writeStoredSessionUser(sessionUser);
   return sessionUser;
 }
 
+/** Save the current session user now instead of waiting for the debounce. */
 export function persistCurrentUserToSupabase(): Promise<void> {
   if (!isSupabaseConfigured()) return Promise.resolve();
-
-  const localUser = getCurrentUser();
-  if (!localUser) return Promise.resolve();
-
-  playerPersistenceQueue = playerPersistenceQueue
-    .catch(() => undefined)
-    .then(async () => {
-      const supabase = createClient();
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-      await saveRemotePlayer(localUser, user.id);
-    })
-    .catch(() => undefined);
-
-  return playerPersistenceQueue;
+  schedulePlayerPersist();
+  return flushPlayerPersist();
 }
 
 export async function bootstrapSupabaseSession(): Promise<boolean> {

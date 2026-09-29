@@ -52,12 +52,10 @@ beforeEach(() => {
 });
 
 describe('multiplayer tutorial progress', () => {
-  it('advances the First Banner steps only after their real actions complete', () => {
-    expect(getNextMultiplayerTutorialCallout('FreshBanner', 'story-01-first-banner')).toBe('jobs-open');
+  it('leaves First Banner jobs teaching to story dialogue and still records real actions', () => {
+    expect(getNextMultiplayerTutorialCallout('FreshBanner', 'story-01-first-banner')).toBeNull();
 
     completeMultiplayerTutorialCallout('FreshBanner', 'jobs-open');
-    expect(getNextMultiplayerTutorialCallout('FreshBanner', 'story-01-first-banner')).toBe('job-start');
-
     completeMultiplayerTutorialCallout('FreshBanner', 'job-start');
     expect(getNextMultiplayerTutorialCallout('FreshBanner', 'story-01-first-banner')).toBeNull();
     expect(readMultiplayerTutorialProgress('FreshBanner').completedCalloutIds).toEqual([
@@ -66,19 +64,20 @@ describe('multiplayer tutorial progress', () => {
     ]);
   });
 
-  it('scopes callouts to the active story instead of blocking on older unfinished steps', () => {
-    expect(getNextMultiplayerTutorialCallout('ReturningBanner', 'story-02-candle-road')).toBe('harborview-travel');
-    expect(getNextMultiplayerTutorialCallout('ReturningBanner', 'story-03-lost-apprentice')).toBe('marshal-orren-contact');
+  it('scopes failsafe callouts to the active story instead of blocking on older unfinished steps', () => {
+    expect(getNextMultiplayerTutorialCallout('ReturningBanner', 'story-02-candle-road')).toBeNull();
+    expect(getNextMultiplayerTutorialCallout('ReturningBanner', 'story-03-lost-apprentice')).toBeNull();
     expect(getNextMultiplayerTutorialCallout('ReturningBanner', 'story-04-river-law')).toBe('enemy-risk');
     expect(getNextMultiplayerTutorialCallout('ReturningBanner', null)).toBeNull();
+    expect(getNextMultiplayerTutorialCallout('ReturningBanner')).toBe('enemy-risk');
   });
 
-  it('completes the Marshal Orren contact lesson only from its recorded interaction', () => {
-    expect(getNextMultiplayerTutorialCallout('MusterBanner', 'story-03-lost-apprentice')).toBe('marshal-orren-contact');
+  it('records the Marshal Orren contact interaction without spotlighting it', () => {
+    expect(getNextMultiplayerTutorialCallout('MusterBanner', 'story-03-lost-apprentice')).toBeNull();
 
     completeMultiplayerTutorialCallout('MusterBanner', 'marshal-orren-contact');
 
-    expect(getNextMultiplayerTutorialCallout('MusterBanner', 'story-03-lost-apprentice')).toBeNull();
+    expect(readMultiplayerTutorialProgress('MusterBanner').completedCalloutIds).toEqual(['marshal-orren-contact']);
   });
 
   it('advances every Trial by Steel interaction in order', () => {
@@ -171,13 +170,13 @@ describe('multiplayer tutorial progress', () => {
   });
 
   it('recovers partial callout and dialogue progress after module reload', async () => {
-    completeMultiplayerTutorialCallout('ReloadBanner', 'jobs-open');
+    completeMultiplayerTutorialCallout('ReloadBanner', 'enemy-risk');
     saveMultiplayerTutorialDialogueLine('ReloadBanner', 'story-01-first-banner', 1);
 
     vi.resetModules();
     const reloaded = await import('@/lib/multiplayerTutorial');
 
-    expect(reloaded.getNextMultiplayerTutorialCallout('ReloadBanner', 'story-01-first-banner')).toBe('job-start');
+    expect(reloaded.getNextMultiplayerTutorialCallout('ReloadBanner', 'story-04-river-law')).toBe('formation-confirm');
     expect(reloaded.getMultiplayerTutorialDialogueLine('ReloadBanner', 'story-01-first-banner')).toBe(1);
   });
 });

@@ -15,9 +15,12 @@ import {
   skipModeTutorial,
 } from '@/lib/modeTutorial';
 import { playGameSound } from '@/lib/sound';
+import dynamic from 'next/dynamic';
 import BackgroundMusic from '@/components/BackgroundMusic';
-import SingleplayerTutorialOverlay from '@/components/SingleplayerTutorialOverlay';
-import ThreeFxOverlay from '@/components/ThreeFxOverlay';
+import LoadingScreen from '@/components/ui/LoadingScreen';
+
+const SingleplayerTutorialOverlay = dynamic(() => import('@/components/SingleplayerTutorialOverlay'), { ssr: false });
+const ThreeFxOverlay = dynamic(() => import('@/components/ThreeFxOverlay'), { ssr: false });
 
 export default function ModePage() {
   const router = useRouter();
@@ -49,13 +52,7 @@ export default function ModePage() {
     };
   }, [router]);
 
-  if (!ready) {
-    return (
-      <div className="fantasy-ui flex min-h-screen items-center justify-center bg-[#05080a]">
-        <div className="fantasy-heading text-2xl">Loading...</div>
-      </div>
-    );
-  }
+  if (!ready) return <LoadingScreen />;
 
   return (
     <>
@@ -65,6 +62,35 @@ export default function ModePage() {
     </>
   );
 }
+
+const MODE_CARDS: {
+  mode: GameMode;
+  kicker: string;
+  title: string;
+  copy: string;
+  features: string[];
+  cta: string;
+  image: string;
+}[] = [
+  {
+    mode: 'singleplayer',
+    kicker: 'Solo campaign',
+    title: 'Singleplayer',
+    copy: 'Roguelike roads with permanent run upgrades. Retreat any time with no world-map penalty.',
+    features: ['Drafted warbands', 'Omens and relics', 'Run achievements'],
+    cta: 'Enter the Run Hall',
+    image: '/assets/run-background.jpg',
+  },
+  {
+    mode: 'multiplayer',
+    kicker: 'Shared frontier',
+    title: 'Multiplayer',
+    copy: 'The living coast: towns, contracts, dungeons, and your persistent commander.',
+    features: ['Story campaign', 'Co-op raids and duels', 'Trade and parties'],
+    cta: 'Enter the World Map',
+    image: '/assets/world-map.jpg',
+  },
+];
 
 function FixedModeSelectScreen() {
   const router = useRouter();
@@ -103,6 +129,16 @@ function FixedModeSelectScreen() {
     });
   };
 
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.target instanceof HTMLElement && event.target.closest('input, textarea, select')) return;
+      const card = MODE_CARDS[Number(event.key) - 1];
+      if (card) chooseMode(card.mode);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  });
+
   const skipTutorial = () => {
     skipModeTutorial(username);
     playGameSound('ui.click', { throttleMs: 120 });
@@ -111,58 +147,69 @@ function FixedModeSelectScreen() {
   };
 
   return (
-    <div className="mode-select-screen fantasy-ui relative min-h-screen overflow-hidden text-zinc-100">
+    <div className="dp-screen fantasy-ui">
       <Image
         src="/assets/town-harborview-bg.png"
         alt=""
         fill
         priority
-        className="mode-select-bg object-cover object-center"
+        className="dp-screen-bg object-cover object-center"
         sizes="100vw"
+        quality={70}
       />
-      <div className="mode-select-vignette absolute inset-0" aria-hidden="true" />
+      <div className="dp-screen-vignette" aria-hidden="true" />
 
-      <div className="relative z-10 flex min-h-screen flex-col items-center justify-center px-4 py-10">
-        <div className="mode-select-copy mb-10 text-center">
-          <p className="arcane-label mb-3">Choose your road</p>
-          <h1 className="fantasy-heading mode-select-title">Dark Plains</h1>
-          <p className="ui-muted mx-auto mt-4 max-w-xl text-sm font-bold leading-relaxed">
-            Lead armies on the shared world map, or carve a solo roguelike road with separate run progression.
+      <header className="dp-screen-topbar">
+        <span className="dp-brand">Dark Plains</span>
+        {username && (
+          <span className="dp-topbar-user">
+            <span className="arcane-label">Commander</span>
+            <strong>{username}</strong>
+          </span>
+        )}
+      </header>
+
+      <main className="dp-mode">
+        <div className="dp-mode-hero">
+          <p className="arcane-label">Choose your road</p>
+          <h1 className="fantasy-heading dp-mode-title">Dark Plains</h1>
+          <p className="dp-mode-lede">
+            Lead a warband across the shared frontier, or walk a solo roguelike road with its own progression.
           </p>
         </div>
 
-        <div className="mode-select-grid grid w-full max-w-4xl gap-4 md:grid-cols-2">
-          <button
-            type="button"
-            onClick={() => chooseMode('singleplayer')}
-            className="mode-select-card command-panel vine-frame rounded border p-6 text-left transition"
-          >
-            <span className="mode-select-card-kicker arcane-label">Solo Campaign</span>
-            <span className="fantasy-heading mt-2 block text-3xl">Singleplayer</span>
-            <span className="ui-muted mt-3 block text-sm font-bold leading-relaxed">
-              Run overview, roguelike roads, permanent run upgrades, and achievements. Retreat returns here with no world-map penalty.
-            </span>
-            <span className="mode-select-card-cta ui-button-primary mt-6 inline-flex rounded px-4 py-2 text-xs font-black uppercase">
-              Enter Run Hall
-            </span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => chooseMode('multiplayer')}
-            className="mode-select-card command-panel vine-frame rounded border p-6 text-left transition"
-          >
-            <span className="mode-select-card-kicker arcane-label">Shared Frontier</span>
-            <span className="fantasy-heading mt-2 block text-3xl">Multiplayer</span>
-            <span className="ui-muted mt-3 block text-sm font-bold leading-relaxed">
-              Explore the world map, towns, quests, dungeons, social play, and your persistent commander profile.
-            </span>
-            <span className="mode-select-card-cta ui-button-primary mt-6 inline-flex rounded px-4 py-2 text-xs font-black uppercase">
-              Enter World Map
-            </span>
-          </button>
+        <div className="dp-mode-grid">
+          {MODE_CARDS.map((card, index) => (
+            <button
+              key={card.mode}
+              type="button"
+              onClick={() => chooseMode(card.mode)}
+              className="dp-mode-card"
+              aria-keyshortcuts={String(index + 1)}
+            >
+              <span className="dp-mode-card-art" aria-hidden="true">
+                <Image src={card.image} alt="" fill sizes="(max-width: 768px) 100vw, 36rem" className="object-cover" quality={65} />
+              </span>
+              <span className="dp-mode-card-body">
+                <span className="arcane-label">{card.kicker}</span>
+                <span className="fantasy-heading dp-mode-card-title">{card.title}</span>
+                <span className="dp-mode-card-copy">{card.copy}</span>
+                <span className="dp-mode-card-features">
+                  {card.features.map(feature => (
+                    <span key={feature}>{feature}</span>
+                  ))}
+                </span>
+                <span className="dp-mode-card-footer">
+                  <span className="ui-button-primary dp-mode-card-cta">{card.cta}</span>
+                  <kbd className="dp-kbd">{index + 1}</kbd>
+                </span>
+              </span>
+            </button>
+          ))}
         </div>
-      </div>
+      </main>
+
+      <footer className="dp-screen-footer">v2.0</footer>
 
       {tutorialStep && (
         <SingleplayerTutorialOverlay

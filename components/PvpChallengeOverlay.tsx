@@ -1,7 +1,7 @@
 'use client';
 
 import Image from 'next/image';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   acceptBattleChallenge,
   BattleChallenge,
@@ -22,6 +22,8 @@ import {
   refreshWorldPlayers,
 } from '@/lib/worldPlayers';
 import { playGameSound, preloadGameSounds } from '@/lib/sound';
+import { PVP_DUEL_SESSION_UPDATED_EVENT } from '@/lib/pvpDuelClient';
+import { useClock, usePolling } from '@/lib/hooks/usePolling';
 import CinematicScrollShell from './CinematicScrollShell';
 
 function getIncomingChallenge(
@@ -35,10 +37,12 @@ function getIncomingChallenge(
   ));
 }
 
+const IDLE_CHALLENGE_POLL_MS = 5_000;
+const ACTIVE_CHALLENGE_POLL_MS = 1_500;
+
 export default function PvpChallengeOverlay() {
   const [challenges, setChallenges] = useState<BattleChallenge[]>([]);
   const [worldPlayers, setWorldPlayers] = useState(() => getCachedWorldPlayers());
-  const [now, setNow] = useState(() => Date.now());
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const onlineEnabled = shouldUseOnlineChallenges();
@@ -47,50 +51,35 @@ export default function PvpChallengeOverlay() {
     ? getIncomingChallenge(challenges, username)
     : undefined;
   const incomingChallengeId = incoming?.id;
+  const now = useClock(1_000, Boolean(incomingChallengeId));
 
-  useEffect(() => {
-    if (!username) {
-      setChallenges([]);
-      return undefined;
+  const refresh = useCallback(async () => {
+    if (!username) return;
+
+    if (!onlineEnabled) {
+      setChallenges(getBattleChallenges());
+      return;
     }
 
-    let cancelled = false;
-
-    const refresh = async () => {
-      if (cancelled) return;
-
-      if (!onlineEnabled) {
-        setChallenges(getBattleChallenges());
-        return;
-      }
-
-      try {
-        const [onlineChallenges, latestWorldPlayers] = await Promise.all([
-          fetchOnlineBattleChallenges(),
-          refreshWorldPlayers(),
-        ]);
-        if (!cancelled) {
-          setChallenges(onlineChallenges);
-          setWorldPlayers(latestWorldPlayers);
-        }
-      } catch {
-        if (!cancelled) {
-          setChallenges(getBattleChallenges());
-          setWorldPlayers(getCachedWorldPlayers());
-        }
-      }
-    };
-
-    void refresh();
-    const interval = window.setInterval(refresh, 3000);
-    const clock = window.setInterval(() => setNow(Date.now()), 1000);
-
-    return () => {
-      cancelled = true;
-      window.clearInterval(interval);
-      window.clearInterval(clock);
-    };
+    try {
+      const onlineChallenges = await fetchOnlineBattleChallenges();
+      // World players are only needed to draw the challenger portrait.
+      const latestWorldPlayers = getIncomingChallenge(onlineChallenges, username)
+        ? await refreshWorldPlayers()
+        : getCachedWorldPlayers();
+      setChallenges(onlineChallenges);
+      setWorldPlayers(latestWorldPlayers);
+    } catch {
+      setChallenges(getBattleChallenges());
+      setWorldPlayers(getCachedWorldPlayers());
+    }
   }, [username, onlineEnabled]);
+
+  usePolling(
+    refresh,
+    incomingChallengeId ? ACTIVE_CHALLENGE_POLL_MS : IDLE_CHALLENGE_POLL_MS,
+    { enabled: Boolean(username) },
+  );
 
   useEffect(() => {
     if (!incomingChallengeId) return undefined;
@@ -141,6 +130,7 @@ export default function PvpChallengeOverlay() {
         if (!accepted) throw new Error('Duel challenges unlock at level 3.');
       }
       await refreshChallenges();
+      window.dispatchEvent(new Event(PVP_DUEL_SESSION_UPDATED_EVENT));
       playGameSound('social.accept', { throttleMs: 120 });
       setNotice('Duel accepted. Prepare your warband.');
     } catch (error) {

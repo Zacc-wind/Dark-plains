@@ -53,7 +53,9 @@ export type GameSoundId = keyof typeof GAME_SOUND_ASSETS;
 
 const SOUND_MUTED_KEY = 'wizardy_sound_muted';
 const SOUND_VOLUME_KEY = 'wizardy_sound_volume';
+const MAX_POOLED_AUDIO_PER_SOUND = 4;
 const cachedAudio = new Map<GameSoundId, HTMLAudioElement>();
+const audioPools = new Map<GameSoundId, HTMLAudioElement[]>();
 const lastPlayedAt = new Map<GameSoundId, number>();
 
 export function isGameSoundId(id: string): id is GameSoundId {
@@ -128,12 +130,33 @@ export function playGameSound(
   if (now - previous < throttleMs) return;
   lastPlayedAt.set(id, now);
 
-  const baseAudio = cachedAudio.get(id) || new Audio(config.file);
-  cachedAudio.set(id, baseAudio);
-  const audio = baseAudio.cloneNode(true) as HTMLAudioElement;
+  const audio = acquirePooledAudio(id);
   audio.volume = Math.max(0, Math.min(1, config.volume * masterVolume * (options.volumeScale ?? 1)));
   audio.currentTime = 0;
   void audio.play().catch(() => {
     // Browsers can block audio before the first user gesture; this is non-fatal.
   });
+}
+
+function acquirePooledAudio(id: GameSoundId): HTMLAudioElement {
+  const baseAudio = cachedAudio.get(id) || new Audio(GAME_SOUND_ASSETS[id].file);
+  cachedAudio.set(id, baseAudio);
+
+  let pool = audioPools.get(id);
+  if (!pool) {
+    pool = [];
+    audioPools.set(id, pool);
+  }
+
+  const idle = pool.find(audio => audio.paused || audio.ended);
+  if (idle) return idle;
+
+  if (pool.length < MAX_POOLED_AUDIO_PER_SOUND) {
+    const audio = baseAudio.cloneNode(true) as HTMLAudioElement;
+    pool.push(audio);
+    return audio;
+  }
+
+  // Every instance is still playing: restart the one that has played the longest.
+  return pool.reduce((oldest, audio) => (audio.currentTime > oldest.currentTime ? audio : oldest));
 }

@@ -2,20 +2,43 @@
 
 import { type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import dynamic from 'next/dynamic';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { getActiveGearSetSummaries } from '@/lib/gearSets';
 import { formatEquipmentQualityLabel } from '@/lib/gearProgression';
 import { getPlayerModelPath } from '@/lib/assetLoader';
 import { BATTLE_SPELLS, type BattleSpell } from '@/lib/battle';
-import { DailyRunModal, getSavedDailyRunSummary } from './RoguelikeRunModal';
-import MultiplayerHubModal from './MultiplayerHubModal';
-import PveHubModal from './PveHubModal';
+import type { SavedDailyRunSummary } from './RoguelikeRunModal';
 import ChatLiveFeed from './ChatLiveFeed';
-import GameSettingsPanel from './GameSettingsPanel';
 import MultiplayerFeatureLock from './MultiplayerFeatureLock';
-import MultiplayerProgressionModal, { type MultiplayerProgressionTab } from './MultiplayerProgressionModal';
+import type { MultiplayerProgressionTab } from './MultiplayerProgressionModal';
 import CinematicScrollShell from './CinematicScrollShell';
+import {
+  CHAT_FEED_ACTIVE_INTERVAL_MS,
+  CHAT_FEED_IDLE_INTERVAL_MS,
+  pushGlobalChatMessage,
+  useGlobalChatFeed,
+} from '@/lib/chatFeed';
+import { useClock, usePolling } from '@/lib/hooks/usePolling';
+import { keepIfUnchanged } from '@/lib/hooks/userSnapshot';
+
+// The run module also carries the whole battle UI, so the world map only loads it for singleplayer.
+const loadRoguelikeRunModule = () => import('./RoguelikeRunModal');
+const DailyRunModal = dynamic(() => loadRoguelikeRunModule().then(module => module.DailyRunModal), { ssr: false });
+const loadMultiplayerHubModal = () => import('./MultiplayerHubModal');
+const loadPveHubModal = () => import('./PveHubModal');
+const loadGameSettingsPanel = () => import('./GameSettingsPanel');
+const loadMultiplayerProgressionModal = () => import('./MultiplayerProgressionModal');
+
+const MultiplayerHubModal = dynamic(loadMultiplayerHubModal, { ssr: false });
+const PveHubModal = dynamic(loadPveHubModal, { ssr: false });
+const GameSettingsPanel = dynamic(loadGameSettingsPanel, { ssr: false });
+const MultiplayerProgressionModal = dynamic(loadMultiplayerProgressionModal, { ssr: false });
+
+const USER_POLL_INTERVAL_MS = 1_000;
+const FAST_CLOCK_INTERVAL_MS = 1_000;
+const IDLE_CLOCK_INTERVAL_MS = 10_000;
 import {
   ActivityEntry,
   AllocatableStat,
@@ -521,18 +544,17 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
   const [activePanel, setActivePanel] = useState<PanelId>('overview');
   const [isCommandOpen, setIsCommandOpen] = useState(false);
   const [hoveredSpellId, setHoveredSpellId] = useState<string | null>(null);
-  const [now, setNow] = useState(() => Date.now());
   const [notice, setNotice] = useState('');
   const [armySwapSourceId, setArmySwapSourceId] = useState<string | null>(null);
   const [selectedSpellSlot, setSelectedSpellSlot] = useState(0);
   const [expandedQuestId, setExpandedQuestId] = useState<string | null>(null);
   const [showDailyRun, setShowDailyRun] = useState(false);
+  const [savedDailyRun, setSavedDailyRun] = useState<SavedDailyRunSummary | null>(null);
   const [friendSearch, setFriendSearch] = useState('');
   const [chatChannel, setChatChannel] = useState<SocialChatChannel>('global');
   const [chatDraft, setChatDraft] = useState('');
-  const [chatHistory, setChatHistory] = useState<SocialChatMessage[]>([]);
+  const [partyChatHistory, setPartyChatHistory] = useState<SocialChatMessage[]>([]);
   const [chatSending, setChatSending] = useState(false);
-  const latestChatMessageId = chatHistory.at(-1)?.id;
   const [isChatDockOpen, setIsChatDockOpen] = useState(false);
   const [showMultiplayerHub, setShowMultiplayerHub] = useState(false);
   const [showPveHub, setShowPveHub] = useState(false);
@@ -544,7 +566,19 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
   const lastActivityNoticeId = useRef<string | null>(null);
   const chatHistoryRef = useRef<HTMLDivElement | null>(null);
   const router = useRouter();
+  const needsFastClock = isCommandOpen
+    || showMultiplayerProgression
+    || Boolean(user?.traveling)
+    || Boolean(user?.jobQueue?.length);
+  const now = useClock(needsFastClock ? FAST_CLOCK_INTERVAL_MS : IDLE_CLOCK_INTERVAL_MS);
   const engagementDayKey = new Date(now).toDateString();
+  const isChatVisible = isChatDockOpen || (isCommandOpen && activePanel === 'social');
+  const globalChat = useGlobalChatFeed(
+    isChatVisible && chatChannel === 'global' ? CHAT_FEED_ACTIVE_INTERVAL_MS : CHAT_FEED_IDLE_INTERVAL_MS,
+  );
+  const chatHistory = chatChannel === 'global' ? globalChat.messages : partyChatHistory;
+  const latestChatMessageId = chatHistory.at(-1)?.id;
+  const partyChatKey = `${user?.username ?? ''}:${user?.social?.party?.updatedAt ?? ''}`;
 
   useEffect(() => {
     preloadGameSounds();
@@ -624,32 +658,39 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
     };
   }, []);
 
-  useEffect(() => {
-    const interval = window.setInterval(() => {
-      setNow(Date.now());
-      setUser(getCurrentUser());
-    }, 1000);
-
-    return () => window.clearInterval(interval);
+  const refreshUserSnapshot = useCallback(() => {
+    setUser(previous => keepIfUnchanged(previous, getCurrentUser()));
   }, []);
+  usePolling(refreshUserSnapshot, USER_POLL_INTERVAL_MS);
+
+  const refreshPartyChat = useCallback(async () => {
+    const messages = await fetchSharedChatHistory('party', getCurrentUser());
+    setPartyChatHistory(previous => keepIfUnchanged(previous, messages.slice(-MAX_VISIBLE_CHAT_HISTORY)));
+  }, []);
+  usePolling(
+    refreshPartyChat,
+    isChatVisible ? CHAT_FEED_ACTIVE_INTERVAL_MS : CHAT_FEED_IDLE_INTERVAL_MS,
+    { enabled: chatChannel === 'party', restartKey: partyChatKey },
+  );
 
   useEffect(() => {
-    let active = true;
-
-    const refresh = async () => {
-      const messages = await fetchSharedChatHistory(chatChannel, getCurrentUser());
-      if (active) setChatHistory(messages.slice(-MAX_VISIBLE_CHAT_HISTORY));
+    const idleWindow = window as Window & {
+      requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number;
+      cancelIdleCallback?: (handle: number) => void;
     };
-
-    setChatHistory([]);
-    void refresh();
-    const interval = window.setInterval(() => void refresh(), 2000);
-
-    return () => {
-      active = false;
-      window.clearInterval(interval);
+    const prefetch = () => {
+      void loadMultiplayerHubModal();
+      void loadPveHubModal();
+      void loadMultiplayerProgressionModal();
+      void loadGameSettingsPanel();
     };
-  }, [chatChannel, user?.social?.party?.updatedAt, user?.username]);
+    if (idleWindow.requestIdleCallback) {
+      const handle = idleWindow.requestIdleCallback(prefetch, { timeout: 8_000 });
+      return () => idleWindow.cancelIdleCallback?.(handle);
+    }
+    const timer = window.setTimeout(prefetch, 4_000);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   useLayoutEffect(() => {
     const list = chatHistoryRef.current;
@@ -699,6 +740,19 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
     window.addEventListener('wizardy:open-command-panel', handleOpenCommandPanel);
     return () => window.removeEventListener('wizardy:open-command-panel', handleOpenCommandPanel);
   }, []);
+
+  useEffect(() => {
+    if (!showRandomRun) return undefined;
+    let cancelled = false;
+    void loadRoguelikeRunModule().then(module => {
+      if (cancelled) return;
+      const next = module.getSavedDailyRunSummary(user);
+      setSavedDailyRun(previous => keepIfUnchanged(previous, next));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [showRandomRun, showDailyRun, user]);
 
   useEffect(() => {
     if (!showRandomRun) return;
@@ -772,7 +826,6 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
   const inventoryUpgradeQuote = getInventoryUpgradeQuote(player);
   const rareGemCount = getRareGemCount(player);
   const hudRunState = getDailyRunState(player);
-  const savedDailyRun = getSavedDailyRunSummary(player);
   const socialState = getSocialState(player);
   const acceptedFriends = socialState.friends.filter(friend => friend.status === 'accepted');
   const incomingFriendRequests = socialState.friends.filter(
@@ -889,10 +942,15 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
     if (result.success) {
       setChatDraft('');
       if (result.chat) {
-        setChatHistory(previous => [
-          ...previous.filter(message => message.id !== result.chat?.id),
-          result.chat!,
-        ].slice(-MAX_VISIBLE_CHAT_HISTORY));
+        const sentMessage = result.chat;
+        if (chatChannel === 'global') {
+          pushGlobalChatMessage(sentMessage);
+        } else {
+          setPartyChatHistory(previous => [
+            ...previous.filter(message => message.id !== sentMessage.id),
+            sentMessage,
+          ].slice(-MAX_VISIBLE_CHAT_HISTORY));
+        }
       }
       recordCurrentMultiplayerEngagementEvent({
         kind: 'chat-sent',
@@ -1326,14 +1384,18 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
               }}
             />
           )}
-          <MultiplayerHubModal
-            isOpen={showMultiplayerHub}
-            onClose={() => setShowMultiplayerHub(false)}
-          />
-          <PveHubModal
-            isOpen={showPveHub}
-            onClose={() => setShowPveHub(false)}
-          />
+          {showMultiplayerHub && (
+            <MultiplayerHubModal
+              isOpen
+              onClose={() => setShowMultiplayerHub(false)}
+            />
+          )}
+          {showPveHub && (
+            <PveHubModal
+              isOpen
+              onClose={() => setShowPveHub(false)}
+            />
+          )}
         </>
       )}
     </>
@@ -2223,9 +2285,69 @@ export default function GameCommandCenter({ onOpenAvatar, showRandomRun = false 
       })
       .find(item => item && !item.status.claimed) || null;
     const openDailyQuests = quests.filter(quest => !quest.claimed);
+    const equippedGearCount = Object.values(equippedSlots).filter(Boolean).length;
+    const shortcuts: Array<{ id: PanelId; label: string; value: string }> = [
+      { id: 'minions', label: 'Army', value: `${fieldedMinions.length}/7 fielded` },
+      { id: 'inventory', label: 'Gear', value: `${equippedGearCount} equipped` },
+      { id: 'spells', label: 'Spells', value: `${(player.equippedSpellIds?.length === 4 ? player.equippedSpellIds : DEFAULT_EQUIPPED_SPELL_IDS).length}/4 ready` },
+      { id: 'jobs', label: 'Jobs', value: `${activeJobs.length}/4 queued` },
+    ];
 
     return (
       <div className="overview-dashboard-grid overview-dashboard-modern">
+        <section className="overview-commander ui-card rounded border">
+          <span className="overview-commander-avatar ui-avatar-frame relative block overflow-hidden rounded-full border">
+            <Image
+              src={getPlayerModelPath(currentModel)}
+              alt=""
+              fill
+              className="player-model-art object-contain p-1.5"
+              sizes="88px"
+              unoptimized
+            />
+          </span>
+          <div className="overview-commander-main">
+            <div className="arcane-label">Commander · Level {player.stats.level}</div>
+            <h3 className="fantasy-heading overview-commander-name">{player.username}</h3>
+            <div className="overview-commander-xp ui-progress-track h-2 overflow-hidden rounded border">
+              <div className="ui-progress-fill h-full" style={{ width: `${expProgress}%` }} />
+            </div>
+            <div className="ui-faint text-xs font-bold">{player.exp} / {expNeeded} XP</div>
+          </div>
+          <dl className="overview-commander-stats">
+            <div><dt>Army</dt><dd>{player.stats.armyPower}</dd></div>
+            <div><dt>Ward</dt><dd>{player.stats.defensivePower}</dd></div>
+            <div><dt>Spell</dt><dd>{player.stats.spellPower}</dd></div>
+            <div><dt>Health</dt><dd>{player.stats.health}/{player.stats.maxHealth}</dd></div>
+          </dl>
+          {player.stats.unallocatedPoints > 0 && (
+            <button
+              type="button"
+              onClick={() => setActivePanel('character')}
+              className="overview-commander-points ui-button-primary rounded px-4 py-2 text-xs font-black"
+            >
+              Spend {player.stats.unallocatedPoints} points
+            </button>
+          )}
+        </section>
+
+        <nav className="overview-shortcuts" aria-label="Command shortcuts">
+          {shortcuts.map(shortcut => (
+            <button
+              key={shortcut.id}
+              type="button"
+              onClick={() => setActivePanel(shortcut.id)}
+              className="overview-shortcut ui-card rounded border"
+            >
+              <span className="overview-shortcut-icon"><PanelIcon icon={shortcut.id} /></span>
+              <span className="min-w-0">
+                <span className="block text-sm font-black text-zinc-100">{shortcut.label}</span>
+                <span className="ui-faint block text-xs font-bold">{shortcut.value}</span>
+              </span>
+            </button>
+          ))}
+        </nav>
+
         <section className="ui-card rounded border p-4">
           <SectionTitle title="Work" action={`${activeJobs.length}/4`} />
           {!player.traveling && activeJobs.length === 0 ? (

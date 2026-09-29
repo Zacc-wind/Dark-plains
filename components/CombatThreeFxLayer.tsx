@@ -471,7 +471,19 @@ function createRuntime(mount: HTMLDivElement): RuntimeContext {
     animationFrame = window.requestAnimationFrame(animate);
   };
 
+  const clearEffects = () => {
+    effects.forEach(effect => {
+      scene.remove(effect.root);
+      disposeObject(effect.root);
+    });
+    effects.length = 0;
+  };
+
   const addEffect = (effect: RuntimeCombatEffect) => {
+    if (document.hidden) {
+      disposeObject(effect.root);
+      return;
+    }
     while (effects.length >= renderQuality.maxEffects) {
       const staleEffect = effects.shift();
       if (!staleEffect) break;
@@ -590,6 +602,12 @@ function createRuntime(mount: HTMLDivElement): RuntimeContext {
   };
 
   function animate(time: number) {
+    if (document.hidden) {
+      clearEffects();
+      renderer.render(scene, camera);
+      animationFrame = 0;
+      return;
+    }
     const delta = Math.min(0.04, (time - lastTime) / 1000);
     lastTime = time;
 
@@ -615,10 +633,7 @@ function createRuntime(mount: HTMLDivElement): RuntimeContext {
     dispose: () => {
       if (animationFrame) window.cancelAnimationFrame(animationFrame);
       resizeObserver.disconnect();
-      effects.forEach(effect => {
-        scene.remove(effect.root);
-        disposeObject(effect.root);
-      });
+      clearEffects();
       renderer.dispose();
       renderer.domElement.remove();
     },

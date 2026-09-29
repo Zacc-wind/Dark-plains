@@ -1,7 +1,8 @@
 'use client';
 
 import Image from 'next/image';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
+import { useClock, usePolling } from '@/lib/hooks/usePolling';
 import {
   BattleChallenge,
   cancelBattleChallenge,
@@ -71,7 +72,7 @@ export default function MultiplayerHubModal({ isOpen, onClose }: PvpHubModalProp
   const [challenges, setChallenges] = useState<BattleChallenge[]>([]);
   const [worldPlayers, setWorldPlayers] = useState<WorldMapPlayer[]>(() => getCachedWorldPlayers());
   const [offlineExpanded, setOfflineExpanded] = useState(false);
-  const [now, setNow] = useState(() => Date.now());
+  const now = useClock(1_000, isOpen);
   const [notice, setNotice] = useState<string | null>(null);
   const onlineEnabled = shouldUseOnlineChallenges();
   const username = getCurrentUser()?.username ?? null;
@@ -106,46 +107,27 @@ export default function MultiplayerHubModal({ isOpen, onClose }: PvpHubModalProp
     [onlineEnabled, onlineWorldPlayers, localPlayers],
   );
 
-  useEffect(() => {
-    if (!isOpen) return undefined;
-    let cancelled = false;
+  const pollHub = useCallback(async () => {
+    if (!onlineEnabled) {
+      setChallenges(getBattleChallenges());
+      return;
+    }
 
-    const refresh = async () => {
-      if (cancelled) return;
+    try {
+      const [onlineChallenges, latestWorldPlayers] = await Promise.all([
+        fetchOnlineBattleChallenges(),
+        refreshWorldPlayers(),
+      ]);
+      setChallenges(onlineChallenges);
+      setWorldPlayers(latestWorldPlayers);
+    } catch (error) {
+      setChallenges(getBattleChallenges());
+      setWorldPlayers(getCachedWorldPlayers());
+      setNotice(error instanceof Error ? error.message : 'Online PVP challenges failed to load.');
+    }
+  }, [onlineEnabled]);
 
-      if (!onlineEnabled) {
-        setChallenges(getBattleChallenges());
-        return;
-      }
-
-      try {
-        const [onlineChallenges, latestWorldPlayers] = await Promise.all([
-          fetchOnlineBattleChallenges(),
-          refreshWorldPlayers(),
-        ]);
-        if (!cancelled) {
-          setChallenges(onlineChallenges);
-          setWorldPlayers(latestWorldPlayers);
-        }
-      } catch (error) {
-        if (!cancelled) {
-          setChallenges(getBattleChallenges());
-          setWorldPlayers(getCachedWorldPlayers());
-          setNotice(error instanceof Error ? error.message : 'Online PVP challenges failed to load.');
-        }
-      }
-    };
-
-    void refresh();
-    const interval = window.setInterval(refresh, 3000);
-    const clock = window.setInterval(() => setNow(Date.now()), 1000);
-
-    return () => {
-      cancelled = true;
-      window.clearInterval(interval);
-      window.clearInterval(clock);
-    };
-  }, [isOpen, onlineEnabled]);
+  usePolling(pollHub, 3_000, { enabled: isOpen });
 
   if (!isOpen) return null;
 
