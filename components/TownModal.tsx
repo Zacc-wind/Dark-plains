@@ -3,7 +3,7 @@
 import { buildQuestRewardChips } from '@/lib/rewardDisplay';
 import RewardIconStrip from '@/components/RewardIconStrip';
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
-import { usePolling } from '@/lib/hooks/usePolling';
+import { useClock, usePolling } from '@/lib/hooks/usePolling';
 import { keepIfUnchanged } from '@/lib/hooks/userSnapshot';
 import Image from 'next/image';
 import { ASSET_PATHS, getPlayerModelPath } from '@/lib/assetLoader';
@@ -156,11 +156,10 @@ export default function TownModal({ town, onClose, onTravel }: TownModalProps) {
 
   const isTownOpen = Boolean(town);
   const refreshUser = useCallback(() => {
-    // While open, the rotating city quest board and reset timers read Date.now() during render,
-    // so keep the per-second re-render; while closed only re-render on real changes.
-    setUser(previous => (isTownOpen ? getCurrentUser() : keepIfUnchanged(previous, getCurrentUser())));
-  }, [isTownOpen]);
+    setUser(previous => keepIfUnchanged(previous, getCurrentUser()));
+  }, []);
   usePolling(refreshUser, 1_000, { immediate: false });
+  const now = useClock(1_000, isTownOpen);
 
   useEffect(() => {
     if (!town) return undefined;
@@ -189,7 +188,7 @@ export default function TownModal({ town, onClose, onTravel }: TownModalProps) {
     : ASSET_PATHS.towns.riversideBackground;
   const offers = getTownShopOffers(town.name);
   const recruitmentOffers = getTownRecruitmentOffers(town.name, user);
-  const cityQuests = getRotatingCityQuests(town.name, Date.now(), 5, {
+  const cityQuests = getRotatingCityQuests(town.name, now, 5, {
     claimedStoryQuestIds: (user?.storyQuests || [])
       .filter(progress => progress.claimed)
       .map(progress => progress.questId),

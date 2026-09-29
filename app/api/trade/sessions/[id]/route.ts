@@ -202,7 +202,7 @@ export async function PATCH(request: Request, context: RouteContext) {
     }
 
     const now = Date.now();
-    let session = hydrateSession(row, usernameById, now);
+    const session = hydrateSession(row, usernameById, now);
     if (!session) {
       return Response.json({ ok: false, error: 'Trade session could not be loaded.', deploymentMode: 'database' }, { status: 500 });
     }

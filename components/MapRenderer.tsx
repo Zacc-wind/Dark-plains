@@ -1413,8 +1413,8 @@ function drawWorldMapFrame(
   // Clear canvas in CSS-pixel space
   ctx.fillStyle = '#000000';
   ctx.fillRect(0, 0, actualWidth, actualHeight);
-  // Avoid double-softening when buffer already matches CSS size.
-  ctx.imageSmoothingEnabled = renderSize.scale !== 1;
+  // Terrain, markers and sprites are all drawn resampled, so smoothing stays on at every buffer scale.
+  ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = mapGfx.smoothing;
 
   const cameraX = view.x;

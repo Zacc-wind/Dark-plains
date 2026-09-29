@@ -115,7 +115,18 @@ export default function CompletionOverlay() {
     const dialogObserver = typeof MutationObserver === 'undefined'
       ? null
       : new MutationObserver(() => {
-        if (activeRef.current || queueRef.current.length === 0 || isStoryDialogOpen()) return;
+        if (isStoryDialogOpen()) {
+          const paused = activeRef.current;
+          if (!paused) return;
+          if (timerRef.current) window.clearTimeout(timerRef.current);
+          timerRef.current = null;
+          queueRef.current.unshift(paused);
+          activeRef.current = null;
+          setActiveNotice(null);
+          setQueuedCount(queueRef.current.length);
+          return;
+        }
+        if (activeRef.current || queueRef.current.length === 0) return;
         const next = queueRef.current.shift();
         if (next) startNoticeRef.current(next);
       });
