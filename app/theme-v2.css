@@ -1576,3 +1576,55 @@ body:has(.story-dialog-layer) .map-action-rail {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+/* ------------------------------------------------------------------ */
+/* Battlefield readability                                             */
+/* ------------------------------------------------------------------ */
+
+.battlefield-board {
+  background-image:
+    radial-gradient(ellipse at 50% 46%, transparent 38%, rgba(4, 3, 5, 0.62) 100%),
+    linear-gradient(180deg, rgba(4, 3, 5, 0.12), rgba(4, 3, 5, 0.3)),
+    url("/assets/battlefield-bg.png");
+}
+
+.battle-terrain-mud {
+  background:
+    repeating-linear-gradient(135deg, rgba(40, 26, 14, 0.22) 0 6px, transparent 6px 12px),
+    rgba(92, 62, 34, 0.34);
+  box-shadow: inset 0 0 0 1px rgba(150, 110, 70, 0.2);
+}
+
+.battle-terrain-high-ground {
+  background:
+    linear-gradient(180deg, rgba(210, 206, 190, 0.16), rgba(120, 122, 110, 0.1) 60%, rgba(20, 20, 18, 0.2)),
+    rgba(118, 120, 106, 0.2);
+  box-shadow:
+    inset 0 2px 0 rgba(230, 226, 210, 0.22),
+    inset 0 0 0 1px rgba(200, 196, 180, 0.2);
+}
+
+.battle-terrain-holy-ground {
+  background:
+    radial-gradient(circle at 50% 50%, rgba(243, 220, 166, 0.3), rgba(217, 185, 121, 0.08) 58%, transparent 72%),
+    rgba(110, 92, 52, 0.2);
+  box-shadow: inset 0 0 0 1px rgba(243, 220, 166, 0.3), inset 0 0 18px rgba(243, 220, 166, 0.12);
+}
+
+.battle-terrain-water {
+  background: rgba(20, 70, 76, 0.36);
+  box-shadow: inset 0 0 0 1px rgba(120, 200, 200, 0.18);
+}
+
+.battle-terrain-cover {
+  background: rgba(40, 70, 50, 0.32);
+  box-shadow: inset 0 0 0 1px rgba(140, 200, 150, 0.16);
+}
+
+.battle-terrain-chip {
+  border-color: rgba(243, 220, 166, 0.28);
+  background: rgba(7, 6, 8, 0.72);
+  color: var(--dp-text-2);
+  font-size: var(--dp-fs-2xs);
+  letter-spacing: 0.08em;
+}
