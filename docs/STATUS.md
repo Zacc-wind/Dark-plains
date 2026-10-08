@@ -1,13 +1,13 @@
 # Dark Plains status
-Updated 18 Sep 2026.
+Updated 21 Sep 2026 (Europe/Copenhagen).
 
 ## Phase
 Story remake. **Story bible LOCKED** (Filip, 18 Sep 2026). Reshape campaign dialogue and spine to match.
 
 ## Now
-1. Phase B: remake Movements I–VI chapter dialogue/spine to [docs/STORY_BIBLE.md](STORY_BIBLE.md) ([docs/REMAKE_FROM_STORY.md](REMAKE_FROM_STORY.md); track [#6](https://github.com/Zacc-wind/Dark-plains/issues/6))
+1. **Phase B PR [#7](https://github.com/Zacc-wind/Dark-plains/pull/7) in progress** on `story/phase-b-dialogue-remake` — remake Movements I–VI chapter dialogue/spine to [docs/STORY_BIBLE.md](STORY_BIBLE.md) ([docs/REMAKE_FROM_STORY.md](REMAKE_FROM_STORY.md); track [#6](https://github.com/Zacc-wind/Dark-plains/issues/6)). **Do not merge** until Filip says so.
 2. Then Phase C/D (sides as character arcs, world reactions)
-3. Parked P0 until Filip unparks ([#1](https://github.com/Zacc-wind/Dark-plains/issues/1) Auth URLs / Vercel env / reset email, and related #2–#4)
+3. **Parked:** P0 until Filip unparks ([#1](https://github.com/Zacc-wind/Dark-plains/issues/1) Auth URLs / Vercel env / reset email, and related #2–#4); side-fill [#5](https://github.com/Zacc-wind/Dark-plains/issues/5) until bible-aligned rewrites land
 
 ## Parked
 P0/auth and hosted-smoke hardening until Filip unparks; side-fill issue #5 until bible-aligned rewrites land; bespoke art, 120 map, seasonal PVP, guilds, 4-player veteran dungeons.
