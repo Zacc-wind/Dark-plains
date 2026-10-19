@@ -27,6 +27,7 @@ import {
 import { getActiveDrownedMoonwellBoss } from './multiplayerDrownedMoonwell';
 import { getActiveMoonwellSideBoss } from './multiplayerMoonwellSides';
 import { getActiveLaterBandSideBoss } from './multiplayerLaterBandSides';
+import { getActiveBrokenCrownSideBoss } from './multiplayerBrokenCrownSides';
 import { getActiveBrokenCrownBoss } from './multiplayerBrokenCrown';
 import { getActiveGlassRoadBoss } from './multiplayerGlassRoad';
 import { getActiveCandleKeyBoss } from './multiplayerCandleKey';
@@ -1381,6 +1382,24 @@ function getLaterBandSideStoryBoss(
   );
 }
 
+function getBrokenCrownSideStoryBoss(
+  user: User | null,
+  now: number,
+  occupied: Set<string>,
+  defeatedEnemyIds: Set<string>,
+): WorldEnemy | null {
+  const definition = getActiveBrokenCrownSideBoss(user);
+  if (!definition) return null;
+  return spawnNamedStoryBossNearPoi(
+    definition,
+    user,
+    now,
+    occupied,
+    defeatedEnemyIds,
+    definition.poiFallback,
+  );
+}
+
 function getBrokenCrownStoryBoss(
   user: User | null,
   now: number,
@@ -1761,6 +1780,7 @@ export function getNpcEnemiesForUser(user: User | null, now = Date.now()): World
     const moonwellBoss = getDrownedMoonwellStoryBoss(user, now, occupied, defeatedEnemyIds);
     const moonwellSideBoss = getMoonwellSideStoryBoss(user, now, occupied, defeatedEnemyIds);
     const laterBandSideBoss = getLaterBandSideStoryBoss(user, now, occupied, defeatedEnemyIds);
+    const brokenCrownSideBoss = getBrokenCrownSideStoryBoss(user, now, occupied, defeatedEnemyIds);
     const brokenCrownBoss = getBrokenCrownStoryBoss(user, now, occupied, defeatedEnemyIds);
     const glassRoadBoss = getGlassRoadStoryBoss(user, now, occupied, defeatedEnemyIds);
     const candleKeyBoss = getCandleKeyStoryBoss(user, now, occupied, defeatedEnemyIds);
@@ -1772,6 +1792,7 @@ export function getNpcEnemiesForUser(user: User | null, now = Date.now()): World
       ...(moonwellBoss ? [moonwellBoss] : []),
       ...(moonwellSideBoss ? [moonwellSideBoss] : []),
       ...(laterBandSideBoss ? [laterBandSideBoss] : []),
+      ...(brokenCrownSideBoss ? [brokenCrownSideBoss] : []),
       ...(brokenCrownBoss ? [brokenCrownBoss] : []),
       ...(glassRoadBoss ? [glassRoadBoss] : []),
       ...(candleKeyBoss ? [candleKeyBoss] : []),
@@ -1852,6 +1873,7 @@ export function getNpcEnemiesForUser(user: User | null, now = Date.now()): World
   const moonwellBoss = getDrownedMoonwellStoryBoss(user, now, patrolOccupied, defeatedEnemyIds);
   const moonwellSideBoss = getMoonwellSideStoryBoss(user, now, patrolOccupied, defeatedEnemyIds);
   const laterBandSideBoss = getLaterBandSideStoryBoss(user, now, patrolOccupied, defeatedEnemyIds);
+  const brokenCrownSideBoss = getBrokenCrownSideStoryBoss(user, now, patrolOccupied, defeatedEnemyIds);
   const brokenCrownBoss = getBrokenCrownStoryBoss(user, now, patrolOccupied, defeatedEnemyIds);
   const glassRoadBoss = getGlassRoadStoryBoss(user, now, patrolOccupied, defeatedEnemyIds);
   const candleKeyBoss = getCandleKeyStoryBoss(user, now, patrolOccupied, defeatedEnemyIds);
@@ -1864,6 +1886,7 @@ export function getNpcEnemiesForUser(user: User | null, now = Date.now()): World
     ...(moonwellBoss ? [moonwellBoss] : []),
     ...(moonwellSideBoss ? [moonwellSideBoss] : []),
     ...(laterBandSideBoss ? [laterBandSideBoss] : []),
+    ...(brokenCrownSideBoss ? [brokenCrownSideBoss] : []),
     ...(brokenCrownBoss ? [brokenCrownBoss] : []),
     ...(glassRoadBoss ? [glassRoadBoss] : []),
     ...(candleKeyBoss ? [candleKeyBoss] : []),

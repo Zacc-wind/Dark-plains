@@ -313,5 +313,81 @@ export const storyDialoguePartB: Record<string, StoryDialogSequence> = {
       { speaker: 'player', text: 'Feed it to the oath fire. Keep Ashford\'s road honest.' },
       { speaker: 'npc', text: 'I will. When glass calls louder, you will still have ash under your boots that remembers living vows—not funeral hymns.' },
     ],
-  }
+  },
+  'story-side-choir-scout': {
+    id: 'story-side-choir-scout',
+    kicker: 'Side Road - Choir Practice',
+    npcName: 'Ash Hermit Yara',
+    npcTitle: 'Keeper of Oath Fire',
+    npcModelNumber: 6,
+    defaultChoiceId: 'cantor-oathbound',
+    objective: {
+      label: 'Side Order',
+      title: 'Inspect the Iron Choir Cantor',
+      description: 'Find the named Iron Choir Cantor near East Road Camp and study the practice verses before you strike.',
+    },
+    lines: [
+      { speaker: 'npc', text: 'East of Blackwater, king-magic answers faster than mercy. An iron choir cantor is practicing verses on freed names—raw ink from Moonwell riding the hymn. I want the practice quieted before the field learns your formation; my sin is that oath fire once enjoyed songs like this.' },
+      {
+        speaker: 'player',
+        text: 'Name the host. I will read the verse before I break it.',
+        choicePrompt: 'How do you answer choir practice?',
+        choices: [
+          {
+            id: 'cantor-oathbound',
+            tone: 'oathbound',
+            label: 'Guard the freed names',
+            text: 'Then the practice ends before one more name is etched into iron.',
+          },
+          {
+            id: 'cantor-pragmatic',
+            tone: 'pragmatic',
+            label: 'Measure the verse',
+            text: 'I will hear how far the verse has learned our march, then cut it.',
+          },
+          {
+            id: 'cantor-defiant',
+            tone: 'defiant',
+            label: 'Refuse the hymn',
+            text: 'No emperor sings my banner. Point me to the cantor.',
+          }
+        ],
+      },
+      { speaker: 'npc', text: 'Inspect the Iron Choir Cantor near East Road Camp. If the practice finishes, steel will hum your orders before you speak them.' },
+    ],
+  },
+  'story-side-choir-clear': {
+    id: 'story-side-choir-clear',
+    kicker: 'Side Road - Practice Broken',
+    npcName: 'Ash Hermit Yara',
+    npcTitle: 'Keeper of Oath Fire',
+    npcModelNumber: 6,
+    objective: {
+      label: 'Side Order',
+      title: 'Defeat the Iron Choir Cantor',
+      description: 'Defeat the Iron Choir Cantor near East Road Camp and recover an iron hymn plate etched with practice verses.',
+    },
+    lines: [
+      { speaker: 'npc', text: 'Practice makes kings who never ask. Break the cantor before the verse finishes your name into armor.' },
+      { speaker: 'player', text: 'I will end the verse and carry what it etched.' },
+      { speaker: 'npc', text: 'Take one hymn-etched plate if you can. It will still want to sing after the voice is gone.' },
+    ],
+  },
+  'story-side-choir-return': {
+    id: 'story-side-choir-return',
+    kicker: 'Side Road - Plate to Oath Fire',
+    npcName: 'Ash Hermit Yara',
+    npcTitle: 'Keeper of Oath Fire',
+    npcModelNumber: 6,
+    objective: {
+      label: 'Side Complete',
+      title: 'Return the iron hymn plate',
+      description: 'Visit Ash Hermit Yara with the hymn-etched plate so oath fire can quiet the remaining verse.',
+    },
+    lines: [
+      { speaker: 'npc', text: 'The plate still hums. Good. That means the verse was real, not mirrored—and not yet a crown.' },
+      { speaker: 'player', text: 'Feed it to the oath fire. Let the lesson stay a lesson.' },
+      { speaker: 'npc', text: 'I will. When Serat points at the Marshal, remember: commanders who rule alone become funeral armor. Quiet practice, then refuse the throne.' },
+    ],
+  },
 };
