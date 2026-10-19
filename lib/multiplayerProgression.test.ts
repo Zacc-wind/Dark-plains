@@ -17,7 +17,7 @@ describe('multiplayer campaign presentation', () => {
 
     const views = getMultiplayerChapterViews({ stats: { level: 1 }, storyQuests: [] });
     expect(views).toHaveLength(6);
-    expect(views.reduce((total, chapter) => total + chapter.questCount, 0)).toBe(37);
+    expect(views.reduce((total, chapter) => total + chapter.questCount, 0)).toBe(40);
     expect(views[0]).toMatchObject({ unlocked: true, active: true, questCount: 8 });
     expect(views[1].unlocked).toBe(false);
   });

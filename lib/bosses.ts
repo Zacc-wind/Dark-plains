@@ -192,6 +192,17 @@ export const STORY_BOSS_PROFILES: BossProfile[] = [
     personality: 'arcane',
     minionTemplates: ['enchanter', 'crossbow', 'crow', 'witchdoc'],
   },
+  {
+    id: 'iron-choir-cantor',
+    name: 'Iron Choir Cantor',
+    subtitle: 'Hymn practice conductor',
+    story: 'She practices the emperor’s hymn on freed names, etching verses into iron until formations march before battle.',
+    intro: 'A test verse carries on the wind. Armor hums like a tuning fork.',
+    assetPath: '/assets/bosses/boss2.png',
+    modelNumber: 2,
+    personality: 'defensive',
+    minionTemplates: ['bell', 'crossbow', 'mercenary', 'fallen'],
+  },
 ];
 
 export function getBossProfileById(id?: string): BossProfile | undefined {

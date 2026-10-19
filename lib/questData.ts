@@ -203,6 +203,7 @@ export function getQuestNpcWorldVoice(
   const glassSealed = claimed('story-20-glass-sealed');
   const keySealed = claimed('story-25-key-sealed');
   const courtSealed = claimed('story-30-court-sealed');
+  const choirPracticeQuiet = claimed('story-side-choir-return');
 
   if (npc.id === 'quest-npc-scribe-naima' && moonwellSealed) {
     return {
@@ -232,7 +233,9 @@ export function getQuestNpcWorldVoice(
 
   if (npc.id === 'quest-npc-ash-hermit' && moonwellSealed && !crownBroken) {
     return {
-      line: 'The Moonwell stopped choosing soldiers. The crown country will try to choose kings instead.',
+      line: choirPracticeQuiet
+        ? 'The Moonwell stopped choosing soldiers. One cantor is quiet; good. The crown country will try to choose kings instead.'
+        : 'The Moonwell stopped choosing soldiers. The crown country will try to choose kings instead.',
       questHook: 'Walk to me when your banner is ready. King-magic eats commanders who skip the lesson.',
     };
   }
